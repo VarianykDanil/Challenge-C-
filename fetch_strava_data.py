@@ -5,8 +5,8 @@ import polyline as pl
 
 
 # Replace with your actual access token and activity ID
-ACCESS_TOKEN = 'd13a3fee0162b131e53c83df3634c43e16ccefea'  # Your Strava API access token
-ACTIVITY_ID = '11986938277'  # The Strava activity ID you want to fetch data for
+ACCESS_TOKEN = 'your_strava_access_token'  # Your Strava API access token
+ACTIVITY_ID = 'your_activity_id'  # The Strava activity ID you want to fetch data for
 
 # Define the path to the CSV file
 CSV_FILE_PATH = 'journey_data.csv'  # Path to save the CSV file
