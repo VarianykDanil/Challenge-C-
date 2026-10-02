@@ -98,7 +98,7 @@ class TrackCursor:
             j = (i + 1) % n
             if tr.crossed_start_line((tr.x[i], tr.y[i]), (tr.x[j], tr.y[j])):
                 gates.append(float(tr.s[j]) if j else 0.0)
-        return gates
+        return sorted(gates)
 
 
 # ============================================================================ profile

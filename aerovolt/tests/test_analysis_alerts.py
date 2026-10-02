@@ -65,7 +65,7 @@ def test_threshold_debounce_and_hysteresis():
     # cleared 0.3 s after dropping below 95.
     assert changed == [(1.0, True), (2.4, False)]
     first = eng.log[0]
-    assert first.detail == "x is 101.0" and first.t_end == 2.4 and not first.active
+    assert first.detail == "x is 101.0" and first.t_end == pytest.approx(2.4) and not first.active
     assert eng.active() == []
 
 
@@ -73,7 +73,8 @@ def test_unknown_state_holds_alert_and_timer():
     eng = _engine({"id": "low", "type": "threshold", "channel": "x", "op": "<", "value": 1, "for_s": 0.3,
                    "clear_for_s": 0.2, "title": "Low"})
     changed = _run(eng, [{"x": 0}] * 3 + [{"x": NAN}] * 5 + [{"x": 0}] * 2 + [{"x": NAN}] * 20)
-    assert changed == [(0.8, True)]  # NaN neither resets the timer nor clears the alert
+    # NaN neither resets the timer nor clears the alert (the intervals next to it do not count)
+    assert changed == [(0.9, True)]
     assert eng.is_active("low")
 
 

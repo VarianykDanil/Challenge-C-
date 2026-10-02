@@ -81,19 +81,21 @@ def test_bms_current_limits_hold_the_cell_voltage_limits(vehicle):
     assert full.current_limits()[1] == 0.0  # no regen into a full pack
 
 
-def test_cell_thermal_steady_state_and_sensor_mapping(uniform_vehicle):
-    """Constant current: every cell settles at T_air + Q/UA; sensors read cell means."""
+def test_cell_thermal_response_and_sensor_mapping(uniform_vehicle):
+    """Constant current: first-order approach to T_air + Q/UA with τ = C_th/UA
+    (Q = I²R0 + V_rc²/R1); the 60 sensors read the mean of the cells they touch."""
     pack = Accumulator(uniform_vehicle, rng(), soc=0.9, temp_c=25.0)
-    current, air_speed, t_air = 60.0, 15.0, 20.0
-    for _ in range(4000):  # 4000 s at 10 Hz thermal steps
+    current, air_speed, t_air, seconds = 60.0, 15.0, 20.0, 400
+    for _ in range(seconds * 10):  # 10 Hz thermal steps
         for _ in range(10):
             pack.step(current, DT)
-            pack.soc[:] = 0.9  # hold SoC so the heat stays constant
         pack.thermal_step(0.1, air_speed, t_air)
     ua = pack.ua0 + pack.ua1 * air_speed
-    heat = current**2 * pack.r0[0] + pack.v_rc[0] ** 2 / pack.r1
-    assert pack.temp.mean() == pytest.approx(t_air + heat / ua, abs=0.05)
-    sensors = pack.sensor_temperatures()
+    heat = current**2 * pack.r0[0] + (current * pack.r1) ** 2 / pack.r1
+    decay = math.exp(-seconds * ua / pack.c_th)
+    expected = t_air + heat / ua * (1.0 - decay) + (25.0 - t_air) * decay
+    assert pack.temp.mean() == pytest.approx(expected, abs=0.3)  # (V_rc builds up in 15 s)
+    assert pack.temp.std() < 1e-9  # identical cells, identical temperatures
     pack.temp[:] = np.arange(140.0)
     sensors = pack.sensor_temperatures()
     assert sensors[20] == pytest.approx(np.mean([47.0, 48.0]))
@@ -166,7 +168,7 @@ def test_pump_failure_heats_the_winding_much_faster(vehicle):
     def rise(failed):
         loop = CoolingLoop(vehicle, 40.0)
         loop.pump_failed = failed
-        for _ in range(600):  # 60 s at 1 kW motor loss
+        for _ in range(1800):  # 3 minutes at 1 kW motor loss
             loop.add_heat(1000.0, 300.0, 0.1)
             loop.step(0.1, pump_on=True, air_speed=15.0, t_amb=20.0)
         return loop.t_winding - 40.0, loop
@@ -174,7 +176,7 @@ def test_pump_failure_heats_the_winding_much_faster(vehicle):
     normal, _ = rise(False)
     failed, loop = rise(True)
     assert loop.flow_lpm == 0.0 and loop.pump_duty == 100.0
-    assert failed > 1.5 * normal
+    assert failed > 1.8 * normal
 
 
 def test_fan_hysteresis(vehicle):
@@ -289,8 +291,10 @@ def test_powertrain_respects_the_accumulator_power_limit(vehicle):
     out = pt.step(DT, pedal_pct=100.0, regen_force_request=0.0, wheel_omega=110.0,
                   traction_torque=1e9, car_speed=25.0)
     assert out.p_dc == pytest.approx(80_000.0, rel=1e-6)
+    # the current is solved on the start-of-step cell state, the reported voltage is the
+    # end-of-step value (V_rc has grown a little): agreement within 1 %
     assert out.pack_current * out.pack_voltage == pytest.approx(
-        out.p_dc + out.pack_current**2 * pm.CABLE_RESISTANCE_OHM, rel=1e-6)
+        out.p_dc + out.pack_current**2 * pm.CABLE_RESISTANCE_OHM, rel=0.01)
     low = started(vehicle, power_limit_kw=50.0)
     out = low.step(DT, pedal_pct=100.0, regen_force_request=0.0, wheel_omega=110.0,
                    traction_torque=1e9, car_speed=25.0)

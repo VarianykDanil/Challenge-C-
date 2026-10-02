@@ -13,7 +13,8 @@ Debounce and hysteresis (standard alarm-management practice - an alarm must be w
 reacting to and must not chatter):
 
 * an alert is **raised** after the condition has been ``True`` for ``for_s`` seconds of
-  judged time (any ``False`` resets the timer);
+  judged time - only intervals between two consecutive ``True`` ticks count, and any
+  ``False`` resets the timer (``for_s: 0`` raises on the first ``True`` tick);
 * an active alert is **cleared** after ``clear_for_s`` seconds of ``False``. Threshold
   rules re-test against ``clear_value`` (e.g. raise above 110 degC, clear below 105 degC),
   plausibility rules against ``clear_diff``; custom checks receive ``active`` and apply
@@ -63,6 +64,8 @@ OPS: dict[str, Callable[[float, float], bool]] = {
 }
 #: Longest tick interval counted by the debounce timers (data gaps do not raise alerts), s.
 MAX_DT_S = 1.0
+#: Tolerance of the debounce comparisons (tick times are floats: 0.7 - 0.6 = 0.0999...), s.
+TIME_EPS_S = 1e-6
 
 
 class AlertConfigError(ValueError):
@@ -355,6 +358,7 @@ def build_rules(config: Mapping[str, Any], vehicle: Mapping[str, Any]) -> list[R
 @dataclass
 class _RuleRuntime:
     timer: float = 0.0  # inactive: time condition True; active: time condition False
+    last: bool | None = None  # previous tick's answer (an interval counts if both ends agree)
     alert: Alert | None = None
     key: str | None = None
 
@@ -399,8 +403,9 @@ class AlertEngine:
                 res = CheckResult(None)
             if rt.alert is None:
                 if res.state is True:
-                    rt.timer += dt
-                    if rt.timer >= rule.for_s:
+                    if rt.last is True:
+                        rt.timer += dt
+                    if rt.timer >= rule.for_s - TIME_EPS_S:
                         rt.alert = Alert(id=rule.id, rule=rule.id, severity=rule.severity, title=rule.title,
                                          detail=res.detail, channels=list(res.channels), t_start=t)
                         rt.timer, rt.key = 0.0, res.key
@@ -410,8 +415,9 @@ class AlertEngine:
                     rt.timer = 0.0
             else:
                 if res.state is False:
-                    rt.timer += dt
-                    if rt.timer >= rule.clear_for_s:
+                    if rt.last is False:
+                        rt.timer += dt
+                    if rt.timer >= rule.clear_for_s - TIME_EPS_S:
                         rt.alert.active = False
                         rt.alert.t_end = t
                         changed.append(rt.alert)
@@ -423,6 +429,7 @@ class AlertEngine:
                         rt.alert.detail = res.detail
                         rt.alert.channels = list(res.channels)
                         changed.append(rt.alert)
+            rt.last = res.state
         return changed
 
 
