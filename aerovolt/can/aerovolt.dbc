@@ -1,0 +1,1212 @@
+VERSION "AeroVolt 1.0.0"
+
+NS_ :
+	NS_DESC_
+	CM_
+	BA_DEF_
+	BA_
+	VAL_
+	CAT_DEF_
+	CAT_
+	FILTER
+	BA_DEF_DEF_
+	EV_DATA_
+	ENVVAR_DATA_
+	SGTYPE_
+	SGTYPE_VAL_
+	BA_DEF_SGTYPE_
+	BA_SGTYPE_
+	SIG_TYPE_REF_
+	VAL_TABLE_
+	SIG_GROUP_
+	SIG_VALTYPE_
+	SIGTYPE_VALTYPE_
+	BO_TX_BU_
+	BA_DEF_REL_
+	BA_REL_
+	BA_DEF_DEF_REL_
+	BU_SG_REL_
+	BU_EV_REL_
+	BU_BO_REL_
+	SG_MUL_VAL_
+
+BS_:
+
+BU_: AERO_NODE SUSP_NODE IMU_NODE GPS_NODE DASH_NODE INVERTER BMS VCU
+
+
+BO_ 768 AERO_FW_TAPS_A: 8 AERO_NODE
+ SG_ fw_p01 : 0|16@1- (0.1,0) [-3276.7|3276.7] "Pa" DASH_NODE
+ SG_ fw_p02 : 16|16@1- (0.1,0) [-3276.7|3276.7] "Pa" DASH_NODE
+ SG_ fw_p03 : 32|16@1- (0.1,0) [-3276.7|3276.7] "Pa" DASH_NODE
+ SG_ fw_p04 : 48|16@1- (0.1,0) [-3276.7|3276.7] "Pa" DASH_NODE
+
+BO_ 769 AERO_FW_TAPS_B: 8 AERO_NODE
+ SG_ fw_p05 : 0|16@1- (0.1,0) [-3276.7|3276.7] "Pa" DASH_NODE
+ SG_ fw_p06 : 16|16@1- (0.1,0) [-3276.7|3276.7] "Pa" DASH_NODE
+ SG_ fw_p07 : 32|16@1- (0.1,0) [-3276.7|3276.7] "Pa" DASH_NODE
+ SG_ fw_p08 : 48|16@1- (0.1,0) [-3276.7|3276.7] "Pa" DASH_NODE
+
+BO_ 770 AERO_FW_TAPS_C: 8 AERO_NODE
+ SG_ fw_p09 : 0|16@1- (0.1,0) [-3276.7|3276.7] "Pa" DASH_NODE
+ SG_ fw_p10 : 16|16@1- (0.1,0) [-3276.7|3276.7] "Pa" DASH_NODE
+ SG_ fw_p11 : 32|16@1- (0.1,0) [-3276.7|3276.7] "Pa" DASH_NODE
+ SG_ fw_p12 : 48|16@1- (0.1,0) [-3276.7|3276.7] "Pa" DASH_NODE
+
+BO_ 771 AERO_RW_TAPS_A: 8 AERO_NODE
+ SG_ rw_p01 : 0|16@1- (0.1,0) [-3276.7|3276.7] "Pa" DASH_NODE
+ SG_ rw_p02 : 16|16@1- (0.1,0) [-3276.7|3276.7] "Pa" DASH_NODE
+ SG_ rw_p03 : 32|16@1- (0.1,0) [-3276.7|3276.7] "Pa" DASH_NODE
+ SG_ rw_p04 : 48|16@1- (0.1,0) [-3276.7|3276.7] "Pa" DASH_NODE
+
+BO_ 772 AERO_RW_TAPS_B: 8 AERO_NODE
+ SG_ rw_p05 : 0|16@1- (0.1,0) [-3276.7|3276.7] "Pa" DASH_NODE
+ SG_ rw_p06 : 16|16@1- (0.1,0) [-3276.7|3276.7] "Pa" DASH_NODE
+ SG_ rw_p07 : 32|16@1- (0.1,0) [-3276.7|3276.7] "Pa" DASH_NODE
+ SG_ rw_p08 : 48|16@1- (0.1,0) [-3276.7|3276.7] "Pa" DASH_NODE
+
+BO_ 773 AERO_RW_TAPS_C: 8 AERO_NODE
+ SG_ rw_p09 : 0|16@1- (0.1,0) [-3276.7|3276.7] "Pa" DASH_NODE
+ SG_ rw_p10 : 16|16@1- (0.1,0) [-3276.7|3276.7] "Pa" DASH_NODE
+ SG_ rw_p11 : 32|16@1- (0.1,0) [-3276.7|3276.7] "Pa" DASH_NODE
+ SG_ rw_p12 : 48|16@1- (0.1,0) [-3276.7|3276.7] "Pa" DASH_NODE
+
+BO_ 774 AERO_UT_TAPS_A: 8 AERO_NODE
+ SG_ ut_p01 : 0|16@1- (0.1,0) [-3276.7|3276.7] "Pa" DASH_NODE
+ SG_ ut_p02 : 16|16@1- (0.1,0) [-3276.7|3276.7] "Pa" DASH_NODE
+ SG_ ut_p03 : 32|16@1- (0.1,0) [-3276.7|3276.7] "Pa" DASH_NODE
+ SG_ ut_p04 : 48|16@1- (0.1,0) [-3276.7|3276.7] "Pa" DASH_NODE
+
+BO_ 775 AERO_UT_TAPS_B: 8 AERO_NODE
+ SG_ ut_p05 : 0|16@1- (0.1,0) [-3276.7|3276.7] "Pa" DASH_NODE
+ SG_ ut_p06 : 16|16@1- (0.1,0) [-3276.7|3276.7] "Pa" DASH_NODE
+ SG_ ut_p07 : 32|16@1- (0.1,0) [-3276.7|3276.7] "Pa" DASH_NODE
+ SG_ ut_p08 : 48|16@1- (0.1,0) [-3276.7|3276.7] "Pa" DASH_NODE
+
+BO_ 784 AERO_AIR: 8 AERO_NODE
+ SG_ pitot_dp : 0|16@1- (0.1,0) [-3276.7|3276.7] "Pa" DASH_NODE
+ SG_ amb_temp : 16|16@1- (0.01,0) [-327.67|327.67] "°C" DASH_NODE
+ SG_ amb_press : 32|16@1+ (1,50000) [50000|115534] "Pa" DASH_NODE
+ SG_ amb_rh : 48|8@1+ (0.5,0) [0|127] "%" DASH_NODE
+
+BO_ 785 AERO_PROBE: 8 AERO_NODE
+ SG_ probe_yaw : 0|16@1- (0.01,0) [-327.67|327.67] "deg" DASH_NODE
+ SG_ probe_pitch : 16|16@1- (0.01,0) [-327.67|327.67] "deg" DASH_NODE
+ SG_ rh_front : 32|16@1+ (0.01,0) [0|655.34] "mm" DASH_NODE
+ SG_ rh_rear : 48|16@1+ (0.01,0) [0|655.34] "mm" DASH_NODE
+
+BO_ 786 AERO_WING_LOADS: 8 AERO_NODE
+ SG_ fw_load : 0|16@1- (1,0) [-32767|32767] "N" DASH_NODE
+ SG_ rw_load : 16|16@1- (1,0) [-32767|32767] "N" DASH_NODE
+
+BO_ 800 SUSP_DAMPERS: 8 SUSP_NODE
+ SG_ damper_fl : 0|16@1- (0.01,0) [-327.67|327.67] "mm" DASH_NODE
+ SG_ damper_fr : 16|16@1- (0.01,0) [-327.67|327.67] "mm" DASH_NODE
+ SG_ damper_rl : 32|16@1- (0.01,0) [-327.67|327.67] "mm" DASH_NODE
+ SG_ damper_rr : 48|16@1- (0.01,0) [-327.67|327.67] "mm" DASH_NODE
+
+BO_ 801 SUSP_PUSHRODS: 8 SUSP_NODE
+ SG_ pushrod_fl : 0|16@1- (1,0) [-32767|32767] "N" DASH_NODE
+ SG_ pushrod_fr : 16|16@1- (1,0) [-32767|32767] "N" DASH_NODE
+ SG_ pushrod_rl : 32|16@1- (1,0) [-32767|32767] "N" DASH_NODE
+ SG_ pushrod_rr : 48|16@1- (1,0) [-32767|32767] "N" DASH_NODE
+
+BO_ 816 IMU_ACCEL: 8 IMU_NODE
+ SG_ ax : 0|16@1- (0.002,0) [-65.534|65.534] "m/s²" DASH_NODE
+ SG_ ay : 16|16@1- (0.002,0) [-65.534|65.534] "m/s²" DASH_NODE
+ SG_ az : 32|16@1- (0.002,0) [-65.534|65.534] "m/s²" DASH_NODE
+
+BO_ 817 IMU_GYRO: 8 IMU_NODE
+ SG_ gx : 0|16@1- (0.01,0) [-327.67|327.67] "deg/s" DASH_NODE
+ SG_ gy : 16|16@1- (0.01,0) [-327.67|327.67] "deg/s" DASH_NODE
+ SG_ gz : 32|16@1- (0.01,0) [-327.67|327.67] "deg/s" DASH_NODE
+
+BO_ 832 GPS_POS: 8 GPS_NODE
+ SG_ gps_lat : 0|32@1- (0.0000001,0) [-214.7483647|214.7483647] "deg" DASH_NODE
+ SG_ gps_lon : 32|32@1- (0.0000001,0) [-214.7483647|214.7483647] "deg" DASH_NODE
+
+BO_ 833 GPS_VEL: 8 GPS_NODE
+ SG_ gps_speed : 0|16@1+ (0.01,0) [0|655.34] "m/s" DASH_NODE
+ SG_ gps_heading : 16|16@1+ (0.01,0) [0|655.34] "deg" DASH_NODE
+
+BO_ 848 WHEEL_SPEEDS: 8 VCU
+ SG_ ws_fl : 0|16@1+ (0.01,0) [0|655.34] "m/s" DASH_NODE
+ SG_ ws_fr : 16|16@1+ (0.01,0) [0|655.34] "m/s" DASH_NODE
+ SG_ ws_rl : 32|16@1+ (0.01,0) [0|655.34] "m/s" DASH_NODE
+ SG_ ws_rr : 48|16@1+ (0.01,0) [0|655.34] "m/s" DASH_NODE
+
+BO_ 849 DRIVER: 8 VCU
+ SG_ steer : 0|16@1- (0.01,0) [-327.67|327.67] "deg" DASH_NODE
+ SG_ apps1 : 16|8@1+ (0.5,0) [0|127] "%" DASH_NODE
+ SG_ apps2 : 24|8@1+ (0.5,0) [0|127] "%" DASH_NODE
+ SG_ brake_press_f : 32|16@1+ (0.01,0) [0|655.34] "bar" DASH_NODE
+ SG_ brake_press_r : 48|16@1+ (0.01,0) [0|655.34] "bar" DASH_NODE
+
+BO_ 1024 INV_STATUS: 8 INVERTER
+ SG_ mot_speed : 0|16@1- (1,0) [-32767|32767] "rpm" DASH_NODE,VCU
+ SG_ mot_torque : 16|16@1- (0.1,0) [-3276.7|3276.7] "Nm" DASH_NODE,VCU
+ SG_ inv_dc_voltage : 32|16@1+ (0.1,0) [0|6553.4] "V" DASH_NODE,VCU
+ SG_ inv_dc_current : 48|16@1- (0.1,0) [-3276.7|3276.7] "A" DASH_NODE,VCU
+
+BO_ 1025 INV_TEMPS: 8 INVERTER
+ SG_ mot_winding_temp : 0|16@1- (0.1,0) [-3276.7|3276.7] "°C" DASH_NODE,VCU
+ SG_ inv_igbt_temp : 16|16@1- (0.1,0) [-3276.7|3276.7] "°C" DASH_NODE,VCU
+ SG_ inv_phase_current : 32|16@1+ (0.1,0) [0|6553.4] "A" DASH_NODE,VCU
+ SG_ inv_state : 48|8@1+ (1,0) [0|254] "enum" DASH_NODE,VCU
+ SG_ inv_fault : 56|8@1+ (1,0) [0|254] "enum" DASH_NODE,VCU
+
+BO_ 1040 BMS_PACK: 8 BMS
+ SG_ pack_voltage : 0|16@1+ (0.1,0) [0|6553.4] "V" DASH_NODE,VCU
+ SG_ pack_current : 16|16@1- (0.1,0) [-3276.7|3276.7] "A" DASH_NODE,VCU
+ SG_ bms_soc : 32|8@1+ (0.5,0) [0|127] "%" DASH_NODE,VCU
+ SG_ bms_state : 40|8@1+ (1,0) [0|254] "enum" DASH_NODE,VCU
+ SG_ bms_fault : 48|8@1+ (1,0) [0|254] "enum" DASH_NODE,VCU
+
+BO_ 1056 BMS_CELL_V_00: 8 BMS
+ SG_ cell_v_000 : 0|16@1+ (0.001,0) [0|65.534] "V" DASH_NODE
+ SG_ cell_v_001 : 16|16@1+ (0.001,0) [0|65.534] "V" DASH_NODE
+ SG_ cell_v_002 : 32|16@1+ (0.001,0) [0|65.534] "V" DASH_NODE
+ SG_ cell_v_003 : 48|16@1+ (0.001,0) [0|65.534] "V" DASH_NODE
+
+BO_ 1057 BMS_CELL_V_01: 8 BMS
+ SG_ cell_v_004 : 0|16@1+ (0.001,0) [0|65.534] "V" DASH_NODE
+ SG_ cell_v_005 : 16|16@1+ (0.001,0) [0|65.534] "V" DASH_NODE
+ SG_ cell_v_006 : 32|16@1+ (0.001,0) [0|65.534] "V" DASH_NODE
+ SG_ cell_v_007 : 48|16@1+ (0.001,0) [0|65.534] "V" DASH_NODE
+
+BO_ 1058 BMS_CELL_V_02: 8 BMS
+ SG_ cell_v_008 : 0|16@1+ (0.001,0) [0|65.534] "V" DASH_NODE
+ SG_ cell_v_009 : 16|16@1+ (0.001,0) [0|65.534] "V" DASH_NODE
+ SG_ cell_v_010 : 32|16@1+ (0.001,0) [0|65.534] "V" DASH_NODE
+ SG_ cell_v_011 : 48|16@1+ (0.001,0) [0|65.534] "V" DASH_NODE
+
+BO_ 1059 BMS_CELL_V_03: 8 BMS
+ SG_ cell_v_012 : 0|16@1+ (0.001,0) [0|65.534] "V" DASH_NODE
+ SG_ cell_v_013 : 16|16@1+ (0.001,0) [0|65.534] "V" DASH_NODE
+ SG_ cell_v_014 : 32|16@1+ (0.001,0) [0|65.534] "V" DASH_NODE
+ SG_ cell_v_015 : 48|16@1+ (0.001,0) [0|65.534] "V" DASH_NODE
+
+BO_ 1060 BMS_CELL_V_04: 8 BMS
+ SG_ cell_v_016 : 0|16@1+ (0.001,0) [0|65.534] "V" DASH_NODE
+ SG_ cell_v_017 : 16|16@1+ (0.001,0) [0|65.534] "V" DASH_NODE
+ SG_ cell_v_018 : 32|16@1+ (0.001,0) [0|65.534] "V" DASH_NODE
+ SG_ cell_v_019 : 48|16@1+ (0.001,0) [0|65.534] "V" DASH_NODE
+
+BO_ 1061 BMS_CELL_V_05: 8 BMS
+ SG_ cell_v_020 : 0|16@1+ (0.001,0) [0|65.534] "V" DASH_NODE
+ SG_ cell_v_021 : 16|16@1+ (0.001,0) [0|65.534] "V" DASH_NODE
+ SG_ cell_v_022 : 32|16@1+ (0.001,0) [0|65.534] "V" DASH_NODE
+ SG_ cell_v_023 : 48|16@1+ (0.001,0) [0|65.534] "V" DASH_NODE
+
+BO_ 1062 BMS_CELL_V_06: 8 BMS
+ SG_ cell_v_024 : 0|16@1+ (0.001,0) [0|65.534] "V" DASH_NODE
+ SG_ cell_v_025 : 16|16@1+ (0.001,0) [0|65.534] "V" DASH_NODE
+ SG_ cell_v_026 : 32|16@1+ (0.001,0) [0|65.534] "V" DASH_NODE
+ SG_ cell_v_027 : 48|16@1+ (0.001,0) [0|65.534] "V" DASH_NODE
+
+BO_ 1063 BMS_CELL_V_07: 8 BMS
+ SG_ cell_v_028 : 0|16@1+ (0.001,0) [0|65.534] "V" DASH_NODE
+ SG_ cell_v_029 : 16|16@1+ (0.001,0) [0|65.534] "V" DASH_NODE
+ SG_ cell_v_030 : 32|16@1+ (0.001,0) [0|65.534] "V" DASH_NODE
+ SG_ cell_v_031 : 48|16@1+ (0.001,0) [0|65.534] "V" DASH_NODE
+
+BO_ 1064 BMS_CELL_V_08: 8 BMS
+ SG_ cell_v_032 : 0|16@1+ (0.001,0) [0|65.534] "V" DASH_NODE
+ SG_ cell_v_033 : 16|16@1+ (0.001,0) [0|65.534] "V" DASH_NODE
+ SG_ cell_v_034 : 32|16@1+ (0.001,0) [0|65.534] "V" DASH_NODE
+ SG_ cell_v_035 : 48|16@1+ (0.001,0) [0|65.534] "V" DASH_NODE
+
+BO_ 1065 BMS_CELL_V_09: 8 BMS
+ SG_ cell_v_036 : 0|16@1+ (0.001,0) [0|65.534] "V" DASH_NODE
+ SG_ cell_v_037 : 16|16@1+ (0.001,0) [0|65.534] "V" DASH_NODE
+ SG_ cell_v_038 : 32|16@1+ (0.001,0) [0|65.534] "V" DASH_NODE
+ SG_ cell_v_039 : 48|16@1+ (0.001,0) [0|65.534] "V" DASH_NODE
+
+BO_ 1066 BMS_CELL_V_10: 8 BMS
+ SG_ cell_v_040 : 0|16@1+ (0.001,0) [0|65.534] "V" DASH_NODE
+ SG_ cell_v_041 : 16|16@1+ (0.001,0) [0|65.534] "V" DASH_NODE
+ SG_ cell_v_042 : 32|16@1+ (0.001,0) [0|65.534] "V" DASH_NODE
+ SG_ cell_v_043 : 48|16@1+ (0.001,0) [0|65.534] "V" DASH_NODE
+
+BO_ 1067 BMS_CELL_V_11: 8 BMS
+ SG_ cell_v_044 : 0|16@1+ (0.001,0) [0|65.534] "V" DASH_NODE
+ SG_ cell_v_045 : 16|16@1+ (0.001,0) [0|65.534] "V" DASH_NODE
+ SG_ cell_v_046 : 32|16@1+ (0.001,0) [0|65.534] "V" DASH_NODE
+ SG_ cell_v_047 : 48|16@1+ (0.001,0) [0|65.534] "V" DASH_NODE
+
+BO_ 1068 BMS_CELL_V_12: 8 BMS
+ SG_ cell_v_048 : 0|16@1+ (0.001,0) [0|65.534] "V" DASH_NODE
+ SG_ cell_v_049 : 16|16@1+ (0.001,0) [0|65.534] "V" DASH_NODE
+ SG_ cell_v_050 : 32|16@1+ (0.001,0) [0|65.534] "V" DASH_NODE
+ SG_ cell_v_051 : 48|16@1+ (0.001,0) [0|65.534] "V" DASH_NODE
+
+BO_ 1069 BMS_CELL_V_13: 8 BMS
+ SG_ cell_v_052 : 0|16@1+ (0.001,0) [0|65.534] "V" DASH_NODE
+ SG_ cell_v_053 : 16|16@1+ (0.001,0) [0|65.534] "V" DASH_NODE
+ SG_ cell_v_054 : 32|16@1+ (0.001,0) [0|65.534] "V" DASH_NODE
+ SG_ cell_v_055 : 48|16@1+ (0.001,0) [0|65.534] "V" DASH_NODE
+
+BO_ 1070 BMS_CELL_V_14: 8 BMS
+ SG_ cell_v_056 : 0|16@1+ (0.001,0) [0|65.534] "V" DASH_NODE
+ SG_ cell_v_057 : 16|16@1+ (0.001,0) [0|65.534] "V" DASH_NODE
+ SG_ cell_v_058 : 32|16@1+ (0.001,0) [0|65.534] "V" DASH_NODE
+ SG_ cell_v_059 : 48|16@1+ (0.001,0) [0|65.534] "V" DASH_NODE
+
+BO_ 1071 BMS_CELL_V_15: 8 BMS
+ SG_ cell_v_060 : 0|16@1+ (0.001,0) [0|65.534] "V" DASH_NODE
+ SG_ cell_v_061 : 16|16@1+ (0.001,0) [0|65.534] "V" DASH_NODE
+ SG_ cell_v_062 : 32|16@1+ (0.001,0) [0|65.534] "V" DASH_NODE
+ SG_ cell_v_063 : 48|16@1+ (0.001,0) [0|65.534] "V" DASH_NODE
+
+BO_ 1072 BMS_CELL_V_16: 8 BMS
+ SG_ cell_v_064 : 0|16@1+ (0.001,0) [0|65.534] "V" DASH_NODE
+ SG_ cell_v_065 : 16|16@1+ (0.001,0) [0|65.534] "V" DASH_NODE
+ SG_ cell_v_066 : 32|16@1+ (0.001,0) [0|65.534] "V" DASH_NODE
+ SG_ cell_v_067 : 48|16@1+ (0.001,0) [0|65.534] "V" DASH_NODE
+
+BO_ 1073 BMS_CELL_V_17: 8 BMS
+ SG_ cell_v_068 : 0|16@1+ (0.001,0) [0|65.534] "V" DASH_NODE
+ SG_ cell_v_069 : 16|16@1+ (0.001,0) [0|65.534] "V" DASH_NODE
+ SG_ cell_v_070 : 32|16@1+ (0.001,0) [0|65.534] "V" DASH_NODE
+ SG_ cell_v_071 : 48|16@1+ (0.001,0) [0|65.534] "V" DASH_NODE
+
+BO_ 1074 BMS_CELL_V_18: 8 BMS
+ SG_ cell_v_072 : 0|16@1+ (0.001,0) [0|65.534] "V" DASH_NODE
+ SG_ cell_v_073 : 16|16@1+ (0.001,0) [0|65.534] "V" DASH_NODE
+ SG_ cell_v_074 : 32|16@1+ (0.001,0) [0|65.534] "V" DASH_NODE
+ SG_ cell_v_075 : 48|16@1+ (0.001,0) [0|65.534] "V" DASH_NODE
+
+BO_ 1075 BMS_CELL_V_19: 8 BMS
+ SG_ cell_v_076 : 0|16@1+ (0.001,0) [0|65.534] "V" DASH_NODE
+ SG_ cell_v_077 : 16|16@1+ (0.001,0) [0|65.534] "V" DASH_NODE
+ SG_ cell_v_078 : 32|16@1+ (0.001,0) [0|65.534] "V" DASH_NODE
+ SG_ cell_v_079 : 48|16@1+ (0.001,0) [0|65.534] "V" DASH_NODE
+
+BO_ 1076 BMS_CELL_V_20: 8 BMS
+ SG_ cell_v_080 : 0|16@1+ (0.001,0) [0|65.534] "V" DASH_NODE
+ SG_ cell_v_081 : 16|16@1+ (0.001,0) [0|65.534] "V" DASH_NODE
+ SG_ cell_v_082 : 32|16@1+ (0.001,0) [0|65.534] "V" DASH_NODE
+ SG_ cell_v_083 : 48|16@1+ (0.001,0) [0|65.534] "V" DASH_NODE
+
+BO_ 1077 BMS_CELL_V_21: 8 BMS
+ SG_ cell_v_084 : 0|16@1+ (0.001,0) [0|65.534] "V" DASH_NODE
+ SG_ cell_v_085 : 16|16@1+ (0.001,0) [0|65.534] "V" DASH_NODE
+ SG_ cell_v_086 : 32|16@1+ (0.001,0) [0|65.534] "V" DASH_NODE
+ SG_ cell_v_087 : 48|16@1+ (0.001,0) [0|65.534] "V" DASH_NODE
+
+BO_ 1078 BMS_CELL_V_22: 8 BMS
+ SG_ cell_v_088 : 0|16@1+ (0.001,0) [0|65.534] "V" DASH_NODE
+ SG_ cell_v_089 : 16|16@1+ (0.001,0) [0|65.534] "V" DASH_NODE
+ SG_ cell_v_090 : 32|16@1+ (0.001,0) [0|65.534] "V" DASH_NODE
+ SG_ cell_v_091 : 48|16@1+ (0.001,0) [0|65.534] "V" DASH_NODE
+
+BO_ 1079 BMS_CELL_V_23: 8 BMS
+ SG_ cell_v_092 : 0|16@1+ (0.001,0) [0|65.534] "V" DASH_NODE
+ SG_ cell_v_093 : 16|16@1+ (0.001,0) [0|65.534] "V" DASH_NODE
+ SG_ cell_v_094 : 32|16@1+ (0.001,0) [0|65.534] "V" DASH_NODE
+ SG_ cell_v_095 : 48|16@1+ (0.001,0) [0|65.534] "V" DASH_NODE
+
+BO_ 1080 BMS_CELL_V_24: 8 BMS
+ SG_ cell_v_096 : 0|16@1+ (0.001,0) [0|65.534] "V" DASH_NODE
+ SG_ cell_v_097 : 16|16@1+ (0.001,0) [0|65.534] "V" DASH_NODE
+ SG_ cell_v_098 : 32|16@1+ (0.001,0) [0|65.534] "V" DASH_NODE
+ SG_ cell_v_099 : 48|16@1+ (0.001,0) [0|65.534] "V" DASH_NODE
+
+BO_ 1081 BMS_CELL_V_25: 8 BMS
+ SG_ cell_v_100 : 0|16@1+ (0.001,0) [0|65.534] "V" DASH_NODE
+ SG_ cell_v_101 : 16|16@1+ (0.001,0) [0|65.534] "V" DASH_NODE
+ SG_ cell_v_102 : 32|16@1+ (0.001,0) [0|65.534] "V" DASH_NODE
+ SG_ cell_v_103 : 48|16@1+ (0.001,0) [0|65.534] "V" DASH_NODE
+
+BO_ 1082 BMS_CELL_V_26: 8 BMS
+ SG_ cell_v_104 : 0|16@1+ (0.001,0) [0|65.534] "V" DASH_NODE
+ SG_ cell_v_105 : 16|16@1+ (0.001,0) [0|65.534] "V" DASH_NODE
+ SG_ cell_v_106 : 32|16@1+ (0.001,0) [0|65.534] "V" DASH_NODE
+ SG_ cell_v_107 : 48|16@1+ (0.001,0) [0|65.534] "V" DASH_NODE
+
+BO_ 1083 BMS_CELL_V_27: 8 BMS
+ SG_ cell_v_108 : 0|16@1+ (0.001,0) [0|65.534] "V" DASH_NODE
+ SG_ cell_v_109 : 16|16@1+ (0.001,0) [0|65.534] "V" DASH_NODE
+ SG_ cell_v_110 : 32|16@1+ (0.001,0) [0|65.534] "V" DASH_NODE
+ SG_ cell_v_111 : 48|16@1+ (0.001,0) [0|65.534] "V" DASH_NODE
+
+BO_ 1084 BMS_CELL_V_28: 8 BMS
+ SG_ cell_v_112 : 0|16@1+ (0.001,0) [0|65.534] "V" DASH_NODE
+ SG_ cell_v_113 : 16|16@1+ (0.001,0) [0|65.534] "V" DASH_NODE
+ SG_ cell_v_114 : 32|16@1+ (0.001,0) [0|65.534] "V" DASH_NODE
+ SG_ cell_v_115 : 48|16@1+ (0.001,0) [0|65.534] "V" DASH_NODE
+
+BO_ 1085 BMS_CELL_V_29: 8 BMS
+ SG_ cell_v_116 : 0|16@1+ (0.001,0) [0|65.534] "V" DASH_NODE
+ SG_ cell_v_117 : 16|16@1+ (0.001,0) [0|65.534] "V" DASH_NODE
+ SG_ cell_v_118 : 32|16@1+ (0.001,0) [0|65.534] "V" DASH_NODE
+ SG_ cell_v_119 : 48|16@1+ (0.001,0) [0|65.534] "V" DASH_NODE
+
+BO_ 1086 BMS_CELL_V_30: 8 BMS
+ SG_ cell_v_120 : 0|16@1+ (0.001,0) [0|65.534] "V" DASH_NODE
+ SG_ cell_v_121 : 16|16@1+ (0.001,0) [0|65.534] "V" DASH_NODE
+ SG_ cell_v_122 : 32|16@1+ (0.001,0) [0|65.534] "V" DASH_NODE
+ SG_ cell_v_123 : 48|16@1+ (0.001,0) [0|65.534] "V" DASH_NODE
+
+BO_ 1087 BMS_CELL_V_31: 8 BMS
+ SG_ cell_v_124 : 0|16@1+ (0.001,0) [0|65.534] "V" DASH_NODE
+ SG_ cell_v_125 : 16|16@1+ (0.001,0) [0|65.534] "V" DASH_NODE
+ SG_ cell_v_126 : 32|16@1+ (0.001,0) [0|65.534] "V" DASH_NODE
+ SG_ cell_v_127 : 48|16@1+ (0.001,0) [0|65.534] "V" DASH_NODE
+
+BO_ 1088 BMS_CELL_V_32: 8 BMS
+ SG_ cell_v_128 : 0|16@1+ (0.001,0) [0|65.534] "V" DASH_NODE
+ SG_ cell_v_129 : 16|16@1+ (0.001,0) [0|65.534] "V" DASH_NODE
+ SG_ cell_v_130 : 32|16@1+ (0.001,0) [0|65.534] "V" DASH_NODE
+ SG_ cell_v_131 : 48|16@1+ (0.001,0) [0|65.534] "V" DASH_NODE
+
+BO_ 1089 BMS_CELL_V_33: 8 BMS
+ SG_ cell_v_132 : 0|16@1+ (0.001,0) [0|65.534] "V" DASH_NODE
+ SG_ cell_v_133 : 16|16@1+ (0.001,0) [0|65.534] "V" DASH_NODE
+ SG_ cell_v_134 : 32|16@1+ (0.001,0) [0|65.534] "V" DASH_NODE
+ SG_ cell_v_135 : 48|16@1+ (0.001,0) [0|65.534] "V" DASH_NODE
+
+BO_ 1090 BMS_CELL_V_34: 8 BMS
+ SG_ cell_v_136 : 0|16@1+ (0.001,0) [0|65.534] "V" DASH_NODE
+ SG_ cell_v_137 : 16|16@1+ (0.001,0) [0|65.534] "V" DASH_NODE
+ SG_ cell_v_138 : 32|16@1+ (0.001,0) [0|65.534] "V" DASH_NODE
+ SG_ cell_v_139 : 48|16@1+ (0.001,0) [0|65.534] "V" DASH_NODE
+
+BO_ 1104 BMS_CELL_T_0: 8 BMS
+ SG_ cell_t_00 : 0|8@1+ (0.5,-20) [-20|107] "°C" DASH_NODE
+ SG_ cell_t_01 : 8|8@1+ (0.5,-20) [-20|107] "°C" DASH_NODE
+ SG_ cell_t_02 : 16|8@1+ (0.5,-20) [-20|107] "°C" DASH_NODE
+ SG_ cell_t_03 : 24|8@1+ (0.5,-20) [-20|107] "°C" DASH_NODE
+ SG_ cell_t_04 : 32|8@1+ (0.5,-20) [-20|107] "°C" DASH_NODE
+ SG_ cell_t_05 : 40|8@1+ (0.5,-20) [-20|107] "°C" DASH_NODE
+ SG_ cell_t_06 : 48|8@1+ (0.5,-20) [-20|107] "°C" DASH_NODE
+ SG_ cell_t_07 : 56|8@1+ (0.5,-20) [-20|107] "°C" DASH_NODE
+
+BO_ 1105 BMS_CELL_T_1: 8 BMS
+ SG_ cell_t_08 : 0|8@1+ (0.5,-20) [-20|107] "°C" DASH_NODE
+ SG_ cell_t_09 : 8|8@1+ (0.5,-20) [-20|107] "°C" DASH_NODE
+ SG_ cell_t_10 : 16|8@1+ (0.5,-20) [-20|107] "°C" DASH_NODE
+ SG_ cell_t_11 : 24|8@1+ (0.5,-20) [-20|107] "°C" DASH_NODE
+ SG_ cell_t_12 : 32|8@1+ (0.5,-20) [-20|107] "°C" DASH_NODE
+ SG_ cell_t_13 : 40|8@1+ (0.5,-20) [-20|107] "°C" DASH_NODE
+ SG_ cell_t_14 : 48|8@1+ (0.5,-20) [-20|107] "°C" DASH_NODE
+ SG_ cell_t_15 : 56|8@1+ (0.5,-20) [-20|107] "°C" DASH_NODE
+
+BO_ 1106 BMS_CELL_T_2: 8 BMS
+ SG_ cell_t_16 : 0|8@1+ (0.5,-20) [-20|107] "°C" DASH_NODE
+ SG_ cell_t_17 : 8|8@1+ (0.5,-20) [-20|107] "°C" DASH_NODE
+ SG_ cell_t_18 : 16|8@1+ (0.5,-20) [-20|107] "°C" DASH_NODE
+ SG_ cell_t_19 : 24|8@1+ (0.5,-20) [-20|107] "°C" DASH_NODE
+ SG_ cell_t_20 : 32|8@1+ (0.5,-20) [-20|107] "°C" DASH_NODE
+ SG_ cell_t_21 : 40|8@1+ (0.5,-20) [-20|107] "°C" DASH_NODE
+ SG_ cell_t_22 : 48|8@1+ (0.5,-20) [-20|107] "°C" DASH_NODE
+ SG_ cell_t_23 : 56|8@1+ (0.5,-20) [-20|107] "°C" DASH_NODE
+
+BO_ 1107 BMS_CELL_T_3: 8 BMS
+ SG_ cell_t_24 : 0|8@1+ (0.5,-20) [-20|107] "°C" DASH_NODE
+ SG_ cell_t_25 : 8|8@1+ (0.5,-20) [-20|107] "°C" DASH_NODE
+ SG_ cell_t_26 : 16|8@1+ (0.5,-20) [-20|107] "°C" DASH_NODE
+ SG_ cell_t_27 : 24|8@1+ (0.5,-20) [-20|107] "°C" DASH_NODE
+ SG_ cell_t_28 : 32|8@1+ (0.5,-20) [-20|107] "°C" DASH_NODE
+ SG_ cell_t_29 : 40|8@1+ (0.5,-20) [-20|107] "°C" DASH_NODE
+ SG_ cell_t_30 : 48|8@1+ (0.5,-20) [-20|107] "°C" DASH_NODE
+ SG_ cell_t_31 : 56|8@1+ (0.5,-20) [-20|107] "°C" DASH_NODE
+
+BO_ 1108 BMS_CELL_T_4: 8 BMS
+ SG_ cell_t_32 : 0|8@1+ (0.5,-20) [-20|107] "°C" DASH_NODE
+ SG_ cell_t_33 : 8|8@1+ (0.5,-20) [-20|107] "°C" DASH_NODE
+ SG_ cell_t_34 : 16|8@1+ (0.5,-20) [-20|107] "°C" DASH_NODE
+ SG_ cell_t_35 : 24|8@1+ (0.5,-20) [-20|107] "°C" DASH_NODE
+ SG_ cell_t_36 : 32|8@1+ (0.5,-20) [-20|107] "°C" DASH_NODE
+ SG_ cell_t_37 : 40|8@1+ (0.5,-20) [-20|107] "°C" DASH_NODE
+ SG_ cell_t_38 : 48|8@1+ (0.5,-20) [-20|107] "°C" DASH_NODE
+ SG_ cell_t_39 : 56|8@1+ (0.5,-20) [-20|107] "°C" DASH_NODE
+
+BO_ 1109 BMS_CELL_T_5: 8 BMS
+ SG_ cell_t_40 : 0|8@1+ (0.5,-20) [-20|107] "°C" DASH_NODE
+ SG_ cell_t_41 : 8|8@1+ (0.5,-20) [-20|107] "°C" DASH_NODE
+ SG_ cell_t_42 : 16|8@1+ (0.5,-20) [-20|107] "°C" DASH_NODE
+ SG_ cell_t_43 : 24|8@1+ (0.5,-20) [-20|107] "°C" DASH_NODE
+ SG_ cell_t_44 : 32|8@1+ (0.5,-20) [-20|107] "°C" DASH_NODE
+ SG_ cell_t_45 : 40|8@1+ (0.5,-20) [-20|107] "°C" DASH_NODE
+ SG_ cell_t_46 : 48|8@1+ (0.5,-20) [-20|107] "°C" DASH_NODE
+ SG_ cell_t_47 : 56|8@1+ (0.5,-20) [-20|107] "°C" DASH_NODE
+
+BO_ 1110 BMS_CELL_T_6: 8 BMS
+ SG_ cell_t_48 : 0|8@1+ (0.5,-20) [-20|107] "°C" DASH_NODE
+ SG_ cell_t_49 : 8|8@1+ (0.5,-20) [-20|107] "°C" DASH_NODE
+ SG_ cell_t_50 : 16|8@1+ (0.5,-20) [-20|107] "°C" DASH_NODE
+ SG_ cell_t_51 : 24|8@1+ (0.5,-20) [-20|107] "°C" DASH_NODE
+ SG_ cell_t_52 : 32|8@1+ (0.5,-20) [-20|107] "°C" DASH_NODE
+ SG_ cell_t_53 : 40|8@1+ (0.5,-20) [-20|107] "°C" DASH_NODE
+ SG_ cell_t_54 : 48|8@1+ (0.5,-20) [-20|107] "°C" DASH_NODE
+ SG_ cell_t_55 : 56|8@1+ (0.5,-20) [-20|107] "°C" DASH_NODE
+
+BO_ 1111 BMS_CELL_T_7: 8 BMS
+ SG_ cell_t_56 : 0|8@1+ (0.5,-20) [-20|107] "°C" DASH_NODE
+ SG_ cell_t_57 : 8|8@1+ (0.5,-20) [-20|107] "°C" DASH_NODE
+ SG_ cell_t_58 : 16|8@1+ (0.5,-20) [-20|107] "°C" DASH_NODE
+ SG_ cell_t_59 : 24|8@1+ (0.5,-20) [-20|107] "°C" DASH_NODE
+
+BO_ 1120 COOLING: 8 VCU
+ SG_ cool_temp_in : 0|16@1- (0.1,0) [-3276.7|3276.7] "°C" DASH_NODE
+ SG_ cool_temp_out : 16|16@1- (0.1,0) [-3276.7|3276.7] "°C" DASH_NODE
+ SG_ cool_flow : 32|16@1+ (0.01,0) [0|655.34] "L/min" DASH_NODE
+ SG_ pump_duty : 48|8@1+ (0.5,0) [0|127] "%" DASH_NODE
+ SG_ fan_duty : 56|8@1+ (0.5,0) [0|127] "%" DASH_NODE
+
+BO_ 1136 SAFETY: 8 VCU
+ SG_ sdc_closed : 0|1@1+ (1,0) [0|1] "bool" DASH_NODE
+ SG_ imd_ok : 1|1@1+ (1,0) [0|1] "bool" DASH_NODE
+ SG_ ams_ok : 2|1@1+ (1,0) [0|1] "bool" DASH_NODE
+ SG_ bspd_ok : 3|1@1+ (1,0) [0|1] "bool" DASH_NODE
+ SG_ apps_plaus_ok : 4|1@1+ (1,0) [0|1] "bool" DASH_NODE
+ SG_ air_pos_closed : 5|1@1+ (1,0) [0|1] "bool" DASH_NODE
+ SG_ air_neg_closed : 6|1@1+ (1,0) [0|1] "bool" DASH_NODE
+ SG_ precharge_done : 7|1@1+ (1,0) [0|1] "bool" DASH_NODE
+ SG_ tsal_state : 8|8@1+ (1,0) [0|254] "enum" DASH_NODE
+ SG_ imd_iso_kohm : 16|16@1+ (1,0) [0|65534] "kOhm" DASH_NODE
+
+
+CM_ "AeroVolt Formula Student EV telemetry bus. Classic CAN 2.0A, 1 Mbit/s, Intel byte order. Signal names equal AeroVolt channel ids. SNA = most negative raw value (signed) or all ones (unsigned); 1-bit flags have no SNA.";
+CM_ BU_ AERO_NODE "Aero sensor node (pressure taps, pitot, ambient, 5-hole probe, ride height, wing load cells)";
+CM_ BU_ SUSP_NODE "Suspension node (damper potentiometers, pushrod load cells)";
+CM_ BU_ IMU_NODE "Inertial measurement unit near the centre of gravity";
+CM_ BU_ GPS_NODE "GNSS receiver (10 Hz)";
+CM_ BU_ DASH_NODE "Dashboard / telemetry logger (receives everything, forwards to the pit wall)";
+CM_ BU_ INVERTER "Motor inverter";
+CM_ BU_ BMS "Battery management system (accumulator)";
+CM_ BU_ VCU "Vehicle control unit (pedals, wheel speeds, cooling control, safety chain monitor)";
+CM_ BO_ 768 "Front wing pressure taps 1-4 (station L suction side), Pa relative to freestream static. Cycle 20 ms.";
+CM_ SG_ 768 fw_p01 "Front wing L tap 1 (suction, x/c 0.05). Sensor range -3200 .. 3200 Pa. SNA (not available) = raw -32768.";
+CM_ SG_ 768 fw_p02 "Front wing L tap 2 (suction, x/c 0.20). Sensor range -3200 .. 3200 Pa. SNA (not available) = raw -32768.";
+CM_ SG_ 768 fw_p03 "Front wing L tap 3 (suction, x/c 0.45). Sensor range -3200 .. 3200 Pa. SNA (not available) = raw -32768.";
+CM_ SG_ 768 fw_p04 "Front wing L tap 4 (suction, x/c 0.75). Sensor range -3200 .. 3200 Pa. SNA (not available) = raw -32768.";
+CM_ BO_ 769 "Front wing pressure taps 5-8 (station L pressure side, station R suction side), Pa. Cycle 20 ms.";
+CM_ SG_ 769 fw_p05 "Front wing L tap 5 (pressure, x/c 0.10). Sensor range -3200 .. 3200 Pa. SNA (not available) = raw -32768.";
+CM_ SG_ 769 fw_p06 "Front wing L tap 6 (pressure, x/c 0.50). Sensor range -3200 .. 3200 Pa. SNA (not available) = raw -32768.";
+CM_ SG_ 769 fw_p07 "Front wing R tap 7 (suction, x/c 0.05). Sensor range -3200 .. 3200 Pa. SNA (not available) = raw -32768.";
+CM_ SG_ 769 fw_p08 "Front wing R tap 8 (suction, x/c 0.20). Sensor range -3200 .. 3200 Pa. SNA (not available) = raw -32768.";
+CM_ BO_ 770 "Front wing pressure taps 9-12 (station R), Pa. Cycle 20 ms.";
+CM_ SG_ 770 fw_p09 "Front wing R tap 9 (suction, x/c 0.45). Sensor range -3200 .. 3200 Pa. SNA (not available) = raw -32768.";
+CM_ SG_ 770 fw_p10 "Front wing R tap 10 (suction, x/c 0.75). Sensor range -3200 .. 3200 Pa. SNA (not available) = raw -32768.";
+CM_ SG_ 770 fw_p11 "Front wing R tap 11 (pressure, x/c 0.10). Sensor range -3200 .. 3200 Pa. SNA (not available) = raw -32768.";
+CM_ SG_ 770 fw_p12 "Front wing R tap 12 (pressure, x/c 0.50). Sensor range -3200 .. 3200 Pa. SNA (not available) = raw -32768.";
+CM_ BO_ 771 "Rear wing pressure taps 1-4 (station L suction side), Pa. Cycle 20 ms.";
+CM_ SG_ 771 rw_p01 "Rear wing L tap 1 (suction, x/c 0.05). Sensor range -3200 .. 3200 Pa. SNA (not available) = raw -32768.";
+CM_ SG_ 771 rw_p02 "Rear wing L tap 2 (suction, x/c 0.20). Sensor range -3200 .. 3200 Pa. SNA (not available) = raw -32768.";
+CM_ SG_ 771 rw_p03 "Rear wing L tap 3 (suction, x/c 0.45). Sensor range -3200 .. 3200 Pa. SNA (not available) = raw -32768.";
+CM_ SG_ 771 rw_p04 "Rear wing L tap 4 (suction, x/c 0.75). Sensor range -3200 .. 3200 Pa. SNA (not available) = raw -32768.";
+CM_ BO_ 772 "Rear wing pressure taps 5-8, Pa. Cycle 20 ms.";
+CM_ SG_ 772 rw_p05 "Rear wing L tap 5 (pressure, x/c 0.10). Sensor range -3200 .. 3200 Pa. SNA (not available) = raw -32768.";
+CM_ SG_ 772 rw_p06 "Rear wing L tap 6 (pressure, x/c 0.50). Sensor range -3200 .. 3200 Pa. SNA (not available) = raw -32768.";
+CM_ SG_ 772 rw_p07 "Rear wing R tap 7 (suction, x/c 0.05). Sensor range -3200 .. 3200 Pa. SNA (not available) = raw -32768.";
+CM_ SG_ 772 rw_p08 "Rear wing R tap 8 (suction, x/c 0.20). Sensor range -3200 .. 3200 Pa. SNA (not available) = raw -32768.";
+CM_ BO_ 773 "Rear wing pressure taps 9-12 (station R), Pa. Cycle 20 ms.";
+CM_ SG_ 773 rw_p09 "Rear wing R tap 9 (suction, x/c 0.45). Sensor range -3200 .. 3200 Pa. SNA (not available) = raw -32768.";
+CM_ SG_ 773 rw_p10 "Rear wing R tap 10 (suction, x/c 0.75). Sensor range -3200 .. 3200 Pa. SNA (not available) = raw -32768.";
+CM_ SG_ 773 rw_p11 "Rear wing R tap 11 (pressure, x/c 0.10). Sensor range -3200 .. 3200 Pa. SNA (not available) = raw -32768.";
+CM_ SG_ 773 rw_p12 "Rear wing R tap 12 (pressure, x/c 0.50). Sensor range -3200 .. 3200 Pa. SNA (not available) = raw -32768.";
+CM_ BO_ 774 "Undertray centreline taps 1-4 (inlet to throat), Pa. Cycle 20 ms.";
+CM_ SG_ 774 ut_p01 "Undertray tap 1 (inlet, 0.05). Sensor range -3200 .. 3200 Pa. SNA (not available) = raw -32768.";
+CM_ SG_ 774 ut_p02 "Undertray tap 2 (0.20). Sensor range -3200 .. 3200 Pa. SNA (not available) = raw -32768.";
+CM_ SG_ 774 ut_p03 "Undertray tap 3 (throat, 0.40). Sensor range -3200 .. 3200 Pa. SNA (not available) = raw -32768.";
+CM_ SG_ 774 ut_p04 "Undertray tap 4 (0.60). Sensor range -3200 .. 3200 Pa. SNA (not available) = raw -32768.";
+CM_ BO_ 775 "Undertray taps 5-8 (diffuser centreline and tunnels), Pa. Cycle 20 ms.";
+CM_ SG_ 775 ut_p05 "Undertray tap 5 (diffuser, 0.80). Sensor range -3200 .. 3200 Pa. SNA (not available) = raw -32768.";
+CM_ SG_ 775 ut_p06 "Undertray tap 6 (diffuser exit, 0.97). Sensor range -3200 .. 3200 Pa. SNA (not available) = raw -32768.";
+CM_ SG_ 775 ut_p07 "Undertray tap 7 (left tunnel, 0.80). Sensor range -3200 .. 3200 Pa. SNA (not available) = raw -32768.";
+CM_ SG_ 775 ut_p08 "Undertray tap 8 (right tunnel, 0.80). Sensor range -3200 .. 3200 Pa. SNA (not available) = raw -32768.";
+CM_ BO_ 784 "Pitot dynamic pressure (50 Hz) and BME280 ambient air data (updated at 1 Hz). Cycle 20 ms.";
+CM_ SG_ 784 pitot_dp "Pitot dynamic pressure. Sensor range -500 .. 3200 Pa. SNA (not available) = raw -32768.";
+CM_ SG_ 784 amb_temp "Ambient temperature. Sensor range -20 .. 60 °C. SNA (not available) = raw -32768.";
+CM_ SG_ 784 amb_press "Ambient pressure (absolute). Sensor range 50000 .. 110000 Pa. SNA (not available) = raw 65535.";
+CM_ SG_ 784 amb_rh "Ambient relative humidity. Sensor range 0 .. 100 %. SNA (not available) = raw 255.";
+CM_ BO_ 785 "5-hole probe flow angles and laser ride heights. Cycle 20 ms.";
+CM_ SG_ 785 probe_yaw "Flow yaw angle (5-hole probe). Sensor range -30 .. 30 deg. SNA (not available) = raw -32768.";
+CM_ SG_ 785 probe_pitch "Flow pitch angle (5-hole probe). Sensor range -30 .. 30 deg. SNA (not available) = raw -32768.";
+CM_ SG_ 785 rh_front "Ride height front (laser). Sensor range 0 .. 100 mm. SNA (not available) = raw 65535.";
+CM_ SG_ 785 rh_rear "Ride height rear (laser). Sensor range 0 .. 100 mm. SNA (not available) = raw 65535.";
+CM_ BO_ 786 "Wing mount load cells, vertical force, + = down. Cycle 20 ms.";
+CM_ SG_ 786 fw_load "Front wing mount load (vertical, +down). Sensor range -500 .. 3000 N. SNA (not available) = raw -32768.";
+CM_ SG_ 786 rw_load "Rear wing mount load (vertical, +down). Sensor range -500 .. 3000 N. SNA (not available) = raw -32768.";
+CM_ BO_ 800 "Damper positions from static, + = bump. Cycle 10 ms.";
+CM_ SG_ 800 damper_fl "Damper position FL (+bump). Sensor range -40 .. 60 mm. SNA (not available) = raw -32768.";
+CM_ SG_ 800 damper_fr "Damper position FR (+bump). Sensor range -40 .. 60 mm. SNA (not available) = raw -32768.";
+CM_ SG_ 800 damper_rl "Damper position RL (+bump). Sensor range -40 .. 60 mm. SNA (not available) = raw -32768.";
+CM_ SG_ 800 damper_rr "Damper position RR (+bump). Sensor range -40 .. 60 mm. SNA (not available) = raw -32768.";
+CM_ BO_ 801 "Pushrod compression forces. Cycle 10 ms.";
+CM_ SG_ 801 pushrod_fl "Pushrod force FL (compression). Sensor range -500 .. 8000 N. SNA (not available) = raw -32768.";
+CM_ SG_ 801 pushrod_fr "Pushrod force FR (compression). Sensor range -500 .. 8000 N. SNA (not available) = raw -32768.";
+CM_ SG_ 801 pushrod_rl "Pushrod force RL (compression). Sensor range -500 .. 8000 N. SNA (not available) = raw -32768.";
+CM_ SG_ 801 pushrod_rr "Pushrod force RR (compression). Sensor range -500 .. 8000 N. SNA (not available) = raw -32768.";
+CM_ BO_ 816 "Accelerations in the vehicle frame (ISO 8855), az = +9.81 at rest. Cycle 10 ms.";
+CM_ SG_ 816 ax "Longitudinal acceleration (+forward). Sensor range -50 .. 50 m/s². SNA (not available) = raw -32768.";
+CM_ SG_ 816 ay "Lateral acceleration (+left). Sensor range -50 .. 50 m/s². SNA (not available) = raw -32768.";
+CM_ SG_ 816 az "Vertical acceleration (+9.81 at rest). Sensor range -50 .. 50 m/s². SNA (not available) = raw -32768.";
+CM_ BO_ 817 "Angular rates: roll, pitch, yaw. Cycle 10 ms.";
+CM_ SG_ 817 gx "Roll rate. Sensor range -250 .. 250 deg/s. SNA (not available) = raw -32768.";
+CM_ SG_ 817 gy "Pitch rate. Sensor range -250 .. 250 deg/s. SNA (not available) = raw -32768.";
+CM_ SG_ 817 gz "Yaw rate. Sensor range -250 .. 250 deg/s. SNA (not available) = raw -32768.";
+CM_ BO_ 832 "GNSS position (WGS-84). Cycle 100 ms.";
+CM_ SG_ 832 gps_lat "GPS latitude. Sensor range -90 .. 90 deg. SNA (not available) = raw -2147483648.";
+CM_ SG_ 832 gps_lon "GPS longitude. Sensor range -180 .. 180 deg. SNA (not available) = raw -2147483648.";
+CM_ BO_ 833 "GNSS ground speed and heading (0 = north, clockwise). Cycle 100 ms.";
+CM_ SG_ 833 gps_speed "GPS ground speed. Sensor range 0 .. 60 m/s. SNA (not available) = raw 65535.";
+CM_ SG_ 833 gps_heading "GPS heading (0 = north, clockwise). Sensor range 0 .. 360 deg. SNA (not available) = raw 65535.";
+CM_ BO_ 848 "Wheel surface speeds. Cycle 20 ms.";
+CM_ SG_ 848 ws_fl "Wheel speed FL. Sensor range 0 .. 60 m/s. SNA (not available) = raw 65535.";
+CM_ SG_ 848 ws_fr "Wheel speed FR. Sensor range 0 .. 60 m/s. SNA (not available) = raw 65535.";
+CM_ SG_ 848 ws_rl "Wheel speed RL. Sensor range 0 .. 60 m/s. SNA (not available) = raw 65535.";
+CM_ SG_ 848 ws_rr "Wheel speed RR. Sensor range 0 .. 60 m/s. SNA (not available) = raw 65535.";
+CM_ BO_ 849 "Driver inputs: steering, both accelerator pedal sensors, brake pressures. Cycle 20 ms.";
+CM_ SG_ 849 steer "Steering wheel angle (+left). Sensor range -120 .. 120 deg. SNA (not available) = raw -32768.";
+CM_ SG_ 849 apps1 "Accelerator pedal sensor 1. Sensor range 0 .. 100 %. SNA (not available) = raw 255.";
+CM_ SG_ 849 apps2 "Accelerator pedal sensor 2. Sensor range 0 .. 100 %. SNA (not available) = raw 255.";
+CM_ SG_ 849 brake_press_f "Brake pressure front. Sensor range 0 .. 120 bar. SNA (not available) = raw 65535.";
+CM_ SG_ 849 brake_press_r "Brake pressure rear. Sensor range 0 .. 120 bar. SNA (not available) = raw 65535.";
+CM_ BO_ 1024 "Inverter fast status: motor speed and torque, DC link. Cycle 10 ms.";
+CM_ SG_ 1024 mot_speed "Motor speed. Sensor range -500 .. 7000 rpm. SNA (not available) = raw -32768.";
+CM_ SG_ 1024 mot_torque "Motor torque (inverter estimate). Sensor range -150 .. 240 Nm. SNA (not available) = raw -32768.";
+CM_ SG_ 1024 inv_dc_voltage "Inverter DC-link voltage. Sensor range 0 .. 650 V. SNA (not available) = raw 65535.";
+CM_ SG_ 1024 inv_dc_current "Inverter DC current (+ from pack). Sensor range -150 .. 300 A. SNA (not available) = raw -32768.";
+CM_ BO_ 1025 "Inverter slow status: temperatures, phase current, state machine and fault code. Cycle 100 ms.";
+CM_ SG_ 1025 mot_winding_temp "Motor winding temperature. Sensor range -20 .. 180 °C. SNA (not available) = raw -32768.";
+CM_ SG_ 1025 inv_igbt_temp "Inverter IGBT temperature. Sensor range -20 .. 150 °C. SNA (not available) = raw -32768.";
+CM_ SG_ 1025 inv_phase_current "Motor phase current (RMS). Sensor range 0 .. 400 A. SNA (not available) = raw 65535.";
+CM_ SG_ 1025 inv_state "Inverter state. Sensor range 0 .. 5 enum. SNA (not available) = raw 255.";
+CM_ SG_ 1025 inv_fault "Inverter fault code. Sensor range 0 .. 4 enum. SNA (not available) = raw 255.";
+CM_ BO_ 1040 "Accumulator pack status. Cycle 10 ms.";
+CM_ SG_ 1040 pack_voltage "Pack voltage. Sensor range 0 .. 650 V. SNA (not available) = raw 65535.";
+CM_ SG_ 1040 pack_current "Pack current (+ discharge). Sensor range -150 .. 300 A. SNA (not available) = raw -32768.";
+CM_ SG_ 1040 bms_soc "BMS state of charge. Sensor range 0 .. 100 %. SNA (not available) = raw 255.";
+CM_ SG_ 1040 bms_state "BMS state. Sensor range 0 .. 3 enum. SNA (not available) = raw 255.";
+CM_ SG_ 1040 bms_fault "BMS fault code. Sensor range 0 .. 4 enum. SNA (not available) = raw 255.";
+CM_ BO_ 1056 "Cell voltages cell_v_000 ... cell_v_003 (frame 0). Cycle 100 ms.";
+CM_ SG_ 1056 cell_v_000 "Cell 000 voltage (segment 0). Sensor range 0 .. 5 V. SNA (not available) = raw 65535.";
+CM_ SG_ 1056 cell_v_001 "Cell 001 voltage (segment 0). Sensor range 0 .. 5 V. SNA (not available) = raw 65535.";
+CM_ SG_ 1056 cell_v_002 "Cell 002 voltage (segment 0). Sensor range 0 .. 5 V. SNA (not available) = raw 65535.";
+CM_ SG_ 1056 cell_v_003 "Cell 003 voltage (segment 0). Sensor range 0 .. 5 V. SNA (not available) = raw 65535.";
+CM_ BO_ 1057 "Cell voltages cell_v_004 ... cell_v_007 (frame 1). Cycle 100 ms.";
+CM_ SG_ 1057 cell_v_004 "Cell 004 voltage (segment 0). Sensor range 0 .. 5 V. SNA (not available) = raw 65535.";
+CM_ SG_ 1057 cell_v_005 "Cell 005 voltage (segment 0). Sensor range 0 .. 5 V. SNA (not available) = raw 65535.";
+CM_ SG_ 1057 cell_v_006 "Cell 006 voltage (segment 0). Sensor range 0 .. 5 V. SNA (not available) = raw 65535.";
+CM_ SG_ 1057 cell_v_007 "Cell 007 voltage (segment 0). Sensor range 0 .. 5 V. SNA (not available) = raw 65535.";
+CM_ BO_ 1058 "Cell voltages cell_v_008 ... cell_v_011 (frame 2). Cycle 100 ms.";
+CM_ SG_ 1058 cell_v_008 "Cell 008 voltage (segment 0). Sensor range 0 .. 5 V. SNA (not available) = raw 65535.";
+CM_ SG_ 1058 cell_v_009 "Cell 009 voltage (segment 0). Sensor range 0 .. 5 V. SNA (not available) = raw 65535.";
+CM_ SG_ 1058 cell_v_010 "Cell 010 voltage (segment 0). Sensor range 0 .. 5 V. SNA (not available) = raw 65535.";
+CM_ SG_ 1058 cell_v_011 "Cell 011 voltage (segment 0). Sensor range 0 .. 5 V. SNA (not available) = raw 65535.";
+CM_ BO_ 1059 "Cell voltages cell_v_012 ... cell_v_015 (frame 3). Cycle 100 ms.";
+CM_ SG_ 1059 cell_v_012 "Cell 012 voltage (segment 0). Sensor range 0 .. 5 V. SNA (not available) = raw 65535.";
+CM_ SG_ 1059 cell_v_013 "Cell 013 voltage (segment 0). Sensor range 0 .. 5 V. SNA (not available) = raw 65535.";
+CM_ SG_ 1059 cell_v_014 "Cell 014 voltage (segment 0). Sensor range 0 .. 5 V. SNA (not available) = raw 65535.";
+CM_ SG_ 1059 cell_v_015 "Cell 015 voltage (segment 0). Sensor range 0 .. 5 V. SNA (not available) = raw 65535.";
+CM_ BO_ 1060 "Cell voltages cell_v_016 ... cell_v_019 (frame 4). Cycle 100 ms.";
+CM_ SG_ 1060 cell_v_016 "Cell 016 voltage (segment 0). Sensor range 0 .. 5 V. SNA (not available) = raw 65535.";
+CM_ SG_ 1060 cell_v_017 "Cell 017 voltage (segment 0). Sensor range 0 .. 5 V. SNA (not available) = raw 65535.";
+CM_ SG_ 1060 cell_v_018 "Cell 018 voltage (segment 0). Sensor range 0 .. 5 V. SNA (not available) = raw 65535.";
+CM_ SG_ 1060 cell_v_019 "Cell 019 voltage (segment 0). Sensor range 0 .. 5 V. SNA (not available) = raw 65535.";
+CM_ BO_ 1061 "Cell voltages cell_v_020 ... cell_v_023 (frame 5). Cycle 100 ms.";
+CM_ SG_ 1061 cell_v_020 "Cell 020 voltage (segment 0). Sensor range 0 .. 5 V. SNA (not available) = raw 65535.";
+CM_ SG_ 1061 cell_v_021 "Cell 021 voltage (segment 0). Sensor range 0 .. 5 V. SNA (not available) = raw 65535.";
+CM_ SG_ 1061 cell_v_022 "Cell 022 voltage (segment 0). Sensor range 0 .. 5 V. SNA (not available) = raw 65535.";
+CM_ SG_ 1061 cell_v_023 "Cell 023 voltage (segment 0). Sensor range 0 .. 5 V. SNA (not available) = raw 65535.";
+CM_ BO_ 1062 "Cell voltages cell_v_024 ... cell_v_027 (frame 6). Cycle 100 ms.";
+CM_ SG_ 1062 cell_v_024 "Cell 024 voltage (segment 0). Sensor range 0 .. 5 V. SNA (not available) = raw 65535.";
+CM_ SG_ 1062 cell_v_025 "Cell 025 voltage (segment 0). Sensor range 0 .. 5 V. SNA (not available) = raw 65535.";
+CM_ SG_ 1062 cell_v_026 "Cell 026 voltage (segment 0). Sensor range 0 .. 5 V. SNA (not available) = raw 65535.";
+CM_ SG_ 1062 cell_v_027 "Cell 027 voltage (segment 0). Sensor range 0 .. 5 V. SNA (not available) = raw 65535.";
+CM_ BO_ 1063 "Cell voltages cell_v_028 ... cell_v_031 (frame 7). Cycle 100 ms.";
+CM_ SG_ 1063 cell_v_028 "Cell 028 voltage (segment 1). Sensor range 0 .. 5 V. SNA (not available) = raw 65535.";
+CM_ SG_ 1063 cell_v_029 "Cell 029 voltage (segment 1). Sensor range 0 .. 5 V. SNA (not available) = raw 65535.";
+CM_ SG_ 1063 cell_v_030 "Cell 030 voltage (segment 1). Sensor range 0 .. 5 V. SNA (not available) = raw 65535.";
+CM_ SG_ 1063 cell_v_031 "Cell 031 voltage (segment 1). Sensor range 0 .. 5 V. SNA (not available) = raw 65535.";
+CM_ BO_ 1064 "Cell voltages cell_v_032 ... cell_v_035 (frame 8). Cycle 100 ms.";
+CM_ SG_ 1064 cell_v_032 "Cell 032 voltage (segment 1). Sensor range 0 .. 5 V. SNA (not available) = raw 65535.";
+CM_ SG_ 1064 cell_v_033 "Cell 033 voltage (segment 1). Sensor range 0 .. 5 V. SNA (not available) = raw 65535.";
+CM_ SG_ 1064 cell_v_034 "Cell 034 voltage (segment 1). Sensor range 0 .. 5 V. SNA (not available) = raw 65535.";
+CM_ SG_ 1064 cell_v_035 "Cell 035 voltage (segment 1). Sensor range 0 .. 5 V. SNA (not available) = raw 65535.";
+CM_ BO_ 1065 "Cell voltages cell_v_036 ... cell_v_039 (frame 9). Cycle 100 ms.";
+CM_ SG_ 1065 cell_v_036 "Cell 036 voltage (segment 1). Sensor range 0 .. 5 V. SNA (not available) = raw 65535.";
+CM_ SG_ 1065 cell_v_037 "Cell 037 voltage (segment 1). Sensor range 0 .. 5 V. SNA (not available) = raw 65535.";
+CM_ SG_ 1065 cell_v_038 "Cell 038 voltage (segment 1). Sensor range 0 .. 5 V. SNA (not available) = raw 65535.";
+CM_ SG_ 1065 cell_v_039 "Cell 039 voltage (segment 1). Sensor range 0 .. 5 V. SNA (not available) = raw 65535.";
+CM_ BO_ 1066 "Cell voltages cell_v_040 ... cell_v_043 (frame 10). Cycle 100 ms.";
+CM_ SG_ 1066 cell_v_040 "Cell 040 voltage (segment 1). Sensor range 0 .. 5 V. SNA (not available) = raw 65535.";
+CM_ SG_ 1066 cell_v_041 "Cell 041 voltage (segment 1). Sensor range 0 .. 5 V. SNA (not available) = raw 65535.";
+CM_ SG_ 1066 cell_v_042 "Cell 042 voltage (segment 1). Sensor range 0 .. 5 V. SNA (not available) = raw 65535.";
+CM_ SG_ 1066 cell_v_043 "Cell 043 voltage (segment 1). Sensor range 0 .. 5 V. SNA (not available) = raw 65535.";
+CM_ BO_ 1067 "Cell voltages cell_v_044 ... cell_v_047 (frame 11). Cycle 100 ms.";
+CM_ SG_ 1067 cell_v_044 "Cell 044 voltage (segment 1). Sensor range 0 .. 5 V. SNA (not available) = raw 65535.";
+CM_ SG_ 1067 cell_v_045 "Cell 045 voltage (segment 1). Sensor range 0 .. 5 V. SNA (not available) = raw 65535.";
+CM_ SG_ 1067 cell_v_046 "Cell 046 voltage (segment 1). Sensor range 0 .. 5 V. SNA (not available) = raw 65535.";
+CM_ SG_ 1067 cell_v_047 "Cell 047 voltage (segment 1). Sensor range 0 .. 5 V. SNA (not available) = raw 65535.";
+CM_ BO_ 1068 "Cell voltages cell_v_048 ... cell_v_051 (frame 12). Cycle 100 ms.";
+CM_ SG_ 1068 cell_v_048 "Cell 048 voltage (segment 1). Sensor range 0 .. 5 V. SNA (not available) = raw 65535.";
+CM_ SG_ 1068 cell_v_049 "Cell 049 voltage (segment 1). Sensor range 0 .. 5 V. SNA (not available) = raw 65535.";
+CM_ SG_ 1068 cell_v_050 "Cell 050 voltage (segment 1). Sensor range 0 .. 5 V. SNA (not available) = raw 65535.";
+CM_ SG_ 1068 cell_v_051 "Cell 051 voltage (segment 1). Sensor range 0 .. 5 V. SNA (not available) = raw 65535.";
+CM_ BO_ 1069 "Cell voltages cell_v_052 ... cell_v_055 (frame 13). Cycle 100 ms.";
+CM_ SG_ 1069 cell_v_052 "Cell 052 voltage (segment 1). Sensor range 0 .. 5 V. SNA (not available) = raw 65535.";
+CM_ SG_ 1069 cell_v_053 "Cell 053 voltage (segment 1). Sensor range 0 .. 5 V. SNA (not available) = raw 65535.";
+CM_ SG_ 1069 cell_v_054 "Cell 054 voltage (segment 1). Sensor range 0 .. 5 V. SNA (not available) = raw 65535.";
+CM_ SG_ 1069 cell_v_055 "Cell 055 voltage (segment 1). Sensor range 0 .. 5 V. SNA (not available) = raw 65535.";
+CM_ BO_ 1070 "Cell voltages cell_v_056 ... cell_v_059 (frame 14). Cycle 100 ms.";
+CM_ SG_ 1070 cell_v_056 "Cell 056 voltage (segment 2). Sensor range 0 .. 5 V. SNA (not available) = raw 65535.";
+CM_ SG_ 1070 cell_v_057 "Cell 057 voltage (segment 2). Sensor range 0 .. 5 V. SNA (not available) = raw 65535.";
+CM_ SG_ 1070 cell_v_058 "Cell 058 voltage (segment 2). Sensor range 0 .. 5 V. SNA (not available) = raw 65535.";
+CM_ SG_ 1070 cell_v_059 "Cell 059 voltage (segment 2). Sensor range 0 .. 5 V. SNA (not available) = raw 65535.";
+CM_ BO_ 1071 "Cell voltages cell_v_060 ... cell_v_063 (frame 15). Cycle 100 ms.";
+CM_ SG_ 1071 cell_v_060 "Cell 060 voltage (segment 2). Sensor range 0 .. 5 V. SNA (not available) = raw 65535.";
+CM_ SG_ 1071 cell_v_061 "Cell 061 voltage (segment 2). Sensor range 0 .. 5 V. SNA (not available) = raw 65535.";
+CM_ SG_ 1071 cell_v_062 "Cell 062 voltage (segment 2). Sensor range 0 .. 5 V. SNA (not available) = raw 65535.";
+CM_ SG_ 1071 cell_v_063 "Cell 063 voltage (segment 2). Sensor range 0 .. 5 V. SNA (not available) = raw 65535.";
+CM_ BO_ 1072 "Cell voltages cell_v_064 ... cell_v_067 (frame 16). Cycle 100 ms.";
+CM_ SG_ 1072 cell_v_064 "Cell 064 voltage (segment 2). Sensor range 0 .. 5 V. SNA (not available) = raw 65535.";
+CM_ SG_ 1072 cell_v_065 "Cell 065 voltage (segment 2). Sensor range 0 .. 5 V. SNA (not available) = raw 65535.";
+CM_ SG_ 1072 cell_v_066 "Cell 066 voltage (segment 2). Sensor range 0 .. 5 V. SNA (not available) = raw 65535.";
+CM_ SG_ 1072 cell_v_067 "Cell 067 voltage (segment 2). Sensor range 0 .. 5 V. SNA (not available) = raw 65535.";
+CM_ BO_ 1073 "Cell voltages cell_v_068 ... cell_v_071 (frame 17). Cycle 100 ms.";
+CM_ SG_ 1073 cell_v_068 "Cell 068 voltage (segment 2). Sensor range 0 .. 5 V. SNA (not available) = raw 65535.";
+CM_ SG_ 1073 cell_v_069 "Cell 069 voltage (segment 2). Sensor range 0 .. 5 V. SNA (not available) = raw 65535.";
+CM_ SG_ 1073 cell_v_070 "Cell 070 voltage (segment 2). Sensor range 0 .. 5 V. SNA (not available) = raw 65535.";
+CM_ SG_ 1073 cell_v_071 "Cell 071 voltage (segment 2). Sensor range 0 .. 5 V. SNA (not available) = raw 65535.";
+CM_ BO_ 1074 "Cell voltages cell_v_072 ... cell_v_075 (frame 18). Cycle 100 ms.";
+CM_ SG_ 1074 cell_v_072 "Cell 072 voltage (segment 2). Sensor range 0 .. 5 V. SNA (not available) = raw 65535.";
+CM_ SG_ 1074 cell_v_073 "Cell 073 voltage (segment 2). Sensor range 0 .. 5 V. SNA (not available) = raw 65535.";
+CM_ SG_ 1074 cell_v_074 "Cell 074 voltage (segment 2). Sensor range 0 .. 5 V. SNA (not available) = raw 65535.";
+CM_ SG_ 1074 cell_v_075 "Cell 075 voltage (segment 2). Sensor range 0 .. 5 V. SNA (not available) = raw 65535.";
+CM_ BO_ 1075 "Cell voltages cell_v_076 ... cell_v_079 (frame 19). Cycle 100 ms.";
+CM_ SG_ 1075 cell_v_076 "Cell 076 voltage (segment 2). Sensor range 0 .. 5 V. SNA (not available) = raw 65535.";
+CM_ SG_ 1075 cell_v_077 "Cell 077 voltage (segment 2). Sensor range 0 .. 5 V. SNA (not available) = raw 65535.";
+CM_ SG_ 1075 cell_v_078 "Cell 078 voltage (segment 2). Sensor range 0 .. 5 V. SNA (not available) = raw 65535.";
+CM_ SG_ 1075 cell_v_079 "Cell 079 voltage (segment 2). Sensor range 0 .. 5 V. SNA (not available) = raw 65535.";
+CM_ BO_ 1076 "Cell voltages cell_v_080 ... cell_v_083 (frame 20). Cycle 100 ms.";
+CM_ SG_ 1076 cell_v_080 "Cell 080 voltage (segment 2). Sensor range 0 .. 5 V. SNA (not available) = raw 65535.";
+CM_ SG_ 1076 cell_v_081 "Cell 081 voltage (segment 2). Sensor range 0 .. 5 V. SNA (not available) = raw 65535.";
+CM_ SG_ 1076 cell_v_082 "Cell 082 voltage (segment 2). Sensor range 0 .. 5 V. SNA (not available) = raw 65535.";
+CM_ SG_ 1076 cell_v_083 "Cell 083 voltage (segment 2). Sensor range 0 .. 5 V. SNA (not available) = raw 65535.";
+CM_ BO_ 1077 "Cell voltages cell_v_084 ... cell_v_087 (frame 21). Cycle 100 ms.";
+CM_ SG_ 1077 cell_v_084 "Cell 084 voltage (segment 3). Sensor range 0 .. 5 V. SNA (not available) = raw 65535.";
+CM_ SG_ 1077 cell_v_085 "Cell 085 voltage (segment 3). Sensor range 0 .. 5 V. SNA (not available) = raw 65535.";
+CM_ SG_ 1077 cell_v_086 "Cell 086 voltage (segment 3). Sensor range 0 .. 5 V. SNA (not available) = raw 65535.";
+CM_ SG_ 1077 cell_v_087 "Cell 087 voltage (segment 3). Sensor range 0 .. 5 V. SNA (not available) = raw 65535.";
+CM_ BO_ 1078 "Cell voltages cell_v_088 ... cell_v_091 (frame 22). Cycle 100 ms.";
+CM_ SG_ 1078 cell_v_088 "Cell 088 voltage (segment 3). Sensor range 0 .. 5 V. SNA (not available) = raw 65535.";
+CM_ SG_ 1078 cell_v_089 "Cell 089 voltage (segment 3). Sensor range 0 .. 5 V. SNA (not available) = raw 65535.";
+CM_ SG_ 1078 cell_v_090 "Cell 090 voltage (segment 3). Sensor range 0 .. 5 V. SNA (not available) = raw 65535.";
+CM_ SG_ 1078 cell_v_091 "Cell 091 voltage (segment 3). Sensor range 0 .. 5 V. SNA (not available) = raw 65535.";
+CM_ BO_ 1079 "Cell voltages cell_v_092 ... cell_v_095 (frame 23). Cycle 100 ms.";
+CM_ SG_ 1079 cell_v_092 "Cell 092 voltage (segment 3). Sensor range 0 .. 5 V. SNA (not available) = raw 65535.";
+CM_ SG_ 1079 cell_v_093 "Cell 093 voltage (segment 3). Sensor range 0 .. 5 V. SNA (not available) = raw 65535.";
+CM_ SG_ 1079 cell_v_094 "Cell 094 voltage (segment 3). Sensor range 0 .. 5 V. SNA (not available) = raw 65535.";
+CM_ SG_ 1079 cell_v_095 "Cell 095 voltage (segment 3). Sensor range 0 .. 5 V. SNA (not available) = raw 65535.";
+CM_ BO_ 1080 "Cell voltages cell_v_096 ... cell_v_099 (frame 24). Cycle 100 ms.";
+CM_ SG_ 1080 cell_v_096 "Cell 096 voltage (segment 3). Sensor range 0 .. 5 V. SNA (not available) = raw 65535.";
+CM_ SG_ 1080 cell_v_097 "Cell 097 voltage (segment 3). Sensor range 0 .. 5 V. SNA (not available) = raw 65535.";
+CM_ SG_ 1080 cell_v_098 "Cell 098 voltage (segment 3). Sensor range 0 .. 5 V. SNA (not available) = raw 65535.";
+CM_ SG_ 1080 cell_v_099 "Cell 099 voltage (segment 3). Sensor range 0 .. 5 V. SNA (not available) = raw 65535.";
+CM_ BO_ 1081 "Cell voltages cell_v_100 ... cell_v_103 (frame 25). Cycle 100 ms.";
+CM_ SG_ 1081 cell_v_100 "Cell 100 voltage (segment 3). Sensor range 0 .. 5 V. SNA (not available) = raw 65535.";
+CM_ SG_ 1081 cell_v_101 "Cell 101 voltage (segment 3). Sensor range 0 .. 5 V. SNA (not available) = raw 65535.";
+CM_ SG_ 1081 cell_v_102 "Cell 102 voltage (segment 3). Sensor range 0 .. 5 V. SNA (not available) = raw 65535.";
+CM_ SG_ 1081 cell_v_103 "Cell 103 voltage (segment 3). Sensor range 0 .. 5 V. SNA (not available) = raw 65535.";
+CM_ BO_ 1082 "Cell voltages cell_v_104 ... cell_v_107 (frame 26). Cycle 100 ms.";
+CM_ SG_ 1082 cell_v_104 "Cell 104 voltage (segment 3). Sensor range 0 .. 5 V. SNA (not available) = raw 65535.";
+CM_ SG_ 1082 cell_v_105 "Cell 105 voltage (segment 3). Sensor range 0 .. 5 V. SNA (not available) = raw 65535.";
+CM_ SG_ 1082 cell_v_106 "Cell 106 voltage (segment 3). Sensor range 0 .. 5 V. SNA (not available) = raw 65535.";
+CM_ SG_ 1082 cell_v_107 "Cell 107 voltage (segment 3). Sensor range 0 .. 5 V. SNA (not available) = raw 65535.";
+CM_ BO_ 1083 "Cell voltages cell_v_108 ... cell_v_111 (frame 27). Cycle 100 ms.";
+CM_ SG_ 1083 cell_v_108 "Cell 108 voltage (segment 3). Sensor range 0 .. 5 V. SNA (not available) = raw 65535.";
+CM_ SG_ 1083 cell_v_109 "Cell 109 voltage (segment 3). Sensor range 0 .. 5 V. SNA (not available) = raw 65535.";
+CM_ SG_ 1083 cell_v_110 "Cell 110 voltage (segment 3). Sensor range 0 .. 5 V. SNA (not available) = raw 65535.";
+CM_ SG_ 1083 cell_v_111 "Cell 111 voltage (segment 3). Sensor range 0 .. 5 V. SNA (not available) = raw 65535.";
+CM_ BO_ 1084 "Cell voltages cell_v_112 ... cell_v_115 (frame 28). Cycle 100 ms.";
+CM_ SG_ 1084 cell_v_112 "Cell 112 voltage (segment 4). Sensor range 0 .. 5 V. SNA (not available) = raw 65535.";
+CM_ SG_ 1084 cell_v_113 "Cell 113 voltage (segment 4). Sensor range 0 .. 5 V. SNA (not available) = raw 65535.";
+CM_ SG_ 1084 cell_v_114 "Cell 114 voltage (segment 4). Sensor range 0 .. 5 V. SNA (not available) = raw 65535.";
+CM_ SG_ 1084 cell_v_115 "Cell 115 voltage (segment 4). Sensor range 0 .. 5 V. SNA (not available) = raw 65535.";
+CM_ BO_ 1085 "Cell voltages cell_v_116 ... cell_v_119 (frame 29). Cycle 100 ms.";
+CM_ SG_ 1085 cell_v_116 "Cell 116 voltage (segment 4). Sensor range 0 .. 5 V. SNA (not available) = raw 65535.";
+CM_ SG_ 1085 cell_v_117 "Cell 117 voltage (segment 4). Sensor range 0 .. 5 V. SNA (not available) = raw 65535.";
+CM_ SG_ 1085 cell_v_118 "Cell 118 voltage (segment 4). Sensor range 0 .. 5 V. SNA (not available) = raw 65535.";
+CM_ SG_ 1085 cell_v_119 "Cell 119 voltage (segment 4). Sensor range 0 .. 5 V. SNA (not available) = raw 65535.";
+CM_ BO_ 1086 "Cell voltages cell_v_120 ... cell_v_123 (frame 30). Cycle 100 ms.";
+CM_ SG_ 1086 cell_v_120 "Cell 120 voltage (segment 4). Sensor range 0 .. 5 V. SNA (not available) = raw 65535.";
+CM_ SG_ 1086 cell_v_121 "Cell 121 voltage (segment 4). Sensor range 0 .. 5 V. SNA (not available) = raw 65535.";
+CM_ SG_ 1086 cell_v_122 "Cell 122 voltage (segment 4). Sensor range 0 .. 5 V. SNA (not available) = raw 65535.";
+CM_ SG_ 1086 cell_v_123 "Cell 123 voltage (segment 4). Sensor range 0 .. 5 V. SNA (not available) = raw 65535.";
+CM_ BO_ 1087 "Cell voltages cell_v_124 ... cell_v_127 (frame 31). Cycle 100 ms.";
+CM_ SG_ 1087 cell_v_124 "Cell 124 voltage (segment 4). Sensor range 0 .. 5 V. SNA (not available) = raw 65535.";
+CM_ SG_ 1087 cell_v_125 "Cell 125 voltage (segment 4). Sensor range 0 .. 5 V. SNA (not available) = raw 65535.";
+CM_ SG_ 1087 cell_v_126 "Cell 126 voltage (segment 4). Sensor range 0 .. 5 V. SNA (not available) = raw 65535.";
+CM_ SG_ 1087 cell_v_127 "Cell 127 voltage (segment 4). Sensor range 0 .. 5 V. SNA (not available) = raw 65535.";
+CM_ BO_ 1088 "Cell voltages cell_v_128 ... cell_v_131 (frame 32). Cycle 100 ms.";
+CM_ SG_ 1088 cell_v_128 "Cell 128 voltage (segment 4). Sensor range 0 .. 5 V. SNA (not available) = raw 65535.";
+CM_ SG_ 1088 cell_v_129 "Cell 129 voltage (segment 4). Sensor range 0 .. 5 V. SNA (not available) = raw 65535.";
+CM_ SG_ 1088 cell_v_130 "Cell 130 voltage (segment 4). Sensor range 0 .. 5 V. SNA (not available) = raw 65535.";
+CM_ SG_ 1088 cell_v_131 "Cell 131 voltage (segment 4). Sensor range 0 .. 5 V. SNA (not available) = raw 65535.";
+CM_ BO_ 1089 "Cell voltages cell_v_132 ... cell_v_135 (frame 33). Cycle 100 ms.";
+CM_ SG_ 1089 cell_v_132 "Cell 132 voltage (segment 4). Sensor range 0 .. 5 V. SNA (not available) = raw 65535.";
+CM_ SG_ 1089 cell_v_133 "Cell 133 voltage (segment 4). Sensor range 0 .. 5 V. SNA (not available) = raw 65535.";
+CM_ SG_ 1089 cell_v_134 "Cell 134 voltage (segment 4). Sensor range 0 .. 5 V. SNA (not available) = raw 65535.";
+CM_ SG_ 1089 cell_v_135 "Cell 135 voltage (segment 4). Sensor range 0 .. 5 V. SNA (not available) = raw 65535.";
+CM_ BO_ 1090 "Cell voltages cell_v_136 ... cell_v_139 (frame 34). Cycle 100 ms.";
+CM_ SG_ 1090 cell_v_136 "Cell 136 voltage (segment 4). Sensor range 0 .. 5 V. SNA (not available) = raw 65535.";
+CM_ SG_ 1090 cell_v_137 "Cell 137 voltage (segment 4). Sensor range 0 .. 5 V. SNA (not available) = raw 65535.";
+CM_ SG_ 1090 cell_v_138 "Cell 138 voltage (segment 4). Sensor range 0 .. 5 V. SNA (not available) = raw 65535.";
+CM_ SG_ 1090 cell_v_139 "Cell 139 voltage (segment 4). Sensor range 0 .. 5 V. SNA (not available) = raw 65535.";
+CM_ BO_ 1104 "Cell temperature sensors cell_t_00 ... cell_t_07 (frame 0), 0.5 degC steps from -20 degC. Cycle 500 ms.";
+CM_ SG_ 1104 cell_t_00 "Cell temperature sensor 00 (segment 0). Sensor range -20 .. 100 °C. SNA (not available) = raw 255.";
+CM_ SG_ 1104 cell_t_01 "Cell temperature sensor 01 (segment 0). Sensor range -20 .. 100 °C. SNA (not available) = raw 255.";
+CM_ SG_ 1104 cell_t_02 "Cell temperature sensor 02 (segment 0). Sensor range -20 .. 100 °C. SNA (not available) = raw 255.";
+CM_ SG_ 1104 cell_t_03 "Cell temperature sensor 03 (segment 0). Sensor range -20 .. 100 °C. SNA (not available) = raw 255.";
+CM_ SG_ 1104 cell_t_04 "Cell temperature sensor 04 (segment 0). Sensor range -20 .. 100 °C. SNA (not available) = raw 255.";
+CM_ SG_ 1104 cell_t_05 "Cell temperature sensor 05 (segment 0). Sensor range -20 .. 100 °C. SNA (not available) = raw 255.";
+CM_ SG_ 1104 cell_t_06 "Cell temperature sensor 06 (segment 0). Sensor range -20 .. 100 °C. SNA (not available) = raw 255.";
+CM_ SG_ 1104 cell_t_07 "Cell temperature sensor 07 (segment 0). Sensor range -20 .. 100 °C. SNA (not available) = raw 255.";
+CM_ BO_ 1105 "Cell temperature sensors cell_t_08 ... cell_t_15 (frame 1), 0.5 degC steps from -20 degC. Cycle 500 ms.";
+CM_ SG_ 1105 cell_t_08 "Cell temperature sensor 08 (segment 0). Sensor range -20 .. 100 °C. SNA (not available) = raw 255.";
+CM_ SG_ 1105 cell_t_09 "Cell temperature sensor 09 (segment 0). Sensor range -20 .. 100 °C. SNA (not available) = raw 255.";
+CM_ SG_ 1105 cell_t_10 "Cell temperature sensor 10 (segment 0). Sensor range -20 .. 100 °C. SNA (not available) = raw 255.";
+CM_ SG_ 1105 cell_t_11 "Cell temperature sensor 11 (segment 0). Sensor range -20 .. 100 °C. SNA (not available) = raw 255.";
+CM_ SG_ 1105 cell_t_12 "Cell temperature sensor 12 (segment 1). Sensor range -20 .. 100 °C. SNA (not available) = raw 255.";
+CM_ SG_ 1105 cell_t_13 "Cell temperature sensor 13 (segment 1). Sensor range -20 .. 100 °C. SNA (not available) = raw 255.";
+CM_ SG_ 1105 cell_t_14 "Cell temperature sensor 14 (segment 1). Sensor range -20 .. 100 °C. SNA (not available) = raw 255.";
+CM_ SG_ 1105 cell_t_15 "Cell temperature sensor 15 (segment 1). Sensor range -20 .. 100 °C. SNA (not available) = raw 255.";
+CM_ BO_ 1106 "Cell temperature sensors cell_t_16 ... cell_t_23 (frame 2), 0.5 degC steps from -20 degC. Cycle 500 ms.";
+CM_ SG_ 1106 cell_t_16 "Cell temperature sensor 16 (segment 1). Sensor range -20 .. 100 °C. SNA (not available) = raw 255.";
+CM_ SG_ 1106 cell_t_17 "Cell temperature sensor 17 (segment 1). Sensor range -20 .. 100 °C. SNA (not available) = raw 255.";
+CM_ SG_ 1106 cell_t_18 "Cell temperature sensor 18 (segment 1). Sensor range -20 .. 100 °C. SNA (not available) = raw 255.";
+CM_ SG_ 1106 cell_t_19 "Cell temperature sensor 19 (segment 1). Sensor range -20 .. 100 °C. SNA (not available) = raw 255.";
+CM_ SG_ 1106 cell_t_20 "Cell temperature sensor 20 (segment 1). Sensor range -20 .. 100 °C. SNA (not available) = raw 255.";
+CM_ SG_ 1106 cell_t_21 "Cell temperature sensor 21 (segment 1). Sensor range -20 .. 100 °C. SNA (not available) = raw 255.";
+CM_ SG_ 1106 cell_t_22 "Cell temperature sensor 22 (segment 1). Sensor range -20 .. 100 °C. SNA (not available) = raw 255.";
+CM_ SG_ 1106 cell_t_23 "Cell temperature sensor 23 (segment 1). Sensor range -20 .. 100 °C. SNA (not available) = raw 255.";
+CM_ BO_ 1107 "Cell temperature sensors cell_t_24 ... cell_t_31 (frame 3), 0.5 degC steps from -20 degC. Cycle 500 ms.";
+CM_ SG_ 1107 cell_t_24 "Cell temperature sensor 24 (segment 2). Sensor range -20 .. 100 °C. SNA (not available) = raw 255.";
+CM_ SG_ 1107 cell_t_25 "Cell temperature sensor 25 (segment 2). Sensor range -20 .. 100 °C. SNA (not available) = raw 255.";
+CM_ SG_ 1107 cell_t_26 "Cell temperature sensor 26 (segment 2). Sensor range -20 .. 100 °C. SNA (not available) = raw 255.";
+CM_ SG_ 1107 cell_t_27 "Cell temperature sensor 27 (segment 2). Sensor range -20 .. 100 °C. SNA (not available) = raw 255.";
+CM_ SG_ 1107 cell_t_28 "Cell temperature sensor 28 (segment 2). Sensor range -20 .. 100 °C. SNA (not available) = raw 255.";
+CM_ SG_ 1107 cell_t_29 "Cell temperature sensor 29 (segment 2). Sensor range -20 .. 100 °C. SNA (not available) = raw 255.";
+CM_ SG_ 1107 cell_t_30 "Cell temperature sensor 30 (segment 2). Sensor range -20 .. 100 °C. SNA (not available) = raw 255.";
+CM_ SG_ 1107 cell_t_31 "Cell temperature sensor 31 (segment 2). Sensor range -20 .. 100 °C. SNA (not available) = raw 255.";
+CM_ BO_ 1108 "Cell temperature sensors cell_t_32 ... cell_t_39 (frame 4), 0.5 degC steps from -20 degC. Cycle 500 ms.";
+CM_ SG_ 1108 cell_t_32 "Cell temperature sensor 32 (segment 2). Sensor range -20 .. 100 °C. SNA (not available) = raw 255.";
+CM_ SG_ 1108 cell_t_33 "Cell temperature sensor 33 (segment 2). Sensor range -20 .. 100 °C. SNA (not available) = raw 255.";
+CM_ SG_ 1108 cell_t_34 "Cell temperature sensor 34 (segment 2). Sensor range -20 .. 100 °C. SNA (not available) = raw 255.";
+CM_ SG_ 1108 cell_t_35 "Cell temperature sensor 35 (segment 2). Sensor range -20 .. 100 °C. SNA (not available) = raw 255.";
+CM_ SG_ 1108 cell_t_36 "Cell temperature sensor 36 (segment 3). Sensor range -20 .. 100 °C. SNA (not available) = raw 255.";
+CM_ SG_ 1108 cell_t_37 "Cell temperature sensor 37 (segment 3). Sensor range -20 .. 100 °C. SNA (not available) = raw 255.";
+CM_ SG_ 1108 cell_t_38 "Cell temperature sensor 38 (segment 3). Sensor range -20 .. 100 °C. SNA (not available) = raw 255.";
+CM_ SG_ 1108 cell_t_39 "Cell temperature sensor 39 (segment 3). Sensor range -20 .. 100 °C. SNA (not available) = raw 255.";
+CM_ BO_ 1109 "Cell temperature sensors cell_t_40 ... cell_t_47 (frame 5), 0.5 degC steps from -20 degC. Cycle 500 ms.";
+CM_ SG_ 1109 cell_t_40 "Cell temperature sensor 40 (segment 3). Sensor range -20 .. 100 °C. SNA (not available) = raw 255.";
+CM_ SG_ 1109 cell_t_41 "Cell temperature sensor 41 (segment 3). Sensor range -20 .. 100 °C. SNA (not available) = raw 255.";
+CM_ SG_ 1109 cell_t_42 "Cell temperature sensor 42 (segment 3). Sensor range -20 .. 100 °C. SNA (not available) = raw 255.";
+CM_ SG_ 1109 cell_t_43 "Cell temperature sensor 43 (segment 3). Sensor range -20 .. 100 °C. SNA (not available) = raw 255.";
+CM_ SG_ 1109 cell_t_44 "Cell temperature sensor 44 (segment 3). Sensor range -20 .. 100 °C. SNA (not available) = raw 255.";
+CM_ SG_ 1109 cell_t_45 "Cell temperature sensor 45 (segment 3). Sensor range -20 .. 100 °C. SNA (not available) = raw 255.";
+CM_ SG_ 1109 cell_t_46 "Cell temperature sensor 46 (segment 3). Sensor range -20 .. 100 °C. SNA (not available) = raw 255.";
+CM_ SG_ 1109 cell_t_47 "Cell temperature sensor 47 (segment 3). Sensor range -20 .. 100 °C. SNA (not available) = raw 255.";
+CM_ BO_ 1110 "Cell temperature sensors cell_t_48 ... cell_t_55 (frame 6), 0.5 degC steps from -20 degC. Cycle 500 ms.";
+CM_ SG_ 1110 cell_t_48 "Cell temperature sensor 48 (segment 4). Sensor range -20 .. 100 °C. SNA (not available) = raw 255.";
+CM_ SG_ 1110 cell_t_49 "Cell temperature sensor 49 (segment 4). Sensor range -20 .. 100 °C. SNA (not available) = raw 255.";
+CM_ SG_ 1110 cell_t_50 "Cell temperature sensor 50 (segment 4). Sensor range -20 .. 100 °C. SNA (not available) = raw 255.";
+CM_ SG_ 1110 cell_t_51 "Cell temperature sensor 51 (segment 4). Sensor range -20 .. 100 °C. SNA (not available) = raw 255.";
+CM_ SG_ 1110 cell_t_52 "Cell temperature sensor 52 (segment 4). Sensor range -20 .. 100 °C. SNA (not available) = raw 255.";
+CM_ SG_ 1110 cell_t_53 "Cell temperature sensor 53 (segment 4). Sensor range -20 .. 100 °C. SNA (not available) = raw 255.";
+CM_ SG_ 1110 cell_t_54 "Cell temperature sensor 54 (segment 4). Sensor range -20 .. 100 °C. SNA (not available) = raw 255.";
+CM_ SG_ 1110 cell_t_55 "Cell temperature sensor 55 (segment 4). Sensor range -20 .. 100 °C. SNA (not available) = raw 255.";
+CM_ BO_ 1111 "Cell temperature sensors cell_t_56 ... cell_t_59 (frame 7), 0.5 degC steps from -20 degC. Cycle 500 ms.";
+CM_ SG_ 1111 cell_t_56 "Cell temperature sensor 56 (segment 4). Sensor range -20 .. 100 °C. SNA (not available) = raw 255.";
+CM_ SG_ 1111 cell_t_57 "Cell temperature sensor 57 (segment 4). Sensor range -20 .. 100 °C. SNA (not available) = raw 255.";
+CM_ SG_ 1111 cell_t_58 "Cell temperature sensor 58 (segment 4). Sensor range -20 .. 100 °C. SNA (not available) = raw 255.";
+CM_ SG_ 1111 cell_t_59 "Cell temperature sensor 59 (segment 4). Sensor range -20 .. 100 °C. SNA (not available) = raw 255.";
+CM_ BO_ 1120 "Cooling loop temperatures, flow and actuator duty cycles. Cycle 100 ms.";
+CM_ SG_ 1120 cool_temp_in "Coolant temperature in (after radiator). Sensor range -20 .. 120 °C. SNA (not available) = raw -32768.";
+CM_ SG_ 1120 cool_temp_out "Coolant temperature out (after motor). Sensor range -20 .. 120 °C. SNA (not available) = raw -32768.";
+CM_ SG_ 1120 cool_flow "Coolant flow. Sensor range 0 .. 20 L/min. SNA (not available) = raw 65535.";
+CM_ SG_ 1120 pump_duty "Pump duty cycle. Sensor range 0 .. 100 %. SNA (not available) = raw 255.";
+CM_ SG_ 1120 fan_duty "Radiator fan duty cycle. Sensor range 0 .. 100 %. SNA (not available) = raw 255.";
+CM_ BO_ 1136 "Shutdown circuit and tractive-system safety flags (1 = OK / closed), TSAL, IMD insulation. Cycle 50 ms.";
+CM_ SG_ 1136 sdc_closed "Shutdown circuit closed. Sensor range 0 .. 1 bool. 1-bit flag, no SNA value.";
+CM_ SG_ 1136 imd_ok "Insulation monitoring device OK. Sensor range 0 .. 1 bool. 1-bit flag, no SNA value.";
+CM_ SG_ 1136 ams_ok "Accumulator management system OK. Sensor range 0 .. 1 bool. 1-bit flag, no SNA value.";
+CM_ SG_ 1136 bspd_ok "Brake system plausibility device OK. Sensor range 0 .. 1 bool. 1-bit flag, no SNA value.";
+CM_ SG_ 1136 apps_plaus_ok "APPS plausibility OK. Sensor range 0 .. 1 bool. 1-bit flag, no SNA value.";
+CM_ SG_ 1136 air_pos_closed "AIR+ (positive accumulator isolation relay) closed. Sensor range 0 .. 1 bool. 1-bit flag, no SNA value.";
+CM_ SG_ 1136 air_neg_closed "AIR- (negative accumulator isolation relay) closed. Sensor range 0 .. 1 bool. 1-bit flag, no SNA value.";
+CM_ SG_ 1136 precharge_done "Precharge complete. Sensor range 0 .. 1 bool. 1-bit flag, no SNA value.";
+CM_ SG_ 1136 tsal_state "TSAL state. Sensor range 0 .. 1 enum. SNA (not available) = raw 255.";
+CM_ SG_ 1136 imd_iso_kohm "Insulation resistance. Sensor range 0 .. 10000 kOhm. SNA (not available) = raw 65535.";
+BA_DEF_  "BusType" STRING ;
+BA_DEF_  "Baudrate" INT 0 1000000;
+BA_DEF_  "DBName" STRING ;
+BA_DEF_ BO_  "GenMsgCycleTime" INT 0 65535;
+BA_DEF_DEF_  "BusType" "";
+BA_DEF_DEF_  "Baudrate" 500000;
+BA_DEF_DEF_  "DBName" "";
+BA_DEF_DEF_  "GenMsgCycleTime" 0;
+BA_ "BusType" "CAN";
+BA_ "Baudrate" 1000000;
+BA_ "DBName" "AeroVolt";
+BA_ "GenMsgCycleTime" BO_ 768 20;
+BA_ "GenMsgCycleTime" BO_ 769 20;
+BA_ "GenMsgCycleTime" BO_ 770 20;
+BA_ "GenMsgCycleTime" BO_ 771 20;
+BA_ "GenMsgCycleTime" BO_ 772 20;
+BA_ "GenMsgCycleTime" BO_ 773 20;
+BA_ "GenMsgCycleTime" BO_ 774 20;
+BA_ "GenMsgCycleTime" BO_ 775 20;
+BA_ "GenMsgCycleTime" BO_ 784 20;
+BA_ "GenMsgCycleTime" BO_ 785 20;
+BA_ "GenMsgCycleTime" BO_ 786 20;
+BA_ "GenMsgCycleTime" BO_ 800 10;
+BA_ "GenMsgCycleTime" BO_ 801 10;
+BA_ "GenMsgCycleTime" BO_ 816 10;
+BA_ "GenMsgCycleTime" BO_ 817 10;
+BA_ "GenMsgCycleTime" BO_ 832 100;
+BA_ "GenMsgCycleTime" BO_ 833 100;
+BA_ "GenMsgCycleTime" BO_ 848 20;
+BA_ "GenMsgCycleTime" BO_ 849 20;
+BA_ "GenMsgCycleTime" BO_ 1024 10;
+BA_ "GenMsgCycleTime" BO_ 1025 100;
+BA_ "GenMsgCycleTime" BO_ 1040 10;
+BA_ "GenMsgCycleTime" BO_ 1056 100;
+BA_ "GenMsgCycleTime" BO_ 1057 100;
+BA_ "GenMsgCycleTime" BO_ 1058 100;
+BA_ "GenMsgCycleTime" BO_ 1059 100;
+BA_ "GenMsgCycleTime" BO_ 1060 100;
+BA_ "GenMsgCycleTime" BO_ 1061 100;
+BA_ "GenMsgCycleTime" BO_ 1062 100;
+BA_ "GenMsgCycleTime" BO_ 1063 100;
+BA_ "GenMsgCycleTime" BO_ 1064 100;
+BA_ "GenMsgCycleTime" BO_ 1065 100;
+BA_ "GenMsgCycleTime" BO_ 1066 100;
+BA_ "GenMsgCycleTime" BO_ 1067 100;
+BA_ "GenMsgCycleTime" BO_ 1068 100;
+BA_ "GenMsgCycleTime" BO_ 1069 100;
+BA_ "GenMsgCycleTime" BO_ 1070 100;
+BA_ "GenMsgCycleTime" BO_ 1071 100;
+BA_ "GenMsgCycleTime" BO_ 1072 100;
+BA_ "GenMsgCycleTime" BO_ 1073 100;
+BA_ "GenMsgCycleTime" BO_ 1074 100;
+BA_ "GenMsgCycleTime" BO_ 1075 100;
+BA_ "GenMsgCycleTime" BO_ 1076 100;
+BA_ "GenMsgCycleTime" BO_ 1077 100;
+BA_ "GenMsgCycleTime" BO_ 1078 100;
+BA_ "GenMsgCycleTime" BO_ 1079 100;
+BA_ "GenMsgCycleTime" BO_ 1080 100;
+BA_ "GenMsgCycleTime" BO_ 1081 100;
+BA_ "GenMsgCycleTime" BO_ 1082 100;
+BA_ "GenMsgCycleTime" BO_ 1083 100;
+BA_ "GenMsgCycleTime" BO_ 1084 100;
+BA_ "GenMsgCycleTime" BO_ 1085 100;
+BA_ "GenMsgCycleTime" BO_ 1086 100;
+BA_ "GenMsgCycleTime" BO_ 1087 100;
+BA_ "GenMsgCycleTime" BO_ 1088 100;
+BA_ "GenMsgCycleTime" BO_ 1089 100;
+BA_ "GenMsgCycleTime" BO_ 1090 100;
+BA_ "GenMsgCycleTime" BO_ 1104 500;
+BA_ "GenMsgCycleTime" BO_ 1105 500;
+BA_ "GenMsgCycleTime" BO_ 1106 500;
+BA_ "GenMsgCycleTime" BO_ 1107 500;
+BA_ "GenMsgCycleTime" BO_ 1108 500;
+BA_ "GenMsgCycleTime" BO_ 1109 500;
+BA_ "GenMsgCycleTime" BO_ 1110 500;
+BA_ "GenMsgCycleTime" BO_ 1111 500;
+BA_ "GenMsgCycleTime" BO_ 1120 100;
+BA_ "GenMsgCycleTime" BO_ 1136 50;
+VAL_ 768 fw_p01 -32768 "SNA" ;
+VAL_ 768 fw_p02 -32768 "SNA" ;
+VAL_ 768 fw_p03 -32768 "SNA" ;
+VAL_ 768 fw_p04 -32768 "SNA" ;
+VAL_ 769 fw_p05 -32768 "SNA" ;
+VAL_ 769 fw_p06 -32768 "SNA" ;
+VAL_ 769 fw_p07 -32768 "SNA" ;
+VAL_ 769 fw_p08 -32768 "SNA" ;
+VAL_ 770 fw_p09 -32768 "SNA" ;
+VAL_ 770 fw_p10 -32768 "SNA" ;
+VAL_ 770 fw_p11 -32768 "SNA" ;
+VAL_ 770 fw_p12 -32768 "SNA" ;
+VAL_ 771 rw_p01 -32768 "SNA" ;
+VAL_ 771 rw_p02 -32768 "SNA" ;
+VAL_ 771 rw_p03 -32768 "SNA" ;
+VAL_ 771 rw_p04 -32768 "SNA" ;
+VAL_ 772 rw_p05 -32768 "SNA" ;
+VAL_ 772 rw_p06 -32768 "SNA" ;
+VAL_ 772 rw_p07 -32768 "SNA" ;
+VAL_ 772 rw_p08 -32768 "SNA" ;
+VAL_ 773 rw_p09 -32768 "SNA" ;
+VAL_ 773 rw_p10 -32768 "SNA" ;
+VAL_ 773 rw_p11 -32768 "SNA" ;
+VAL_ 773 rw_p12 -32768 "SNA" ;
+VAL_ 774 ut_p01 -32768 "SNA" ;
+VAL_ 774 ut_p02 -32768 "SNA" ;
+VAL_ 774 ut_p03 -32768 "SNA" ;
+VAL_ 774 ut_p04 -32768 "SNA" ;
+VAL_ 775 ut_p05 -32768 "SNA" ;
+VAL_ 775 ut_p06 -32768 "SNA" ;
+VAL_ 775 ut_p07 -32768 "SNA" ;
+VAL_ 775 ut_p08 -32768 "SNA" ;
+VAL_ 784 pitot_dp -32768 "SNA" ;
+VAL_ 784 amb_temp -32768 "SNA" ;
+VAL_ 784 amb_press 65535 "SNA" ;
+VAL_ 784 amb_rh 255 "SNA" ;
+VAL_ 785 probe_yaw -32768 "SNA" ;
+VAL_ 785 probe_pitch -32768 "SNA" ;
+VAL_ 785 rh_front 65535 "SNA" ;
+VAL_ 785 rh_rear 65535 "SNA" ;
+VAL_ 786 fw_load -32768 "SNA" ;
+VAL_ 786 rw_load -32768 "SNA" ;
+VAL_ 800 damper_fl -32768 "SNA" ;
+VAL_ 800 damper_fr -32768 "SNA" ;
+VAL_ 800 damper_rl -32768 "SNA" ;
+VAL_ 800 damper_rr -32768 "SNA" ;
+VAL_ 801 pushrod_fl -32768 "SNA" ;
+VAL_ 801 pushrod_fr -32768 "SNA" ;
+VAL_ 801 pushrod_rl -32768 "SNA" ;
+VAL_ 801 pushrod_rr -32768 "SNA" ;
+VAL_ 816 ax -32768 "SNA" ;
+VAL_ 816 ay -32768 "SNA" ;
+VAL_ 816 az -32768 "SNA" ;
+VAL_ 817 gx -32768 "SNA" ;
+VAL_ 817 gy -32768 "SNA" ;
+VAL_ 817 gz -32768 "SNA" ;
+VAL_ 832 gps_lat -2147483648 "SNA" ;
+VAL_ 832 gps_lon -2147483648 "SNA" ;
+VAL_ 833 gps_speed 65535 "SNA" ;
+VAL_ 833 gps_heading 65535 "SNA" ;
+VAL_ 848 ws_fl 65535 "SNA" ;
+VAL_ 848 ws_fr 65535 "SNA" ;
+VAL_ 848 ws_rl 65535 "SNA" ;
+VAL_ 848 ws_rr 65535 "SNA" ;
+VAL_ 849 steer -32768 "SNA" ;
+VAL_ 849 apps1 255 "SNA" ;
+VAL_ 849 apps2 255 "SNA" ;
+VAL_ 849 brake_press_f 65535 "SNA" ;
+VAL_ 849 brake_press_r 65535 "SNA" ;
+VAL_ 1024 mot_speed -32768 "SNA" ;
+VAL_ 1024 mot_torque -32768 "SNA" ;
+VAL_ 1024 inv_dc_voltage 65535 "SNA" ;
+VAL_ 1024 inv_dc_current -32768 "SNA" ;
+VAL_ 1025 mot_winding_temp -32768 "SNA" ;
+VAL_ 1025 inv_igbt_temp -32768 "SNA" ;
+VAL_ 1025 inv_phase_current 65535 "SNA" ;
+VAL_ 1025 inv_state 0 "off" 1 "precharge" 2 "ready" 3 "driving" 4 "derating" 5 "fault" 255 "SNA" ;
+VAL_ 1025 inv_fault 0 "none" 1 "overtemp" 2 "overcurrent" 3 "DC undervoltage" 4 "comms" 255 "SNA" ;
+VAL_ 1040 pack_voltage 65535 "SNA" ;
+VAL_ 1040 pack_current -32768 "SNA" ;
+VAL_ 1040 bms_soc 255 "SNA" ;
+VAL_ 1040 bms_state 0 "idle" 1 "precharge" 2 "TS active" 3 "fault" 255 "SNA" ;
+VAL_ 1040 bms_fault 0 "none" 1 "cell overvoltage" 2 "cell undervoltage" 3 "cell overtemp" 4 "comms" 255 "SNA" ;
+VAL_ 1056 cell_v_000 65535 "SNA" ;
+VAL_ 1056 cell_v_001 65535 "SNA" ;
+VAL_ 1056 cell_v_002 65535 "SNA" ;
+VAL_ 1056 cell_v_003 65535 "SNA" ;
+VAL_ 1057 cell_v_004 65535 "SNA" ;
+VAL_ 1057 cell_v_005 65535 "SNA" ;
+VAL_ 1057 cell_v_006 65535 "SNA" ;
+VAL_ 1057 cell_v_007 65535 "SNA" ;
+VAL_ 1058 cell_v_008 65535 "SNA" ;
+VAL_ 1058 cell_v_009 65535 "SNA" ;
+VAL_ 1058 cell_v_010 65535 "SNA" ;
+VAL_ 1058 cell_v_011 65535 "SNA" ;
+VAL_ 1059 cell_v_012 65535 "SNA" ;
+VAL_ 1059 cell_v_013 65535 "SNA" ;
+VAL_ 1059 cell_v_014 65535 "SNA" ;
+VAL_ 1059 cell_v_015 65535 "SNA" ;
+VAL_ 1060 cell_v_016 65535 "SNA" ;
+VAL_ 1060 cell_v_017 65535 "SNA" ;
+VAL_ 1060 cell_v_018 65535 "SNA" ;
+VAL_ 1060 cell_v_019 65535 "SNA" ;
+VAL_ 1061 cell_v_020 65535 "SNA" ;
+VAL_ 1061 cell_v_021 65535 "SNA" ;
+VAL_ 1061 cell_v_022 65535 "SNA" ;
+VAL_ 1061 cell_v_023 65535 "SNA" ;
+VAL_ 1062 cell_v_024 65535 "SNA" ;
+VAL_ 1062 cell_v_025 65535 "SNA" ;
+VAL_ 1062 cell_v_026 65535 "SNA" ;
+VAL_ 1062 cell_v_027 65535 "SNA" ;
+VAL_ 1063 cell_v_028 65535 "SNA" ;
+VAL_ 1063 cell_v_029 65535 "SNA" ;
+VAL_ 1063 cell_v_030 65535 "SNA" ;
+VAL_ 1063 cell_v_031 65535 "SNA" ;
+VAL_ 1064 cell_v_032 65535 "SNA" ;
+VAL_ 1064 cell_v_033 65535 "SNA" ;
+VAL_ 1064 cell_v_034 65535 "SNA" ;
+VAL_ 1064 cell_v_035 65535 "SNA" ;
+VAL_ 1065 cell_v_036 65535 "SNA" ;
+VAL_ 1065 cell_v_037 65535 "SNA" ;
+VAL_ 1065 cell_v_038 65535 "SNA" ;
+VAL_ 1065 cell_v_039 65535 "SNA" ;
+VAL_ 1066 cell_v_040 65535 "SNA" ;
+VAL_ 1066 cell_v_041 65535 "SNA" ;
+VAL_ 1066 cell_v_042 65535 "SNA" ;
+VAL_ 1066 cell_v_043 65535 "SNA" ;
+VAL_ 1067 cell_v_044 65535 "SNA" ;
+VAL_ 1067 cell_v_045 65535 "SNA" ;
+VAL_ 1067 cell_v_046 65535 "SNA" ;
+VAL_ 1067 cell_v_047 65535 "SNA" ;
+VAL_ 1068 cell_v_048 65535 "SNA" ;
+VAL_ 1068 cell_v_049 65535 "SNA" ;
+VAL_ 1068 cell_v_050 65535 "SNA" ;
+VAL_ 1068 cell_v_051 65535 "SNA" ;
+VAL_ 1069 cell_v_052 65535 "SNA" ;
+VAL_ 1069 cell_v_053 65535 "SNA" ;
+VAL_ 1069 cell_v_054 65535 "SNA" ;
+VAL_ 1069 cell_v_055 65535 "SNA" ;
+VAL_ 1070 cell_v_056 65535 "SNA" ;
+VAL_ 1070 cell_v_057 65535 "SNA" ;
+VAL_ 1070 cell_v_058 65535 "SNA" ;
+VAL_ 1070 cell_v_059 65535 "SNA" ;
+VAL_ 1071 cell_v_060 65535 "SNA" ;
+VAL_ 1071 cell_v_061 65535 "SNA" ;
+VAL_ 1071 cell_v_062 65535 "SNA" ;
+VAL_ 1071 cell_v_063 65535 "SNA" ;
+VAL_ 1072 cell_v_064 65535 "SNA" ;
+VAL_ 1072 cell_v_065 65535 "SNA" ;
+VAL_ 1072 cell_v_066 65535 "SNA" ;
+VAL_ 1072 cell_v_067 65535 "SNA" ;
+VAL_ 1073 cell_v_068 65535 "SNA" ;
+VAL_ 1073 cell_v_069 65535 "SNA" ;
+VAL_ 1073 cell_v_070 65535 "SNA" ;
+VAL_ 1073 cell_v_071 65535 "SNA" ;
+VAL_ 1074 cell_v_072 65535 "SNA" ;
+VAL_ 1074 cell_v_073 65535 "SNA" ;
+VAL_ 1074 cell_v_074 65535 "SNA" ;
+VAL_ 1074 cell_v_075 65535 "SNA" ;
+VAL_ 1075 cell_v_076 65535 "SNA" ;
+VAL_ 1075 cell_v_077 65535 "SNA" ;
+VAL_ 1075 cell_v_078 65535 "SNA" ;
+VAL_ 1075 cell_v_079 65535 "SNA" ;
+VAL_ 1076 cell_v_080 65535 "SNA" ;
+VAL_ 1076 cell_v_081 65535 "SNA" ;
+VAL_ 1076 cell_v_082 65535 "SNA" ;
+VAL_ 1076 cell_v_083 65535 "SNA" ;
+VAL_ 1077 cell_v_084 65535 "SNA" ;
+VAL_ 1077 cell_v_085 65535 "SNA" ;
+VAL_ 1077 cell_v_086 65535 "SNA" ;
+VAL_ 1077 cell_v_087 65535 "SNA" ;
+VAL_ 1078 cell_v_088 65535 "SNA" ;
+VAL_ 1078 cell_v_089 65535 "SNA" ;
+VAL_ 1078 cell_v_090 65535 "SNA" ;
+VAL_ 1078 cell_v_091 65535 "SNA" ;
+VAL_ 1079 cell_v_092 65535 "SNA" ;
+VAL_ 1079 cell_v_093 65535 "SNA" ;
+VAL_ 1079 cell_v_094 65535 "SNA" ;
+VAL_ 1079 cell_v_095 65535 "SNA" ;
+VAL_ 1080 cell_v_096 65535 "SNA" ;
+VAL_ 1080 cell_v_097 65535 "SNA" ;
+VAL_ 1080 cell_v_098 65535 "SNA" ;
+VAL_ 1080 cell_v_099 65535 "SNA" ;
+VAL_ 1081 cell_v_100 65535 "SNA" ;
+VAL_ 1081 cell_v_101 65535 "SNA" ;
+VAL_ 1081 cell_v_102 65535 "SNA" ;
+VAL_ 1081 cell_v_103 65535 "SNA" ;
+VAL_ 1082 cell_v_104 65535 "SNA" ;
+VAL_ 1082 cell_v_105 65535 "SNA" ;
+VAL_ 1082 cell_v_106 65535 "SNA" ;
+VAL_ 1082 cell_v_107 65535 "SNA" ;
+VAL_ 1083 cell_v_108 65535 "SNA" ;
+VAL_ 1083 cell_v_109 65535 "SNA" ;
+VAL_ 1083 cell_v_110 65535 "SNA" ;
+VAL_ 1083 cell_v_111 65535 "SNA" ;
+VAL_ 1084 cell_v_112 65535 "SNA" ;
+VAL_ 1084 cell_v_113 65535 "SNA" ;
+VAL_ 1084 cell_v_114 65535 "SNA" ;
+VAL_ 1084 cell_v_115 65535 "SNA" ;
+VAL_ 1085 cell_v_116 65535 "SNA" ;
+VAL_ 1085 cell_v_117 65535 "SNA" ;
+VAL_ 1085 cell_v_118 65535 "SNA" ;
+VAL_ 1085 cell_v_119 65535 "SNA" ;
+VAL_ 1086 cell_v_120 65535 "SNA" ;
+VAL_ 1086 cell_v_121 65535 "SNA" ;
+VAL_ 1086 cell_v_122 65535 "SNA" ;
+VAL_ 1086 cell_v_123 65535 "SNA" ;
+VAL_ 1087 cell_v_124 65535 "SNA" ;
+VAL_ 1087 cell_v_125 65535 "SNA" ;
+VAL_ 1087 cell_v_126 65535 "SNA" ;
+VAL_ 1087 cell_v_127 65535 "SNA" ;
+VAL_ 1088 cell_v_128 65535 "SNA" ;
+VAL_ 1088 cell_v_129 65535 "SNA" ;
+VAL_ 1088 cell_v_130 65535 "SNA" ;
+VAL_ 1088 cell_v_131 65535 "SNA" ;
+VAL_ 1089 cell_v_132 65535 "SNA" ;
+VAL_ 1089 cell_v_133 65535 "SNA" ;
+VAL_ 1089 cell_v_134 65535 "SNA" ;
+VAL_ 1089 cell_v_135 65535 "SNA" ;
+VAL_ 1090 cell_v_136 65535 "SNA" ;
+VAL_ 1090 cell_v_137 65535 "SNA" ;
+VAL_ 1090 cell_v_138 65535 "SNA" ;
+VAL_ 1090 cell_v_139 65535 "SNA" ;
+VAL_ 1104 cell_t_00 255 "SNA" ;
+VAL_ 1104 cell_t_01 255 "SNA" ;
+VAL_ 1104 cell_t_02 255 "SNA" ;
+VAL_ 1104 cell_t_03 255 "SNA" ;
+VAL_ 1104 cell_t_04 255 "SNA" ;
+VAL_ 1104 cell_t_05 255 "SNA" ;
+VAL_ 1104 cell_t_06 255 "SNA" ;
+VAL_ 1104 cell_t_07 255 "SNA" ;
+VAL_ 1105 cell_t_08 255 "SNA" ;
+VAL_ 1105 cell_t_09 255 "SNA" ;
+VAL_ 1105 cell_t_10 255 "SNA" ;
+VAL_ 1105 cell_t_11 255 "SNA" ;
+VAL_ 1105 cell_t_12 255 "SNA" ;
+VAL_ 1105 cell_t_13 255 "SNA" ;
+VAL_ 1105 cell_t_14 255 "SNA" ;
+VAL_ 1105 cell_t_15 255 "SNA" ;
+VAL_ 1106 cell_t_16 255 "SNA" ;
+VAL_ 1106 cell_t_17 255 "SNA" ;
+VAL_ 1106 cell_t_18 255 "SNA" ;
+VAL_ 1106 cell_t_19 255 "SNA" ;
+VAL_ 1106 cell_t_20 255 "SNA" ;
+VAL_ 1106 cell_t_21 255 "SNA" ;
+VAL_ 1106 cell_t_22 255 "SNA" ;
+VAL_ 1106 cell_t_23 255 "SNA" ;
+VAL_ 1107 cell_t_24 255 "SNA" ;
+VAL_ 1107 cell_t_25 255 "SNA" ;
+VAL_ 1107 cell_t_26 255 "SNA" ;
+VAL_ 1107 cell_t_27 255 "SNA" ;
+VAL_ 1107 cell_t_28 255 "SNA" ;
+VAL_ 1107 cell_t_29 255 "SNA" ;
+VAL_ 1107 cell_t_30 255 "SNA" ;
+VAL_ 1107 cell_t_31 255 "SNA" ;
+VAL_ 1108 cell_t_32 255 "SNA" ;
+VAL_ 1108 cell_t_33 255 "SNA" ;
+VAL_ 1108 cell_t_34 255 "SNA" ;
+VAL_ 1108 cell_t_35 255 "SNA" ;
+VAL_ 1108 cell_t_36 255 "SNA" ;
+VAL_ 1108 cell_t_37 255 "SNA" ;
+VAL_ 1108 cell_t_38 255 "SNA" ;
+VAL_ 1108 cell_t_39 255 "SNA" ;
+VAL_ 1109 cell_t_40 255 "SNA" ;
+VAL_ 1109 cell_t_41 255 "SNA" ;
+VAL_ 1109 cell_t_42 255 "SNA" ;
+VAL_ 1109 cell_t_43 255 "SNA" ;
+VAL_ 1109 cell_t_44 255 "SNA" ;
+VAL_ 1109 cell_t_45 255 "SNA" ;
+VAL_ 1109 cell_t_46 255 "SNA" ;
+VAL_ 1109 cell_t_47 255 "SNA" ;
+VAL_ 1110 cell_t_48 255 "SNA" ;
+VAL_ 1110 cell_t_49 255 "SNA" ;
+VAL_ 1110 cell_t_50 255 "SNA" ;
+VAL_ 1110 cell_t_51 255 "SNA" ;
+VAL_ 1110 cell_t_52 255 "SNA" ;
+VAL_ 1110 cell_t_53 255 "SNA" ;
+VAL_ 1110 cell_t_54 255 "SNA" ;
+VAL_ 1110 cell_t_55 255 "SNA" ;
+VAL_ 1111 cell_t_56 255 "SNA" ;
+VAL_ 1111 cell_t_57 255 "SNA" ;
+VAL_ 1111 cell_t_58 255 "SNA" ;
+VAL_ 1111 cell_t_59 255 "SNA" ;
+VAL_ 1120 cool_temp_in -32768 "SNA" ;
+VAL_ 1120 cool_temp_out -32768 "SNA" ;
+VAL_ 1120 cool_flow 65535 "SNA" ;
+VAL_ 1120 pump_duty 255 "SNA" ;
+VAL_ 1120 fan_duty 255 "SNA" ;
+VAL_ 1136 tsal_state 0 "LV (green)" 1 "HV active (red)" 255 "SNA" ;
+VAL_ 1136 imd_iso_kohm 65535 "SNA" ;

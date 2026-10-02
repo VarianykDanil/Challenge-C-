@@ -1,0 +1,6 @@
+__pycache__/
+*.pyc
+.pytest_cache/
+logs/
+firmware/sensor_node/.pio/
+firmware/sensor_node/test/host/build/

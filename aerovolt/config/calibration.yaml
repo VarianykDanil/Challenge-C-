@@ -1,0 +1,18 @@
+# =========================================================================================
+# Calibration of REAL sensors (applied to serial / CAN sources, never to the simulator)
+# =========================================================================================
+# For each channel:   value = (raw - offset) * scale
+#   offset : the sensor reading with zero input (e.g. a pressure tap with no airflow), in
+#            the channel's unit
+#   scale  : gain correction (1.0 = none), e.g. reference / measured from a known load
+#
+# tools/calibrate_taps.py writes this file automatically (zero-offset calibration: car
+# stationary, no wind, average N seconds of each tap). Extra keys such as note / date /
+# samples are allowed and ignored. Example:
+#
+#   fw_p03: {offset: 3.42, scale: 1.0, note: "bench SDP810, 10 s average"}
+#   pitot_dp: {offset: -1.15, scale: 1.0}
+#   fw_load: {offset: 12.0, scale: 0.982}
+#
+# No calibration yet:
+{}

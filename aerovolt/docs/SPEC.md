@@ -64,7 +64,7 @@ aerovolt/
     calibration.yaml        per-channel offset/scale for real sensors (written by tools)
   aerovolt/
     __init__.py  __main__.py (CLI)
-    core/      model.py catalog.py config.py store.py physics.py geo.py
+    core/      model.py catalog.py config.py store.py physics.py geo.py canutil.py (CAN SNA/layout helpers)
                source.py (Source ABC) manager.py (SourceManager) events.py
     sim/       tracks.py lapsim.py vehicle_model.py aero_model.py powertrain_model.py
                sensors.py faults.py engine.py source.py (SimSource)
@@ -253,6 +253,15 @@ Per-cell numbers above are for one *parallel group* treated as one cell: capacit
 4 = 16 Ah, resistance r0/4, etc. — `core/physics.py` provides `CellModel` that accepts the
 cell params and `parallel` count.
 
+The actual `config/vehicle.yaml` is a commented superset of the above (every key documented
+in the file): `brakes {max_force_n, bias_front, gain_n_per_bar}`, `aero.undertray.cop_frac`
+and `aero.ground_effect {...}`, motor `peak_power_kw`, `torque_constant_nm_per_a`,
+`losses {k_cu_w_per_nm2, k_iron_w_per_rads, k_windage_w_per_rads2}` and `thermal`, inverter
+`thermal`, `regen_min_speed_kmh`, `accumulator.cell.v_nom`, `accumulator.soc_window {max, min}`,
+`accumulator.variation {capacity_pct, r0_pct}`, `accumulator.thermal {ua0, ua1}`, `cooling.radiator
+{ua0_w_per_k, ua1_w_per_k_per_ms, fan_*}`. **Usable energy** = series × parallel × capacity ×
+v_nom × (soc_window.max − soc_window.min) (`lapsim.VehicleParams.usable_energy_kwh`, 7.66 kWh).
+
 ## 4. Core (`aerovolt/core/`)
 
 * `model.py` — `ChannelDef`, `FaultInfo(id, title, system, description, active)`,
@@ -298,7 +307,8 @@ cell params and `parallel` count.
   A value for channel C from source i is dropped if a higher-priority source j has emitted C in
   the last 1.0 s (so a real sensor overrides the sim, and if the real sensor stops, the sim
   value comes back after 1 s). Applies `calibration.yaml` (`value = (raw − offset) × scale`) to
-  non-sim sources. Unknown channel ids are counted (`stats.unknown`) and dropped. Exposes
+  live hardware sources (`serial`, `can`; not to `sim` or `replay` — logs are already calibrated).
+  Unknown channel ids are counted (`stats.unknown`) and dropped. Exposes
   `owner(channel)` → source kind (for the Sensors tab) and `mode` → `SIM` | `LIVE` | `HYBRID` |
   `REPLAY`.
 * `events.py` — small sync pub/sub used by the session to fan events out to the server.
@@ -307,22 +317,35 @@ cell params and `parallel` count.
 
 ### 5.1 Tracks (`tracks.py`)
 Track = closed (or open, for acceleration) centreline in the **track frame** (x east, y north,
-metres) resampled every 0.5–1 m, with `s` (distance), `kappa` (signed curvature 1/m), heading,
-and `start_line` (point + direction). Built from control points with a periodic cubic spline.
+metres) resampled every 0.5–1 m, with `s` (distance), `kappa` (signed curvature 1/m, + = left),
+`heading` (compass deg, 0 = north, clockwise), and `start_line` (point + direction, a gate
+±5 m wide). The built-in tracks are built from a *curvature program* (straights, clothoid
+transitions, arcs, sinusoidal slalom; closed by a Newton solve), which controls radii and
+straight lengths exactly; custom tracks can be built from control points with a periodic
+cubic spline (`Track.from_control_points`). API: `get_track(name)` (cached, read-only arrays),
+`TRACKS`, `position_at(s) -> (x, y, heading_deg)`, `nearest_s(x, y, s_hint=None,
+window_m=None)`, `crossed_start_line(p_prev, p_now)` (forward crossings only), `features`
+(named sections), `finish_s` (open tracks: timed distance).
 * `fs_endurance` (default): closed loop, lap length 900–1100 m, hairpins with ≥ 4.5 m
   centreline radius, straights ≤ 80 m, a slalom section (cones 7.5–12 m apart), a chicane and a
   few sweepers — a realistic Formula Student endurance/autocross layout. Must not
   self-intersect (test it).
 * `skidpad`: figure-of-8, circles with 15.25 m inner diameter (driven radius ≈ 9.125 m).
+  The start gate is at the crossover, so it is crossed once per circle (one "lap" = one circle).
 * `acceleration`: 75 m straight + run-off (open track).
 `Track.to_json(origin)` → `{name, length_m, closed, xy:[[x,y]...], latlon:[[lat,lon]...],
-start:{x,y,heading_deg}, origin:{lat,lon}}` (downsampled to ≤ 1500 points).
+start:{x,y,heading_deg}, origin:{lat,lon}, features:[{kind,label,s_start,s_end}]}`
+(downsampled to ≤ 1500 points).
 
 ### 5.2 Lap simulator (`lapsim.py`)
 Quasi-steady-state point-mass solver used both by the sim and by `analysis/strategy.py`:
-`solve(track, vehicle_params, power_limit_kw, aero_overrides=None) -> LapResult` with arrays
-`s, v, ax, ay, t, power_kw` and scalars `lap_time, energy_kwh` (battery side, including
-driveline/inverter/motor efficiency and regen). Corner speed from lateral grip with
+`solve(track, params, power_limit_kw=None, aero_scale=None, mu_scale=1.0, rho=1.2, wind=None)
+-> LapResult` (`params = VehicleParams.from_dict(vehicle_dict)`; `aero_scale` =
+`{cla_front, cla_rear, cda}` multipliers; `wind` = `{speed, dir_deg (from)}`) with arrays
+`s, v, ax, ay, t, power_kw` (+ `motor_torque_nm, motor_rpm, brake_force_n, downforce_n,
+drag_n`) and scalars `lap_time, energy_kwh, regen_kwh, v_max` (battery side, including
+driveline/inverter/motor efficiency and regen). `energy_vs_power(track, params, limits_kw)`
+→ `[{kw, lap_time, energy_kwh}]`. Corner speed from lateral grip with
 aerodynamic load: `m v² |κ| = μ_lat (m g + ½ ρ CL·A v²)`; forward pass limited by traction
 (rear-wheel drive, rear axle load incl. load transfer and aero share), motor torque/speed
 limits and the power limit, minus drag and rolling resistance; backward pass for braking.
@@ -475,6 +498,8 @@ every 2 s if the port disappears (`status: waiting`), timestamps samples on arri
 * "Signal not available" (SNA): raw value `0x8000…` (most negative) for signed signals,
   all-ones for unsigned. Decoders drop SNA values (channel not updated). Senders that do not
   own every signal in a message fill the others with SNA.
+  1-bit flags have **no** SNA (all-ones would be `1` = true). Every frame has DLC 8; unused
+  bits are 0. Helpers: `core/canutil.py` (`sna_raw`, `is_sna`, `CanSignal.encode/decode`).
 * Message map (IDs hex; `i16` = signed 16-bit, `u16` unsigned, scale per bit):
 
 | ID | name | signals (in order, 16 bit unless noted) |

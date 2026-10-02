@@ -1,0 +1,210 @@
+# =========================================================================================
+# AeroVolt CAN layout (SPEC section 7.3)
+# =========================================================================================
+# Source of truth for the car's CAN bus. tools/gen_can.py turns this file into
+#   can/aerovolt.dbc                          (for cantools, Vector CANdb++, SavvyCAN, ...)
+#   firmware/sensor_node/include/aerovolt_can.h  (C++17 header for the sensor-node firmware)
+# After editing run:   python tools/gen_can.py        (and commit the generated files)
+# CI / tests run:      python tools/gen_can.py --check   (fails if the outputs are stale)
+#
+# Rules
+#   * Classic CAN 2.0A: 11-bit identifiers, 1 Mbit/s, DLC 8 for every frame.
+#   * Intel (little-endian) byte order; signals are packed back to back from bit 0 in the
+#     order listed here (no gaps), unused bits at the end of a frame are 0.
+#   * Signal name == channel id in config/sensors.yaml (units, names and ranges come from
+#     there). physical = raw * scale + offset.
+#   * Types: i8/i16/i32 signed, u8/u16/u32 unsigned, flag = 1-bit unsigned.
+#   * SNA ("signal not available"): raw 0x80..0 (most negative) for signed signals, all
+#     ones for unsigned signals. 1-bit flags have NO SNA (all ones would mean "true").
+#   * A message may give type/scale/offset once for all its signals; a signal written as a
+#     mapping overrides them.
+#   * "series" generates numbered frames: frame n gets id = id + n, name formatted with n,
+#     and carries channels k = per_frame*n ... per_frame*n + per_frame - 1.
+#   * cycle_ms = transmit period, matching the fastest channel of the frame
+#     (GenMsgCycleTime in the DBC). Estimated bus load at 1 Mbit/s: ~23 %.
+# =========================================================================================
+
+comment: >-
+  AeroVolt Formula Student EV telemetry bus. Classic CAN 2.0A, 1 Mbit/s, Intel byte order.
+  Signal names equal AeroVolt channel ids. SNA = most negative raw value (signed) or all ones
+  (unsigned); 1-bit flags have no SNA.
+
+bus:
+  bitrate: 1000000
+  dlc: 8
+  receivers: [DASH_NODE]        # default receivers: the telemetry / dash logger
+
+nodes:
+  AERO_NODE: "Aero sensor node (pressure taps, pitot, ambient, 5-hole probe, ride height, wing load cells)"
+  SUSP_NODE: "Suspension node (damper potentiometers, pushrod load cells)"
+  IMU_NODE: "Inertial measurement unit near the centre of gravity"
+  GPS_NODE: "GNSS receiver (10 Hz)"
+  DASH_NODE: "Dashboard / telemetry logger (receives everything, forwards to the pit wall)"
+  INVERTER: "Motor inverter"
+  BMS: "Battery management system (accumulator)"
+  VCU: "Vehicle control unit (pedals, wheel speeds, cooling control, safety chain monitor)"
+
+messages:
+  # ---------------------------------------------------------------- System 1: aero
+  - {id: 0x300, name: AERO_FW_TAPS_A, sender: AERO_NODE, cycle_ms: 20, type: i16, scale: 0.1,
+     comment: "Front wing pressure taps 1-4 (station L suction side), Pa relative to freestream static.",
+     signals: [fw_p01, fw_p02, fw_p03, fw_p04]}
+  - {id: 0x301, name: AERO_FW_TAPS_B, sender: AERO_NODE, cycle_ms: 20, type: i16, scale: 0.1,
+     comment: "Front wing pressure taps 5-8 (station L pressure side, station R suction side), Pa.",
+     signals: [fw_p05, fw_p06, fw_p07, fw_p08]}
+  - {id: 0x302, name: AERO_FW_TAPS_C, sender: AERO_NODE, cycle_ms: 20, type: i16, scale: 0.1,
+     comment: "Front wing pressure taps 9-12 (station R), Pa.",
+     signals: [fw_p09, fw_p10, fw_p11, fw_p12]}
+  - {id: 0x303, name: AERO_RW_TAPS_A, sender: AERO_NODE, cycle_ms: 20, type: i16, scale: 0.1,
+     comment: "Rear wing pressure taps 1-4 (station L suction side), Pa.",
+     signals: [rw_p01, rw_p02, rw_p03, rw_p04]}
+  - {id: 0x304, name: AERO_RW_TAPS_B, sender: AERO_NODE, cycle_ms: 20, type: i16, scale: 0.1,
+     comment: "Rear wing pressure taps 5-8, Pa.",
+     signals: [rw_p05, rw_p06, rw_p07, rw_p08]}
+  - {id: 0x305, name: AERO_RW_TAPS_C, sender: AERO_NODE, cycle_ms: 20, type: i16, scale: 0.1,
+     comment: "Rear wing pressure taps 9-12 (station R), Pa.",
+     signals: [rw_p09, rw_p10, rw_p11, rw_p12]}
+  - {id: 0x306, name: AERO_UT_TAPS_A, sender: AERO_NODE, cycle_ms: 20, type: i16, scale: 0.1,
+     comment: "Undertray centreline taps 1-4 (inlet to throat), Pa.",
+     signals: [ut_p01, ut_p02, ut_p03, ut_p04]}
+  - {id: 0x307, name: AERO_UT_TAPS_B, sender: AERO_NODE, cycle_ms: 20, type: i16, scale: 0.1,
+     comment: "Undertray taps 5-8 (diffuser centreline and tunnels), Pa.",
+     signals: [ut_p05, ut_p06, ut_p07, ut_p08]}
+  - id: 0x310
+    name: AERO_AIR
+    sender: AERO_NODE
+    cycle_ms: 20
+    comment: "Pitot dynamic pressure (50 Hz) and BME280 ambient air data (updated at 1 Hz)."
+    signals:
+      - {name: pitot_dp,  type: i16, scale: 0.1}
+      - {name: amb_temp,  type: i16, scale: 0.01}
+      - {name: amb_press, type: u16, scale: 1, offset: 50000}
+      - {name: amb_rh,    type: u8,  scale: 0.5}
+  - id: 0x311
+    name: AERO_PROBE
+    sender: AERO_NODE
+    cycle_ms: 20
+    comment: "5-hole probe flow angles and laser ride heights."
+    signals:
+      - {name: probe_yaw,   type: i16, scale: 0.01}
+      - {name: probe_pitch, type: i16, scale: 0.01}
+      - {name: rh_front,    type: u16, scale: 0.01}
+      - {name: rh_rear,     type: u16, scale: 0.01}
+  - {id: 0x312, name: AERO_WING_LOADS, sender: AERO_NODE, cycle_ms: 20, type: i16, scale: 1,
+     comment: "Wing mount load cells, vertical force, + = down.",
+     signals: [fw_load, rw_load]}
+
+  # ---------------------------------------------------------------- Vehicle dynamics
+  - {id: 0x320, name: SUSP_DAMPERS, sender: SUSP_NODE, cycle_ms: 10, type: i16, scale: 0.01,
+     comment: "Damper positions from static, + = bump.",
+     signals: [damper_fl, damper_fr, damper_rl, damper_rr]}
+  - {id: 0x321, name: SUSP_PUSHRODS, sender: SUSP_NODE, cycle_ms: 10, type: i16, scale: 1,
+     comment: "Pushrod compression forces.",
+     signals: [pushrod_fl, pushrod_fr, pushrod_rl, pushrod_rr]}
+  - {id: 0x330, name: IMU_ACCEL, sender: IMU_NODE, cycle_ms: 10, type: i16, scale: 0.002,
+     comment: "Accelerations in the vehicle frame (ISO 8855), az = +9.81 at rest.",
+     signals: [ax, ay, az]}
+  - {id: 0x331, name: IMU_GYRO, sender: IMU_NODE, cycle_ms: 10, type: i16, scale: 0.01,
+     comment: "Angular rates: roll, pitch, yaw.",
+     signals: [gx, gy, gz]}
+  - {id: 0x340, name: GPS_POS, sender: GPS_NODE, cycle_ms: 100, type: i32, scale: 1.0e-7,
+     comment: "GNSS position (WGS-84).",
+     signals: [gps_lat, gps_lon]}
+  - {id: 0x341, name: GPS_VEL, sender: GPS_NODE, cycle_ms: 100, type: u16, scale: 0.01,
+     comment: "GNSS ground speed and heading (0 = north, clockwise).",
+     signals: [gps_speed, gps_heading]}
+  - {id: 0x350, name: WHEEL_SPEEDS, sender: VCU, cycle_ms: 20, type: u16, scale: 0.01,
+     comment: "Wheel surface speeds.",
+     signals: [ws_fl, ws_fr, ws_rl, ws_rr]}
+  - id: 0x351
+    name: DRIVER
+    sender: VCU
+    cycle_ms: 20
+    comment: "Driver inputs: steering, both accelerator pedal sensors, brake pressures."
+    signals:
+      - {name: steer,         type: i16, scale: 0.01}
+      - {name: apps1,         type: u8,  scale: 0.5}
+      - {name: apps2,         type: u8,  scale: 0.5}
+      - {name: brake_press_f, type: u16, scale: 0.01}
+      - {name: brake_press_r, type: u16, scale: 0.01}
+
+  # ---------------------------------------------------------------- System 2: powertrain
+  - id: 0x400
+    name: INV_STATUS
+    sender: INVERTER
+    receivers: [DASH_NODE, VCU]
+    cycle_ms: 10
+    comment: "Inverter fast status: motor speed and torque, DC link."
+    signals:
+      - {name: mot_speed,      type: i16, scale: 1}
+      - {name: mot_torque,     type: i16, scale: 0.1}
+      - {name: inv_dc_voltage, type: u16, scale: 0.1}
+      - {name: inv_dc_current, type: i16, scale: 0.1}
+  - id: 0x401
+    name: INV_TEMPS
+    sender: INVERTER
+    receivers: [DASH_NODE, VCU]
+    cycle_ms: 100
+    comment: "Inverter slow status: temperatures, phase current, state machine and fault code."
+    signals:
+      - {name: mot_winding_temp,  type: i16, scale: 0.1}
+      - {name: inv_igbt_temp,     type: i16, scale: 0.1}
+      - {name: inv_phase_current, type: u16, scale: 0.1}
+      - {name: inv_state,         type: u8,  scale: 1}
+      - {name: inv_fault,         type: u8,  scale: 1}
+  - id: 0x410
+    name: BMS_PACK
+    sender: BMS
+    receivers: [DASH_NODE, VCU]
+    cycle_ms: 10
+    comment: "Accumulator pack status."
+    signals:
+      - {name: pack_voltage, type: u16, scale: 0.1}
+      - {name: pack_current, type: i16, scale: 0.1}
+      - {name: bms_soc,      type: u8,  scale: 0.5}
+      - {name: bms_state,    type: u8,  scale: 1}
+      - {name: bms_fault,    type: u8,  scale: 1}
+  - name: "BMS_CELL_V_{n:02d}"
+    id: 0x420                    # frames 0x420 ... 0x442
+    sender: BMS
+    cycle_ms: 100
+    type: u16
+    scale: 0.001
+    comment: "Cell voltages {first} ... {last} (frame {n})."
+    series: {channel: "cell_v_{k:03d}", count: 140, per_frame: 4}
+  - name: "BMS_CELL_T_{n}"
+    id: 0x450                    # frames 0x450 ... 0x457 (the last one carries 4 sensors)
+    sender: BMS
+    cycle_ms: 500
+    type: u8
+    scale: 0.5
+    offset: -20
+    comment: "Cell temperature sensors {first} ... {last} (frame {n}), 0.5 degC steps from -20 degC."
+    series: {channel: "cell_t_{k:02d}", count: 60, per_frame: 8}
+  - id: 0x460
+    name: COOLING
+    sender: VCU
+    cycle_ms: 100
+    comment: "Cooling loop temperatures, flow and actuator duty cycles."
+    signals:
+      - {name: cool_temp_in,  type: i16, scale: 0.1}
+      - {name: cool_temp_out, type: i16, scale: 0.1}
+      - {name: cool_flow,     type: u16, scale: 0.01}
+      - {name: pump_duty,     type: u8,  scale: 0.5}
+      - {name: fan_duty,      type: u8,  scale: 0.5}
+  - id: 0x470
+    name: SAFETY
+    sender: VCU
+    cycle_ms: 50
+    comment: "Shutdown circuit and tractive-system safety flags (1 = OK / closed), TSAL, IMD insulation."
+    signals:
+      - {name: sdc_closed,     type: flag}
+      - {name: imd_ok,         type: flag}
+      - {name: ams_ok,         type: flag}
+      - {name: bspd_ok,        type: flag}
+      - {name: apps_plaus_ok,  type: flag}
+      - {name: air_pos_closed, type: flag}
+      - {name: air_neg_closed, type: flag}
+      - {name: precharge_done, type: flag}
+      - {name: tsal_state,     type: u8,  scale: 1}
+      - {name: imd_iso_kohm,   type: u16, scale: 1}

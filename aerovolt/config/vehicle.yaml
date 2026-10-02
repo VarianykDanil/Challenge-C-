@@ -1,0 +1,170 @@
+# =============================================================================================
+# AeroVolt — vehicle parameters (SPEC §3)
+# ---------------------------------------------------------------------------------------------
+# A virtual Formula Student electric car, representative of a well-sorted university car.
+# Shared by the simulator (as the "true car"; the sim adds per-cell manufacturing variation)
+# and by the analysis (as the nominal model: lap-time/energy predictions, SoC EKF, aero maths).
+# Units are SI unless the key says otherwise. Vehicle frame (ISO 8855): origin on the ground
+# at the FRONT AXLE, x forward (rear axle at x = −wheelbase), y left, z up.
+# Values were tuned so the quasi-steady-state lap simulator hits the calibration targets in
+# SPEC §5.4 (see tests/test_lapsim_calibration.py) while staying physically sensible.
+# =============================================================================================
+
+name: "MMU EV demo car (virtual)"
+
+# ---- mass & geometry --------------------------------------------------------------------------
+mass_kg: 300                  # car 230 kg + driver 70 kg (FS EVs: 200–260 kg + driver)
+weight_dist_front: 0.47       # static fraction of weight on the front axle (FS: 0.45–0.50)
+cg_height_m: 0.28             # centre-of-gravity height with driver (FS: 0.25–0.32 m)
+wheelbase_m: 1.53             # FS rules: ≥ 1.525 m
+track_front_m: 1.22           # track widths (FS: 1.15–1.25 m)
+track_rear_m: 1.18
+wheel_radius_m: 0.228         # loaded radius of an 18.0x6.0-10 (or 16x7.5-10) slick
+unsprung_mass_corner_kg: 9    # wheel + upright + brake + half the links, per corner
+frontal_area_m2: 1.10         # reference area: CL = CL·A / A ≈ 3.3, CD = CD·A / A ≈ 1.2
+
+# ---- aerodynamics -------------------------------------------------------------------------------
+aero:
+  cla_ref: 3.6                # lift (downforce) area CL·A [m²] at the reference ride heights.
+                              # Downforce = ½·ρ·v²·CL·A → 1350 N at 25 m/s (FS full aero: 3–4.5)
+  cda_ref: 1.35               # drag area CD·A [m²] → L/D ≈ 2.7 (typical FS 2–3)
+  share:                      # fraction of the total CL·A produced by each element (sum = 1)
+    front_wing: 0.30
+    rear_wing: 0.42
+    undertray: 0.28
+  # Element geometry in the vehicle frame. A wing's centre of pressure is at its quarter
+  # chord (x_le − c/4); the undertray's at x_start + cop_frac·(x_end − x_start). With the
+  # shares above this gives an aero balance of ≈ 45.5 % front (lapsim.aero_balance_front).
+  # mass_kg: wing assembly mass carried by the mount load cells (they are tared at rest, so
+  # they read downforce + mass × vertical acceleration).
+  front_wing: {chord_m: 0.36, span_m: 1.40, le_x_m: 0.80, z_m: 0.07, station_y_m: [0.55, -0.55], mass_kg: 3.5}
+  rear_wing:  {chord_m: 0.48, span_m: 1.10, le_x_m: -1.70, z_m: 1.05, station_y_m: [0.25, -0.25], mass_kg: 4.5}
+  undertray:  {x_start_m: 0.15, x_end_m: -1.95, width_m: 0.90, z_m: 0.03, cop_frac: 0.55}
+  pitot:      {x_m: 0.95, z_m: 0.45}   # pitot-static probe position (clear of the wing wake)
+  ground_effect:              # ride-height sensitivity used by the simulator's aero model
+    ref_ride_height_mm: {front: 30, rear: 35}   # heights at which cla_ref was "measured"
+    front_wing_gain_per_mm: 0.006   # +0.6 % front-wing CL·A per mm lower (ground effect)
+    floor_gain_per_mm: 0.012        # +1.2 % undertray CL·A per mm lower
+    front_wing_stall_mm: 10         # below this front ride height the wing's flow separates
+    floor_stall_mm: 12              # below this the diffuser stalls (sharp downforce loss)
+    stall_loss: 0.45                # fraction of the element's CL·A lost when fully stalled
+    pitch_gain_per_deg: 0.04        # nose-down pitch lowers the rear wing's angle of attack:
+                                    # −4 % rear-wing CL·A per degree (the front wing and floor
+                                    # feel pitch through their ride heights)
+    yaw_loss_per_deg2: 0.0015       # CL·A × (1 − k·ψ²): 5° flow yaw → −3.75 %
+
+# ---- tyres & brakes ------------------------------------------------------------------------------
+tyres:
+  mu_lat: 1.38                # effective vehicle-level lateral friction coefficient. Tyre-test
+                              # (TTC) peaks for FS slicks are 1.5–1.8 at low load; load
+                              # sensitivity, camber and lateral load transfer bring the whole
+                              # car down to ≈ 1.3–1.45 (skid-pad ≈ 5 s).
+  mu_long: 1.32               # effective longitudinal friction coefficient (drive and brake)
+  c_rr: 0.015                 # rolling-resistance coefficient: F = C_rr·(m·g + downforce)
+brakes:
+  max_force_n: 4500           # largest total brake force the hydraulics deliver at the driver's
+                              # maximum pedal force (≈ 1000 N). Enough to lock all four wheels at
+                              # low speed (FS brake test: μ·m·g ≈ 4060 N) but not at high speed
+                              # with downforce — so peak braking is ≈ 1.7–1.9 g, as on real cars.
+  bias_front: 0.62            # fraction of brake force on the front axle (balance bar setting)
+  gain_n_per_bar: {front: 52, rear: 33}   # tyre brake force per bar of line pressure, per axle
+                                          # (caliper piston area × pad μ × disc/tyre radius)
+
+# ---- suspension ----------------------------------------------------------------------------------
+suspension:
+  wheel_rate_n_per_mm: {front: 60, rear: 65}      # vertical stiffness at the wheel
+  pushrod_ratio: {front: 1.15, rear: 1.10}        # pushrod force / (wheel load − unsprung weight)
+  damper_motion_ratio: {front: 0.90, rear: 0.85}  # damper travel / wheel travel
+  static_ride_height_mm: {front: 30, rear: 35}    # chassis ground clearance at rest (rules ≥ 30)
+  pitch_stiffness_nm_per_deg: 9000                # sprung-mass pitch stiffness (from wheel rates)
+  roll_stiffness_nm_per_deg: 7000                 # total roll stiffness incl. anti-roll bars
+
+steering:
+  ratio: 5.0                  # steering-wheel angle / road-wheel angle (FS racks: 4.5–6)
+  understeer_deg_per_g: 1.0   # understeer gradient: extra road-wheel angle per g of lateral
+                              # acceleration beyond the Ackermann angle atan(L·κ)
+
+# ---- powertrain ----------------------------------------------------------------------------------
+powertrain:
+  gear_ratio: 3.8             # single-speed reduction motor:wheel (chain or planetary)
+  driveline_efficiency: 0.95  # chain/gears + differential + CV joints
+  power_limit_kw: 80          # FS rules: accumulator output power ≤ 80 kW (energy meter)
+  regen_max_kw: 30            # charge-power limit of the cells during regen (battery side)
+  regen_min_speed_kmh: 5      # FS rules: no regenerative braking below 5 km/h
+  motor:                      # axial-flux PMSM, EMRAX-228-class
+    peak_torque_nm: 220       # constant-torque region up to the base speed
+    peak_power_kw: 100        # constant-power region above base speed (base ≈ 4340 rpm)
+    max_speed_rpm: 6500       # mechanical / back-EMF limit → 147 km/h with G = 3.8
+    torque_constant_nm_per_a: 0.75   # T = k_t · I_phase,rms (sets the phase current channel)
+    losses:                   # P_loss = k_cu·T² + k_fe·ω + k_w·ω²  (ω in rad/s)
+      k_cu_w_per_nm2: 0.072   # copper (I²R): 3.5 kW at peak torque
+      k_iron_w_per_rads: 0.60 # hysteresis iron loss: ≈ 410 W at 6500 rpm
+      k_windage_w_per_rads2: 0.0015  # eddy-current + windage: ≈ 700 W at 6500 rpm
+                              # → η ≈ 96 % at 4000 rpm/150 Nm, ≈ 87 % at 1000 rpm/220 Nm
+    derate_start_c: 110       # winding temperature where the inverter starts to cut torque
+    max_winding_c: 140        # torque is zero at this temperature (insulation class H)
+    thermal:                  # winding lumped thermal RC, cooled by the coolant jacket
+      c_th_j_per_k: 2500      # heat capacity of copper + stator teeth (τ = R·C ≈ 100 s)
+      r_th_k_per_w: 0.040     # winding → coolant thermal resistance at full pump flow (the
+                              # convective part grows as flow^-0.8 when the flow drops)
+  inverter:
+    efficiency: 0.97          # DC→AC conversion efficiency (SiC/IGBT inverters: 0.96–0.98)
+    derate_start_c: 75        # IGBT/heatsink temperature where torque derating starts
+    max_c: 90                 # inverter shuts down here
+    thermal:                  # IGBT junction/baseplate lumped thermal RC on the cold plate
+      c_th_j_per_k: 2000      # module baseplate + aluminium cold plate (τ = R·C ≈ 40 s)
+      r_th_k_per_w: 0.020     # IGBT → coolant thermal resistance
+
+# ---- accumulator ---------------------------------------------------------------------------------
+accumulator:
+  series: 140                 # series groups (140 × 3.6 V ≈ 504 V nominal, < 600 V FS limit)
+  parallel: 4                 # cells in parallel per group (one "cell" channel = one group)
+  segments: 5                 # FS rules: segment ≤ 120 V and ≤ 6 MJ → 5 × 28 groups
+  temp_sensors: 60            # 12 per segment (FS rules: ≥ 30 % of cells monitored)
+  cell:                       # ONE 21700 NMC cell (Molicel P42A / Samsung 40T class);
+                              # physics.CellModel scales by `parallel` (capacity ×4, R ÷4)
+    capacity_ah: 4.0          # rated capacity
+    v_nom: 3.6                # nominal voltage (average over the discharge)
+    v_max: 4.2                # charge cut-off
+    v_min: 2.8                # discharge cut-off (BMS under-voltage limit)
+    r0_ohm: 0.012             # ohmic DC resistance at 25 °C
+    r1_ohm: 0.006             # polarisation resistance of the RC pair
+    c1_f: 2500                # polarisation capacitance → τ = R1·C1 = 15 s
+    mass_kg: 0.07             # per cell (21700 ≈ 68–70 g)
+    cp_j_per_kgk: 1000        # specific heat capacity (NMC cylindrical cells 900–1100)
+    max_temp_c: 60            # FS rules: cell temperature must stay ≤ 60 °C
+  soc_window: {max: 1.0, min: 0.05}   # usable SoC window: the bottom 5 % is not usable at
+                              # endurance currents (voltage sag → cell under-voltage cut-off).
+                              # Usable energy = series·parallel·capacity·v_nom·(max − min)
+                              #              = 140·4·4.0 Ah·3.6 V·0.95 = 7.66 kWh
+  variation:                  # manufacturing spread, sampled uniformly within ± by the sim
+    capacity_pct: 1.5         # ± % capacity
+    r0_pct: 5.0               # ± % ohmic resistance
+  thermal:                    # per parallel group (4 cells) — air-cooled segments
+    ua0_w_per_k: 0.35         # segment fans + conduction to the segment wall
+    ua1_w_per_k_per_ms: 0.030 # ram air through the ducted side pods grows with car speed
+    neighbour_w_per_k: 0.30   # conduction between adjacent groups of a segment (bus bars)
+  ocv:                        # open-circuit voltage of one NMC cell vs state of charge
+    soc: [0.00, 0.05, 0.10, 0.20, 0.30, 0.40, 0.50, 0.60, 0.70, 0.80, 0.90, 0.95, 1.00]
+    v:   [3.00, 3.30, 3.42, 3.53, 3.60, 3.66, 3.72, 3.80, 3.89, 3.98, 4.07, 4.13, 4.20]
+
+# ---- cooling loop (motor + inverter) --------------------------------------------------------------
+cooling:
+  coolant_cp: 3600            # J/(kg·K), 50 % water-glycol
+  coolant_density: 1040       # kg/m³
+  pump_flow_lpm: 8            # nominal pump flow at 100 % duty
+  loop_volume_l: 2.0          # coolant inventory (pipes + jackets + radiator)
+  radiator:                   # heat rejection Q = (T_coolant − T_amb)·(UA0 + UA1·airspeed)
+    ua0_w_per_k: 25           # natural convection + fan at standstill
+    ua1_w_per_k_per_ms: 4.0   # ram-air contribution per m/s of airspeed (aero ↔ thermal coupling)
+    fan_ua_w_per_k: 30        # extra UA with the fan on
+    fan_on_c: 50              # coolant temperature switching the fan on …
+    fan_off_c: 45             # … and off again (hysteresis)
+
+# ---- endurance event ------------------------------------------------------------------------------
+endurance:
+  distance_km: 22             # FS endurance: ≈ 22 km with a driver change at half distance
+  reserve_pct: 5              # strategy keeps this % of usable energy in reserve at the finish
+
+# Virtual track placed near Silverstone (Formula Student UK venue). Track frame origin.
+gps_origin: {lat: 52.0786, lon: -1.0169}

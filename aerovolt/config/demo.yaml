@@ -1,0 +1,47 @@
+# =========================================================================================
+# AeroVolt demo configuration: simulator only (the default)
+# =========================================================================================
+# Run with:   python -m aerovolt --config config/demo.yaml      then open http://127.0.0.1:8080
+# Any value here can be changed; command-line options (--speed, --track, --port, --fault,
+# --log, --headless, --duration) override this file for one run.
+# Relative paths are relative to the project root (the folder containing config/).
+
+session:
+  name: "Demo - virtual car on the FS endurance track"   # shown in the dashboard header
+  log: null              # data log file, e.g. logs/demo.csv.gz (null = do not log)
+
+server:
+  host: 127.0.0.1        # 0.0.0.0 to let other computers (phones, pit-wall laptop) connect
+  port: 8080             # web dashboard: http://<host>:<port>
+  broadcast_hz: 20       # WebSocket frames per second sent to each browser
+
+processing:
+  process_hz: 20         # analysis rate (calc_* channels, alerts), in data time
+  snapshot_hz: 20        # history / log rows per second
+  history_s: 300         # seconds of history kept in memory for the plots
+
+# Venue. Tracks: fs_endurance (~1 km FS endurance/autocross loop), skidpad, acceleration.
+track: fs_endurance
+
+# Data sources, in priority order: LATER sources win. A real sensor listed after the sim
+# replaces the simulated value of its channel (see config/hybrid_serial.yaml).
+sources:
+  - type: sim
+    label: Simulator
+    speed: 1.0           # 1.0 = real time, 4 = four times faster, max = as fast as possible
+    seed: 42             # random seed: same seed -> same driver variation and sensor noise
+    weather:
+      temp_c: 18         # ambient temperature, °C
+      pressure_pa: 101325  # absolute ambient pressure, Pa (sea level standard)
+      rh_pct: 60         # relative humidity, %
+      wind_ms: 3.0       # mean wind speed, m/s (gusts are added by the simulator)
+      wind_dir_deg: 225  # direction the wind blows FROM, degrees (0 = north, 90 = east): SW
+    faults: []           # scheduled faults, e.g. ["cell_hot@60", "pump_fail@120"] (id@seconds)
+
+# Shared files (defaults shown; change only if you keep several variants).
+paths:
+  vehicle: config/vehicle.yaml          # car parameters (mass, aero, powertrain, accumulator)
+  sensors: config/sensors.yaml          # channel catalogue
+  can_layout: config/can_layout.yaml    # CAN message layout (tools/gen_can.py)
+  alerts: config/alerts.yaml            # alert rules
+  calibration: config/calibration.yaml  # zero offsets / gains of real sensors

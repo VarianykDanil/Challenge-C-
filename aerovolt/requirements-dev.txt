@@ -1,0 +1,5 @@
+# Everything needed to run the full test suite.
+#   pip install -r requirements-dev.txt
+-r requirements.txt
+-r requirements-hw.txt
+pytest>=7.4

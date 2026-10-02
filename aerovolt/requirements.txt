@@ -1,0 +1,5 @@
+# AeroVolt runtime dependencies (simulator, analysis, web server).
+# Install with:  pip install -r requirements.txt
+numpy>=1.24
+pyyaml>=6.0
+aiohttp>=3.9

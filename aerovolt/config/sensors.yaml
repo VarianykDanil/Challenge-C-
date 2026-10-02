@@ -1,0 +1,400 @@
+# =========================================================================================
+# AeroVolt channel catalogue - the single source of truth for every channel (SPEC section 2)
+# =========================================================================================
+#
+# Every measurable or derived quantity is a "channel" with a unique snake_case id.
+# The simulator, the CAN layout, the analysis, the data logger and the web dashboard all
+# read this file, so a channel added here appears everywhere.
+#
+# Fields (see aerovolt/core/model.py: ChannelDef)
+#   id          unique snake_case id; calc_* = derived (analysis), truth_* = simulator truth
+#   name        human label shown in the dashboard
+#   unit        SI unless noted (degC written as °C, ride height / damper in mm, pressure in Pa)
+#   system      aero | vehicle | powertrain | calc | truth
+#   group       dotted group used by the dashboard (e.g. aero.taps, bms.cell_v)
+#   rate_hz     nominal sample rate of the sensor
+#   min, max    physical range of the sensor (gauges, plausibility checks, sim clipping)
+#   noise       1-sigma Gaussian noise of the virtual sensor (simulator)
+#   resolution  quantisation step of the virtual sensor (simulator, display precision)
+#   lag_s       first-order lag time constant of the virtual sensor (default 0)
+#   warn_lo / warn_hi / crit_lo / crit_hi   display thresholds (omit = none)
+#   meta        free-form extra info (tap geometry, enum labels, cell index ...)
+#
+# Sections: "defaults" are applied to every channel of the section (a channel can override).
+# Repeat construct: an entry with "count" is expanded count times, i = start .. start+count-1,
+# strings are formatted with i and with the integer "vars" (tiny expressions of i).
+#
+# Resolutions are chosen to match the CAN scaling (config/can_layout.yaml) where the bus is
+# coarser than the sensor, so simulated data survive a CAN round trip unchanged.
+# The one exception is the cell temperature (0.1 °C from the BMS ADC, 0.5 °C on CAN).
+# =========================================================================================
+
+sections:
+
+  # =======================================================================================
+  # SYSTEM 1 - AERO SENSING
+  # =======================================================================================
+
+  # ---- Surface pressure taps ------------------------------------------------------------
+  # Tap pressure = local static pressure - freestream static (reference port), so the
+  # pressure coefficient is Cp = tap / q. Differential sensors with a +-3.2 kPa range are
+  # needed for the wings: at 30 m/s q = 550 Pa and the suction peak (Cp ~ -4) reaches
+  # -2.2 kPa. (A +-500 Pa Sensirion SDP3x/SDP8xx saturates there - fine for the bench demo
+  # and the pitot, not for the wing suction peak.) The range is also limited by the CAN
+  # encoding (i16, 0.1 Pa -> +-3276.7 Pa).
+  # noise 1.5 Pa: sensor noise (~0.2 Pa) plus tube pumping from chassis vibration.
+  # lag_s: ~1 m of 1.6 mm ID tubing behaves like a first-order lag of ~20 ms; undertray
+  # taps have longer runs to the sensor box (25 ms).
+  # Wing tap layout per station (6 taps): suction x/c 0.05 0.20 0.45 0.75, pressure x/c
+  # 0.10 0.50. Inverted wings: the SUCTION surface is the LOWER surface.
+  # pos [x, y, z] is computed by the catalogue loader from config/vehicle.yaml.
+  - title: Front wing pressure taps
+    defaults: {system: aero, group: aero.taps, unit: Pa, rate_hz: 50, min: -3200, max: 3200,
+               noise: 1.5, resolution: 0.1, lag_s: 0.02}
+    channels:
+      - {id: fw_p01, name: "Front wing L tap 1 (suction, x/c 0.05)",  meta: {element: fw, station: L, surface: suction,  x_c: 0.05}}
+      - {id: fw_p02, name: "Front wing L tap 2 (suction, x/c 0.20)",  meta: {element: fw, station: L, surface: suction,  x_c: 0.20}}
+      - {id: fw_p03, name: "Front wing L tap 3 (suction, x/c 0.45)",  meta: {element: fw, station: L, surface: suction,  x_c: 0.45}}
+      - {id: fw_p04, name: "Front wing L tap 4 (suction, x/c 0.75)",  meta: {element: fw, station: L, surface: suction,  x_c: 0.75}}
+      - {id: fw_p05, name: "Front wing L tap 5 (pressure, x/c 0.10)", meta: {element: fw, station: L, surface: pressure, x_c: 0.10}}
+      - {id: fw_p06, name: "Front wing L tap 6 (pressure, x/c 0.50)", meta: {element: fw, station: L, surface: pressure, x_c: 0.50}}
+      - {id: fw_p07, name: "Front wing R tap 7 (suction, x/c 0.05)",  meta: {element: fw, station: R, surface: suction,  x_c: 0.05}}
+      - {id: fw_p08, name: "Front wing R tap 8 (suction, x/c 0.20)",  meta: {element: fw, station: R, surface: suction,  x_c: 0.20}}
+      - {id: fw_p09, name: "Front wing R tap 9 (suction, x/c 0.45)",  meta: {element: fw, station: R, surface: suction,  x_c: 0.45}}
+      - {id: fw_p10, name: "Front wing R tap 10 (suction, x/c 0.75)", meta: {element: fw, station: R, surface: suction,  x_c: 0.75}}
+      - {id: fw_p11, name: "Front wing R tap 11 (pressure, x/c 0.10)", meta: {element: fw, station: R, surface: pressure, x_c: 0.10}}
+      - {id: fw_p12, name: "Front wing R tap 12 (pressure, x/c 0.50)", meta: {element: fw, station: R, surface: pressure, x_c: 0.50}}
+
+  - title: Rear wing pressure taps
+    defaults: {system: aero, group: aero.taps, unit: Pa, rate_hz: 50, min: -3200, max: 3200,
+               noise: 1.5, resolution: 0.1, lag_s: 0.02}
+    channels:
+      - {id: rw_p01, name: "Rear wing L tap 1 (suction, x/c 0.05)",  meta: {element: rw, station: L, surface: suction,  x_c: 0.05}}
+      - {id: rw_p02, name: "Rear wing L tap 2 (suction, x/c 0.20)",  meta: {element: rw, station: L, surface: suction,  x_c: 0.20}}
+      - {id: rw_p03, name: "Rear wing L tap 3 (suction, x/c 0.45)",  meta: {element: rw, station: L, surface: suction,  x_c: 0.45}}
+      - {id: rw_p04, name: "Rear wing L tap 4 (suction, x/c 0.75)",  meta: {element: rw, station: L, surface: suction,  x_c: 0.75}}
+      - {id: rw_p05, name: "Rear wing L tap 5 (pressure, x/c 0.10)", meta: {element: rw, station: L, surface: pressure, x_c: 0.10}}
+      - {id: rw_p06, name: "Rear wing L tap 6 (pressure, x/c 0.50)", meta: {element: rw, station: L, surface: pressure, x_c: 0.50}}
+      - {id: rw_p07, name: "Rear wing R tap 7 (suction, x/c 0.05)",  meta: {element: rw, station: R, surface: suction,  x_c: 0.05}}
+      - {id: rw_p08, name: "Rear wing R tap 8 (suction, x/c 0.20)",  meta: {element: rw, station: R, surface: suction,  x_c: 0.20}}
+      - {id: rw_p09, name: "Rear wing R tap 9 (suction, x/c 0.45)",  meta: {element: rw, station: R, surface: suction,  x_c: 0.45}}
+      - {id: rw_p10, name: "Rear wing R tap 10 (suction, x/c 0.75)", meta: {element: rw, station: R, surface: suction,  x_c: 0.75}}
+      - {id: rw_p11, name: "Rear wing R tap 11 (pressure, x/c 0.10)", meta: {element: rw, station: R, surface: pressure, x_c: 0.10}}
+      - {id: rw_p12, name: "Rear wing R tap 12 (pressure, x/c 0.50)", meta: {element: rw, station: R, surface: pressure, x_c: 0.50}}
+
+  # Undertray: x_c = fraction of the floor length (0 = floor leading edge, 1 = diffuser
+  # exit). Centreline taps C, plus one tap in each diffuser tunnel (y = +-0.30 m).
+  - title: Undertray / diffuser pressure taps
+    defaults: {system: aero, group: aero.taps, unit: Pa, rate_hz: 50, min: -3200, max: 3200,
+               noise: 1.5, resolution: 0.1, lag_s: 0.025}
+    channels:
+      - {id: ut_p01, name: "Undertray tap 1 (inlet, 0.05)",          meta: {element: ut, station: C, surface: floor, x_c: 0.05, y: 0.0}}
+      - {id: ut_p02, name: "Undertray tap 2 (0.20)",                 meta: {element: ut, station: C, surface: floor, x_c: 0.20, y: 0.0}}
+      - {id: ut_p03, name: "Undertray tap 3 (throat, 0.40)",         meta: {element: ut, station: C, surface: floor, x_c: 0.40, y: 0.0}}
+      - {id: ut_p04, name: "Undertray tap 4 (0.60)",                 meta: {element: ut, station: C, surface: floor, x_c: 0.60, y: 0.0}}
+      - {id: ut_p05, name: "Undertray tap 5 (diffuser, 0.80)",       meta: {element: ut, station: C, surface: floor, x_c: 0.80, y: 0.0}}
+      - {id: ut_p06, name: "Undertray tap 6 (diffuser exit, 0.97)",  meta: {element: ut, station: C, surface: floor, x_c: 0.97, y: 0.0}}
+      - {id: ut_p07, name: "Undertray tap 7 (left tunnel, 0.80)",    meta: {element: ut, station: L, surface: floor, x_c: 0.80, y: 0.30}}
+      - {id: ut_p08, name: "Undertray tap 8 (right tunnel, 0.80)",   meta: {element: ut, station: R, surface: floor, x_c: 0.80, y: -0.30}}
+
+  # ---- Air data ---------------------------------------------------------------------------
+  - title: Air data
+    defaults: {system: aero, group: aero.air}
+    channels:
+      # Pitot-static tube on the nose: total - static = dynamic pressure q = 1/2 rho v^2.
+      # 120 km/h -> q ~ 680 Pa. Short tube to the sensor -> 15 ms lag.
+      - {id: pitot_dp, name: "Pitot dynamic pressure", unit: Pa, rate_hz: 50, min: -500, max: 3200,
+         noise: 1.0, resolution: 0.1, lag_s: 0.015}
+      # BME280 ambient sensor in the shaded side pod (1 Hz is plenty for weather).
+      - {id: amb_temp, name: "Ambient temperature", unit: "°C", rate_hz: 1, min: -20, max: 60,
+         noise: 0.05, resolution: 0.01}
+      # Absolute pressure; the CAN frame uses an offset of 50 kPa, hence min 50000 Pa
+      # (~5.5 km altitude - more than enough for any race track).
+      - {id: amb_press, name: "Ambient pressure (absolute)", unit: Pa, rate_hz: 1, min: 50000, max: 110000,
+         noise: 2.0, resolution: 1.0}
+      - {id: amb_rh, name: "Ambient relative humidity", unit: "%", rate_hz: 1, min: 0, max: 100,
+         noise: 0.5, resolution: 0.5}
+      # 5-hole probe flow angles (yaw + = flow coming from the left of the car).
+      - {id: probe_yaw, name: "Flow yaw angle (5-hole probe)", unit: deg, rate_hz: 50, min: -30, max: 30,
+         noise: 0.3, resolution: 0.01, lag_s: 0.02, warn_lo: -10, warn_hi: 10, crit_lo: -20, crit_hi: 20}
+      - {id: probe_pitch, name: "Flow pitch angle (5-hole probe)", unit: deg, rate_hz: 50, min: -30, max: 30,
+         noise: 0.3, resolution: 0.01, lag_s: 0.02}
+
+  # ---- Ride height and wing loads ----------------------------------------------------------
+  - title: Ride height
+    defaults: {system: aero, group: aero.ride, unit: mm, rate_hz: 50, min: 0, max: 100,
+               noise: 0.15, resolution: 0.01}
+    channels:
+      # Laser triangulation sensors under the front bulkhead and in front of the rear axle.
+      # The front wing / floor stall below ~10 / 12 mm (ground effect collapses).
+      - {id: rh_front, name: "Ride height front (laser)", warn_lo: 15, crit_lo: 10}
+      - {id: rh_rear,  name: "Ride height rear (laser)",  warn_lo: 15, crit_lo: 12}
+
+  - title: Wing mount load cells
+    defaults: {system: aero, group: aero.loads, unit: N, rate_hz: 50, min: -500, max: 3000,
+               noise: 3.0, resolution: 1.0}
+    channels:
+      # Vertical load through the wing mounts, + = downward (downforce).
+      - {id: fw_load, name: "Front wing mount load (vertical, +down)"}
+      - {id: rw_load, name: "Rear wing mount load (vertical, +down)"}
+
+  # =======================================================================================
+  # VEHICLE DYNAMICS
+  # =======================================================================================
+
+  - title: Dampers
+    defaults: {system: vehicle, group: susp, unit: mm, rate_hz: 100, min: -40, max: 60,
+               noise: 0.05, resolution: 0.01}
+    channels:
+      # Linear potentiometers; compression from the static position, + = bump.
+      - {id: damper_fl, name: "Damper position FL (+bump)"}
+      - {id: damper_fr, name: "Damper position FR (+bump)"}
+      - {id: damper_rl, name: "Damper position RL (+bump)"}
+      - {id: damper_rr, name: "Damper position RR (+bump)"}
+
+  - title: Pushrod load cells
+    defaults: {system: vehicle, group: susp, unit: N, rate_hz: 100, min: -500, max: 8000,
+               noise: 8.0, resolution: 1.0}
+    channels:
+      # Strain-gauged pushrods, compression force. Static ~700 N per corner.
+      - {id: pushrod_fl, name: "Pushrod force FL (compression)"}
+      - {id: pushrod_fr, name: "Pushrod force FR (compression)"}
+      - {id: pushrod_rl, name: "Pushrod force RL (compression)"}
+      - {id: pushrod_rr, name: "Pushrod force RR (compression)"}
+
+  - title: IMU
+    defaults: {system: vehicle, group: imu, rate_hz: 100}
+    channels:
+      # MEMS IMU near the CG. Noise includes chassis vibration (motor, road).
+      - {id: ax, name: "Longitudinal acceleration (+forward)", unit: "m/s²", min: -50, max: 50, noise: 0.15, resolution: 0.002}
+      - {id: ay, name: "Lateral acceleration (+left)",         unit: "m/s²", min: -50, max: 50, noise: 0.15, resolution: 0.002}
+      - {id: az, name: "Vertical acceleration (+9.81 at rest)", unit: "m/s²", min: -50, max: 50, noise: 0.20, resolution: 0.002}
+      - {id: gx, name: "Roll rate",  unit: "deg/s", min: -250, max: 250, noise: 0.1, resolution: 0.01}
+      - {id: gy, name: "Pitch rate", unit: "deg/s", min: -250, max: 250, noise: 0.1, resolution: 0.01}
+      - {id: gz, name: "Yaw rate",   unit: "deg/s", min: -250, max: 250, noise: 0.1, resolution: 0.01}
+
+  - title: GPS
+    defaults: {system: vehicle, group: gps, rate_hz: 10}
+    channels:
+      # u-blox class receiver at 10 Hz. Short-term position noise ~0.3 m (3e-6 deg).
+      - {id: gps_lat, name: "GPS latitude",  unit: deg, min: -90,  max: 90,  noise: 3.0e-6, resolution: 1.0e-7}
+      - {id: gps_lon, name: "GPS longitude", unit: deg, min: -180, max: 180, noise: 3.0e-6, resolution: 1.0e-7}
+      - {id: gps_speed, name: "GPS ground speed", unit: "m/s", min: 0, max: 60, noise: 0.05, resolution: 0.01}
+      - {id: gps_heading, name: "GPS heading (0 = north, clockwise)", unit: deg, min: 0, max: 360, noise: 0.3, resolution: 0.01}
+
+  - title: Wheel speeds
+    defaults: {system: vehicle, group: wheels, unit: "m/s", rate_hz: 50, min: 0, max: 60,
+               noise: 0.03, resolution: 0.01}
+    channels:
+      # Hall-effect sensors on the brake discs, converted to tyre surface speed.
+      - {id: ws_fl, name: "Wheel speed FL"}
+      - {id: ws_fr, name: "Wheel speed FR"}
+      - {id: ws_rl, name: "Wheel speed RL"}
+      - {id: ws_rr, name: "Wheel speed RR"}
+
+  - title: Driver inputs
+    defaults: {system: vehicle, group: driver, rate_hz: 50}
+    channels:
+      - {id: steer, name: "Steering wheel angle (+left)", unit: deg, min: -120, max: 120, noise: 0.1, resolution: 0.01}
+      # Two independent accelerator pedal position sensors (FS rules: plausibility check,
+      # > 10 percentage points disagreement for > 100 ms cuts the torque).
+      - {id: apps1, name: "Accelerator pedal sensor 1", unit: "%", min: 0, max: 100, noise: 0.2, resolution: 0.5}
+      - {id: apps2, name: "Accelerator pedal sensor 2", unit: "%", min: 0, max: 100, noise: 0.2, resolution: 0.5}
+      - {id: brake_press_f, name: "Brake pressure front", unit: bar, min: 0, max: 120, noise: 0.05, resolution: 0.01}
+      - {id: brake_press_r, name: "Brake pressure rear",  unit: bar, min: 0, max: 120, noise: 0.05, resolution: 0.01}
+
+  # =======================================================================================
+  # SYSTEM 2 - EV POWERTRAIN SENSING
+  # =======================================================================================
+
+  - title: Motor
+    defaults: {system: powertrain, group: motor}
+    channels:
+      - {id: mot_speed, name: "Motor speed", unit: rpm, rate_hz: 100, min: -500, max: 7000, noise: 2.0, resolution: 1.0}
+      - {id: mot_torque, name: "Motor torque (inverter estimate)", unit: Nm, rate_hz: 100, min: -150, max: 240, noise: 0.5, resolution: 0.1}
+      # Winding thermistor (PT1000 in the end winding). Derating starts at 110 °C.
+      - {id: mot_winding_temp, name: "Motor winding temperature", unit: "°C", rate_hz: 10, min: -20, max: 180,
+         noise: 0.3, resolution: 0.1, lag_s: 1.0, warn_hi: 110, crit_hi: 130}
+
+  - title: Inverter
+    defaults: {system: powertrain, group: inverter}
+    channels:
+      # DC link: 140 cells in series -> 392 V (2.8 V/cell) ... 588 V (4.2 V/cell).
+      - {id: inv_dc_voltage, name: "Inverter DC-link voltage", unit: V, rate_hz: 100, min: 0, max: 650,
+         noise: 0.2, resolution: 0.1, warn_lo: 420, crit_lo: 392}
+      - {id: inv_dc_current, name: "Inverter DC current (+ from pack)", unit: A, rate_hz: 100, min: -150, max: 300,
+         noise: 0.3, resolution: 0.1}
+      - {id: inv_phase_current, name: "Motor phase current (RMS)", unit: A, rate_hz: 100, min: 0, max: 400,
+         noise: 0.5, resolution: 0.1}
+      # IGBT junction estimate from the module NTC; derating starts at 75 °C, trips at 90 °C.
+      - {id: inv_igbt_temp, name: "Inverter IGBT temperature", unit: "°C", rate_hz: 10, min: -20, max: 150,
+         noise: 0.2, resolution: 0.1, lag_s: 0.5, warn_hi: 75, crit_hi: 90}
+      - {id: inv_state, name: "Inverter state", unit: enum, rate_hz: 10, min: 0, max: 5, resolution: 1,
+         meta: {enum: {0: "off", 1: "precharge", 2: "ready", 3: "driving", 4: "derating", 5: "fault"}}}
+      - {id: inv_fault, name: "Inverter fault code", unit: enum, rate_hz: 10, min: 0, max: 4, resolution: 1, crit_hi: 0.5,
+         meta: {enum: {0: "none", 1: "overtemp", 2: "overcurrent", 3: "DC undervoltage", 4: "comms"}}}
+
+  - title: Accumulator (pack level)
+    defaults: {system: powertrain, group: bms.pack}
+    channels:
+      - {id: pack_voltage, name: "Pack voltage", unit: V, rate_hz: 100, min: 0, max: 650, noise: 0.2, resolution: 0.1,
+         warn_lo: 420, crit_lo: 392, warn_hi: 581, crit_hi: 588}
+      # Shunt current sensor (IVT-S class) - the input of the Coulomb counters.
+      - {id: pack_current, name: "Pack current (+ discharge)", unit: A, rate_hz: 100, min: -150, max: 300,
+         noise: 0.3, resolution: 0.1}
+      # The BMS's own SoC estimate (Coulomb counting), coarse 0.5 % steps.
+      - {id: bms_soc, name: "BMS state of charge", unit: "%", rate_hz: 10, min: 0, max: 100, resolution: 0.5,
+         warn_lo: 15, crit_lo: 5}
+      - {id: bms_state, name: "BMS state", unit: enum, rate_hz: 10, min: 0, max: 3, resolution: 1,
+         meta: {enum: {0: "idle", 1: "precharge", 2: "TS active", 3: "fault"}}}
+      - {id: bms_fault, name: "BMS fault code", unit: enum, rate_hz: 10, min: 0, max: 4, resolution: 1, crit_hi: 0.5,
+         meta: {enum: {0: "none", 1: "cell overvoltage", 2: "cell undervoltage", 3: "cell overtemp", 4: "comms"}}}
+
+  # 140 series elements ("cells", each 4 x 21700 in parallel), 5 segments x 28.
+  # Cell monitor ICs (LTC6811 class): 0-5 V input, ~1 mV resolution, ~2 mV noise.
+  # NMC limits: 2.8 V absolute minimum, 4.2 V absolute maximum.
+  - title: Cell voltages
+    defaults: {system: powertrain, group: bms.cell_v, unit: V, rate_hz: 10, min: 0, max: 5,
+               noise: 0.002, resolution: 0.001, warn_lo: 3.0, crit_lo: 2.8, warn_hi: 4.15, crit_hi: 4.2}
+    channels:
+      - {id: "cell_v_{i:03d}", count: 140, start: 0, vars: {seg: "i // 28"},
+         name: "Cell {i:03d} voltage (segment {seg})", meta: {index: "{i}", segment: "{seg}"}}
+
+  # 60 NTC thermistors, 12 per segment, each between 2-3 cells (mapping:
+  # aerovolt/core/physics.py temp_sensor_cells(j)). 0.1 °C ADC resolution, 0.2 °C noise;
+  # the thermistor is glued to the cell can -> ~2 s thermal lag. FS rules: cells must stay
+  # below 60 °C.
+  - title: Cell temperatures
+    defaults: {system: powertrain, group: bms.cell_t, unit: "°C", rate_hz: 2, min: -20, max: 100,
+               noise: 0.2, resolution: 0.1, lag_s: 2.0, warn_hi: 55, crit_hi: 60}
+    channels:
+      - {id: "cell_t_{i:02d}", count: 60, start: 0, vars: {seg: "i // 12"},
+         name: "Cell temperature sensor {i:02d} (segment {seg})", meta: {index: "{i}", segment: "{seg}"}}
+
+  - title: Cooling loop
+    defaults: {system: powertrain, group: cooling, rate_hz: 10}
+    channels:
+      # Water-glycol loop: radiator -> pump -> inverter -> motor -> radiator.
+      # cool_temp_in = into the inverter (after the radiator), cool_temp_out = out of the motor.
+      - {id: cool_temp_in, name: "Coolant temperature in (after radiator)", unit: "°C", min: -20, max: 120,
+         noise: 0.1, resolution: 0.1, lag_s: 1.0, warn_hi: 55, crit_hi: 65}
+      - {id: cool_temp_out, name: "Coolant temperature out (after motor)", unit: "°C", min: -20, max: 120,
+         noise: 0.1, resolution: 0.1, lag_s: 1.0, warn_hi: 55, crit_hi: 65}
+      # Turbine flow meter; nominal pump flow 8 L/min.
+      - {id: cool_flow, name: "Coolant flow", unit: "L/min", min: 0, max: 20, noise: 0.05, resolution: 0.01,
+         lag_s: 0.3, warn_lo: 4, crit_lo: 2}
+      - {id: pump_duty, name: "Pump duty cycle", unit: "%", min: 0, max: 100, resolution: 0.5}
+      - {id: fan_duty, name: "Radiator fan duty cycle", unit: "%", min: 0, max: 100, resolution: 0.5}
+
+  # Shutdown circuit (SDC) and tractive-system safety. Flags: 1 = OK / closed.
+  - title: Safety chain
+    defaults: {system: powertrain, group: safety, unit: bool, rate_hz: 20, min: 0, max: 1, resolution: 1}
+    channels:
+      - {id: sdc_closed, name: "Shutdown circuit closed", crit_lo: 0.5}
+      - {id: imd_ok, name: "Insulation monitoring device OK", crit_lo: 0.5}
+      - {id: ams_ok, name: "Accumulator management system OK", crit_lo: 0.5}
+      - {id: bspd_ok, name: "Brake system plausibility device OK", crit_lo: 0.5}
+      - {id: apps_plaus_ok, name: "APPS plausibility OK", crit_lo: 0.5}
+      - {id: air_pos_closed, name: "AIR+ (positive accumulator isolation relay) closed"}
+      - {id: air_neg_closed, name: "AIR- (negative accumulator isolation relay) closed"}
+      - {id: precharge_done, name: "Precharge complete"}
+      - {id: tsal_state, name: "TSAL state", unit: enum, min: 0, max: 1,
+         meta: {enum: {0: "LV (green)", 1: "HV active (red)"}}}
+      # Insulation resistance HV <-> chassis. FS rules: the IMD must trip below
+      # 500 ohm/V x 588 V = 294 kOhm. Healthy car: ~2000 kOhm.
+      - {id: imd_iso_kohm, name: "Insulation resistance", unit: "kΩ", min: 0, max: 10000, noise: 5.0,
+         resolution: 1.0, warn_lo: 500, crit_lo: 300}
+
+  # =======================================================================================
+  # SIMULATOR TRUTH (only produced by the simulator; shows estimation accuracy)
+  # =======================================================================================
+  - title: Simulator truth
+    defaults: {system: truth, group: truth, rate_hz: 20}
+    channels:
+      - {id: truth_speed, name: "True ground speed", unit: "m/s", min: 0, max: 60}
+      - {id: truth_downforce_f, name: "True front axle downforce", unit: N, min: -500, max: 5000}
+      - {id: truth_downforce_r, name: "True rear axle downforce", unit: N, min: -500, max: 5000}
+      - {id: truth_drag, name: "True aerodynamic drag", unit: N, min: -200, max: 3000}
+      - {id: truth_cla, name: "True CL·A", unit: "m²", min: -1, max: 8}
+      - {id: truth_cda, name: "True CD·A", unit: "m²", min: 0, max: 4}
+      - {id: truth_soc, name: "True state of charge", unit: "%", min: 0, max: 100}
+      - {id: truth_s, name: "True distance along the lap", unit: m, min: 0, max: 5000}
+      - {id: truth_lap, name: "True lap number", unit: "-", min: 0, max: 1000}
+      - {id: truth_wind_speed, name: "True wind speed", unit: "m/s", min: 0, max: 40}
+      - {id: truth_wind_dir, name: "True wind direction (from, 0 = north)", unit: deg, min: 0, max: 360}
+
+  # =======================================================================================
+  # DERIVED CHANNELS (computed by aerovolt/analysis/processor.py at process_hz)
+  # =======================================================================================
+  - title: Aero - air data
+    defaults: {system: calc, group: calc.aero, rate_hz: 20}
+    channels:
+      - {id: calc_rho, name: "Air density (moist air)", unit: "kg/m³", min: 0.9, max: 1.4, resolution: 0.0001}
+      - {id: calc_q, name: "Dynamic pressure", unit: Pa, min: 0, max: 3200, resolution: 0.1}
+      - {id: calc_airspeed, name: "Airspeed", unit: "m/s", min: 0, max: 70, resolution: 0.01}
+      - {id: calc_yaw, name: "Flow yaw angle", unit: deg, min: -30, max: 30, resolution: 0.01,
+         warn_lo: -10, warn_hi: 10, crit_lo: -20, crit_hi: 20}
+
+  - title: Aero - pressure coefficients
+    defaults: {system: calc, group: calc.cp, unit: "-", rate_hz: 20, min: -6, max: 1.5, resolution: 0.001}
+    channels:
+      - {id: "calc_cp_fw_p{i:02d}", count: 12, start: 1, name: "Cp front wing tap {i}", meta: {tap: "fw_p{i:02d}"}}
+      - {id: "calc_cp_rw_p{i:02d}", count: 12, start: 1, name: "Cp rear wing tap {i}", meta: {tap: "rw_p{i:02d}"}}
+      - {id: "calc_cp_ut_p{i:02d}", count: 8, start: 1, name: "Cp undertray tap {i}", meta: {tap: "ut_p{i:02d}"}}
+
+  - title: Aero - forces and coefficients
+    defaults: {system: calc, group: calc.aero, rate_hz: 20}
+    channels:
+      # Section Cl = integral of (Cp_pressure - Cp_suction) d(x/c), + = downforce.
+      - {id: calc_cl_fw_l, name: "Front wing L section Cl", unit: "-", min: -1, max: 5, resolution: 0.001}
+      - {id: calc_cl_fw_r, name: "Front wing R section Cl", unit: "-", min: -1, max: 5, resolution: 0.001}
+      - {id: calc_cl_rw_l, name: "Rear wing L section Cl", unit: "-", min: -1, max: 5, resolution: 0.001}
+      - {id: calc_cl_rw_r, name: "Rear wing R section Cl", unit: "-", min: -1, max: 5, resolution: 0.001}
+      - {id: calc_cp_ut_mean, name: "Undertray mean Cp", unit: "-", min: -4, max: 1, resolution: 0.001}
+      - {id: calc_downforce_f, name: "Front axle downforce (pushrods)", unit: N, min: -500, max: 5000, resolution: 1}
+      - {id: calc_downforce_r, name: "Rear axle downforce (pushrods)", unit: N, min: -500, max: 5000, resolution: 1}
+      - {id: calc_downforce, name: "Total downforce (pushrods)", unit: N, min: -500, max: 8000, resolution: 1}
+      - {id: calc_aero_balance, name: "Aero balance (% front)", unit: "%", min: 0, max: 100, resolution: 0.1,
+         warn_lo: 38, warn_hi: 52}
+      - {id: calc_cla, name: "CL·A (downforce / q)", unit: "m²", min: -1, max: 8, resolution: 0.001}
+      - {id: calc_cda, name: "CD·A (drag / q)", unit: "m²", min: 0, max: 4, resolution: 0.001}
+      - {id: calc_drag, name: "Aerodynamic drag (force balance)", unit: N, min: -200, max: 3000, resolution: 1}
+      - {id: calc_ld, name: "Lift-to-drag ratio L/D", unit: "-", min: -2, max: 6, resolution: 0.01}
+      # (Cl_L - Cl_R) / mean * 100: a damaged left flap gives a large positive/negative value.
+      - {id: calc_fw_asym, name: "Front wing L/R asymmetry", unit: "%", min: -100, max: 100, resolution: 0.1,
+         warn_lo: -15, warn_hi: 15, crit_lo: -30, crit_hi: 30}
+
+  - title: Powertrain - power and cells
+    defaults: {system: calc, group: calc.powertrain, rate_hz: 20}
+    channels:
+      - {id: calc_pack_power, name: "Pack power (+ discharge)", unit: kW, min: -40, max: 100, resolution: 0.01, warn_hi: 80}
+      - {id: calc_mot_power, name: "Motor mechanical power (T·ω)", unit: kW, min: -40, max: 100, resolution: 0.01}
+      - {id: calc_inv_eff, name: "Inverter + motor efficiency", unit: "%", min: 0, max: 100, resolution: 0.1}
+      - {id: calc_cell_v_min, name: "Lowest cell voltage", unit: V, min: 0, max: 5, resolution: 0.001, warn_lo: 3.0, crit_lo: 2.8}
+      - {id: calc_cell_v_max, name: "Highest cell voltage", unit: V, min: 0, max: 5, resolution: 0.001, warn_hi: 4.15, crit_hi: 4.2}
+      - {id: calc_cell_v_delta, name: "Cell voltage spread (max - min)", unit: mV, min: 0, max: 1000, resolution: 1,
+         warn_hi: 50, crit_hi: 100}
+      - {id: calc_cell_v_min_idx, name: "Index of the lowest cell", unit: "-", min: 0, max: 139, resolution: 1}
+      - {id: calc_cell_t_max, name: "Hottest cell temperature", unit: "°C", min: -20, max: 100, resolution: 0.1,
+         warn_hi: 55, crit_hi: 60}
+      - {id: calc_cell_t_max_idx, name: "Index of the hottest temperature sensor", unit: "-", min: 0, max: 59, resolution: 1}
+      - {id: calc_cell_t_mean, name: "Mean cell temperature", unit: "°C", min: -20, max: 100, resolution: 0.1}
+      - {id: calc_cool_heat, name: "Heat rejected by the coolant (m·cp·ΔT)", unit: kW, min: -5, max: 30, resolution: 0.01}
+
+  - title: Powertrain - state of charge and energy
+    defaults: {system: calc, group: calc.energy, rate_hz: 20}
+    channels:
+      - {id: calc_soc_cc, name: "SoC (Coulomb counting)", unit: "%", min: 0, max: 100, resolution: 0.01, warn_lo: 15, crit_lo: 5}
+      - {id: calc_soc_ekf, name: "SoC (extended Kalman filter)", unit: "%", min: 0, max: 100, resolution: 0.01, warn_lo: 15, crit_lo: 5}
+      - {id: calc_energy_used, name: "Energy used (discharge)", unit: kWh, min: 0, max: 10, resolution: 0.0001}
+      - {id: calc_energy_regen, name: "Energy recovered (regen)", unit: kWh, min: 0, max: 5, resolution: 0.0001}
+      - {id: calc_laps_remaining, name: "Laps possible with remaining energy", unit: "-", min: 0, max: 100, resolution: 0.1}
+      - {id: calc_laps_needed, name: "Laps still needed to finish", unit: "-", min: 0, max: 100, resolution: 1}
+      - {id: calc_power_limit_rec, name: "Recommended power limit", unit: kW, min: 0, max: 80, resolution: 1}
+
+  - title: Session
+    defaults: {system: calc, group: calc.session, rate_hz: 20}
+    channels:
+      - {id: calc_lap, name: "Current lap", unit: "-", min: 0, max: 1000, resolution: 1}
+      - {id: calc_lap_time, name: "Current lap time", unit: s, min: 0, max: 600, resolution: 0.001}
+      - {id: calc_lap_dist, name: "Distance in current lap", unit: m, min: 0, max: 5000, resolution: 0.1}

@@ -1,0 +1,318 @@
+# =========================================================================================
+# AeroVolt alert rules (SPEC section 6.5) - evaluated by aerovolt/analysis/alerts.py
+# =========================================================================================
+#
+# Every rule answers each tick: condition present / absent / cannot judge (-> hold state).
+#   for_s        seconds the condition must hold before the alert is RAISED (debounce)
+#   clear_for_s  seconds the condition must be absent before the alert is CLEARED
+#   clear_value  (threshold) / clear_diff (plausibility): hysteresis - the alert clears only
+#                once the value is comfortably back, so it cannot chatter around the limit
+#   when         gates; if any gate is not met the rule is not judged (state held). Aero
+#                rules are only judged in "steady" flow (aux_aero_steady: pitot q > 150 Pa,
+#                flow yaw < 8 deg) because aero coefficients at low speed or in a crosswind
+#                are not comparable with the learned baseline.
+#   detail       text template over channel values ({calc_fw_asym:+.0f}); custom checks
+#                write their own detail naming the evidence. Missing values print "n/a".
+#   "vehicle:<path>"  reuses a number from config/vehicle.yaml (one place per limit).
+#
+# Severity: info (worth knowing) | warn (act at the next opportunity) | critical (act now).
+#
+# Tuning assumptions (normal 22-lap endurance must stay silent):
+#   - cell temperature spread <= ~3 degC, cell voltage spread <= ~25 mV under load
+#   - aero balance within +-3 pts of its baseline, front-wing L/R asymmetry within +-8 %
+#   - Coulomb counting vs EKF within 3 % SoC, pack vs inverter current within ~0.5 A
+#   - motor winding <= 105 degC, IGBT <= ~70 degC, coolant flow ~8 L/min with the pump on
+# and every SPEC 5.5 fault must be caught within about one lap (60-90 s).
+#
+# Auxiliary values provided by the processor for gates and texts (not catalogue channels):
+#   aux_aero_steady (1/0), aux_yaw_abs_lp (deg), aux_abs_ax (m/s^2), aux_airspeed_pitot (m/s),
+#   aux_q_pitot (Pa), aux_q_source (pitot|gps|none), aux_cl_fw_l / aux_cl_fw_r (filtered),
+#   aux_cell_t_max_id / _label, aux_cell_v_min_id / _label, aux_apps_max (%).
+# =========================================================================================
+
+defaults:
+  for_s: 2.0
+  clear_for_s: 5.0
+
+rules:
+
+  # =======================================================================================
+  # SYSTEM 1 - AERO
+  # =======================================================================================
+
+  # Damaged left front-wing flap: L station suction -55 % -> section Cl roughly halves,
+  # asymmetry ~ -50 %. Normal running (incl. yaw < 8 deg) stays within +-8 %.
+  - id: aero_fw_asymmetry
+    type: threshold
+    severity: warn
+    title: Front wing left/right asymmetry
+    channel: calc_fw_asym
+    abs: true
+    op: ">"
+    value: 20          # % difference between the L and R station section Cl
+    clear_value: 12
+    for_s: 3
+    clear_for_s: 10
+    when:
+      - {channel: aux_aero_steady, op: ">=", value: 1}
+    channels: [calc_fw_asym, calc_cl_fw_l, calc_cl_fw_r]
+    detail: "FW left section Cl {aux_cl_fw_l:.2f} vs right {aux_cl_fw_r:.2f} ({calc_fw_asym:+.0f} %)"
+
+  # Front CL·A -25 % moves the balance ~7 pts rearwards; rear CL·A -40 % ~13 pts forwards.
+  # Baseline = learned balance of this run (anomaly.AeroHealthMonitor). Heavy braking is
+  # excluded (dive dynamics make the pushrod split unreliable).
+  - id: aero_balance_shift
+    type: custom
+    check: balance_shift
+    severity: warn
+    title: Aero balance shift
+    params: {shift_pts: 4.0, clear_pts: 2.5}
+    for_s: 5
+    clear_for_s: 15
+    when:
+      - {channel: aux_aero_steady, op: ">=", value: 1}
+      - {channel: aux_abs_ax, op: "<", value: 12.0}
+
+  # Rear-wing flap stall: aft suction taps collapse, section Cl -40 %. A single leaking
+  # tap moves one station's Cl by < 15 % - and is excluded from the integration once the
+  # anomaly detector classifies it as a sensor fault.
+  - id: aero_rw_suction_loss
+    type: custom
+    check: rw_suction_loss
+    severity: warn
+    title: Rear wing suction loss
+    params: {drop_pct: 20.0, cluster_drop_pct: 10.0, clear_pct: 12.0}
+    for_s: 3
+    clear_for_s: 15
+    when:
+      - {channel: aux_aero_steady, op: ">=", value: 1}
+
+  # Floor too low (broken spring/packer): the diffuser stalls at speed, undertray suction
+  # roughly halves. Long clear time: a bottoming floor stalls on every straight.
+  - id: aero_ut_stall
+    type: custom
+    check: ut_stall
+    severity: critical
+    title: Undertray stall
+    params: {loss_pct: 30.0, clear_pct: 15.0}
+    for_s: 2
+    clear_for_s: 30
+    when:
+      - {channel: aux_aero_steady, op: ">=", value: 1}
+      - {channel: aux_abs_ax, op: "<", value: 12.0}
+
+  # Flow yaw from the 5-hole probe. Normal: a few degrees (3 m/s wind at > 15 m/s gives
+  # < 11 deg worst case); a 12 m/s side gust gives 20-30 deg. Info only: the aero numbers
+  # are unreliable meanwhile (and the aero rules hold their state).
+  - id: aero_high_yaw
+    type: threshold
+    severity: info
+    title: High flow yaw (crosswind)
+    channel: aux_yaw_abs_lp
+    op: ">"
+    value: 12          # deg, low-pass filtered |probe_yaw|
+    clear_value: 8
+    for_s: 1.5
+    clear_for_s: 5
+    when:
+      - {channel: calc_q, op: ">", value: 150}
+    channels: [calc_yaw, probe_yaw]
+    detail: "Flow yaw {calc_yaw:+.1f} deg at {calc_airspeed:.1f} m/s airspeed - crosswind; aero coefficients unreliable"
+
+  # Pitot airspeed vs GPS ground speed: they differ only by the wind (+-3 m/s plus gusts).
+  # A blocked pitot reads ~0 Pa. While active, q falls back to 1/2 rho v_gps^2.
+  - id: sensor_pitot_implausible
+    type: plausibility
+    severity: warn
+    title: Pitot implausible vs GPS speed
+    a: aux_airspeed_pitot
+    b: gps_speed
+    max_diff: 8.0      # m/s
+    clear_diff: 3.0
+    min_value: 12.0    # judge only above 12 m/s ground speed
+    for_s: 3
+    clear_for_s: 5
+    channels: [pitot_dp, gps_speed, calc_airspeed]
+    detail: "Pitot airspeed {aux_airspeed_pitot:.1f} m/s vs GPS speed {gps_speed:.1f} m/s (pitot {pitot_dp:.0f} Pa) - blocked or leaking pitot? q now from GPS speed"
+
+  # One tap deviating while its neighbours are normal (anomaly.TapAnomalyDetector has its
+  # own 2 s persistence, so no extra debounce here).
+  - id: sensor_tap_anomaly
+    type: custom
+    check: tap_anomaly
+    severity: warn
+    title: Pressure tap anomaly (sensor fault)
+    for_s: 0
+    clear_for_s: 5
+
+  # A raw channel that was live stopped updating (stale = no sample for max(0.5, 5/rate) s)
+  # while the rest of the data keeps flowing.
+  - id: sensor_stale
+    type: custom
+    check: stale_channels
+    severity: warn
+    title: Sensor stale
+    params: {max_listed: 6}
+    for_s: 1.0
+    clear_for_s: 2.0
+
+  # =======================================================================================
+  # SYSTEM 2 - POWERTRAIN
+  # =======================================================================================
+
+  # Hot sensor vs pack median (robust z). Normal spread <= ~3 degC (max - min), i.e.
+  # <= ~2 degC from the median. Cell 47 with 4x R0 heats ~3x faster than its neighbours.
+  - id: bms_cell_temp_outlier
+    type: custom
+    check: cell_temp_outlier
+    severity: warn
+    title: Cell temperature outlier
+    params: {min_abs_c: 3.0, clear_abs_c: 2.0, z: 4.0, sigma_floor_c: 0.3}
+    for_s: 5
+    clear_for_s: 15
+
+  # FS rules: cells must stay below 60 degC (the AMS opens the shutdown circuit there).
+  # Warn the driver 2 degC earlier.
+  - id: bms_cell_overtemp
+    type: threshold
+    severity: critical
+    title: Cell over-temperature
+    channel: calc_cell_t_max
+    op: ">"
+    value: 58.0
+    clear_value: 55.0
+    for_s: 2
+    clear_for_s: 10
+    channels: [calc_cell_t_max, "{aux_cell_t_max_id}"]
+    detail: "Hottest sensor {aux_cell_t_max_label} at {calc_cell_t_max:.1f} °C (pack mean {calc_cell_t_mean:.1f} °C, FS limit 60 °C)"
+
+  # Per-cell zero-current offset (weak cell: -10 mV per lap at 80 % capacity) and
+  # internal-resistance deviation (bad weld). Normal: offsets within a few mV, R0 +-5 %.
+  - id: bms_cell_voltage_outlier
+    type: custom
+    check: cell_voltage_outlier
+    severity: warn
+    title: Cell voltage outlier
+    params: {offset_mv: 8.0, resistance_mohm: 1.0, z: 5.0,
+             offset_sigma_floor_mv: 1.0, resistance_sigma_floor_mohm: 0.1}
+    for_s: 5
+    clear_for_s: 30
+
+  # Lowest cell under 2.9 V (absolute minimum 2.8 V, vehicle accumulator.cell.v_min):
+  # at the end of the usable SoC window the voltage sags towards this under full power.
+  - id: bms_cell_undervoltage
+    type: threshold
+    severity: critical
+    title: Cell under-voltage
+    channel: calc_cell_v_min
+    op: "<"
+    value: 2.9
+    clear_value: 3.1
+    for_s: 1.0
+    clear_for_s: 10
+    channels: [calc_cell_v_min, "{aux_cell_v_min_id}"]
+    detail: "Lowest {aux_cell_v_min_label} at {calc_cell_v_min:.3f} V under {pack_current:.0f} A (limit 2.8 V) - reduce power"
+
+  # Coulomb counting vs EKF > 4 % SoC, or the CC's current sensor disagrees with the
+  # inverter's DC current by > 1.5 A on average (a +3 A offset is seen within ~40 s).
+  - id: bms_soc_divergence
+    type: custom
+    check: soc_divergence
+    severity: warn
+    title: SoC estimators diverge
+    params: {max_diff_pct: 4.0, current_mismatch_a: 1.5}
+    for_s: 20
+    clear_for_s: 30
+
+  # Pump commanded but no flow (failed pump, air lock, kinked hose).
+  - id: cooling_no_flow
+    type: threshold
+    severity: critical
+    title: No coolant flow
+    channel: cool_flow
+    op: "<"
+    value: 1.0         # L/min (nominal 8 L/min)
+    clear_value: 2.0
+    for_s: 2
+    clear_for_s: 5
+    when:
+      - {channel: pump_duty, op: ">", value: 20, if_missing: true}
+    channels: [cool_flow, pump_duty, cool_temp_out]
+    detail: "Coolant flow {cool_flow:.1f} L/min with the pump at {pump_duty:.0f} % duty (coolant out {cool_temp_out:.1f} °C)"
+
+  # Motor winding at the inverter's derating temperature (normal endurance: 70-105 degC).
+  - id: motor_temp_high
+    type: threshold
+    severity: warn
+    title: Motor winding temperature high
+    channel: mot_winding_temp
+    op: ">"
+    value: "vehicle:powertrain.motor.derate_start_c"
+    clear_value: 105.0
+    for_s: 2
+    clear_for_s: 10
+    channels: [mot_winding_temp, cool_temp_out, cool_flow]
+    detail: "Motor winding {mot_winding_temp:.1f} °C - torque derating active (coolant out {cool_temp_out:.1f} °C, flow {cool_flow:.1f} L/min)"
+
+  - id: inverter_temp_high
+    type: threshold
+    severity: warn
+    title: Inverter temperature high
+    channel: inv_igbt_temp
+    op: ">"
+    value: "vehicle:powertrain.inverter.derate_start_c"
+    clear_value: 70.0
+    for_s: 2
+    clear_for_s: 10
+    channels: [inv_igbt_temp, cool_temp_in]
+    detail: "Inverter IGBT {inv_igbt_temp:.1f} °C - derating starts at 75 °C, shutdown at 90 °C (coolant in {cool_temp_in:.1f} °C)"
+
+  # FS rules: the IMD must trip below 500 ohm/V x 588 V = 294 kOhm of insulation resistance.
+  - id: safety_imd_trip
+    type: threshold
+    severity: critical
+    title: IMD tripped (insulation fault)
+    channel: imd_ok
+    op: "<"
+    value: 0.5
+    for_s: 0.2
+    clear_for_s: 2
+    channels: [imd_ok, imd_iso_kohm]
+    detail: "IMD tripped: insulation resistance {imd_iso_kohm:.0f} kOhm (healthy ~2000, trip below 294 kOhm = 500 ohm/V x 588 V)"
+
+  - id: safety_sdc_open
+    type: custom
+    check: sdc_open
+    severity: critical
+    title: Shutdown circuit open
+    for_s: 0.2
+    clear_for_s: 2
+
+  # FS rule: the two pedal sensors may disagree by at most 10 percentage points for at most
+  # 100 ms. Judged only while a pedal is pressed (otherwise a sensor stuck at 0 % is
+  # invisible and the alert would chatter at every lift-off).
+  - id: safety_apps_implausible
+    type: plausibility
+    severity: critical
+    title: APPS implausibility
+    a: apps1
+    b: apps2
+    max_diff: 10.0
+    clear_diff: 5.0
+    min_value: -1.0
+    for_s: 0.1
+    clear_for_s: 5
+    when:
+      - {channel: aux_apps_max, op: ">", value: 5.0}
+    channels: [apps1, apps2, apps_plaus_ok]
+    detail: "Pedal sensors disagree: APPS1 {apps1:.1f} % vs APPS2 {apps2:.1f} % (FS limit 10 pts for 100 ms) - torque cut"
+
+  # The endurance strategy predicts the car will not finish (with the reserve) at the power
+  # limit it runs now. Expected at 80 kW in a full endurance (SPEC 5.4: 95-110 % of usable).
+  - id: energy_short
+    type: custom
+    check: energy_short
+    severity: warn
+    title: "Energy short: will not finish at this power limit"
+    for_s: 0
+    clear_for_s: 0

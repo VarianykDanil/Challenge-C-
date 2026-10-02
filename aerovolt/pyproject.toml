@@ -1,0 +1,20 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "aerovolt"
+version = "1.0.0"
+description = "Telemetry and analysis platform for a Formula Student electric race car (aero + EV powertrain)."
+requires-python = ">=3.10"
+dependencies = ["numpy>=1.24", "pyyaml>=6.0", "aiohttp>=3.9"]
+
+[project.optional-dependencies]
+hw = ["python-can>=4.3", "cantools>=39.0", "pyserial>=3.5"]
+dev = ["pytest>=7.4"]
+
+[tool.setuptools.packages.find]
+include = ["aerovolt*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

@@ -1,0 +1,8 @@
+# Hardware dependencies: only needed to talk to real sensors.
+#   python-can : CAN bus access (socketcan, slcan, PCAN, Kvaser, virtual bus)
+#   cantools   : DBC parsing and signal encode/decode (can/aerovolt.dbc)
+#   pyserial   : USB-serial sensor nodes ($AV line protocol)
+# Install with:  pip install -r requirements-hw.txt
+python-can>=4.3
+cantools>=39.0
+pyserial>=3.5
