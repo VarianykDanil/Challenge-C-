@@ -44,8 +44,11 @@ Filter equations (standard EKF, Joseph-form covariance update for numerical safe
     update:   S  = H P- H^T + R,     K  = P- H^T / S
               x  = x- + K (y - h(x-)),   P = (I - K H) P- (I - K H)^T + K R K^T
 
-The SoC state is clamped to 0..1 after each update: outside the OCV table the curve is
-flat but ``dOCV/dSoC`` is not, and an unclamped estimate of a full pack could diverge.
+Model and Jacobian must agree everywhere, including just outside the OCV table (a full pack
+plus measurement noise briefly "looks" like 100.2 %): beyond the table ends the OCV is
+extrapolated *linearly* with the end slope that ``docv_dsoc`` returns. (Clamping the SoC
+state to 1.0 instead would discard corrections the covariance believes were applied - the
+filter then diverges through V_rc.) Users clamp the reported value to 0..100 %.
 
 Tuning (``Qn``, ``R``), validated in ``tests/test_analysis_soc.py`` on synthetic data
 from :class:`physics.CellModel`:
@@ -165,9 +168,18 @@ class SocEkf:
         """1-sigma uncertainty of the SoC estimate (fraction)."""
         return float(math.sqrt(max(self.P[0, 0], 0.0)))
 
+    def open_circuit_voltage(self, soc: float) -> float:
+        """OCV of the table, extrapolated linearly (with the end slope) beyond its ends."""
+        lo, hi = self.table.soc[0], self.table.soc[-1]
+        edge = min(max(soc, lo), hi)
+        v = float(physics.ocv(edge, self.table))
+        if soc != edge:
+            v += float(physics.docv_dsoc(edge, self.table)) * (soc - edge)
+        return v
+
     def predicted_voltage(self, current_a: float) -> float:
         """Model terminal voltage ``h(x) = OCV(SoC) - I R0 - V_rc`` for the current state."""
-        return float(physics.ocv(self.x[0], self.table)) - current_a * self.params.group_r0 - self.x[1]
+        return self.open_circuit_voltage(self.x[0]) - current_a * self.params.group_r0 - self.x[1]
 
     def predict(self, current_a: float, dt: float) -> None:
         """Time update: propagate the state with the current, grow the covariance."""
@@ -190,10 +202,6 @@ class SocEkf:
         self.x = self.x + K * self.innovation
         ikh = np.eye(2) - np.outer(K, H)
         self.P = ikh @ self.P @ ikh.T + np.outer(K, K) * r
-        # SoC is physically bounded. Beyond the ends of the OCV table the model voltage is
-        # flat while the Jacobian still has a slope, so an unbounded estimate could run away
-        # (e.g. a full pack with a small positive innovation). Clamp it.
-        self.x[0] = min(max(self.x[0], 0.0), 1.0)
 
     def step(self, current_a: float, v_cell: float, dt: float) -> float:
         """One predict + correct cycle; returns the SoC fraction.

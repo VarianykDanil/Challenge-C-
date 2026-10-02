@@ -29,6 +29,7 @@ from __future__ import annotations
 
 import logging
 import math
+from collections import deque
 from pathlib import Path
 from typing import Any, Mapping
 
@@ -73,6 +74,8 @@ DATA_FLOWING_FRACTION = 0.5
 SOC_INIT_MAX_CURRENT_A = 5.0
 #: ... or, if the car never rests, after this long with the I*R0-corrected voltage, s.
 SOC_INIT_WAIT_S = 10.0
+#: Pack-current samples kept to pair each cell-voltage sample with the current at its time.
+CURRENT_HISTORY_N = 64
 #: Default alert rules file (used when the config has no ``paths.alerts`` file).
 DEFAULT_ALERTS_PATH = Path(__file__).resolve().parents[2] / "config" / "alerts.yaml"
 
@@ -145,6 +148,8 @@ class Processor:
         self.ekf = SocEkf(self.cell_params, self.ocv_table)
         self._soc_initialised = False
         self._soc_wait = 0.0
+        self._current_hist: deque[tuple[float, float]] = deque(maxlen=CURRENT_HISTORY_N)
+        self._v_stamp = NAN
         self.energy = EnergyIntegrator()
         self.cells = CellDeviationTracker(len(self.cell_v_ids))
         self._current_mismatch = LowPass(TAU_CURRENT_MISMATCH_S)
@@ -329,10 +334,10 @@ class Processor:
                 self._soc_initialised = True
         elif self._soc_initialised:
             self.cc.step(pack_i, dt)
-            self.ekf.step(pack_i, v_mean, dt)
-        if self._soc_initialised:
-            calc["calc_soc_cc"] = self.cc.soc * 100.0
-            calc["calc_soc_ekf"] = self.ekf.soc * 100.0
+            self._ekf_step(pack_i, v_mean, dt)
+        if self._soc_initialised:  # estimates may stray a hair outside 0..1 (noise, regen)
+            calc["calc_soc_cc"] = min(max(self.cc.soc, 0.0), 1.0) * 100.0
+            calc["calc_soc_ekf"] = min(max(self.ekf.soc, 0.0), 1.0) * 100.0
 
         self.cells.update(cell_v, pack_i, dt)
         p_cur, i_cur = v.get("pack_current", NAN), v.get("inv_dc_current", NAN)
@@ -340,6 +345,35 @@ class Processor:
             self._current_mismatch.update(p_cur - i_cur, dt)
         apps = [x for x in (v.get("apps1", NAN), v.get("apps2", NAN)) if _finite(x)]
         aux["aux_apps_max"] = max(apps) if apps else NAN
+
+    def _ekf_step(self, pack_i: float, v_mean: float, dt: float) -> None:
+        """EKF: predict every tick with the newest current; correct once per *new* cell-voltage
+        sample, with the current interpolated at that sample's time.
+
+        Cell voltages arrive at 10 Hz, the current at 100 Hz: pairing a voltage with a current
+        measured up to 0.1 s later would turn every throttle change into a false voltage error
+        (``dI R0`` ~ 0.3 V for a 100 A step), and re-using one sample on two ticks would
+        double-count its information.
+        """
+        if not _finite(pack_i):
+            return
+        if dt > 0.0:
+            self.ekf.predict(pack_i, min(dt, 1.0))
+        stamp_i = self.store.timestamp("pack_current")
+        if _finite(stamp_i) and (not self._current_hist or stamp_i > self._current_hist[-1][0]):
+            self._current_hist.append((stamp_i, pack_i))
+        stamp_v = self.store.timestamp(self.cell_v_ids[0]) if self.cell_v_ids else NAN
+        if not _finite(stamp_v):
+            stamp_v = self.store.timestamp("pack_voltage")
+        if not (_finite(v_mean) and _finite(stamp_v)) or stamp_v == self._v_stamp:
+            return
+        self._v_stamp = stamp_v
+        if len(self._current_hist) >= 2:
+            ts, cur = zip(*self._current_hist)
+            i_at_v = float(np.interp(stamp_v, ts, cur))
+        else:
+            i_at_v = pack_i
+        self.ekf.correct(v_mean, i_at_v)
 
     def _laps(self, t: float, dt: float, v: dict[str, float], calc: dict[str, float],
               aero_out: AeroOutput | None, events: list[dict[str, Any]]) -> None:

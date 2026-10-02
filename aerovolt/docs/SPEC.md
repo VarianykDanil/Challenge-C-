@@ -259,7 +259,9 @@ and `aero.ground_effect {...}`, motor `peak_power_kw`, `torque_constant_nm_per_a
 `losses {k_cu_w_per_nm2, k_iron_w_per_rads, k_windage_w_per_rads2}` and `thermal`, inverter
 `thermal`, `regen_min_speed_kmh`, `accumulator.cell.v_nom`, `accumulator.soc_window {max, min}`,
 `accumulator.variation {capacity_pct, r0_pct}`, `accumulator.thermal {ua0, ua1}`, `cooling.radiator
-{ua0_w_per_k, ua1_w_per_k_per_ms, fan_*}`. **Usable energy** = series × parallel × capacity ×
+{ua0_w_per_k, ua1_w_per_k_per_ms, fan_*}`, plus simulator details: `steering {ratio,
+understeer_deg_per_g}`, wing `mass_kg` (mount load cells) and `accumulator.thermal.neighbour_w_per_k`
+(bus-bar conduction). **Usable energy** = series × parallel × capacity ×
 v_nom × (soc_window.max − soc_window.min) (`lapsim.VehicleParams.usable_energy_kwh`, 7.66 kWh).
 
 ## 4. Core (`aerovolt/core/`)
@@ -362,7 +364,8 @@ The engine must produce **every raw channel in the catalogue** plus the truth ch
   flow yaw, pitot q uses airspeed.
 * Aero model: per-element CL·A depends on ride height (front wing and undertray: ground
   effect — more suction when lower, sharp loss below a stall height ≈ 10 mm front / 12 mm
-  floor), pitch, and flow yaw (outboard taps first). Tap Cp distributions are smooth, physically
+  floor; the floor uses its minimum clearance and reattaches only 6 mm higher (hysteresis)),
+  pitch, and flow yaw (windward-station taps first). Tap Cp distributions are smooth, physically
   shaped (suction peak near the leading edge then pressure recovery; pressure side positive;
   undertray throat minimum ≈ fraction 0.4, diffuser recovery), and **calibrated so that
   `physics.section_cl` of the simulated taps reproduces the element's model section Cl within
@@ -379,10 +382,25 @@ The engine must produce **every raw channel in the catalogue** plus the truth ch
   ∝ (T_coolant − T_amb) × (UA₀ + UA₁·airspeed) — so aero and powertrain are coupled.
   Regen braking up to `regen_max_kw` when braking. BMS SoC reported by `bms_soc` (BMS's own
   estimate — make it Coulomb-counting based, low resolution 0.5 %).
-* Safety chain: SDC = AMS ok ∧ IMD ok ∧ BSPD ok ∧ (no APPS implausibility latch). If the SDC
+* Safety chain: SDC = AMS ok ∧ IMD ok ∧ BSPD ok. If the SDC
   opens: AIRs open, TS deactivates (`tsal_state` 0 after 1 s), motor torque 0, car coasts and
   brakes to a stop; it restarts (precharge → ready → driving) when the fault is cleared.
-  APPS implausibility: |apps1 − apps2| > 10 percentage points for > 100 ms → torque cut.
+  APPS implausibility: |apps1 − apps2| > 10 percentage points for > 100 ms → the inverter cuts
+  the torque (`apps_plaus_ok` 0) until the sensors agree again; the SDC stays closed (FS T 11.8.9:
+  deactivating the TS is not required). AMS: any cell > 60 °C, < 2.8 V or > 4.2 V for > 0.5 s
+  (reset after 10 s back in limits); the BMS also derates current (discharge/charge current
+  limits keep cells inside 3.0…4.18 V, so a full pack accepts no regen). IMD trips 1.5 s after
+  the insulation falls below 294 kΩ; clearing `imd_fault` resets it.
+* Engine API (`engine.py`): `SimEngine(vehicle, catalog, track, seed=, weather=, faults=, laps=,
+  start_soc=, start_temp_c=, power_limit_kw=)`, `.step() -> {channel: value}` (only the channels
+  due at this step; `truth_*` at 20 Hz), `.sample_all()` (every channel, used once at t = 0),
+  `.run_offline(duration_s, emit)` (no asyncio), `.set_fault(id, active)`, `.fault_infos()`,
+  `.lap_times`. The car starts 10 m behind the start line (closed tracks), so lap 1 begins at
+  the first crossing (`truth_lap` = laps started). `SimSource` (`source.py`, kind `sim`) adds
+  the config keys `laps` (stop after N laps), `start_soc` (%, default 100), `start_temp_c`
+  (cells, motor, inverter and coolant; default ambient) and `power_limit_kw` (default
+  vehicle.yaml), sets `ctx.track`, and paces the engine at `speed` × wall clock (`max`: yields
+  to the event loop every 50 steps).
 
 ### 5.4 Calibration targets (the sim must hit these; test them)
 * `fs_endurance` lap time 55–80 s at the full 80 kW limit; v_max 95–120 km/h; peak lateral
@@ -403,7 +421,7 @@ The engine must produce **every raw channel in the catalogue** plus the truth ch
 | `ut_bottoming` | aero | static ride height −12 mm (broken spring/packer): floor stalls at speed | `aero_ut_stall` |
 | `pitot_blocked` | aero | pitot reads ≈ 0 Pa | `sensor_pitot_implausible` |
 | `tap_leak` | aero | tube leak on `rw_p03`: reads 10 % of true | `sensor_tap_anomaly` (classified **sensor**, not aero) |
-| `crosswind_gust` | aero | 12 m/s gust from the side for 20 s | `aero_high_yaw` |
+| `crosswind_gust` | aero | 12 m/s gust from the car's left for 20 s (then clears itself) | `aero_high_yaw` |
 | `cell_hot` | powertrain | cell 47 R0 × 4 (bad weld) | `bms_cell_temp_outlier`, then `bms_cell_overtemp` |
 | `cell_weak` | powertrain | cell 88 capacity 80 % | `bms_cell_voltage_outlier` |
 | `pump_fail` | powertrain | coolant flow → 0 | `cooling_no_flow`, `motor_temp_high` (+ derating) |
@@ -460,6 +478,48 @@ exceptions).
   b > min_value for `for_s`), `custom` (named Python check function registered in
   `alerts.py`, gets the processor state). Severity `info|warn|critical`. Emits alert events
   on raise and on clear.
+
+**Implementation notes (as built):**
+* `Processor(ctx, store, alert_config=None)`: `tick(t) -> [event dicts]` shaped exactly like
+  the §9 messages; `active_alerts()`, `alert_log`, `laps` (list of `LapSummary`), `strategy`
+  (JSON dict or None), `reset()`, `stats {ticks, errors}`. It reads each raw channel with
+  `store.latest/timestamp` and treats channels older than `store.stale_after(id)` as NaN (a
+  dead sensor never freezes a number). It picks up `ctx.track` when the sim sets it. A time
+  jump back by > 5 s resets it (new session / replay loop). Errors inside one stage are
+  logged and counted; the other stages still run. Every `calc_*` channel is written each
+  tick (NaN when unknown).
+* `aero.py`: q also falls back to GPS while `sensor_pitot_implausible` is active. CL·A,
+  CD·A and balance are q-weighted low-pass ratios (`LP(L)/LP(q)`), updated only for
+  q > 120 Pa and |a_x| ≤ 12 m/s² (CD·A additionally |a_y| < 4 m/s²).
+* `soc.py`: SoC is a fraction inside, channels are %. Both estimators start from the OCV of
+  the first sample with |I| ≤ 5 A (or after 10 s). The EKF corrects once per *new*
+  cell-voltage sample, with the pack current interpolated to that sample's time.
+* `laps.py`: optional config section `laps: {gate: [[lat, lon], [lat, lon]], debounce_s: 5}`
+  for a real car on a track the program does not know (two gate posts; the direction of
+  travel is learned from the first crossing). Default debounce `min(5 s, track length /
+  40 m/s)` (skid pad: one circle ~5 s). A first fix within 15 m of the line starts lap 1
+  (standing start); otherwise the time before the first crossing is the out-lap 0 (not
+  summarised). `LapSummary.energy_kwh` is the **net** battery energy of the lap
+  (discharge − regen, like `lapsim.LapResult.energy_kwh`); `regen_kwh` is the recovered part.
+* `strategy.py`: `calc_laps_needed` = laps still to drive (total − done);
+  `calc_laps_remaining` = (energy above the SoC-window minimum − reserve) / measured energy per
+  lap, updated every tick. The current power limit is inferred from the last lap's peak pack
+  power. The `strategy` event also carries `laps_left, laps_possible, current_kw,
+  energy_needed_kwh, energy_available_kwh, energy_short, scale`.
+* `anomaly.py`: a tap deviates beyond `max(0.2, 30 % |mean|, 4σ)` for 2 s of steady flow
+  (pitot q > 150 Pa, filtered |yaw| < 8°). Sensor-fault taps are excluded from the section-Cl
+  integration. `AeroHealthMonitor` keeps learned baselines (station Cl, undertray mean Cp,
+  balance) for the aero alerts. Once warm, it learns only samples within half the alert
+  threshold of the baseline, so a fault is not absorbed before its alert freezes learning.
+* `alerts.yaml`: rule keys `for_s`, `within_s` (cumulative debounce for intermittent faults:
+  raise after `for_s` of True in total within the last `within_s`), `clear_for_s`,
+  `clear_value` (threshold), `clear_diff` (plausibility), `abs`, and
+  `when: [{channel, op, value, if_missing}]` gates.
+  When the answer is unknown (gate closed, input missing), the rule holds its state.
+  Numbers may be `"vehicle:<dotted.path>"`. One alert instance per rule (`id == rule`).
+  When a custom check's subject changes while active (e.g. another stale channel), the
+  alert event is re-sent with the new detail and channels. The processor provides `aux_*`
+  values for gates and texts (listed at the top of `alerts.yaml`).
 
 ### 6.5 Alert ids (must exist in `config/alerts.yaml`)
 `aero_fw_asymmetry`, `aero_balance_shift`, `aero_rw_suction_loss`, `aero_ut_stall`,

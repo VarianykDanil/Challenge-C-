@@ -103,7 +103,7 @@ TAU_DOWNFORCE_S = 0.2  # instantaneous downforce: removes pushrod noise, keeps b
 TAU_DRAG_S = 0.5  # instantaneous drag: removes IMU a_x noise
 TAU_CLA_S = 2.0  # CL·A and the front/rear split (balance)
 TAU_CDA_S = 4.0  # CD·A (drag is a small difference of large forces: average longer)
-TAU_SECTION_CL_S = 1.0  # section Cl used for the left/right asymmetry
+TAU_SECTION_CL_S = 0.5  # section Cl used for the left/right asymmetry (same as yaw: compared)
 TAU_YAW_S = 0.5  # |flow yaw| used to decide whether the flow is "straight"
 
 #: Wing stations with a section Cl channel: key -> (element, station).

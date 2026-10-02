@@ -78,6 +78,21 @@ def test_unknown_state_holds_alert_and_timer():
     assert eng.is_active("low")
 
 
+def test_within_s_counts_intermittent_condition_cumulatively():
+    rule = {"id": "stall", "type": "threshold", "channel": "x", "op": ">", "value": 0, "for_s": 1.0,
+            "within_s": 10.0, "clear_for_s": 5.0, "title": "Stall"}
+    burst = [{"x": 1}] * 5 + [{"x": 0}] * 15  # 0.4 s True per 2 s cycle, never 1 s in a row
+    plain = _engine(dict(rule, within_s=None))
+    assert _run(plain, burst * 5) == []
+    eng = _engine(rule)
+    changed = _run(eng, burst * 5)
+    assert changed == [(4.2, True)]  # 0.4 + 0.4 + 0.2 s of True within 10 s
+    sparse = [{"x": 1}] * 3 + [{"x": 0}] * 97  # 0.2 s per 10 s: never 1 s within 10 s
+    assert _run(_engine(rule), sparse * 6) == []
+    with pytest.raises(AlertConfigError, match="within_s"):
+        _engine(dict(rule, within_s=0.5))
+
+
 def test_when_gates_and_if_missing():
     rule = {"id": "flow", "type": "threshold", "channel": "flow", "op": "<", "value": 1, "for_s": 0,
             "title": "No flow", "when": [{"channel": "duty", "op": ">", "value": 20, "if_missing": True}]}

@@ -15,13 +15,16 @@ reacting to and must not chatter):
 * an alert is **raised** after the condition has been ``True`` for ``for_s`` seconds of
   judged time - only intervals between two consecutive ``True`` ticks count, and any
   ``False`` resets the timer (``for_s: 0`` raises on the first ``True`` tick);
+* for **intermittent** faults (e.g. a floor that stalls only on the fastest straights)
+  ``within_s`` switches to a cumulative count: raised once the condition was ``True`` for
+  ``for_s`` seconds *in total* within the last ``within_s`` seconds;
 * an active alert is **cleared** after ``clear_for_s`` seconds of ``False``. Threshold
   rules re-test against ``clear_value`` (e.g. raise above 110 degC, clear below 105 degC),
   plausibility rules against ``clear_diff``; custom checks receive ``active`` and apply
   their own clear thresholds.
 
 Rule types (all share ``id, severity (info|warn|critical), title, detail, channels,
-for_s, clear_for_s, when, enabled``):
+for_s, within_s, clear_for_s, when, enabled``):
 
 ``threshold``     ``channel op value`` (``op``: ``<  <=  >  >=``; ``abs: true`` compares
                   ``|channel|``), ``clear_value``.
@@ -47,6 +50,7 @@ import logging
 import math
 import operator
 import string
+from collections import deque
 from dataclasses import dataclass, field
 from typing import Any, Callable, Mapping, Sequence
 
@@ -229,6 +233,10 @@ class Rule:
         self.detail = str(c.get("detail", ""))
         self.channels = [str(ch) for ch in c.get("channels", [])]
         self.for_s = float(c.get("for_s", 1.0))
+        within = c.get("within_s")
+        self.within_s = None if within is None else float(within)
+        if self.within_s is not None and self.within_s < self.for_s:
+            raise AlertConfigError(f"{self.id}: within_s must be >= for_s")
         self.clear_for_s = float(c.get("clear_for_s", 3.0))
         self.enabled = bool(c.get("enabled", True))
         self.vehicle = vehicle
@@ -361,6 +369,7 @@ class _RuleRuntime:
     last: bool | None = None  # previous tick's answer (an interval counts if both ends agree)
     alert: Alert | None = None
     key: str | None = None
+    true_spans: deque = field(default_factory=deque)  # (t, seconds) for within_s rules
 
 
 class AlertEngine:
@@ -402,16 +411,23 @@ class AlertEngine:
                 log.exception("alert rule %s failed", rule.id)
                 res = CheckResult(None)
             if rt.alert is None:
+                if rule.within_s is not None:  # cumulative: True time within the window
+                    if res.state is True and rt.last is True and dt > 0.0:
+                        rt.true_spans.append((t, dt))
+                    while rt.true_spans and rt.true_spans[0][0] < t - rule.within_s:
+                        rt.true_spans.popleft()
+                    rt.timer = sum(span for _, span in rt.true_spans)
                 if res.state is True:
-                    if rt.last is True:
+                    if rt.last is True and rule.within_s is None:
                         rt.timer += dt
                     if rt.timer >= rule.for_s - TIME_EPS_S:
                         rt.alert = Alert(id=rule.id, rule=rule.id, severity=rule.severity, title=rule.title,
                                          detail=res.detail, channels=list(res.channels), t_start=t)
                         rt.timer, rt.key = 0.0, res.key
+                        rt.true_spans.clear()
                         self.log.append(rt.alert)
                         changed.append(rt.alert)
-                elif res.state is False:
+                elif res.state is False and rule.within_s is None:
                     rt.timer = 0.0
             else:
                 if res.state is False:
@@ -493,7 +509,7 @@ def check_rw_suction_loss(state: AnalysisState, params: Mapping[str, Any], activ
         bad = drop > float(params.get("clear_pct", 12.0))
     else:
         bad = drop > float(params.get("drop_pct", 20.0)) or (
-            bool(cluster_taps) and drop > float(params.get("cluster_drop_pct", 10.0)))
+            bool(cluster_taps) and drop > float(params.get("cluster_drop_pct", 15.0)))
     cur = 0.5 * (mon.current["cl_rw_l"] + mon.current["cl_rw_r"])
     base = 0.5 * (mon.base("cl_rw_l") + mon.base("cl_rw_r"))
     detail = (f"RW section Cl {cur:.2f} vs baseline {base:.2f} ({_pct(-drop)}; L {mon.current['cl_rw_l']:.2f}, "
@@ -569,7 +585,7 @@ def check_cell_temp_outlier(state: AnalysisState, params: Mapping[str, Any], act
     temps = np.array([state.num(cid) for cid in ids])
     if np.isfinite(temps).sum() < max(3, len(ids) // 2):
         return CheckResult(None)
-    min_abs = float(params.get("clear_abs_c", 2.0) if active else params.get("min_abs_c", 3.0))
+    min_abs = float(params.get("clear_abs_c", 1.8) if active else params.get("min_abs_c", 2.5))
     out = find_outlier(temps, z_threshold=float(params.get("z", 4.0)), min_abs=min_abs, side="high",
                        sigma_floor=float(params.get("sigma_floor_c", 0.3)))
     if out is None:
@@ -592,6 +608,12 @@ def _suspect_cell(state: AnalysisState, cells: range) -> str:
     if math.isfinite(dr[best]) and dr[best] > 0.5e-3:
         return f"; cell {best} internal resistance +{dr[best] * 1e3:.1f} mOhm vs pack"
     return ""
+
+
+def _bucket(magnitude: float) -> int:
+    """Octave of a growing estimate (1, 2, 4, 8 ...): the alert text is refreshed each time
+    the estimate doubles while the fit converges, not on every small change."""
+    return int(math.floor(math.log2(magnitude))) if magnitude > 0 else 0
 
 
 @register_check("cell_voltage_outlier")
@@ -625,13 +647,13 @@ def check_cell_voltage_outlier(state: AnalysisState, params: Mapping[str, Any], 
         parts.append(f"cell {weak.index} {weak.deviation:+.0f} mV vs pack at zero current "
                      f"(z {weak.z:.0f}): low capacity, discharging faster")
         channels.append(cid)
-        keys.append(f"w{weak.index}")
+        keys.append(f"w{weak.index}:{_bucket(-weak.deviation)}")
     if resist is not None:
         cid = ids[resist.index] if resist.index < len(ids) else f"cell {resist.index}"
         parts.append(f"cell {resist.index} internal resistance {resist.deviation:+.1f} mOhm vs pack "
                      f"(z {resist.z:.0f}): sags under load, check weld/connection")
         channels.append(cid)
-        keys.append(f"r{resist.index}")
+        keys.append(f"r{resist.index}:{_bucket(resist.deviation)}")
     if not parts:
         return CheckResult(False)
     return CheckResult(True, "; ".join(parts), channels + ["calc_cell_v_min"], key=",".join(keys))

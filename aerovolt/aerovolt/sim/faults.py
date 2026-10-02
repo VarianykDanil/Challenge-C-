@@ -74,8 +74,6 @@ class SimTarget(Protocol):
     @property
     def t(self) -> float: ...
 
-    def car_heading_deg(self) -> float: ...
-
 
 Hook = Callable[[SimTarget, bool], None]
 
@@ -113,6 +111,14 @@ class SensorFaults:
     def any(self) -> bool:
         return self.pitot_blocked or self.tap_leak or self.current_offset or self.apps2_stuck
 
+    def measured_apps2(self, true_pct: float) -> float:
+        """What the second pedal sensor reports [%] (the VCU's plausibility check uses it)."""
+        return 0.0 if self.apps2_stuck else true_pct
+
+    def measured_pack_current(self, true_a: float) -> float:
+        """What the pack current sensor reports [A] (the BMS Coulomb counter uses it)."""
+        return true_a + CURRENT_OFFSET_A if self.current_offset else true_a
+
     def apply(self, values: np.ndarray, index: Mapping[str, int]) -> None:
         """Corrupt the affected entries of the true-value vector ``values`` in place
         (``index`` maps a channel id to its position)."""
@@ -120,10 +126,10 @@ class SensorFaults:
             values[index["pitot_dp"]] = BLOCKED_PITOT_PA
         if self.tap_leak:
             values[index[LEAKING_TAP]] *= LEAK_FRACTION
-        if self.current_offset:
-            values[index["pack_current"]] += CURRENT_OFFSET_A
-        if self.apps2_stuck:
-            values[index["apps2"]] = 0.0
+        i = index["pack_current"]
+        values[i] = self.measured_pack_current(values[i])
+        i = index["apps2"]
+        values[i] = self.measured_apps2(values[i])
 
 
 # ---------------------------------------------------------------------------- hooks
@@ -148,10 +154,8 @@ def _tap_leak(sim: SimTarget, on: bool) -> None:
 
 
 def _crosswind_gust(sim: SimTarget, on: bool) -> None:
-    if on:
-        # the gust comes from the car's left: compass direction heading − 90°
-        sim.air.start_side_gust(sim.t, (sim.car_heading_deg() - 90.0) % 360.0,
-                                GUST_SPEED_MS, GUST_DURATION_S)
+    if on:  # from the car's left: 90° anticlockwise of its heading
+        sim.air.start_side_gust(sim.t, -90.0, GUST_SPEED_MS, GUST_DURATION_S)
     else:
         sim.air.stop_side_gust(sim.t)
 

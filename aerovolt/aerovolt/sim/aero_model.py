@@ -28,7 +28,7 @@ reference value times dimensionless factors:
   and they **stall** below a critical height (flow separation, sharp loss of
   ``stall_loss``), modelled with a 1 mm-wide logistic step around the stall height. The
   floor's criterion is its minimum clearance (normally the leading edge) and it has
-  **hysteresis**: once separated, the diffuser only reattaches 4 mm higher.
+  **hysteresis**: once separated, the diffuser only reattaches 6 mm higher.
 * **Pitch** — nose-down pitch lowers the rear wing's angle of attack:
   ``1 − pitch_gain·Δθ`` (the front wing and floor feel pitch through their ride heights).
 * **Yaw** — ``1 − k·ψ²`` on each element; the *windward* station loses ``2·k·ψ²`` and the
@@ -116,7 +116,7 @@ FLOOR_THROAT_FRACTION = 0.4
 STALL_WIDTH_MM = 1.0
 #: Diffuser stall hysteresis [mm]: separated flow only reattaches this much above the stall
 #: height (well known from wind-tunnel ride-height sweeps of ground-effect floors).
-FLOOR_REATTACH_MM = 4.0
+FLOOR_REATTACH_MM = 6.0
 
 #: The quadratic yaw-loss model is fitted for moderate yaw; beyond this angle [deg] the
 #: element is treated as fully yawed (only reached at walking pace in a cross wind, where
@@ -177,15 +177,17 @@ class AirModel:
         sigma = GUST_INTENSITY * weather.wind_ms + GUST_SIGMA_FLOOR_MS
         self._gust_speed = OrnsteinUhlenbeck(sigma, GUST_TAU_S, dt, rng)
         self._gust_dir = OrnsteinUhlenbeck(GUST_DIR_SIGMA_DEG, GUST_DIR_TAU_S, dt, rng)
-        self._side: tuple[float, float, float, float] | None = None  # t0, from_deg, speed, t_end
+        self._side: tuple[float, float, float, float] | None = None  # t0, rel. from, speed, t_end
         self.wind_e = self.wind_n = 0.0
         self.speed = weather.wind_ms
         self.from_deg = weather.wind_dir_deg
-        self.step(0.0)
+        self.step(0.0, 0.0)
 
-    def start_side_gust(self, t: float, from_deg: float, speed_ms: float, duration_s: float) -> None:
-        """Superimpose a gust of ``speed_ms`` from ``from_deg`` for ``duration_s`` (1 s ramps)."""
-        self._side = (t, from_deg, speed_ms, t + duration_s)
+    def start_side_gust(self, t: float, relative_from_deg: float, speed_ms: float, duration_s: float) -> None:
+        """Superimpose a gust of ``speed_ms`` for ``duration_s`` (1 s ramps) that comes from
+        ``relative_from_deg`` relative to the car's heading (−90° = from the car's left):
+        a cross-wind section of track, so it stays a *side* wind while the car drives on."""
+        self._side = (t, relative_from_deg, speed_ms, t + duration_s)
 
     def stop_side_gust(self, t: float) -> None:
         """End the injected gust now (it ramps down over one second)."""
@@ -204,14 +206,14 @@ class AirModel:
         ramp = min(1.0, (t - t0) / SIDE_GUST_RAMP_S, (t_end - t) / SIDE_GUST_RAMP_S)
         return speed * max(ramp, 0.0)
 
-    def step(self, t: float) -> None:
+    def step(self, t: float, car_heading_deg: float) -> None:
         """Advance the gust processes one step and update the wind vector."""
         w = max(self.weather.wind_ms + self._gust_speed.step(), 0.0)
         f = math.radians(self.weather.wind_dir_deg + self._gust_dir.step())
         we, wn = -w * math.sin(f), -w * math.cos(f)  # air moves towards f + 180°
         side = self.side_gust_speed(t)
         if side > 0.0:
-            fs = math.radians(self._side[1])
+            fs = math.radians(car_heading_deg + self._side[1])
             we -= side * math.sin(fs)
             wn -= side * math.cos(fs)
         self.wind_e, self.wind_n = we, wn
@@ -370,22 +372,20 @@ class AeroModel:
         self.section_cl_ref = {e: self.station_section_cl(ref, f"{e}_L") for e in ("fw", "rw")}
         self.section_cl_ref["ut"] = self.station_section_cl(ref, "ut")
         # stalled floor: scale its suction so the section Cl drops by exactly stall_loss
-        self._floor_stall *= self._solve_scale(
-            lambda s: self._floor_section_cl_with(stall_scale=s),
-            (1.0 - self.stall_loss) * self.section_cl_ref["ut"])
+        floor = ~self._is_wing
+
+        def stalled_floor_cl(scale: float) -> float:
+            cp = ref.copy()
+            cp[floor] = scale * self._floor_stall[floor]
+            return self.station_section_cl(cp, "ut")
+
+        self._floor_stall *= self._solve_scale(stalled_floor_cl, (1.0 - self.stall_loss) * self.section_cl_ref["ut"])
         # stalled rear wing: circulation left on the attached part, so Cl drops to 60 %
         self.rw_stall_circulation = self._solve_scale(
             lambda lam: self.station_section_cl(self._raw_cp(np.array([1, 1, lam, lam]), 1.0, 0.0, True), "rw_L"),
             RW_STALL_CLA * self.section_cl_ref["rw"])
         #: Effective area [m²] linking a station's section Cl to its element CL·A.
         self.area_eff = {e: self.cla_ref_e[e] / self.section_cl_ref[e] for e in ("fw", "rw", "ut")}
-
-    def _floor_section_cl_with(self, stall_scale: float) -> float:
-        saved = self._floor_stall.copy()
-        self._floor_stall *= stall_scale
-        cp = self._raw_cp(np.ones(4), 1.0, 1.0, False)
-        self._floor_stall[:] = saved
-        return self.station_section_cl(cp, "ut")
 
     @staticmethod
     def _solve_scale(f, target: float, lo: float = 0.0, hi: float = 3.0) -> float:

@@ -41,7 +41,9 @@ rules:
   # =======================================================================================
 
   # Damaged left front-wing flap: L station suction -55 % -> section Cl roughly halves,
-  # asymmetry ~ -50 %. Normal running (incl. yaw < 8 deg) stays within +-8 %.
+  # asymmetry ~ -50 %. Flow yaw also unloads the leeward station (~ -2 x 0.0015 psi^2:
+  # -19 % at 8 deg), so the rule is only judged below 4 deg of yaw (< 5 % from yaw);
+  # normal running then stays within +-8 %.
   - id: aero_fw_asymmetry
     type: threshold
     severity: warn
@@ -55,6 +57,7 @@ rules:
     clear_for_s: 10
     when:
       - {channel: aux_aero_steady, op: ">=", value: 1}
+      - {channel: aux_yaw_abs_lp, op: "<", value: 4.0}
     channels: [calc_fw_asym, calc_cl_fw_l, calc_cl_fw_r]
     detail: "FW left section Cl {aux_cl_fw_l:.2f} vs right {aux_cl_fw_r:.2f} ({calc_fw_asym:+.0f} %)"
 
@@ -81,37 +84,41 @@ rules:
     check: rw_suction_loss
     severity: warn
     title: Rear wing suction loss
-    params: {drop_pct: 20.0, cluster_drop_pct: 10.0, clear_pct: 12.0}
+    params: {drop_pct: 20.0, cluster_drop_pct: 15.0, clear_pct: 12.0}
     for_s: 3
     clear_for_s: 15
     when:
       - {channel: aux_aero_steady, op: ">=", value: 1}
 
-  # Floor too low (broken spring/packer): the diffuser stalls at speed, undertray suction
-  # roughly halves. Long clear time: a bottoming floor stalls on every straight.
+  # Floor too low (broken spring/packer): the diffuser stalls at speed whenever the front
+  # ride height drops (coasting, braking), suction -30...-60 %, then re-attaches when the
+  # car squats under acceleration. Intermittent, so the time is counted cumulatively (2 s
+  # within 30 s); long clear time. Normal running: suction within +-11 % of the baseline.
   - id: aero_ut_stall
     type: custom
     check: ut_stall
     severity: critical
     title: Undertray stall
-    params: {loss_pct: 30.0, clear_pct: 15.0}
+    params: {loss_pct: 25.0, clear_pct: 15.0}
     for_s: 2
+    within_s: 30
     clear_for_s: 30
     when:
       - {channel: aux_aero_steady, op: ">=", value: 1}
       - {channel: aux_abs_ax, op: "<", value: 12.0}
 
-  # Flow yaw from the 5-hole probe. Normal: a few degrees (3 m/s wind at > 15 m/s gives
-  # < 11 deg worst case); a 12 m/s side gust gives 20-30 deg. Info only: the aero numbers
-  # are unreliable meanwhile (and the aero rules hold their state).
+  # Flow yaw from the 5-hole probe. Normal: a few degrees; with 3 m/s of wind plus gusts the
+  # filtered |yaw| above 150 Pa peaks near 17 deg but stays above 14 deg for < 0.4 s.
+  # A 12 m/s side gust gives 20-30 deg for its whole 20 s. Info only: the aero numbers are
+  # unreliable meanwhile (and the aero rules hold their state).
   - id: aero_high_yaw
     type: threshold
     severity: info
     title: High flow yaw (crosswind)
     channel: aux_yaw_abs_lp
     op: ">"
-    value: 12          # deg, low-pass filtered |probe_yaw|
-    clear_value: 8
+    value: 14          # deg, low-pass filtered |probe_yaw|
+    clear_value: 10
     for_s: 1.5
     clear_for_s: 5
     when:
@@ -160,14 +167,15 @@ rules:
   # SYSTEM 2 - POWERTRAIN
   # =======================================================================================
 
-  # Hot sensor vs pack median (robust z). Normal spread <= ~3 degC (max - min), i.e.
-  # <= ~2 degC from the median. Cell 47 with 4x R0 heats ~3x faster than its neighbours.
+  # Hot sensor vs pack median (robust z). Normal: <= 1.4 degC above the median over 15 laps
+  # (R0 spread +-5 %). Cell 47 with 4x R0: its sensor (mean of cells 47-48, heat also
+  # conducted away through the bus bars) pulls away at ~2 degC/min -> 2.5 degC after ~75 s.
   - id: bms_cell_temp_outlier
     type: custom
     check: cell_temp_outlier
     severity: warn
     title: Cell temperature outlier
-    params: {min_abs_c: 3.0, clear_abs_c: 2.0, z: 4.0, sigma_floor_c: 0.3}
+    params: {min_abs_c: 2.5, clear_abs_c: 1.8, z: 4.0, sigma_floor_c: 0.3}
     for_s: 5
     clear_for_s: 15
 

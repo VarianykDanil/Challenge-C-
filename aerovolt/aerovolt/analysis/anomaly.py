@@ -14,8 +14,9 @@ That physical argument is the classifier (:class:`TapAnomalyDetector`):
    variance (:class:`EwmaBaseline`) - only while the flow is "steady" (pitot ``q > 150 Pa``,
    flow yaw below 8 deg) and no aero alert is active, after a warm-up of 20 s of such data.
 2. A tap *deviates* when its smoothed Cp is further from its mean than the largest of
-   0.2 (absolute Cp), 25 % of the mean, or 4 learned standard deviations - and keeps doing
-   so for 2 s of steady flow.
+   0.2 (absolute Cp), 30 % of the mean, or 4 learned standard deviations - and keeps doing
+   so for 2 s of steady flow. (Flow yaw alone moves a whole leeward station by up to ~20 %
+   at the 8 deg steady limit; a leaking tube reads 90 % low, a damaged flap ~55 %.)
 3. A deviating tap whose neighbours (``TapLayout.neighbours``: same element, station and
    surface, adjacent along the chord) are normal -> **sensor fault** (alert
    ``sensor_tap_anomaly``; the tap is excluded from the section-Cl integration so one bad
@@ -122,7 +123,7 @@ class TapAnomalyDetector:
     """Per-tap baseline learning and sensor-vs-aero classification (module docstring)."""
 
     def __init__(self, layout: TapLayout, tau_s: float = 60.0, warmup_s: float = 20.0,
-                 z_threshold: float = 4.0, abs_min: float = 0.2, rel_min: float = 0.25,
+                 z_threshold: float = 4.0, abs_min: float = 0.2, rel_min: float = 0.30,
                  persist_s: float = 2.0, clear_s: float = 5.0, tau_cp_s: float = 0.5) -> None:
         self.layout = layout
         self.n = len(layout)
@@ -256,7 +257,7 @@ class AeroHealthMonitor:
     SIGNALS = ("cl_fw_l", "cl_fw_r", "cl_rw_l", "cl_rw_r", "cp_ut_mean", "balance")
     #: Learning band per signal: (relative to |baseline|, absolute); the larger applies.
     LEARN_BAND = {"cl_fw_l": (0.10, 0.0), "cl_fw_r": (0.10, 0.0), "cl_rw_l": (0.10, 0.0),
-                  "cl_rw_r": (0.10, 0.0), "cp_ut_mean": (0.15, 0.0), "balance": (0.0, 2.0)}
+                  "cl_rw_r": (0.10, 0.0), "cp_ut_mean": (0.125, 0.0), "balance": (0.0, 2.0)}
 
     def __init__(self, tau_s: float = 120.0, warmup_s: float = 10.0) -> None:
         self.baseline = EwmaBaseline(len(self.SIGNALS), tau_s, warmup_s)

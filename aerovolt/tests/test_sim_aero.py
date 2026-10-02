@@ -217,7 +217,7 @@ def test_air_model_wind_statistics_and_density():
     assert air.rho == pytest.approx(1.225, abs=0.001)
     speeds, dirs = [], []
     for k in range(60_000):
-        air.step(k * 0.01)
+        air.step(k * 0.01, 0.0)
         speeds.append(air.speed)
         dirs.append(air.from_deg)
     assert np.mean(speeds) == pytest.approx(4.0, rel=0.1)
@@ -230,9 +230,13 @@ def test_air_model_wind_statistics_and_density():
 
 def test_side_gust_envelope():
     air = AirModel(Weather(wind_ms=0.0), np.random.default_rng(1), 0.01)
-    air.start_side_gust(10.0, 90.0, 12.0, 20.0)
+    air.start_side_gust(10.0, -90.0, 12.0, 20.0)  # from the car's left
     assert air.side_gust_speed(10.5) == pytest.approx(6.0)
     assert air.side_gust_speed(20.0) == pytest.approx(12.0)
-    air.step(20.0)
-    assert air.wind_e == pytest.approx(-12.0, abs=0.5)  # from the east → blowing west
+    air.step(20.0, 0.0)   # car heading north: left = west → air moves east
+    assert air.wind_e == pytest.approx(12.0, abs=0.5)
+    air.step(20.01, 90.0)  # car heading east: left = north → air moves south
+    assert air.wind_n == pytest.approx(-12.0, abs=0.5)
+    _, yaw, _ = relative_airflow(20.0, 90.0, air.wind_e, air.wind_n)
+    assert yaw > 25.0  # flow from the left
     assert air.side_gust_speed(31.0) == 0.0

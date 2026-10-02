@@ -24,6 +24,7 @@ that paces the engine against wall-clock time lives in :mod:`aerovolt.sim.source
 from __future__ import annotations
 
 import math
+import time
 from collections.abc import Callable, Iterable, Mapping
 from dataclasses import dataclass
 from typing import Any
@@ -35,7 +36,7 @@ from aerovolt.core.catalog import Catalog
 from aerovolt.core.model import Emit, FaultInfo
 from aerovolt.sim import lapsim
 from aerovolt.sim.aero_model import AeroModel, AeroState, AirModel, Weather, relative_airflow
-from aerovolt.sim.faults import CURRENT_OFFSET_A, FaultSet, SensorFaults
+from aerovolt.sim.faults import FaultSet, SensorFaults
 from aerovolt.sim.powertrain_model import Powertrain, SafetyInputs
 from aerovolt.sim.sensors import VirtualSensorBank
 from aerovolt.sim.tracks import Track, get_track
@@ -132,7 +133,6 @@ class SimEngine:
         self._cellv_idx = np.array([self.index[c] for c in catalog.ids(group="bms.cell_v")])
         self._cellt_idx = np.array([self.index[c] for c in catalog.ids(group="bms.cell_t")])
         self._scalar_idx: np.ndarray | None = None
-        self.truth_ids = catalog.truth_ids()
         self._truth_every = round(1.0 / (TRUTH_RATE_HZ * self.dt))
         self._gps_every = int(self.bank.period_steps[self.index["gps_lat"]])
         self._slow_dt = SLOW_EVERY * self.dt
@@ -160,7 +160,6 @@ class SimEngine:
         self._update_environment()
         self.aero_state, susp = self._solve_aero()
         self.chassis.set_suspension(susp)
-        self.powertrain.slow_step(self._slow_dt, 0.0, self.weather.temp_c)
         self._update_gps()
         self.bank.reset(self._true_vector())
 
@@ -190,10 +189,6 @@ class SimEngine:
 
     def fault_infos(self) -> list[FaultInfo]:
         return self.faults.infos()
-
-    def car_heading_deg(self) -> float:
-        """Compass heading of the car now [deg]."""
-        return self.cursor.heading_deg(self.cursor.at(self.chassis.s)[2])
 
     def _after_fault_change(self, ids: Iterable[str]) -> None:
         if set(ids) & PROFILE_FAULTS:
@@ -232,8 +227,6 @@ class SimEngine:
         ``emit(t, values)`` receives the initial full sample at the current time and then
         every step's due samples. Stops early if a lap limit is reached.
         """
-        import time
-
         now = clock or time.perf_counter
         stats = SimStats()
         t_end = self.t + duration_s - 0.5 * self.dt
@@ -270,7 +263,7 @@ class SimEngine:
         if changed:
             self._after_fault_change(changed)
 
-        self.air.step(self.t)
+        self.air.step(self.t, self.heading)
         ch, pt, safety = self.chassis, self.powertrain, self.powertrain.safety
         aero_prev = self.aero_state
 
@@ -319,14 +312,13 @@ class SimEngine:
         self._slip_f = ch.slip(-f_brake_f, load_f)
 
         # ---- safety chain, BMS, slow subsystems ---------------------------------------
+        # the VCU and the BMS act on *measured* signals (sensor faults included)
         apps1, apps2 = self._apps_sensors(cmd.pedal_pct)
-        if self.sensor_faults.apps2_stuck:
-            apps2 = 0.0
         safety.update(dt, SafetyInputs(
-            pack_ocv=pt.pack.open_circuit_voltage, car_speed=ch.v, apps1=apps1, apps2=apps2,
+            pack_ocv=pt.pack.open_circuit_voltage, car_speed=ch.v, apps1=apps1,
+            apps2=self.sensor_faults.measured_apps2(apps2),
             brake_press_f=f_brake_f / self.brake_gain_f, p_dc=out.p_dc))
-        measured_current = out.pack_current + (CURRENT_OFFSET_A if self.sensor_faults.current_offset else 0.0)
-        pt.count_bms_soc(measured_current, dt)
+        pt.count_bms_soc(self.sensor_faults.measured_pack_current(out.pack_current), dt)
         if k % SLOW_EVERY == 0:
             pt.slow_step(self._slow_dt, self.aero_state.airspeed, self.weather.temp_c)
             self._check_derating()
