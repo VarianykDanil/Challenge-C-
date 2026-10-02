@@ -578,24 +578,52 @@ def check_cell_temp_outlier(state: AnalysisState, params: Mapping[str, Any], act
     """One temperature sensor runs hotter than the rest of the pack: deviation from the
     pack median above ``min_abs_c`` AND a robust z-score above ``z`` (median/MAD, so the
     hot cell cannot hide by pulling the reference up). Typical cause: a high-resistance
-    cell or weld heating by ``I^2 R``."""
-    from aerovolt.analysis.powertrain import find_outlier
+    cell or weld heating by ``I^2 R``.
+
+    **Corroborated evidence:** if one of the cells under a sensor already shows a clearly
+    high internal resistance (``powertrain.CellDeviationTracker``, more than
+    ``resistance_mohm`` above the pack), that cell *must* run hot, so a smaller rise
+    (``corroborated_abs_c``) is enough - the alert comes about half a minute earlier.
+    """
+    from aerovolt.analysis.powertrain import robust_zscores
 
     ids = list(state.cell_t_ids)
     temps = np.array([state.num(cid) for cid in ids])
-    if np.isfinite(temps).sum() < max(3, len(ids) // 2):
+    ok = np.isfinite(temps)
+    if ok.sum() < max(3, len(ids) // 2):
         return CheckResult(None)
-    min_abs = float(params.get("clear_abs_c", 1.8) if active else params.get("min_abs_c", 2.5))
-    out = find_outlier(temps, z_threshold=float(params.get("z", 4.0)), min_abs=min_abs, side="high",
-                       sigma_floor=float(params.get("sigma_floor_c", 0.3)))
-    if out is None:
-        return CheckResult(False)
     n_cells = len(state.cell_v_ids) or 140
-    cells = _sensor_cells_text(out.index, n_cells, len(ids))
-    suspect = _suspect_cell(state, physics.temp_sensor_cells(out.index, n_cells, len(ids)))
-    detail = (f"{ids[out.index]} ({cells}) at {out.value:.1f} °C, {out.deviation:+.1f} °C vs pack median "
-              f"{out.median:.1f} °C (z {out.z:.1f}){suspect}")
-    return CheckResult(True, detail, [ids[out.index], "calc_cell_t_max"], key=ids[out.index])
+    scale = float(params.get("clear_abs_c", 1.8)) / float(params.get("min_abs_c", 2.5)) if active else 1.0
+    limit = np.full(len(ids), float(params.get("min_abs_c", 2.5)) * scale)
+    high_r = _high_resistance_cells(state, float(params.get("resistance_mohm", 1.0)))
+    for j in range(len(ids)):
+        if any(k in high_r for k in physics.temp_sensor_cells(j, n_cells, len(ids))):
+            limit[j] = float(params.get("corroborated_abs_c", 1.5)) * scale
+    median = float(np.median(temps[ok]))
+    dev = temps - median
+    z = robust_zscores(temps, sigma_floor=float(params.get("sigma_floor_c", 0.3)))
+    hot = ok & (dev >= limit) & (np.nan_to_num(z) >= float(params.get("z", 4.0)))
+    if not hot.any():
+        return CheckResult(False)
+    j = int(np.argmax(np.where(hot, dev, -np.inf)))
+    cells = _sensor_cells_text(j, n_cells, len(ids))
+    suspect = _suspect_cell(state, physics.temp_sensor_cells(j, n_cells, len(ids)))
+    detail = (f"{ids[j]} ({cells}) at {temps[j]:.1f} °C, {dev[j]:+.1f} °C vs pack median "
+              f"{median:.1f} °C (z {z[j]:.1f}){suspect}")
+    return CheckResult(True, detail, [ids[j], "calc_cell_t_max"], key=ids[j])
+
+
+def _high_resistance_cells(state: AnalysisState, min_mohm: float) -> set[int]:
+    """Cells whose internal resistance is clearly above the pack (robust z >= 5)."""
+    from aerovolt.analysis.powertrain import robust_zscores
+
+    tracker = state.cells
+    if tracker is None or not getattr(tracker, "ready", False):
+        return set()
+    dr_mohm = tracker.resistance_dev_ohm() * 1e3
+    z = robust_zscores(dr_mohm, sigma_floor=0.1)
+    med = float(np.nanmedian(dr_mohm))
+    return {int(k) for k in np.flatnonzero((dr_mohm - med >= min_mohm) & (np.nan_to_num(z) >= 5.0))}
 
 
 def _suspect_cell(state: AnalysisState, cells: range) -> str:
@@ -708,9 +736,10 @@ def check_sdc_open(state: AnalysisState, params: Mapping[str, Any], active: bool
 @register_check("energy_short")
 def check_energy_short(state: AnalysisState, params: Mapping[str, Any], active: bool) -> CheckResult:
     """The endurance strategy predicts the car will not finish (with the reserve) at the
-    power limit it is running now."""
+    power limit it is running now. Judged from ``min_laps`` completed laps on (default 2):
+    the first lap alone includes the launch from the grid and overstates the cost of a lap."""
     s = state.strategy
-    if s is None:
+    if s is None or s.laps_done < int(params.get("min_laps", 2)):
         return CheckResult(None)
     if not s.energy_short:
         return CheckResult(False)

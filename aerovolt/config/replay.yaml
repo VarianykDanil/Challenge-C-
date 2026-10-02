@@ -1,0 +1,40 @@
+# =========================================================================================
+# AeroVolt replay: play a recorded log back through the full analysis and dashboard
+# =========================================================================================
+# Record a log first, e.g. a fast headless simulator run with a fault:
+#     python -m aerovolt --headless --duration 600 --speed max --fault cell_hot@120 --log logs/demo.csv.gz
+# then replay it (here 4x faster, looping):
+#     python -m aerovolt --config config/replay.yaml --speed 4
+#
+# The analysis is recomputed from the logged sensor channels (the logged calc_* values are
+# not replayed), so a log from the car can be re-analysed after improving an algorithm.
+# The track comes from the log's metadata sidecar (logs/demo.meta.json).
+
+session:
+  name: "Replay of logs/demo.csv.gz"
+  log: null
+
+server:
+  host: 127.0.0.1
+  port: 8080
+  broadcast_hz: 20
+
+processing:
+  process_hz: 20
+  snapshot_hz: 20
+  history_s: 300
+
+sources:
+  - type: replay
+    label: Log replay
+    file: logs/demo.csv.gz   # .csv or .csv.gz written by AeroVolt (--log)
+    speed: 1.0               # 1.0 = as recorded, 4 = four times faster, max = as fast as possible
+    loop: true               # start again at the end (the analysis starts a new session)
+    start_s: 0               # skip the first seconds of the log
+
+paths:
+  vehicle: config/vehicle.yaml
+  sensors: config/sensors.yaml
+  can_layout: config/can_layout.yaml
+  alerts: config/alerts.yaml
+  calibration: config/calibration.yaml

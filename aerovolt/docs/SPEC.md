@@ -387,7 +387,8 @@ The engine must produce **every raw channel in the catalogue** plus the truth ch
   brakes to a stop; it restarts (precharge → ready → driving) when the fault is cleared.
   APPS implausibility: |apps1 − apps2| > 10 percentage points for > 100 ms → the inverter cuts
   the torque (`apps_plaus_ok` 0) until the sensors agree again; the SDC stays closed (FS T 11.8.9:
-  deactivating the TS is not required). AMS: any cell > 60 °C, < 2.8 V or > 4.2 V for > 0.5 s
+  deactivating the TS is not required). AMS: any temperature *sensor* > 60 °C (the AMS only
+  knows what it measures), any cell < 2.8 V or > 4.2 V for > 0.5 s
   (reset after 10 s back in limits); the BMS also derates current (discharge/charge current
   limits keep cells inside 3.0…4.18 V, so a full pack accepts no regen). IMD trips 1.5 s after
   the insulation falls below 294 kΩ; clearing `imd_fault` resets it.
@@ -422,12 +423,18 @@ The engine must produce **every raw channel in the catalogue** plus the truth ch
 | `pitot_blocked` | aero | pitot reads ≈ 0 Pa | `sensor_pitot_implausible` |
 | `tap_leak` | aero | tube leak on `rw_p03`: reads 10 % of true | `sensor_tap_anomaly` (classified **sensor**, not aero) |
 | `crosswind_gust` | aero | 12 m/s gust from the car's left for 20 s (then clears itself) | `aero_high_yaw` |
-| `cell_hot` | powertrain | cell 47 R0 × 4 (bad weld) | `bms_cell_temp_outlier`, then `bms_cell_overtemp` |
+| `cell_hot` | powertrain | cell 47 R0 × 4 (bad weld) | `bms_cell_voltage_outlier` (its resistance), `bms_cell_temp_outlier`; `bms_cell_overtemp` only if a sensor passes 58 °C (see note) |
 | `cell_weak` | powertrain | cell 88 capacity 80 % | `bms_cell_voltage_outlier` |
 | `pump_fail` | powertrain | coolant flow → 0 | `cooling_no_flow`, `motor_temp_high` (+ derating) |
 | `imd_fault` | powertrain | insulation 2000 → 150 kΩ, IMD trips | `safety_imd_trip`, `safety_sdc_open` |
 | `current_offset` | powertrain | pack current sensor +3 A offset | `bms_soc_divergence` |
 | `apps_implausible` | powertrain | apps2 sticks at 0 % | `safety_apps_implausible` |
+
+*Note on `cell_hot` (as built):* the BMS's resistance-based discharge current limit (cells
+kept ≥ 3.0 V) sees the 4× R0 cell sag first and caps the pack power (≈ 45 kW instead of 80 kW),
+so the hot cell settles ≈ 8 K above the pack and its sensor stays below the 58 °C warning even
+on a hot day - exactly what a real BMS is for. `bms_cell_overtemp` (and the AMS trip at 60 °C)
+is tested end-to-end with a hot-soaked pack instead (`tests/test_e2e_faults.py`).
 
 `SimSource.set_fault(id, active)` toggles; `faults()` lists all with state. Faults can also be
 scheduled from config/CLI: `--fault cell_hot@60` (activate at t = 60 s).
@@ -507,7 +514,10 @@ exceptions).
   power. The `strategy` event also carries `laps_left, laps_possible, current_kw,
   energy_needed_kwh, energy_available_kwh, energy_short, scale`.
 * `anomaly.py`: a tap deviates beyond `max(0.2, 30 % |mean|, 4σ)` for 2 s of steady flow
-  (pitot q > 150 Pa, filtered |yaw| < 8°). Sensor-fault taps are excluded from the section-Cl
+  (pitot q > 150 Pa, filtered |yaw| < 8°). A neighbour *supports* an aero explanation when it
+  deviates the same way by at least 40 % of its own threshold and at least 20 % of the
+  tap's change (real flow changes are not uniform). Sensor-fault flags are sticky until the
+  tap reads normally for 5 s. Sensor-fault taps are excluded from the section-Cl
   integration. `AeroHealthMonitor` keeps learned baselines (station Cl, undertray mean Cp,
   balance) for the aero alerts. Once warm, it learns only samples within half the alert
   threshold of the baseline, so a fault is not absorbed before its alert freezes learning.
@@ -593,11 +603,48 @@ every 2 s if the port disappears (`status: waiting`), timestamps samples on arri
 ### 7.4 `ReplaySource` (`replay_source.py`)
 Plays a log written by `datalog/writer.py` at `speed` × real time (loop optional).
 
+**Implementation notes (as built, §7):**
+* `protocol.py`: `parse_line(line, *, raise_errors=False)` returns `None` for blank lines and free
+  text (anything not starting with `$` or `{`), and also for corrupt protocol lines unless
+  `raise_errors=True`, which raises `ChecksumError` / `ProtocolError` (the serial source counts
+  them). `ParsedLine{kind: data|hello|status|json, node, ms, values, fw_version, channels, status,
+  message}`; helpers `checksum`, `with_checksum`, `format_data/hello/status`, `format_value`.
+  A `$` sentence without `*CS` is rejected.
+* `SerialSource` config extras: `reconnect_s` (2), `probe_s` (6; `port: auto` listens this long
+  per candidate for any valid AeroVolt line, then falls back to the first ttyACM/ttyUSB).
+  Unknown channel ids are dropped in the source. Stats: `port, lines, samples, checksum_errors,
+  malformed, unknown_channels, dropped, node, fw_version, rate_hz, last_hello (session t),
+  last_status, connects`.
+* `canmap.CanMap.from_dbc(path, channels=None)`: `decode(id, data) -> {channel: value}` (SNA
+  dropped; `UnknownFrameError` / `ValueError`), `encode(id|name, values) -> bytes` (missing / NaN
+  -> SNA, missing flags -> 0), `encode_all(values) -> [(id, bytes)]`, `frames_for(channels)`.
+  `CanSource` stats: `frames, frames_per_s, samples, unknown_ids, unknown_id_list,
+  decode_errors, error_frames, dropped, bus_load_pct (worst-case stuffed bits / bitrate), connects`.
+* `ReplaySource` config: `file` (relative to the project root), `speed` (float | max), `loop`,
+  `start_s`, optional `channels`. Only non-`calc_*` columns are emitted (the analysis recomputes
+  them); empty cells are not emitted. `ctx.track` comes from `meta.track` (built-in name, else
+  rebuilt from `meta.track.xy`). The CLI's `--speed` also applies to replay sources.
+
 ## 8. Data logging (`aerovolt/datalog/`)
 Wide CSV (gzip optional `.csv.gz`), one row per store snapshot (20 Hz): header
 `t,<channel ids...>`; a second header line starting with `#units,`; NaN written as empty.
 Metadata JSON sidecar `<log>.meta.json` (config, vehicle name, start time, faults timeline,
 alerts, laps). `reader.py` loads it back (numpy). `tools/export_wide.py` resamples/filters.
+
+**Implementation notes (as built, §8):** the sidecar of `run1.csv.gz` / `run1.csv` is
+`run1.meta.json` (the `.csv`/`.gz` suffixes are stripped; `datalog.writer.meta_path_for`). It is
+written atomically at start, on every lap event and at close, and holds `format:
+"aerovolt-log"`, `format_version`, `session {name, started}`, `mode`, `config`, `vehicle_name`,
+`track` (`Track.to_json`), `sources`, `faults` (timeline `[{t, id, active, by: user|sim}]`),
+`alerts`, `laps`, `strategy`, `rows`, `t_first`, `t_last`, and at close `ended`, `duration_s`,
+`summary`. Columns = every catalogue channel; values use the channel resolution + one guard
+digit. Raw channels that are not live (older than `store.stale_after`) are written empty, so a
+replay shows a dead sensor as dead. `session.log` may contain `{timestamp}` (`{date}`, `{time}`);
+after a session reset the log continues in `<name>-2.csv.gz`, ... API: `LogWriter(path,
+channels, meta)` `.write_row(t, values)` `.write_values(t, dict)` `.update_meta(**kw)`
+`.close(**kw)`; `read_log(path, channels=None, start=None, end=None) -> LogData{t, ids, units,
+values, meta}` (`log["id"]`), `LogReader(path).iter_rows(channels)` (streaming), `read_meta`.
+The reader tolerates a truncated last line / gzip stream.
 
 ## 9. Server (`aerovolt/server/`)
 
@@ -633,6 +680,33 @@ WebSocket messages (JSON, server → client):
 {"type":"sources","sources":[...]}      // every 1 s
 ```
 Frame values: rounded sensibly (≈ 4 significant figures beyond resolution), NaN → null.
+
+**Implementation notes (as built, §9):**
+* `Session(config, processor_factory=None, source_factory=None)`; `await start()/stop()/reset()`,
+  `await run_headless(duration=None) -> summary dict` (`mode, session, track, duration_s, wall_s,
+  realtime_factor, laps, alerts, alerts_raised, faults, strategy, final{key channels}, sources,
+  log, stats`). `hello()`, `frame()`, `history(ids, seconds)`, `faults()`, `set_fault(id,
+  active)`, `alerts_json(active_only=False)`, `sources_info()`, `bus` (EventBus), `store`,
+  `manager`, `processor`, `ctx`.
+* Session time: with a `sim` or `replay` source, `ctx.clock()` returns the latest **data** time,
+  so real sources in a hybrid session are stamped on the simulator's time line at any speed;
+  otherwise it is monotonic seconds since start. A data-time jump back by > 5 s (looping
+  replay) starts a new session (store cleared, `reset` event, new log segment).
+* Processing: one `Processor.tick` whenever an emission passes the next `1/process_hz`
+  boundary (no catch-up burst after a gap), a snapshot (+ log row) on each `1/snapshot_hz`
+  boundary, plus the 1 Hz wall-clock fallback. Fault changes made by the sim itself (schedules,
+  the self-clearing gust) are detected after each tick and published as `faults` events.
+* Extra keys (clients may ignore them): `hello.server_version`; `frame.stale` = raw channels
+  that were live but are now stale (only present when non-empty). The bus also carries an
+  internal `{"type": "reset"}` event, which the server turns into a fresh `hello` for every
+  client. `GET /api/alerts` returns the whole log (active and cleared, oldest first);
+  `POST /api/faults/{id}`: 400 bad body (`active` must be a JSON boolean), 404 unknown fault,
+  409 no simulator. Static files and API answers carry no-cache headers.
+* `server/app.py`: `create_app(session, web_root=None)`, `start_server(session, host, port,
+  web_root=None) -> (runner, actual_port)` (port 0 = ephemeral; `PortInUseError`), `serve(...)`.
+* CLI extras: `--list-faults`, `--list-tracks`, `-v`; `--headless` needs `--duration` unless a
+  sim has `laps` or a replay does not loop. Exit status 2 with a one-line `error:` for user
+  problems (missing config / hardware packages / replay file, busy port).
 
 CLI (`__main__.py`):
 ```

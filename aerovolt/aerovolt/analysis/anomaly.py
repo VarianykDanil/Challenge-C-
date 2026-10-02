@@ -20,8 +20,20 @@ That physical argument is the classifier (:class:`TapAnomalyDetector`):
 3. A deviating tap whose neighbours (``TapLayout.neighbours``: same element, station and
    surface, adjacent along the chord) are normal -> **sensor fault** (alert
    ``sensor_tap_anomaly``; the tap is excluded from the section-Cl integration so one bad
-   tube does not corrupt the downforce numbers). Two or more neighbouring taps deviating
-   in the same direction -> **aero change** (a *cluster*, reported to the aero alerts).
+   tube does not corrupt the downforce numbers). If neighbours move *with* it -> **aero
+   change** (a *cluster*, reported to the aero alerts).
+
+   A real flow change is rarely uniform: when a diffuser stalls, the throat tap may lose
+   65 % of its suction while its neighbours lose "only" 25-40 %, below their own alarm
+   thresholds. So a neighbour *supports* an aero explanation when it deviates in the same
+   direction by at least 40 % of its own threshold **and** at least 20 % of the deviating
+   tap's change. A leaking tube's neighbours do not move at all (measured: a few hundredths
+   of Cp, random sign), so the two cases separate cleanly.
+
+   A sensor-fault flag is *sticky*: it clears only once the tap reads normally again for
+   ``clear_s``, or if a neighbour fully deviates the same way (the "sensor" was the first
+   sign of a spreading aero change). Otherwise flow yaw, which moves a whole station by a
+   few tens of percent, could make a leaking tap look like part of a cluster for a moment.
 
 :class:`AeroHealthMonitor` keeps the same kind of baseline for the element-level numbers
 (station section Cl, undertray mean Cp, aero balance) that the aero alerts compare against.
@@ -122,6 +134,12 @@ class TapCluster:
 class TapAnomalyDetector:
     """Per-tap baseline learning and sensor-vs-aero classification (module docstring)."""
 
+    #: A neighbour supports an aero change when it deviates the same way by at least this
+    #: fraction of its own threshold ...
+    SUPPORT_OF_THRESHOLD = 0.4
+    #: ... and at least this fraction of the deviating tap's own change.
+    SUPPORT_OF_DEVIATION = 0.2
+
     def __init__(self, layout: TapLayout, tau_s: float = 60.0, warmup_s: float = 20.0,
                  z_threshold: float = 4.0, abs_min: float = 0.2, rel_min: float = 0.30,
                  persist_s: float = 2.0, clear_s: float = 5.0, tau_cp_s: float = 0.5) -> None:
@@ -185,40 +203,50 @@ class TapAnomalyDetector:
         self.baseline.update(x, dt, learn)
         self._classify()
 
-    def _classify(self) -> None:
-        persistent = self.dev_time >= self.persist_s
-        sign = np.sign(np.nan_to_num(self.deviation))
-        in_cluster = np.zeros(self.n, dtype=bool)
-        for i in np.flatnonzero(persistent):
-            if any(self.deviating[j] and sign[j] == sign[i] for j in self.layout.neighbours[i]):
-                in_cluster[i] = True
-        self.in_cluster = in_cluster
-        # Sensor fault: persistent and isolated. Once flagged it stays flagged until the tap
-        # has read normally for clear_s, or its neighbours start to agree (then it is aero).
-        newly = persistent & ~in_cluster
-        cleared = (self.ok_time >= self.clear_s) | in_cluster
-        self.sensor_fault = (self.sensor_fault | newly) & ~cleared
-        self.clusters = self._group_clusters(in_cluster, sign)
+    def _supports(self, j: int, i: int, thr: np.ndarray) -> bool:
+        """Does neighbour ``j`` move with deviating tap ``i`` (same sign, meaningful size)?"""
+        dj, di = self.deviation[j], self.deviation[i]
+        if not (math.isfinite(dj) and math.isfinite(di)) or np.sign(dj) != np.sign(di):
+            return False
+        return abs(dj) >= max(self.SUPPORT_OF_THRESHOLD * thr[j], self.SUPPORT_OF_DEVIATION * abs(di))
 
-    def _group_clusters(self, in_cluster: np.ndarray, sign: np.ndarray) -> list[TapCluster]:
+    def _classify(self) -> None:
+        nb = self.layout.neighbours
+        thr = self.thresholds()
+        sign = np.sign(np.nan_to_num(self.deviation))
+        persistent = self.dev_time >= self.persist_s
+        supported = np.zeros(self.n, dtype=bool)
+        confirmed = np.zeros(self.n, dtype=bool)
+        for i in np.flatnonzero(persistent | self.sensor_fault):
+            supported[i] = any(self._supports(j, i, thr) for j in nb[i])
+            confirmed[i] = any(self.deviating[j] and sign[j] == sign[i] for j in nb[i])
+        newly = persistent & ~supported & ~self.sensor_fault
+        cleared = self.sensor_fault & ((self.ok_time >= self.clear_s) | confirmed)
+        self.sensor_fault = (self.sensor_fault | newly) & ~cleared
+        self.in_cluster = persistent & supported & ~self.sensor_fault
+        self.clusters = self._group_clusters(thr)
+
+    def _group_clusters(self, thr: np.ndarray) -> list[TapCluster]:
+        """Flood fill from each clustered tap over the neighbours that move with it."""
         lay = self.layout
         seen: set[int] = set()
         clusters: list[TapCluster] = []
-        for i in np.flatnonzero(in_cluster):
-            if i in seen:
+        for seed in np.flatnonzero(self.in_cluster):
+            if seed in seen:
                 continue
-            members, stack = [], [int(i)]
-            while stack:  # flood fill over same-sign deviating neighbours
+            members, stack = [], [int(seed)]
+            while stack:
                 k = stack.pop()
                 if k in seen:
                     continue
                 seen.add(k)
                 members.append(k)
-                stack.extend(j for j in lay.neighbours[k] if self.deviating[j] and sign[j] == sign[i] and j not in seen)
+                stack.extend(j for j in lay.neighbours[k]
+                             if j not in seen and not self.sensor_fault[j] and self._supports(j, k, thr))
             members.sort()
             clusters.append(TapCluster(
-                element=lay.element[i], station=lay.station[i], surface=lay.surface[i],
-                taps=tuple(lay.ids[k] for k in members), direction=int(sign[i]),
+                element=lay.element[seed], station=lay.station[seed], surface=lay.surface[seed],
+                taps=tuple(lay.ids[k] for k in members), direction=int(np.sign(self.deviation[seed])),
                 mean_deviation=float(np.mean(self.deviation[members])),
             ))
         return clusters

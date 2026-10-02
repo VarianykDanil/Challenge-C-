@@ -196,6 +196,21 @@ def test_check_cell_temp_outlier_names_the_sensor_and_cells():
     assert al.check_cell_temp_outlier(_state(cell_t_ids=ids), {}, False).state is None
 
 
+def test_cell_temp_outlier_threshold_lowered_by_resistance_evidence():
+    ids = [f"cell_t_{j:02d}" for j in range(60)]
+    temps = 41.0 + 0.2 * np.sin(np.arange(60))
+    temps[20] = 42.8  # +1.8 degC: below the plain 2.5 degC limit
+    vids = [f"cell_v_{k:03d}" for k in range(140)]
+    plain = _state(values=dict(zip(ids, temps)), cell_t_ids=ids, cell_v_ids=vids)
+    params = {"min_abs_c": 2.5, "corroborated_abs_c": 1.5, "resistance_mohm": 1.0, "z": 4.0}
+    assert al.check_cell_temp_outlier(plain, params, False).state is False
+    tracker = SimpleNamespace(ready=True, resistance_dev_ohm=lambda: np.where(np.arange(140) == 47, 0.009,
+                                                                             1e-5 * np.cos(np.arange(140))))
+    corroborated = _state(values=dict(zip(ids, temps)), cell_t_ids=ids, cell_v_ids=vids, cells=tracker)
+    res = al.check_cell_temp_outlier(corroborated, params, False)
+    assert res.state is True and "cell 47 internal resistance +9.0 mOhm" in res.detail
+
+
 def test_check_cell_voltage_outlier_reports_cause():
     tracker = SimpleNamespace(ready=True, offset_v=lambda: np.where(np.arange(140) == 88, -0.012, 0.0005 * np.sin(np.arange(140))),
                               resistance_dev_ohm=lambda: np.where(np.arange(140) == 47, 0.009, 1e-5 * np.cos(np.arange(140))))

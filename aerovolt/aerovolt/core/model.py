@@ -133,6 +133,8 @@ class FaultInfo:
     system: str
     description: str
     active: bool = False
+    #: Alert ids the analysis is expected to raise for this fault (SPEC 5.5).
+    alerts: tuple[str, ...] = ()
 
     def to_json(self) -> dict[str, Any]:
         return {
@@ -141,6 +143,7 @@ class FaultInfo:
             "system": self.system,
             "description": self.description,
             "active": bool(self.active),
+            "alerts": list(self.alerts),
         }
 
 

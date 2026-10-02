@@ -170,12 +170,15 @@ rules:
   # Hot sensor vs pack median (robust z). Normal: <= 1.4 degC above the median over 15 laps
   # (R0 spread +-5 %). Cell 47 with 4x R0: its sensor (mean of cells 47-48, heat also
   # conducted away through the bus bars) pulls away at ~2 degC/min -> 2.5 degC after ~75 s.
+  # If a cell under the sensor already shows high internal resistance (bms_cell_voltage_
+  # outlier evidence), 1.5 degC is enough (~45 s): corroborated evidence.
   - id: bms_cell_temp_outlier
     type: custom
     check: cell_temp_outlier
     severity: warn
     title: Cell temperature outlier
-    params: {min_abs_c: 2.5, clear_abs_c: 1.8, z: 4.0, sigma_floor_c: 0.3}
+    params: {min_abs_c: 2.5, clear_abs_c: 1.8, corroborated_abs_c: 1.5, resistance_mohm: 1.0,
+             z: 4.0, sigma_floor_c: 0.3}
     for_s: 5
     clear_for_s: 15
 
@@ -317,10 +320,12 @@ rules:
 
   # The endurance strategy predicts the car will not finish (with the reserve) at the power
   # limit it runs now. Expected at 80 kW in a full endurance (SPEC 5.4: 95-110 % of usable).
+  # Judged from the 2nd completed lap on (lap 1 includes the launch from the grid).
   - id: energy_short
     type: custom
     check: energy_short
     severity: warn
     title: "Energy short: will not finish at this power limit"
+    params: {min_laps: 2}
     for_s: 0
     clear_for_s: 0

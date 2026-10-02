@@ -1,0 +1,65 @@
+# =========================================================================================
+# AeroVolt hybrid configuration: simulator + ONE real USB-serial sensor node
+# (the Phase-2 bench demo)
+# =========================================================================================
+# Run with:   python -m aerovolt --config config/hybrid_serial.yaml --open
+#
+# Everything is simulated except the channels the real sensor node sends. On the bench a
+# Sensirion SDP differential-pressure sensor drives front-wing tap 3 (fw_p03): blow into
+# its tube and that tap lights up on the 3D car, its Cp changes and the analysis reacts -
+# while the virtual car keeps lapping. No hardware? Emulate the node on a pseudo-terminal
+# with tools/fake_sensor_node.py --pty (it prints a /dev/pts/N path; its 'blow' pattern
+# simulates blowing on the sensor when you press Enter) and put that path in 'port' below.
+#
+# HOW PRIORITY WORKS
+#   Sources are listed in priority order: LATER sources win. For every channel the value
+#   shown (and analysed) comes from the highest-priority source that sent it within the
+#   last 1.0 s. So:
+#     * while the node is sending fw_p03, the simulated fw_p03 is dropped;
+#     * unplug the node and, one second later, the simulated fw_p03 comes back
+#       (the dashboard's Sensors tab shows who owns each channel).
+#   Calibration (config/calibration.yaml: value = (raw - offset) * scale) is applied to the
+#   real node's values only - run tools/calibrate_taps.py with no airflow to zero the sensor.
+#
+# TIME
+#   The simulator's clock is the session clock: samples from the node are stamped with the
+#   simulator time at the moment they arrive, so the two stay aligned at any --speed.
+
+session:
+  name: "Bench demo - real pressure sensor on front-wing tap 3"
+  log: null              # e.g. logs/bench_{timestamp}.csv.gz to record the demo
+
+server:
+  host: 127.0.0.1
+  port: 8080
+  broadcast_hz: 20
+
+processing:
+  process_hz: 20
+  snapshot_hz: 20
+  history_s: 300
+
+track: fs_endurance
+
+sources:
+  # 1st = lowest priority: the virtual car provides every channel.
+  - type: sim
+    label: Simulator
+    speed: 1.0           # keep real time for a bench demo (the sensor lives in real time)
+    seed: 42
+    weather: {temp_c: 18, pressure_pa: 101325, rh_pct: 60, wind_ms: 3.0, wind_dir_deg: 225}
+    faults: []
+
+  # 2nd = higher priority: the real sensor node overrides the channels it sends.
+  - type: serial
+    label: "Bench node (front wing tap 3)"
+    port: auto           # first USB serial device that prints AeroVolt lines; or /dev/ttyACM0, COM5 ...
+    baud: 115200
+    channels: [fw_p03]   # take ONLY this channel from the node (anything else it sends is ignored)
+
+paths:
+  vehicle: config/vehicle.yaml
+  sensors: config/sensors.yaml
+  can_layout: config/can_layout.yaml
+  alerts: config/alerts.yaml
+  calibration: config/calibration.yaml

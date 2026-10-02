@@ -13,7 +13,6 @@ import copy
 import json
 import math
 
-import numpy as np
 import pytest
 
 from aerovolt.core.store import ChannelStore

@@ -326,7 +326,7 @@ def raised(events: list[dict]) -> dict[str, dict]:
 
 
 def test_synthetic_car_lap_matches_lapsim():
-    car = SyntheticCar()
+    car = SyntheticCar(rest_s=0.0)
     for _ in range(int(car.lap.lap_time / 0.05)):
         car.step(0.05)
     assert car.s == pytest.approx(car.track.length, rel=0.02)

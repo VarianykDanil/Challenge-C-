@@ -1,0 +1,61 @@
+# =========================================================================================
+# AeroVolt on the REAL CAR: all data from the CAN bus, no simulator
+# =========================================================================================
+# Run on the pit / logger computer (Linux, e.g. a Raspberry Pi with a CAN HAT or a laptop
+# with a USB-CAN adapter):
+#     sudo ip link set can0 up type can bitrate 1000000
+#     python -m aerovolt --config config/car_can.yaml --host 0.0.0.0
+# Hardware packages:   pip install -r requirements-hw.txt   (python-can, cantools, pyserial)
+#
+# The frame layout is can/aerovolt.dbc (generated from config/can_layout.yaml by
+# tools/gen_can.py): every CAN signal is named after the channel it carries, and the
+# "signal not available" value (0x8000 signed / 0xFFFF unsigned) means "no data" - it never
+# overwrites a real value. No CAN adapter? On Linux create a virtual SocketCAN bus
+#     sudo ip link add dev vcan0 type vcan && sudo ip link set vcan0 up
+# set 'channel: vcan0' below and feed it with tools/fake_sensor_node.py --can vcan0.
+#
+# Without a simulator, session time is the arrival time (seconds since start), and the
+# analysis also runs once a second on the wall clock so that a sensor (or the whole bus)
+# going quiet is reported as stale instead of freezing the last value.
+
+session:
+  name: "Car - live CAN telemetry"
+  # {timestamp} -> 20261002-153012, so every run gets its own file
+  log: logs/car_{timestamp}.csv.gz
+
+server:
+  host: 127.0.0.1        # 0.0.0.0 so pit-wall laptops / phones on the same network can connect
+  port: 8080
+  broadcast_hz: 20
+
+processing:
+  process_hz: 20
+  snapshot_hz: 20
+  history_s: 300
+
+# A real venue is not one of the built-in virtual tracks, so there is no track model:
+# lap timing uses the GPS gate below instead.
+track: null
+
+# Lap timing for a real track: two GPS "gate posts" (lat, lon) either side of the timing
+# line - walk to each edge of the track with a phone GPS app and note the coordinates.
+# The direction of travel is learned from the first crossing (the first lap is an out-lap).
+laps:
+  gate: [[52.07861, -1.01702], [52.07855, -1.01690]]
+  debounce_s: 5          # ignore further crossings for this long (GPS jitter on the line)
+
+sources:
+  - type: can
+    label: Car CAN bus
+    interface: socketcan # socketcan (Linux) | slcan | pcan | kvaser | virtual (tests)
+    channel: can0
+    bitrate: 1000000     # classic CAN, 1 Mbit/s (must match every node on the bus)
+    dbc: can/aerovolt.dbc
+    # channels: [...]    # optional: take only these channels from the bus
+
+paths:
+  vehicle: config/vehicle.yaml
+  sensors: config/sensors.yaml
+  can_layout: config/can_layout.yaml
+  alerts: config/alerts.yaml
+  calibration: config/calibration.yaml

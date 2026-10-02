@@ -116,7 +116,8 @@ class Processor:
         self.taps = TapAnomalyDetector(self.aero.layout)
         self.aero_health = AeroHealthMonitor()
 
-        self.cell_params = physics.CellParams.from_vehicle(vehicle) if "accumulator" in vehicle else physics.CellParams(parallel=4)
+        self.cell_params = (physics.CellParams.from_vehicle(vehicle) if "accumulator" in vehicle
+                            else physics.CellParams(parallel=4))
         self.ocv_table = physics.ocv_table_from_vehicle(vehicle)
         acc = vehicle.get("accumulator", {})
         self.n_series = int(acc.get("series", len(self.cell_v_ids) or 140))
@@ -155,6 +156,8 @@ class Processor:
         self._current_mismatch = LowPass(TAU_CURRENT_MISMATCH_S)
         self.alert_engine.reset()
         self.laps: list[LapSummary] = []
+        self.lap_soc_used: list[float] = []  # SoC drop of each completed lap, percentage points
+        self._lap_soc0 = NAN
         self.strategy_result: StrategyResult | None = None
         self._track: Any = object()  # sentinel: (re)build the lap detector on the first tick
         self.lap_detector = LapDetector.from_context(self.vehicle, None, self.laps_cfg)
@@ -387,18 +390,22 @@ class Processor:
             speed = float(np.mean(wheels)) if wheels else NAN
 
         key = (det.lap, det.lap_start)
+        soc_now = _first_finite(calc.get("calc_soc_ekf", NAN), calc.get("calc_soc_cc", NAN))
         if self._acc is None:
             self._acc = LapAccumulator(t, self.energy.net_kwh, self.energy.regen_kwh)
             self._acc_key = key
+            self._lap_soc0 = soc_now
         if lap_event is not None:
             summary = self._acc.summary(lap_event.lap, lap_event.lap_time, self.energy.net_kwh, self.energy.regen_kwh)
             self.laps.append(summary)
+            self.lap_soc_used.append(self._lap_soc0 - soc_now)  # NaN if the SoC was unknown
             events.append({"type": "lap", "lap": summary.to_json()})
             self._run_strategy(calc, events)
         if key != self._acc_key:
             self._acc = LapAccumulator(t, self.energy.net_kwh, self.energy.regen_kwh)
             self._acc_key = key
             self._lap_p_max = NAN
+            self._lap_soc0 = soc_now
 
         q = aero_out.q if aero_out is not None else NAN
         self._acc.add(dt, speed, calc["calc_cla"], calc["calc_cda"], calc["calc_aero_balance"],
@@ -435,7 +442,7 @@ class Processor:
         soc = _first_finite(calc.get("calc_soc_ekf", NAN), calc.get("calc_soc_cc", NAN))
         rho = calc.get("calc_rho", NAN)
         result = strat.evaluate(self.laps, soc, current_kw=self._lap_p_max,
-                                rho=rho if _finite(rho) else 1.2)
+                                rho=rho if _finite(rho) else 1.2, soc_used_pct=self.lap_soc_used)
         self.strategy_result = result
         events.append({"type": "strategy", "strategy": result.to_json()})
 

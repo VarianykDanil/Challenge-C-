@@ -1,0 +1,12 @@
+{
+  "name": "avcore",
+  "version": "1.0.0",
+  "description": "AeroVolt sensor-node core: CAN signal packing (cantools-exact), $AV serial lines, Sensirion SDP CRC/conversion, BME280 compensation, calibration, filters, scheduler. Portable C++17, no Arduino dependency.",
+  "keywords": ["can", "dbc", "sensirion", "bme280", "formula-student"],
+  "frameworks": "*",
+  "platforms": "*",
+  "build": {
+    "srcDir": "src",
+    "includeDir": "src"
+  }
+}

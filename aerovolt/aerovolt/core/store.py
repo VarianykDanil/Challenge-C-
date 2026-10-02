@@ -59,6 +59,7 @@ class ChannelStore:
         self._latest: dict[str, float] = {}
         self._stamp: dict[str, float] = {}
         self._row = np.full(len(self.ids), NAN, dtype=np.float64)
+        self._updates: list[int] = [0] * len(self.ids)  # samples received per catalogue column
         self._buf.fill(NAN)
         self._buf_t.fill(NAN)
         self._head = 0  # next row to write
@@ -73,6 +74,7 @@ class ChannelStore:
         """
         col = self._col
         row = self._row
+        updates = self._updates
         for cid, value in values.items():
             v = float(value) if value is not None else NAN
             self._latest[cid] = v
@@ -80,6 +82,7 @@ class ChannelStore:
             i = col.get(cid)
             if i is not None:
                 row[i] = v
+                updates[i] += 1
         if not t <= self.t:  # also true while self.t is NaN
             self.t = t
 
@@ -99,6 +102,13 @@ class ChannelStore:
         """Seconds since the channel was last updated (``inf`` if never)."""
         stamp = self._stamp.get(cid)
         return math.inf if stamp is None else now - stamp
+
+    def update_counts(self) -> list[int]:
+        """Number of samples received so far per catalogue channel (order of :attr:`ids`).
+
+        Differencing two calls over a time window gives each channel's *actual* sample
+        rate (the Sensors tab compares it with the nominal ``rate_hz``)."""
+        return list(self._updates)
 
     def stale_after(self, cid: str) -> float:
         """Silence (s) after which a channel counts as stale: ``max(0.5, 5 / rate_hz)``."""

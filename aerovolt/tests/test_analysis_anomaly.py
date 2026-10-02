@@ -103,6 +103,49 @@ def test_two_neighbouring_taps_form_a_cluster():
     assert [c.taps for c in det.clusters] == [("fw_p02", "fw_p03")]
 
 
+def test_non_uniform_floor_stall_is_aero_not_sensor():
+    """A stall hits the throat tap hardest (-65 %) while its neighbours lose only 20-30 % -
+    below their own thresholds, but moving the same way: that is aerodynamics."""
+    det = TapAnomalyDetector(LAYOUT)
+    t = _run(det, 30.0)
+    idx = {k: LAYOUT.index(k) for k in ("ut_p03", "ut_p04", "ut_p05")}
+
+    def stall(cp):
+        cp = cp.copy()
+        cp[idx["ut_p04"]] *= 0.35
+        cp[idx["ut_p03"]] *= 0.80
+        cp[idx["ut_p05"]] *= 0.75
+        return cp
+
+    _run(det, 3.0, stall, t0=t)
+    assert not det.sensor_fault.any()
+    assert any("ut_p04" in c.taps for c in det.clusters)
+
+
+def test_sensor_flag_is_sticky_when_the_whole_station_shifts():
+    """Flow yaw moves a whole station by ~15 %: the leaking tap must stay a sensor fault."""
+    det = TapAnomalyDetector(LAYOUT)
+    t = _run(det, 30.0)
+    station = [LAYOUT.index(f"rw_p0{k}") for k in range(1, 7)]
+    leak_i = LAYOUT.index("rw_p03")
+
+    def leak(cp):
+        cp = cp.copy()
+        cp[leak_i] *= 0.1
+        return cp
+
+    def leak_and_yaw(cp):
+        cp = leak(cp)
+        cp[station] *= 0.85
+        cp[leak_i] = 0.1 * NOMINAL_CP[leak_i]
+        return cp
+
+    t = _run(det, 3.0, leak, t0=t)
+    assert [f.tap for f in det.findings("sensor")] == ["rw_p03"]
+    _run(det, 3.0, leak_and_yaw, t0=t)
+    assert [f.tap for f in det.findings("sensor")] == ["rw_p03"]
+
+
 def test_no_decisions_or_learning_outside_steady_flow():
     det = TapAnomalyDetector(LAYOUT)
     _run(det, 30.0, steady=False)

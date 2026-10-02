@@ -207,8 +207,9 @@ FAULTS: Mapping[str, FaultDef] = {
                  "12 m/s gust from the car's left for 20 s: high flow yaw.",
                  ("aero_high_yaw",), _crosswind_gust, duration_s=GUST_DURATION_S),
         FaultDef("cell_hot", "Hot cell (bad weld)", "powertrain",
-                 "Cell 47 internal resistance × 4 (bad weld): it heats 4× faster.",
-                 ("bms_cell_temp_outlier", "bms_cell_overtemp"), _cell_hot),
+                 "Cell 47 internal resistance × 4 (bad weld): it sags most under load and heats "
+                 "4× faster; the BMS current limit cuts the power to protect it.",
+                 ("bms_cell_voltage_outlier", "bms_cell_temp_outlier"), _cell_hot),
         FaultDef("cell_weak", "Weak cell", "powertrain",
                  "Cell 88 has only 80 % capacity: it discharges faster than the others.",
                  ("bms_cell_voltage_outlier",), _cell_weak),
@@ -301,5 +302,5 @@ class FaultSet:
 
     def infos(self) -> list[FaultInfo]:
         """All faults with their state (for ``Source.faults()`` and the dashboard)."""
-        return [FaultInfo(f.id, f.title, f.system, f.description, self.active[f.id])
+        return [FaultInfo(f.id, f.title, f.system, f.description, self.active[f.id], tuple(f.alerts))
                 for f in FAULTS.values()]

@@ -1,0 +1,87 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>AeroVolt · Pit Wall</title>
+  <meta name="description" content="AeroVolt: live aero + EV powertrain telemetry for a Formula Student electric car">
+  <meta name="color-scheme" content="dark">
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%2314181e'/%3E%3Cpath d='M6 21 C12 13 20 11 27 12' stroke='%233987e5' stroke-width='3' fill='none' stroke-linecap='round'/%3E%3Cpath d='M17 6 L12 17 H17 L14 26 L22 13 H17 Z' fill='%23fab219'/%3E%3C/svg%3E">
+  <link rel="stylesheet" href="./css/styles.css">
+  <script type="importmap">
+    {
+      "imports": {
+        "three": "./vendor/three/three.module.js",
+        "three/addons/": "./vendor/three/addons/"
+      }
+    }
+  </script>
+  <script type="module" src="./js/main.js"></script>
+</head>
+<body>
+  <header class="topbar" id="topbar">
+    <a class="brand" href="#overview" aria-label="AeroVolt overview">
+      <svg class="brand-mark" viewBox="0 0 32 32" aria-hidden="true">
+        <rect width="32" height="32" rx="7" fill="var(--surface-2)"/>
+        <path d="M5 21 C11 13 19 11 27 12" stroke="var(--series-1)" stroke-width="3" fill="none" stroke-linecap="round"/>
+        <path d="M17 5 L12 17 H17 L14 27 L22 13 H17 Z" fill="var(--warning)"/>
+      </svg>
+      <span class="brand-text"><b>AeroVolt</b><small>Pit wall</small></span>
+    </a>
+    <span class="mode-badge" id="mode-badge" data-mode="" title="Data source mode">—</span>
+    <span class="conn" id="conn" data-state="connecting" title="Server connection">
+      <span class="conn-dot" aria-hidden="true"></span><span class="conn-text">Connecting…</span>
+    </span>
+
+    <nav class="tabs" id="tabs" aria-label="Dashboard views">
+      <a href="#overview" data-tab="overview"><kbd>1</kbd>Overview</a>
+      <a href="#aero" data-tab="aero"><kbd>2</kbd>Aero</a>
+      <a href="#powertrain" data-tab="powertrain"><kbd>3</kbd>Powertrain</a>
+      <a href="#sensors" data-tab="sensors"><kbd>4</kbd>Sensors</a>
+      <a href="#laps" data-tab="laps"><kbd>5</kbd>Laps</a>
+    </nav>
+
+    <div class="readouts" aria-live="off">
+      <div class="readout"><span class="readout-label">Lap</span><span class="readout-value" id="h-lap">—</span></div>
+      <div class="readout readout-wide"><span class="readout-label">Lap time</span><span class="readout-value" id="h-laptime">—</span></div>
+      <div class="readout"><span class="readout-label">Speed</span><span class="readout-value" id="h-speed">—</span></div>
+      <div class="readout"><span class="readout-label">SoC</span><span class="readout-value" id="h-soc">—</span></div>
+    </div>
+
+    <button class="hbtn hbtn-faults" id="btn-faults" type="button" title="Fault injection (F)" hidden>
+      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M13 2 4 14h7l-1 8 9-12h-7l1-8z"/></svg>
+      <span>Faults</span><span class="hbtn-count" id="faults-count" hidden>0</span>
+    </button>
+    <button class="hbtn hbtn-alerts" id="btn-alerts" type="button" title="Alerts (A)" data-level="none">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3a6 6 0 0 0-6 6v4l-2 3h16l-2-3V9a6 6 0 0 0-6-6zm-2 15a2 2 0 0 0 4 0"/></svg>
+      <span class="hbtn-count" id="alerts-count">0</span>
+    </button>
+  </header>
+
+  <main class="views" id="views">
+    <section class="view" data-view="overview" aria-label="Overview" hidden></section>
+    <section class="view" data-view="aero" aria-label="Aero" hidden></section>
+    <section class="view" data-view="powertrain" aria-label="Powertrain" hidden></section>
+    <section class="view" data-view="sensors" aria-label="Sensors" hidden></section>
+    <section class="view" data-view="laps" aria-label="Laps" hidden></section>
+  </main>
+
+  <div class="scrim" id="scrim" hidden></div>
+  <aside class="drawer drawer-right" id="drawer-alerts" aria-label="Alerts" aria-hidden="true"></aside>
+  <aside class="drawer drawer-right drawer-faults" id="drawer-faults" aria-label="Fault injection" aria-hidden="true"></aside>
+  <div class="toasts" id="toasts" aria-live="polite"></div>
+
+  <div class="splash" id="splash">
+    <div class="splash-card">
+      <svg class="brand-mark big" viewBox="0 0 32 32" aria-hidden="true">
+        <rect width="32" height="32" rx="7" fill="var(--surface-2)"/>
+        <path d="M5 21 C11 13 19 11 27 12" stroke="var(--series-1)" stroke-width="3" fill="none" stroke-linecap="round"/>
+        <path d="M17 5 L12 17 H17 L14 27 L22 13 H17 Z" fill="var(--warning)"/>
+      </svg>
+      <h1>AeroVolt</h1>
+      <p id="splash-text">Connecting to the telemetry server…</p>
+      <noscript><p>This dashboard needs JavaScript (ES modules).</p></noscript>
+    </div>
+  </div>
+</body>
+</html>

@@ -109,7 +109,7 @@ FAULTS: list[tuple[str, str, str, str, list[str]]] = [
      ["sensor_tap_anomaly"]),
     ("crosswind_gust", "aero", "Crosswind gust", "12 m/s gust from the side.", ["aero_high_yaw"]),
     ("cell_hot", "powertrain", "Hot cell (bad weld)", "Cell 47 internal resistance x4.",
-     ["bms_cell_temp_outlier", "bms_cell_overtemp"]),
+     ["bms_cell_voltage_outlier", "bms_cell_temp_outlier"]),
     ("cell_weak", "powertrain", "Weak cell", "Cell 88 capacity 80 %.", ["bms_cell_voltage_outlier"]),
     ("pump_fail", "powertrain", "Coolant pump failure", "Coolant flow drops to 0.",
      ["cooling_no_flow", "motor_temp_high"]),
@@ -303,7 +303,8 @@ class MockCar:
         self.track = MockTrack.build(origin)
         self.v_profile = speed_profile(self.track, mass=float(vehicle.get("mass_kg", 300)))
         self.lap_time_est = float(np.sum(1.0 / self.v_profile))
-        self.faults = {fid: FaultInfo(fid, title, system, desc) for fid, system, title, desc, _ in FAULTS}
+        self.faults = {fid: FaultInfo(fid, title, system, desc, alerts=tuple(alerts))
+                       for fid, system, title, desc, alerts in FAULTS}
         self.fault_alerts = {fid: alerts for fid, *_, alerts in FAULTS}
         self.ocv_table = physics.ocv_table_from_vehicle(vehicle)
         self.cell = physics.CellParams.from_vehicle(vehicle) if "accumulator" in vehicle else physics.CellParams()
@@ -835,6 +836,7 @@ class MockFeed:
             "vehicle": self.vehicle, "faults": self.faults(),
             "alerts": [a.to_json() for a in self.alerts.values()], "laps": list(self.car.laps),
             "strategy": self.car.strategy, "t": json_value(self.car.t, 0.001),
+            "alert_rules": [{"id": aid, "severity": sev, "title": title} for aid, (sev, title, _) in ALERTS.items()],
         }
 
     def frame(self) -> dict[str, Any]:

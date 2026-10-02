@@ -23,7 +23,7 @@ SPEC_FAULTS = {
     "pitot_blocked": ("aero", {"sensor_pitot_implausible"}),
     "tap_leak": ("aero", {"sensor_tap_anomaly"}),
     "crosswind_gust": ("aero", {"aero_high_yaw"}),
-    "cell_hot": ("powertrain", {"bms_cell_temp_outlier", "bms_cell_overtemp"}),
+    "cell_hot": ("powertrain", {"bms_cell_voltage_outlier", "bms_cell_temp_outlier"}),
     "cell_weak": ("powertrain", {"bms_cell_voltage_outlier"}),
     "pump_fail": ("powertrain", {"cooling_no_flow", "motor_temp_high"}),
     "imd_fault": ("powertrain", {"safety_imd_trip", "safety_sdc_open"}),
@@ -260,9 +260,11 @@ def test_imd_fault_opens_the_sdc_stops_the_car_and_restarts(vehicle, catalog):
 
 
 def test_ams_trip_through_the_engine(vehicle, catalog):
-    """A cell above 60 °C → AMS opens the SDC (bms_state 3, bms_fault 3), the car stops."""
+    """A temperature sensor above 60 °C → AMS opens the SDC (bms_state 3, bms_fault 3), the
+    car stops. The AMS sees temperatures only through the sensors, so both cells under
+    sensor 20 (cells 47-48) are made hot."""
     run = Run(vehicle, catalog, 15.0)
-    run.engine.powertrain.pack.temp[47] = 61.0
+    run.engine.powertrain.pack.temp[47:49] = 61.0
     run.engine.powertrain.pack.ua0 = run.engine.powertrain.pack.ua1 = 0.0  # keep it hot
     run.continue_for(15.0)
     assert run.window("ams_ok", 16, 30).min() == 0.0

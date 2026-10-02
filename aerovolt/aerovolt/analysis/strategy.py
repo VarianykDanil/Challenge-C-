@@ -10,12 +10,20 @@ gently throws away lap time. After every completed lap this module answers:
   usable SoC window: ``E_rem = (SoC - SoC_min) * E_pack`` where ``E_pack`` is the pack's
   nominal energy (capacity x nominal voltage). A reserve (``endurance.reserve_pct`` of the
   usable energy) is kept back for estimation error and the final lap.
+* **How much does a lap cost?** Measured over the recent laps. When the SoC drop of each
+  lap is known (the processor passes ``soc_used_pct``), a lap's cost is
+  ``ΔSoC × E_pack`` - the same currency as the remaining energy, so the cells' internal
+  I²R losses (≈ 5 % at 80 kW, invisible at the battery terminals) are counted too. Otherwise
+  the net battery-terminal energy of the lap is used. The first lap of the session is left
+  out once later laps exist: it contains the launch from the grid (½·m·v² of kinetic
+  energy that a flying lap does not pay).
 * **What would each power limit cost?** The quasi-steady-state lap simulator
   (:func:`aerovolt.sim.lapsim.energy_vs_power`) predicts energy and lap time per lap for
   power limits of 40 ... 80 kW (5 kW steps) with the *nominal* car. Models are never
   perfect (the real driver, tyres, temperatures), so the prediction is **calibrated with
   measurements**: ``scale = measured energy per lap / predicted energy per lap at the
-  power limit the car is running now`` (mean of the last three laps). The whole curve is
+  power limit the car is running now`` (mean of the last three laps; the factor therefore
+  also absorbs the internal losses when the cost is SoC based). The whole curve is
   multiplied by that factor (lap times likewise by the measured/predicted lap-time ratio).
 * **Recommendation:** the highest power limit whose scaled energy per lap, times the laps
   left, fits in the remaining energy minus the reserve. ``energy_short`` is raised when the
@@ -148,19 +156,41 @@ class EnduranceStrategy:
 
     # ---- evaluation ----------------------------------------------------------------
 
+    def lap_costs_kwh(self, laps: Sequence[LapSummary],
+                      soc_used_pct: Sequence[float] | None = None) -> list[float]:
+        """Energy each lap cost, kWh: ``ΔSoC/100 × E_pack`` where the lap's SoC drop is
+        known, else its net battery-terminal energy (NaN when neither is usable)."""
+        used = list(soc_used_pct) if soc_used_pct is not None else []
+        costs = []
+        for i, lap in enumerate(laps):
+            du = used[i] if i < len(used) else NAN
+            if math.isfinite(du) and du > 0:
+                costs.append(du / 100.0 * self.pack_energy_kwh)
+            elif math.isfinite(lap.energy_kwh) and lap.energy_kwh > 0:
+                costs.append(float(lap.energy_kwh))
+            else:
+                costs.append(NAN)
+        return costs
+
     def evaluate(self, laps: Sequence[LapSummary], soc_pct: float, current_kw: float | None = None,
-                 rho: float = lapsim.RHO_DEFAULT) -> StrategyResult:
+                 rho: float = lapsim.RHO_DEFAULT,
+                 soc_used_pct: Sequence[float] | None = None) -> StrategyResult:
         """Strategy after the given completed laps, at the present SoC (%).
 
         ``current_kw`` is the power limit the car runs (None = the configured limit).
+        ``soc_used_pct[i]`` is the SoC drop (percentage points) of ``laps[i]``, if known.
         """
-        timed = [lap for lap in laps if math.isfinite(lap.energy_kwh) and lap.energy_kwh > 0
-                 and math.isfinite(lap.lap_time) and lap.lap_time > 0]
+        costs = self.lap_costs_kwh(laps, soc_used_pct)
+        timed = [(lap, e) for lap, e in zip(laps, costs)
+                 if math.isfinite(e) and math.isfinite(lap.lap_time) and lap.lap_time > 0]
+        if len(timed) > 1 and laps and timed[0][0] is laps[0]:
+            timed = timed[1:]  # the first lap includes the launch from the grid
         recent = timed[-LAPS_AVERAGED:]
-        e_lap = float(np.mean([lap.energy_kwh for lap in recent])) if recent else NAN
-        t_lap = float(np.mean([lap.lap_time for lap in recent])) if recent else NAN
+        e_lap = float(np.mean([e for _, e in recent])) if recent else NAN
+        t_lap = float(np.mean([lap.lap_time for lap, _ in recent])) if recent else NAN
+        timed_laps = [lap for lap, _ in timed]
 
-        lap_length = None if self.track is not None else _median_distance(timed)
+        lap_length = None if self.track is not None else _median_distance(timed_laps)
         total = self.laps_total(lap_length) or 0
         laps_done = len(laps)
         laps_left = max(0, total - laps_done)

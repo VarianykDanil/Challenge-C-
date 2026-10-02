@@ -666,13 +666,17 @@ class Powertrain:
         self.bms_soc -= measured_current * dt / 36.0 / self.nominal_capacity_ah
 
     def slow_step(self, dt: float, air_speed: float, t_amb: float) -> None:
-        """10 Hz housekeeping: thermal models, BMS current limits and the AMS check."""
+        """10 Hz housekeeping: thermal models, BMS current limits and the AMS check.
+
+        The AMS judges what it can *measure*: every cell voltage, but temperatures only at
+        the 60 sensors (each reads the mean of the cells it touches) - so a hot spot between
+        two sensors is seen attenuated, exactly as on the real car."""
         self.pack.thermal_step(dt, air_speed, t_amb)
         self.cooling.step(dt, pump_on=True, air_speed=air_speed, t_amb=t_amb)
         self.dcl, self.ccl = self.pack.current_limits()
         p = self.pack
         self.safety.check_cells(dt, float(p.voltage.min()), float(p.voltage.max()),
-                                float(p.temp.max()), (p.v_min, p.v_max, p.t_max))
+                                float(p.sensor_temperatures().max()), (p.v_min, p.v_max, p.t_max))
 
     def inverter_state(self) -> int:
         """``inv_state`` enum: 0 off, 1 precharge, 2 ready, 3 driving, 4 derating, 5 fault."""
