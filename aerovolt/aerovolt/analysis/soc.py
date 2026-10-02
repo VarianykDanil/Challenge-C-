@@ -44,6 +44,9 @@ Filter equations (standard EKF, Joseph-form covariance update for numerical safe
     update:   S  = H P- H^T + R,     K  = P- H^T / S
               x  = x- + K (y - h(x-)),   P = (I - K H) P- (I - K H)^T + K R K^T
 
+The SoC state is clamped to 0..1 after each update: outside the OCV table the curve is
+flat but ``dOCV/dSoC`` is not, and an unclamped estimate of a full pack could diverge.
+
 Tuning (``Qn``, ``R``), validated in ``tests/test_analysis_soc.py`` on synthetic data
 from :class:`physics.CellModel`:
 
@@ -187,6 +190,10 @@ class SocEkf:
         self.x = self.x + K * self.innovation
         ikh = np.eye(2) - np.outer(K, H)
         self.P = ikh @ self.P @ ikh.T + np.outer(K, K) * r
+        # SoC is physically bounded. Beyond the ends of the OCV table the model voltage is
+        # flat while the Jacobian still has a slope, so an unbounded estimate could run away
+        # (e.g. a full pack with a small positive innovation). Clamp it.
+        self.x[0] = min(max(self.x[0], 0.0), 1.0)
 
     def step(self, current_a: float, v_cell: float, dt: float) -> float:
         """One predict + correct cycle; returns the SoC fraction.

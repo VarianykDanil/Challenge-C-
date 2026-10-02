@@ -213,9 +213,12 @@ def test_sdc_open_without_device_flag(warm_session):
 def test_stale_sensor_raised_and_cleared(warm_session):
     car, proc, store, _ = _fork(warm_session)
     events = drive(car, proc, store, 8.0, drop={"amb_rh", "fw_load"})
-    alert = raised(events)["sensor_stale"]
-    assert set(alert["channels"]) == {"amb_rh", "fw_load"}
-    assert "2 channel(s) stopped updating" in alert["detail"]
+    first = raised(events)["sensor_stale"]
+    assert first["channels"] == ["fw_load"]  # 50 Hz: stale after 0.5 s
+    updates = [e["alert"] for e in events if e["type"] == "alert" and e["alert"]["id"] == "sensor_stale"]
+    assert set(updates[-1]["channels"]) == {"amb_rh", "fw_load"}  # 1 Hz: stale after 5 s
+    assert "2 channel(s) stopped updating" in updates[-1]["detail"]
+    assert len(proc.alert_log) == len([a for a in proc.alert_log if a.id != "sensor_stale"]) + 1
     events = drive(car, proc, store, 5.0)
     cleared = [e["alert"] for e in events if e["type"] == "alert" and e["alert"]["id"] == "sensor_stale"]
     assert cleared and not cleared[-1]["active"]
