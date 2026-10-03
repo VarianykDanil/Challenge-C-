@@ -10,6 +10,13 @@ simulator-truth channels) are emitted, never the logged ``calc_*`` values.
 Empty cells (sensor not live when the row was written) are not emitted, so a sensor that
 was dead in the original session is also dead in the replay.
 
+The logger writes one row per store snapshot (20 Hz) with *sample-and-hold*, so a 10 Hz cell
+voltage appears in two consecutive rows with the same value. Replaying the held copy as a new
+sample would pair an old voltage with a newer current in the SoC EKF, so a held value is
+skipped: a channel is emitted when its value changed, or when at least one catalogue sample
+period (``1 / rate_hz``) has passed since it was last emitted (a constant flag still arrives
+at its own rate and never looks stale).
+
 If the log's metadata sidecar names the track (``meta.track``), it becomes ``ctx.track``
 (lap timing and the track map work as in the original session).
 
@@ -28,6 +35,8 @@ import asyncio
 import logging
 import math
 from pathlib import Path
+
+import numpy as np
 from typing import Any
 
 from aerovolt.core.model import Emit
@@ -40,6 +49,8 @@ log = logging.getLogger(__name__)
 MAX_SPEED_BATCH = 20
 #: Longest single sleep of the paced loop, s (keeps cancellation snappy).
 MAX_SLEEP_S = 0.25
+#: A held value is re-emitted once this fraction of its sample period has passed.
+PERIOD_TOLERANCE = 0.9
 
 
 def track_from_meta(meta: dict[str, Any]) -> Any:
@@ -91,6 +102,9 @@ class ReplaySource(Source):
         self.columns = [cid for cid in self.reader.ids
                         if cid in catalog and not catalog[cid].derived
                         and (not self.cfg.get("channels") or cid in self.cfg["channels"])]
+        #: Minimum time between two emissions of an unchanged value, s (per column).
+        self._hold_s = np.array([PERIOD_TOLERANCE / catalog[cid].rate_hz if catalog[cid].rate_hz > 0 else 0.0
+                                 for cid in self.columns])
         meta = self.reader.meta
         track = track_from_meta(meta)
         if track is not None:
@@ -119,6 +133,8 @@ class ReplaySource(Source):
         t_log0: float | None = None
         wall0 = loop.time()
         batch = 0
+        last_value = np.full(len(columns), np.nan)
+        last_t = np.full(len(columns), -np.inf)
         for t, row in self.reader.iter_rows(columns):
             if t < self.start_s:
                 continue
@@ -133,7 +149,11 @@ class ReplaySource(Source):
                 due = wall0 + (t - t_log0) / float(self.speed)
                 while (delay := due - loop.time()) > 0:
                     await asyncio.sleep(min(delay, MAX_SLEEP_S))
-            values = {cid: v for cid, v in zip(columns, row.tolist()) if v == v}
+            # new sample = present and (changed, or one sample period since the last emit)
+            fresh = ~np.isnan(row) & ((row != last_value) | (t - last_t >= self._hold_s))
+            last_value[fresh] = row[fresh]
+            last_t[fresh] = t
+            values = {columns[k]: float(row[k]) for k in np.flatnonzero(fresh)}
             if values:
                 emit(t, values)
             self.stats["rows"] += 1

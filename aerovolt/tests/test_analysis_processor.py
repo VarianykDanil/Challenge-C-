@@ -101,7 +101,10 @@ def test_events_are_spec_shaped_and_json_safe(warm_session):
     lap = next(e["lap"] for e in events if e["type"] == "lap")
     assert list(lap) == ["lap", "lap_time", "distance", "v_avg", "v_max", "energy_kwh", "regen_kwh", "cla_avg",
                          "cda_avg", "balance_avg", "cell_t_max", "cell_v_min", "mot_temp_max"]
-    alert = next(e["alert"] for e in events if e["type"] == "alert")
+    # the first alert of a normal 80 kW run is the strategy warning, judged from lap 2 on
+    car, proc, store, _ = _fork(warm_session)
+    alert = _run_until(car, proc, store, {"energy_short"}, car.t + 90.0)["energy_short"]
+    json.dumps(alert, allow_nan=False)
     assert set(alert) == {"id", "rule", "severity", "title", "detail", "channels", "t_start", "t_end", "active"}
 
 

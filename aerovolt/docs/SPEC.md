@@ -622,7 +622,9 @@ Plays a log written by `datalog/writer.py` at `speed` × real time (loop optiona
   decode_errors, error_frames, dropped, bus_load_pct (worst-case stuffed bits / bitrate), connects`.
 * `ReplaySource` config: `file` (relative to the project root), `speed` (float | max), `loop`,
   `start_s`, optional `channels`. Only non-`calc_*` columns are emitted (the analysis recomputes
-  them); empty cells are not emitted. `ctx.track` comes from `meta.track` (built-in name, else
+  them); empty cells are not emitted, and neither are *held* copies of slow channels (the 20 Hz
+  log repeats a 10 Hz value): a value is replayed when it changed or once per catalogue sample
+  period, so the SoC EKF never pairs an old cell voltage with a newer current. `ctx.track` comes from `meta.track` (built-in name, else
   rebuilt from `meta.track.xy`). The CLI's `--speed` also applies to replay sources.
 
 ## 8. Data logging (`aerovolt/datalog/`)
@@ -667,7 +669,8 @@ WebSocket messages (JSON, server → client):
 {"type":"hello","version":"1.0","mode":"SIM","session":{"name":"...","started":"ISO-8601"},
  "sources":[{"kind":"sim","label":"Simulator","status":"running","detail":"fs_endurance ×1.0","stats":{}}],
  "channels":[ChannelDef dicts], "track":{Track.to_json}, "vehicle":{vehicle.yaml as dict},
- "faults":[{"id":"cell_hot","title":"...","system":"powertrain","description":"...","active":false}],
+ "faults":[{"id":"cell_hot","title":"...","system":"powertrain","description":"...","active":false,
+             "alerts":["bms_cell_voltage_outlier","bms_cell_temp_outlier"]}],   // alerts = SPEC 5.5 expected ids
  "alerts":[active alerts], "laps":[LapSummary...], "strategy":{...}|null, "t":12.34}
 {"type":"frame","t":12.40,"v":{"fw_p01":-523.1,"cell_v_000":3.912, "...":null},
  "owner":{"fw_p03":"serial"}}         // owner only lists channels not owned by the default source
@@ -696,7 +699,11 @@ Frame values: rounded sensibly (≈ 4 significant figures beyond resolution), Na
   boundary (no catch-up burst after a gap), a snapshot (+ log row) on each `1/snapshot_hz`
   boundary, plus the 1 Hz wall-clock fallback. Fault changes made by the sim itself (schedules,
   the self-clearing gust) are detected after each tick and published as `faults` events.
-* Extra keys (clients may ignore them): `hello.server_version`; `frame.stale` = raw channels
+* Extra keys (clients may ignore them): `hello.server_version`; `hello.alert_rules` (`[{id,
+  title, severity}]` of `config/alerts.yaml`, so the fault drawer can name expected alerts
+  before they are raised); `sources.rates` (`{channel: Hz}`, the measured sample rate of every
+  channel in session time, for the Sensors tab - the browser itself only sees `broadcast_hz`
+  frames); `frame.stale` = raw channels
   that were live but are now stale (only present when non-empty). The bus also carries an
   internal `{"type": "reset"}` event, which the server turns into a fresh `hello` for every
   client. `GET /api/alerts` returns the whole log (active and cleared, oldest first);

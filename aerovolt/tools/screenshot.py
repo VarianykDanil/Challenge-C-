@@ -9,6 +9,7 @@ tab does not mount. Start a server first (``python -m aerovolt`` or the mock fee
     python tools/screenshot.py                                  # all tabs, 1600x900
     python tools/screenshot.py --url http://127.0.0.1:8090 --prefix dev- --width 1366 --height 768
     python tools/screenshot.py --fault cell_hot --fault fw_damage_left --drawer alerts
+    python tools/screenshot.py --tabs aero --min-speed 90  # wait for a fast part of the lap
 
 ``--fault ID`` activates simulator faults (``POST /api/faults/{id}``) before the capture and
 deactivates them again afterwards (unless ``--keep-faults``). ``--drawer alerts|faults``
@@ -47,6 +48,17 @@ def post_fault(base_url: str, fault_id: str, active: bool) -> None:
         resp.read()
 
 
+#: In-page check: the header's speed readout (km/h) has reached ``min`` and is still rising.
+#: It reads what the page *shows*: with software WebGL (SwiftShader) the page can lag the
+#: server by seconds, so polling the server's data would capture the wrong moment.
+SPEED_RISING_JS = """(min) => {
+  const v = parseFloat((document.getElementById('h-speed') || {}).textContent);
+  const prev = window.__avPrevSpeed;
+  window.__avPrevSpeed = v;
+  return Number.isFinite(v) && v >= min && Number.isFinite(prev) && v > prev;
+}"""
+
+
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     p = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
     p.add_argument("--url", default="http://127.0.0.1:8080", help="dashboard URL (default %(default)s)")
@@ -59,6 +71,10 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     p.add_argument("--scale", type=float, default=1.0, help="device scale factor (2 = HiDPI)")
     p.add_argument("--fault", action="append", default=[], metavar="ID", help="activate a fault first (repeatable)")
     p.add_argument("--keep-faults", action="store_true", help="leave --fault faults active afterwards")
+    p.add_argument("--min-speed", type=float, default=0.0, metavar="KMH",
+                   help="before each capture, wait (up to 60 s) until the shown speed is >= KMH and rising")
+    p.add_argument("--hide-toasts", action="store_true",
+                   help="remove pop-up alert toasts before each capture (clean gallery images)")
     p.add_argument("--drawer", choices=["alerts", "faults"], help="also capture the first tab with this drawer open")
     p.add_argument("--chromium", default=CHROMIUM, help="Chromium executable")
     args = p.parse_args(argv)
@@ -112,6 +128,13 @@ def main(argv: list[str] | None = None) -> int:
                 if state == "error":
                     problems.append(f"tab {tab!r} failed to load")
                 page.wait_for_timeout(int(args.wait * 1000 if i == 0 else max(1.5, args.wait / 2) * 1000))
+                if args.min_speed > 0:
+                    try:
+                        page.wait_for_function(SPEED_RISING_JS, arg=args.min_speed, polling=100, timeout=60000)
+                    except Exception:  # noqa: BLE001 - a slower picture is still a picture
+                        print(f"note: speed {args.min_speed:g} km/h not reached, capturing anyway")
+                if args.hide_toasts:
+                    page.evaluate("() => document.querySelectorAll('.toast').forEach((e) => e.remove())")
                 path = args.out / f"{args.prefix}{tab}.png"
                 page.screenshot(path=str(path))
                 print(f"saved {path}")

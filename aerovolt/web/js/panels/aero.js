@@ -58,7 +58,30 @@ const HISTORY_IDS = [
   'calc_cl_fw_l', 'calc_cl_fw_r', 'calc_cl_rw_l', 'calc_cl_rw_r', 'calc_cp_ut_mean', 'rh_front', 'rh_rear',
 ];
 
+/** An aero change starts before its alert is raised (the rules debounce for several seconds,
+ * the balance shift up to ~20 s): samples this long before an aero alert are not learned. */
+const ALERT_LEAD_S = 30;
+
 /* ================================================================== baseline */
+
+/**
+ * Time windows in which the aero package was (or was about to be) flagged by the analysis:
+ * `[t_start − ALERT_LEAD_S, t_end]` of every `aero_*` alert in the log (open-ended while
+ * active). The baseline never learns inside them, so a fault that was already present when
+ * the page was opened is shown against a clean baseline, not absorbed into it.
+ * @param {Array<{id: string, t_start: number, t_end: (number|null)}>} log  alert log
+ * @returns {Array<[number, number]>}
+ */
+export function aeroAlertWindows(log) {
+  return (log || [])
+    .filter((a) => a && typeof a.id === 'string' && a.id.startsWith('aero_') && isNum(a.t_start))
+    .map((a) => [a.t_start - ALERT_LEAD_S, isNum(a.t_end) ? a.t_end : Infinity]);
+}
+
+/** True if `t` lies in one of the `windows` from {@link aeroAlertWindows}. */
+export function inWindows(t, windows) {
+  return windows.some(([a, b]) => t >= a && t <= b);
+}
 
 /**
  * Running average of channels over the first `seconds` of valid running (q > qMin), weighted
@@ -93,13 +116,14 @@ export class Baseline {
    * @param {number} t      session time [s]
    * @param {number} q      dynamic pressure [Pa]
    * @param {(id: string) => number} get  value of a channel in this row
+   * @param {boolean} [excluded=false]  skip this row (an aero alert is active around it)
    */
-  add(t, q, get) {
+  add(t, q, get, excluded = false) {
     if (this.frozen || !isNum(t)) return;
     if (isNum(this.lastT) && t <= this.lastT) return;
     const dt = isNum(this.lastT) ? Math.min(0.5, t - this.lastT) : 0.05;
     this.lastT = t;
-    if (!(q > this.qMin)) return;
+    if (!(q > this.qMin) || excluded) return;
     if (!isNum(this.firstT)) this.firstT = t;
     for (const id of this.ids) {
       const v = get(id);
@@ -207,14 +231,22 @@ function onSession(app) {
   ui.lastT = NaN;
   const ids = [...new Set([...ui.tapIds.cp, ...HISTORY_IDS])].filter((id) => app.channels.has(id));
   const meta = app.meta;
-  app.api.get(`/api/history?ids=${encodeURIComponent(ids.join(','))}&seconds=300`).then((data) => {
+  Promise.all([
+    app.api.get(`/api/history?ids=${encodeURIComponent(ids.join(','))}&seconds=300`),
+    app.api.get('/api/alerts').catch(() => app.alertLog),
+  ]).then(([data, log]) => {
     if (!ui || app.meta !== meta || !data || !Array.isArray(data.t)) return;
+    const windows = aeroAlertWindows(Array.isArray(log) ? log : []);
     const t = Float64Array.from(data.t, (x) => (x === null ? NaN : x));
     const series = {};
     for (const [id, arr] of Object.entries(data.series || {})) series[id] = Float64Array.from(arr, (x) => (x === null ? NaN : x));
     ui.fetched = { t, series };
     const q = series.calc_q;
-    if (q) for (let k = 0; k < t.length && !ui.baseline.frozen; k++) ui.baseline.add(t[k], q[k], (id) => (series[id] ? series[id][k] : NaN));
+    if (q) {
+      for (let k = 0; k < t.length && !ui.baseline.frozen; k++) {
+        ui.baseline.add(t[k], q[k], (id) => (series[id] ? series[id][k] : NaN), inWindows(t[k], windows));
+      }
+    }
   }).catch((err) => {
     console.warn('[aero] history back-fill failed:', err.message);
   }).finally(() => {
@@ -345,7 +377,7 @@ function buildUi(root, app) {
     <span class="aero-key"><i style="background:${c0}"></i>suction surface (lower)</span>
     <span class="aero-key"><i style="background:${c1}"></i>pressure surface (upper)</span>
     <span class="aero-key"><i style="background:${c2}"></i>floor centreline</span>
-    <span class="aero-key"><i class="dash"></i>baseline: first valid minute</span>
+    <span class="aero-key" title="first 60 s with q > 150 Pa and no aero alert"><i class="dash"></i>baseline: first clean minute</span>
     <span class="aero-key"><i class="ring"></i>suspect tap</span>
     <span class="spacer"></span>
     <span class="card-sub" data-role="baseline"></span>`;
@@ -598,9 +630,9 @@ const TILES = [
   },
   {
     label: 'FW asymmetry', unit: '%', ch: ['calc_fw_asym', 'calc_cl_fw_l', 'calc_cl_fw_r'],
-    title: '(Cl left − Cl right) / mean: a damaged flap shows up here first',
+    title: '(Cl left − Cl right) / mean of the low-pass filtered section Cl: a damaged flap shows up here first. Below: the instantaneous Cl.',
     value: (app) => signed(v(app, 'calc_fw_asym'), 1),
-    sub: (app) => `Cl L ${f(v(app, 'calc_cl_fw_l'), 2)} · R ${f(v(app, 'calc_cl_fw_r'), 2)}`,
+    sub: (app) => `now Cl L ${f(v(app, 'calc_cl_fw_l'), 2)} · R ${f(v(app, 'calc_cl_fw_r'), 2)}`,
     level: (app) => levelOf(app.def('calc_fw_asym'), v(app, 'calc_fw_asym')),
   },
   {
@@ -648,8 +680,17 @@ function suspectTaps(app) {
   return s;
 }
 
-/** Section-Cl change vs the baseline, as a tag with a level. */
-function deltaTag(node, now, base) {
+/** Flow yaw above which the wing stations are not comparable with their (straight-flow)
+ * baseline: the leeward station unloads in a crosswind. Same limit as the analysis' asymmetry
+ * rule (config/alerts.yaml, aero_fw_asymmetry). */
+const YAW_COMPARABLE_DEG = 4;
+
+/**
+ * Section-Cl change vs the baseline, as a tag with a level. The level (warning / critical
+ * colour) is only given in steady straight flow (`comparable`); in a crosswind or at low q
+ * the number is still shown, uncoloured, because a change there is expected aerodynamics.
+ */
+function deltaTag(node, now, base, comparable = true) {
   if (!isNum(now) || !isNum(base) || Math.abs(base) < 0.05) {
     setText(node, '');
     delete node.dataset.level;
@@ -657,13 +698,16 @@ function deltaTag(node, now, base) {
   }
   const pct = ((now - base) / Math.abs(base)) * 100;
   setText(node, `${signed(pct, 0)} %`);
-  node.title = `vs baseline ${formatNumber(base, 2)}`;
-  const lvl = pct <= -30 || pct >= 30 ? 'critical' : pct <= -15 || pct >= 15 ? 'warning' : '';
+  node.title = comparable ? `vs baseline ${formatNumber(base, 2)}`
+    : `vs baseline ${formatNumber(base, 2)} - not judged: flow yaw ≥ ${YAW_COMPARABLE_DEG}° or q < ${BASELINE_Q_MIN} Pa`;
+  const lvl = !comparable ? '' : pct <= -30 || pct >= 30 ? 'critical' : pct <= -15 || pct >= 15 ? 'warning' : '';
   if ((node.dataset.level || '') !== lvl) { if (lvl) node.dataset.level = lvl; else delete node.dataset.level; }
 }
 
 function updateCpCharts(app) {
   const sus = suspectTaps(app);
+  const yaw = app.val('calc_yaw');
+  const comparable = isNum(yaw) && Math.abs(yaw) < YAW_COMPARABLE_DEG && app.val('calc_q') > BASELINE_Q_MIN;
   const lay = ui.tapIds;
   for (const c of ui.cpCards) {
     const st = lay.stations[c.def.key];
@@ -681,7 +725,7 @@ function updateCpCharts(app) {
     c.chart.setHighlights(hl);
     const cl = app.val(c.def.cl);
     setText(c.cl, isNum(cl) ? `Cl ${formatNumber(cl, 2)}` : 'Cl —');
-    deltaTag(c.delta, cl, ui.baseline.mean(c.def.cl));
+    deltaTag(c.delta, cl, ui.baseline.mean(c.def.cl), comparable);
     ui.car.setStationStatus(c.def.key, c.delta.textContent, c.delta.dataset.level || '');
   }
   const fl = lay.floor;
@@ -697,7 +741,7 @@ function updateCpCharts(app) {
   setText(ui.floorCl, isNum(m) ? `C̄p ${formatNumber(m, 2)}` : 'C̄p —');
   // floor suction loss = Cp mean rising towards 0: report the change of |Cp̄|
   const b = ui.baseline.mean('calc_cp_ut_mean');
-  deltaTag(ui.floorDelta, isNum(m) ? -m : NaN, isNum(b) ? -b : NaN);
+  deltaTag(ui.floorDelta, isNum(m) ? -m : NaN, isNum(b) ? -b : NaN, comparable);
   // baseline status
   const bl = ui.baseline;
   const txt = bl.frozen ? `baseline: ${BASELINE_SECONDS} s with q > ${BASELINE_Q_MIN} Pa from t = ${formatNumber(bl.firstT, 0)} s`
@@ -792,19 +836,21 @@ function renderAlerts(app) {
  */
 export function update(app, dtMs) {
   if (!ui) return;
-  ui.car.update(app, dtMs);
   const a = ui.acc;
   a.tiles += dtMs; a.cp += dtMs; a.strip += dtMs; a.map += dtMs; a.alerts += dtMs;
   // live baseline learning (after the history back-fill was ingested)
   if (ui.baselineReady && app.t !== ui.lastT) {
     ui.lastT = app.t;
-    ui.baseline.add(app.t, app.val('calc_q'), (id) => app.val(id));
+    const aeroAlert = [...app.alerts.keys()].some((id) => id.startsWith('aero_'));
+    ui.baseline.add(app.t, app.val('calc_q'), (id) => app.val(id), aeroAlert);
   }
   if (a.tiles >= 200) { a.tiles = 0; updateTiles(app); }
   if (a.cp >= 100 && ui.baseline) { a.cp = 0; updateCpCharts(app); }
   if (a.strip >= 100) { a.strip = 0; ui.speedChart.pull(app.t); ui.clChart.pull(app.t); }
   if (a.map >= 1000) { a.map = 0; updateAeroMap(app); }
   if (ui.alertsDirty || a.alerts >= 1000) { ui.alertsDirty = false; a.alerts = 0; renderAlerts(app); }
+  // the 3D view last, so its station labels show the Cl changes computed just above
+  ui.car.update(app, dtMs);
   // reflect the current view / toggles (also after a route() call)
   if (ui.car.view !== ui.shownView) {
     ui.shownView = ui.car.view;

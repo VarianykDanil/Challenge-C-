@@ -111,7 +111,7 @@ def test_websocket_hello_frames_events_and_sources(tmp_path, web_root):
                     assert {"sources", "channels", "track", "vehicle", "faults", "alerts", "laps",
                             "strategy", "t"} <= set(hello)
                     assert hello["faults"] == [{"id": "cell_hot", "title": "Hot cell", "system": "powertrain",
-                                                "description": "bad weld", "active": False}]
+                                                "description": "bad weld", "active": False, "alerts": []}]
                     frames = [await receive(ws, "frame") for _ in range(3)]
                     assert all(isinstance(f["v"]["fw_p03"], float) for f in frames)
                     assert frames[-1]["v"]["pitot_dp"] is None  # NaN -> null

@@ -247,7 +247,10 @@ def test_check_sdc_open_requires_armed_and_names_cause():
 
 def test_check_energy_short_uses_strategy():
     s = SimpleNamespace(energy_short=True, current_kw=80.0, laps_left=20, energy_needed_kwh=6.6,
-                        energy_available_kwh=6.1, recommended_kw=60.0)
+                        energy_available_kwh=6.1, recommended_kw=60.0, laps_done=1)
+    # one lap (with the launch from the grid) is not judged yet
+    assert al.check_energy_short(_state(strategy=s), {}, False).state is None
+    s.laps_done = 2
     res = al.check_energy_short(_state(strategy=s), {}, False)
     assert res.state and "recommend 60 kW" in res.detail and "6.10 kWh available" in res.detail
     s.energy_short = False

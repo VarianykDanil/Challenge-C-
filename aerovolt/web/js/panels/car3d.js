@@ -2250,7 +2250,8 @@ export class Car3D {
     const fx = fw.els[0].xle - 0.15, rx = rw.els[0].xle - 0.3;
     const st = this.stationStatus || {};
     const station = (key, name, id, pos) => {
-      const s = st[key] || { text: '', level: '' };
+      // the change vs baseline is only meaningful next to a live Cl (it is refreshed at 10 Hz)
+      const s = isNum(app.val(id)) && st[key] ? st[key] : { text: '', level: '' };
       const el = this._label(key, 'station');
       if ((el.dataset.level || '') !== s.level) { if (s.level) el.dataset.level = s.level; else delete el.dataset.level; }
       this._place(key, 'station', pos, `${name} <b>Cl ${cl(id)}</b>${s.text ? ` <span class="c3-delta">${s.text}</span>` : ''}`);

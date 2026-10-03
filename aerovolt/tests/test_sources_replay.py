@@ -108,3 +108,20 @@ def test_track_from_meta():
     custom = track_from_meta({"track": {"name": "my_carpark", "closed": True, "xy": square}})
     assert custom is not None and custom.name == "my_carpark" and custom.closed
     assert 150 < custom.length < 260
+
+
+def test_replay_skips_held_copies_of_slow_channels(tmp_path, config):
+    """The log holds a 10 Hz cell voltage over two 20 Hz rows: only the real samples (value
+    changed) are replayed, and an unchanged value still arrives once per sample period."""
+    cat = config.catalog
+    assert cat["cell_v_000"].rate_hz == 10 and cat["sdc_closed"].rate_hz == 20
+    channels = [cat["cell_v_000"], cat["sdc_closed"]]
+    volts = [3.900, 3.900, 3.910, 3.910, 3.910, 3.910, 3.920, 3.920]  # 3.910 sampled twice
+    rows = [[v, 1.0] for v in volts]
+    path = tmp_path / "held.csv"
+    write_log(path, channels, [0.05 * i for i in range(len(rows))], rows)
+    src = create_source({"type": "replay", "file": str(path), "speed": "max"}, make_ctx(config))
+    out, _ = collect(src)
+    cell = [(round(t, 2), v["cell_v_000"]) for t, v in out if "cell_v_000" in v]
+    assert cell == [(0.0, 3.9), (0.1, 3.91), (0.2, 3.91), (0.3, 3.92)]
+    assert sum("sdc_closed" in v for _, v in out) == len(rows)  # 20 Hz flag: every row
