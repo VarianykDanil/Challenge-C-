@@ -151,6 +151,15 @@ Week: 5 days, 12 sales, team made 30 sales, £20 advance to recover.
 `margin(revenue, cost)` is the fraction `(revenue − cost) / revenue` (0 when revenue is 0, negative
 when loss-making); `marginAmount` is the same in pounds.
 
+### Office recruiter plan (server seed)
+
+The `recruiter` position (added to `Position`/`POSITIONS` for office staff) is paid through the same
+`calculatePayroll` maths with a different meaning for `sales`: for a recruiter the server passes the number of
+**hires** they closed in the week (candidates they own moved to `hired`) as `sales`, so the plan's
+`commissionPerSale` is 0 and `bonusThreshold` = 2 pays a £100 bonus in any week with two or more hires.
+`daysWorked` is Mon–Fri (clamped to the start date and, for the week in progress, to today). The payroll
+`sales` column therefore reads "hires" on a recruiter's payslip.
+
 ## 5. Paydays and on-time payment
 
 * Pay weeks run **Monday to Sunday**.

@@ -263,6 +263,7 @@ async function main(): Promise<void> {
     eq(r.json.company, null, 'no company for rep');
     positive(r.json.personal.totals.sales, 'Jordan sold this week');
     ok(noDataYet || (r.json.personal.rank !== null && r.json.personal.rankOutOf > 0), 'rank present');
+    ok(r.json.personal.punctualityRate === null || r.json.personal.punctualityRate >= 0.9, `demo rep is on time this week (${r.json.personal.punctualityRate})`);
     const board = await rep.get('/leaderboard?period=week');
     eq(r.json.personal.rankOutOf, board.json.length, 'rep rank is team-scoped: same population as their leaderboard');
     eq(board.json.find((x: Json) => x.userId === 10)?.rank ?? null, r.json.personal.rank, 'same rank as on the team board');
@@ -298,6 +299,8 @@ async function main(): Promise<void> {
     eq(get<Json>(db, `SELECT COUNT(*) AS n FROM events WHERE date = ? AND status = 'live' AND start_time > ?`, [today, nowHHMM()])!.n, 0, "today's live events have started");
     eq(get<Json>(db, `SELECT COUNT(*) AS n FROM gauge_entries WHERE checked_in_at > ?`, [`${today}T${nowHHMM()}`])!.n, 0, 'no check-ins in the future');
     eq(get<Json>(db, `SELECT COUNT(*) AS n FROM users WHERE position = 'recruiter' AND role <> 'recruiter'`)!.n, 0, 'recruiter position only for recruiters');
+    eq(get<Json>(db, `SELECT COUNT(*) AS n FROM gauge_entries WHERE user_id = 10 AND date >= ? AND sales = 0`, [monday])!.n, 0, 'demo rep has no zero-sales day this week');
+    ok(noDataYet || get<Json>(db, `SELECT COUNT(*) AS n FROM gauge_entries WHERE user_id = 10 AND date >= ?`, [monday])!.n > 0, 'demo rep has gauges this week');
     return `${slots.length} interviews, ${AVATAR_PALETTE.length} palette colours`;
   });
 

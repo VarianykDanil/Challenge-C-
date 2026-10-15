@@ -290,13 +290,22 @@ export function seed(db: Db, today: string = D.todayISO()): SeedStats {
         if (!rng.chance(p)) continue;
         if (u.teamId === null) seniorDays.add(`${u.id}|${ev.date}`);
         const g = genGauges(u, ev);
+        if (u.id === jordan.id && monday === thisMonday && g.sales === 0) {
+          // the demo rep never has a zero-sales day this week: lift the funnel to one sale, keeping it monotone
+          g.sales = 1;
+          g.taps = Math.max(g.taps, 1);
+          g.closes = Math.max(g.closes, 1);
+          g.presentations = Math.max(g.presentations, 1);
+          g.table = Math.max(g.table, 1);
+          g.stops = Math.max(g.stops, 1);
+        }
         const [sh, sm] = ev.startTime.split(':').map(Number);
         const [eh, em] = ev.endTime.split(':').map(Number);
         const start = new Date(`${ev.date}T${ev.startTime}:00`).getTime();
         let checkedInAt: string | null = null;
         if (!rng.chance(0.08)) {
-          // the demo crew leader is punctual (always this week, 96% otherwise); everyone else is late 15% of the time
-          const onTimeP = u.id === amelia.id ? (monday === thisMonday ? 1 : 0.96) : 0.85;
+          // the demo leader and rep are punctual (always this week, 96% otherwise); everyone else is late 15% of the time
+          const onTimeP = u.id === amelia.id || u.id === jordan.id ? (monday === thisMonday ? 1 : 0.96) : 0.85;
           const offsetMin = rng.chance(onTimeP) ? rng.float(-25, 4) : rng.float(6, 45);
           checkedInAt = D.toLocalISO(new Date(Math.min(start + offsetMin * 60_000, nowMs))); // never in the future
         }
