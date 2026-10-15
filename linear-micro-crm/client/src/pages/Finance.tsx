@@ -1,6 +1,6 @@
 import { useMemo, useState } from 'react';
 import { Plus, Trash2 } from 'lucide-react';
-import type { Expense, FinanceWeek, PayrollRunWithUser } from '@lm/shared';
+import type { Expense, PayrollRunWithUser } from '@lm/shared';
 import { EXPENSE_CATEGORY_LABELS } from '@lm/shared';
 import { Badge, Button, Card, CardHeader, DataTable, EmptyState, KpiTile, PageHeader, Tabs, useToast, type Column } from '@/components/ui';
 import { DonutChart, TrendChart } from '@/components/charts';
@@ -14,6 +14,9 @@ import { usePageTitle } from '@/lib/usePageTitle';
 import { COPY } from '@/content/copy';
 
 type Tab = 'me' | 'team' | 'company';
+const EXPENSE_PAGE = 25;
+/** Above this many runs, the to-pay table is grouped by pay week in collapsible sections. */
+const GROUP_RUNS_ABOVE = 20;
 
 /** "Next payday" tile: an unpaid run whose due date has passed is overdue, not upcoming. */
 function nextPaydayTile(nextPayday: string | null, nextPayAmount: number | null, none: string): { value: string; hint: string; tone: 'default' | 'danger' } {
@@ -112,11 +115,24 @@ function TeamPay({ teamId, onOpen }: { teamId: number; onOpen: (r: PayrollRunWit
   );
 }
 
+/** Runs grouped by pay week, newest week first. */
+function groupByWeek(rows: PayrollRunWithUser[]): [string, PayrollRunWithUser[]][] {
+  const m = new Map<string, PayrollRunWithUser[]>();
+  for (const r of [...rows].sort((a, b) => b.weekStart.localeCompare(a.weekStart) || a.userName.localeCompare(b.userName))) {
+    const list = m.get(r.weekStart) ?? [];
+    list.push(r);
+    m.set(r.weekStart, list);
+  }
+  return [...m.entries()];
+}
+
 function Company({ onOpen }: { onOpen: (r: PayrollRunWithUser) => void }) {
   const toast = useToast();
   const [range, setRange] = useRangeState('last_12_weeks');
   const summary = useFinanceSummary({ from: range.from, to: range.to });
-  const pending = usePayroll({ status: 'pending' });
+  // Everything still to pay: pending runs plus failed transfers (both can be marked paid).
+  const pending = usePayroll({ status: 'pending,failed' });
+  const [expenseLimit, setExpenseLimit] = useState(EXPENSE_PAGE);
   const expenses = useExpenses({ from: range.from, to: range.to });
   const campaigns = useCampaigns();
   const pay = usePayRun();
@@ -125,8 +141,8 @@ function Company({ onOpen }: { onOpen: (r: PayrollRunWithUser) => void }) {
   const [deleting, setDeleting] = useState<Expense | null>(null);
   const [markingId, setMarkingId] = useState<number | null>(null);
   const s = summary.data;
-  // Weeks without settled runs may carry a live payroll estimate (optional server field).
-  const hasEstimate = (s?.weeks ?? []).some((w: FinanceWeek & { estimated?: boolean }) => w.estimated === true);
+  // The week in progress has no runs yet; the server marks it `estimated` and uses the live pay estimate.
+  const hasEstimate = (s?.weeks ?? []).some((w) => w.estimated === true);
   const campaignName = (id: number | null) => (id == null ? null : campaigns.data?.find((c) => c.id === id) ?? null);
 
   const expenseColumns: Column<Expense>[] = [
@@ -206,8 +222,20 @@ function Company({ onOpen }: { onOpen: (r: PayrollRunWithUser) => void }) {
       )}
 
       <Card padded={false} className="min-w-0 overflow-hidden">
-        <div className="p-5 pb-3"><CardHeader title="Pending payroll" description="Runs awaiting payment — mark them paid once the transfer has gone" className="mb-0" /></div>
-        {pending.isError ? <ErrorState error={pending.error} onRetry={() => void pending.refetch()} className="m-5" /> : (
+        <div className="p-5 pb-3"><CardHeader title="Runs to pay" description={`Pending and failed runs — mark them paid once the transfer has gone${pending.data?.some((r) => r.status === 'failed') ? ' · failed transfers are flagged' : ''}`} className="mb-0" /></div>
+        {pending.isError ? <ErrorState error={pending.error} onRetry={() => void pending.refetch()} className="m-5" /> : (pending.data?.length ?? 0) > GROUP_RUNS_ABOVE ? (
+          <div className="divide-y divide-border border-t border-border">
+            {groupByWeek(pending.data ?? []).map(([weekStart, runs], i) => (
+              <details key={weekStart} open={i === 0} className="group">
+                <summary className="focus-ring flex cursor-pointer select-none items-center justify-between gap-3 px-5 py-3 text-sm hover:bg-surface-2/60">
+                  <span className="font-medium text-fg">Week {formatRangeLabel(weekStart, runs[0]!.weekEnd)}</span>
+                  <span className="text-xs text-muted">{formatNumber(runs.length)} run{runs.length === 1 ? '' : 's'} · {formatGBP(runs.reduce((a, r) => a + r.gross, 0))}{runs.some((r) => r.status === 'failed') ? ` · ${formatNumber(runs.filter((r) => r.status === 'failed').length)} failed` : ''}<span className="ml-2 inline-block transition-transform group-open:rotate-180" aria-hidden>⌄</span></span>
+                </summary>
+                <PayrollRunsTable rows={runs} showUser onRowClick={onOpen} onMarkPaid={markPaid} markingId={markingId} bare className="border-t border-border" />
+              </details>
+            ))}
+          </div>
+        ) : (
           <PayrollRunsTable rows={pending.data ?? []} loading={pending.isLoading} showUser onRowClick={onOpen} onMarkPaid={markPaid} markingId={markingId} emptyMessage="Everyone is paid up" bare className="border-t border-border" />
         )}
       </Card>
@@ -218,7 +246,21 @@ function Company({ onOpen }: { onOpen: (r: PayrollRunWithUser) => void }) {
           <Button size="sm" onClick={() => setAddOpen(true)} leftIcon={<Plus className="h-4 w-4" aria-hidden />}>Add expense</Button>
         </div>
         {expenses.isError ? <ErrorState error={expenses.error} onRetry={() => void expenses.refetch()} className="m-5" /> : (
-          <DataTable columns={expenseColumns} rows={expenses.data ?? []} rowKey={(e) => e.id} loading={expenses.isLoading} emptyMessage="No expenses in this range" initialSort={{ key: 'date', dir: 'desc' }} bare className="border-t border-border" />
+          <DataTable
+            columns={expenseColumns}
+            rows={[...(expenses.data ?? [])].sort((a, b) => b.date.localeCompare(a.date) || b.id - a.id).slice(0, expenseLimit)}
+            rowKey={(e) => e.id}
+            loading={expenses.isLoading}
+            emptyMessage="No expenses in this range"
+            initialSort={{ key: 'date', dir: 'desc' }}
+            bare className="border-t border-border"
+            footer={(expenses.data?.length ?? 0) > expenseLimit ? (
+              <div className="flex items-center justify-between gap-3 px-5 py-3 text-xs text-muted">
+                <span>Showing {formatNumber(expenseLimit)} of {formatNumber(expenses.data?.length ?? 0)} expenses</span>
+                <Button size="sm" variant="outline" onClick={() => setExpenseLimit((n) => n + EXPENSE_PAGE)}>Show {formatNumber(Math.min(EXPENSE_PAGE, (expenses.data?.length ?? 0) - expenseLimit))} more</Button>
+              </div>
+            ) : undefined}
+          />
         )}
       </Card>
 

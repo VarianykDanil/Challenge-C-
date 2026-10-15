@@ -86,7 +86,7 @@ export function EventDetailPage() {
             </div>
           )}
 
-          {ev && ratios ? <TotalsKpis totals={ev.totals} ratios={ratios} days={ev.repCount} /> : <div className="grid grid-cols-2 gap-3 md:grid-cols-3 xl:grid-cols-6"><KpiSkeletons count={6} /></div>}
+          {ev && ratios ? <TotalsKpis totals={ev.totals} ratios={ratios} daysHint={`${formatNumber(ev.repCount)} rep${ev.repCount === 1 ? '' : 's'} logged`} /> : <div className="grid grid-cols-2 gap-3 md:grid-cols-3 xl:grid-cols-6"><KpiSkeletons count={6} /></div>}
 
           <div className="grid grid-cols-1 gap-6 lg:grid-cols-3">
             <Card className="min-w-0 lg:col-span-1">

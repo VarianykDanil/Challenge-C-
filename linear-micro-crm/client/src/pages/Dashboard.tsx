@@ -8,7 +8,7 @@ import { FunnelChart, TrendChart } from '@/components/charts';
 import { useDashboard, useLeaderboard } from '@/api/hooks';
 import { useCurrentUser } from '@/auth/AuthProvider';
 import { GAUGE_ROLES, hasRole } from '@/auth/RequireRole';
-import { Announcements, CompanySection, MiniLeaderboard, NewAnnouncementModal, UpcomingEvents } from '@/features/dashboard';
+import { Announcements, CompanySection, MiniLeaderboard, NewAnnouncementModal, RecruiterSection, UpcomingEvents } from '@/features/dashboard';
 import { ChartSkeleton, ErrorState, KpiSkeletons } from '@/features/common';
 import { CoachingInsights, LogGaugesModal } from '@/features/gauges';
 import { COPY, greetingFor, motivationForDate } from '@/content/copy';
@@ -29,6 +29,10 @@ export function DashboardPage() {
   const q = useDashboard(range);
   const d = q.data;
   const rangeLabel = useMemo(() => (d ? formatRangeLabel(d.from, d.to) : ''), [d]);
+  // Deltas compare with the same to-date span of the previous period (server `previous`), e.g. "vs 5 Oct – 8 Oct".
+  const deltaLabel = d?.previous ? `vs ${formatDateShort(d.previous.from)} – ${formatDateShort(d.previous.to)}` : undefined;
+  // Recruiters run the pipeline, not a pitch: their dashboard leads with recruitment instead of gauges.
+  const recruiterFirst = me.role === 'recruiter';
   const canLog = hasRole(me.role, GAUGE_ROLES);
   // Owners/admins run the business rather than a pitch: lead with the company view.
   const companyFirst = me.role === 'admin';
@@ -67,24 +71,26 @@ export function DashboardPage() {
             </div>
           )}
 
+          {recruiterFirst && <RecruiterSection range={range} />}
+
           {/* KPI tiles */}
-          <div className="grid grid-cols-2 gap-3 md:grid-cols-3 xl:grid-cols-6">
+          {!recruiterFirst && <div className="grid grid-cols-2 gap-3 md:grid-cols-3 xl:grid-cols-6">
             {!d ? (
               <KpiSkeletons count={6} />
             ) : (
               <>
-                <KpiTile label="Sales" value={formatNumber(d.personal.totals.sales)} delta={d.personal.deltas.sales} tone="primary" hint={d.personal.rank ? `Ranked #${d.personal.rank} of ${d.personal.rankOutOf}` : `${formatNumber(d.personal.days)} days worked`} />
-                <KpiTile label="Conversion" value={formatPct(d.personal.ratios.overallConversion, 1)} delta={d.personal.deltas.conversion} tone={ratioTone('overallConversion', d.personal.ratios.overallConversion)} hint="sales ÷ stops" />
-                <KpiTile label="Stops" value={formatNumber(d.personal.totals.stops)} delta={d.personal.deltas.stops} hint={`${formatNumber(d.personal.totals.presentations)} presentations`} />
+                <KpiTile label="Sales" value={formatNumber(d.personal.totals.sales)} delta={d.personal.deltas.sales} deltaLabel={deltaLabel} tone="primary" hint={d.personal.rank ? `Ranked #${d.personal.rank} of ${d.personal.rankOutOf} ${me.role === 'rep' ? 'in your team' : 'company-wide'}` : `${formatNumber(d.personal.days)} days worked`} />
+                <KpiTile label="Conversion" value={formatPct(d.personal.ratios.overallConversion, 1)} delta={d.personal.deltas.conversion} deltaLabel={deltaLabel} tone={ratioTone('overallConversion', d.personal.ratios.overallConversion)} hint="sales ÷ stops" />
+                <KpiTile label="Stops" value={formatNumber(d.personal.totals.stops)} delta={d.personal.deltas.stops} deltaLabel={deltaLabel} hint={`${formatNumber(d.personal.totals.presentations)} presentations`} />
                 <KpiTile label="Earnings to date" value={formatGBP(d.personal.earningsToDate)} hint="gross, this period" />
                 <KpiTile label="Next payday" value={d.personal.nextPayday ? formatDateShort(d.personal.nextPayday) : '—'} tone={d.personal.nextPayday && d.personal.nextPayday < todayISO() ? 'danger' : 'default'} hint={d.personal.nextPayday ? `${d.personal.nextPayAmount != null ? formatGBP(d.personal.nextPayAmount, { cents: true }) : 'amount pending'} · ${d.personal.nextPayday < todayISO() ? 'overdue · ' : ''}${formatRelative(d.personal.nextPayday)}` : 'No pending run'} />
                 <KpiTile label="Punctuality" value={d.personal.punctualityRate == null ? '—' : formatPct(d.personal.punctualityRate)} tone={d.personal.punctualityRate == null ? 'default' : d.personal.punctualityRate >= 0.9 ? 'success' : d.personal.punctualityRate >= 0.75 ? 'warning' : 'danger'} hint="check-ins on time" />
               </>
             )}
-          </div>
+          </div>}
 
           {/* Personal charts */}
-          <div className="grid grid-cols-1 gap-6 lg:grid-cols-5">
+          {!recruiterFirst && <div className="grid grid-cols-1 gap-6 lg:grid-cols-5">
             <Card className="min-w-0 lg:col-span-3">
               <CardHeader title="Your trend" description="Sales and stops per day" />
               {!d ? <ChartSkeleton /> : d.personal.trend.length ? (
@@ -102,7 +108,7 @@ export function DashboardPage() {
                 </>
               )}
             </Card>
-          </div>
+          </div>}
 
           {/* Team, events, announcements */}
           <div className="grid grid-cols-1 gap-6 lg:grid-cols-3 lg:items-start">
@@ -129,7 +135,8 @@ export function DashboardPage() {
             </Card>
             <Card className="min-w-0">
               <CardHeader title="Announcements" actions={canAnnounce ? <Button size="sm" variant="outline" onClick={() => setAnnounceOpen(true)} leftIcon={<Megaphone className="h-3.5 w-3.5" aria-hidden />}>New announcement</Button> : undefined} />
-              {!d ? <div className="space-y-2"><Skeleton className="h-16" /><Skeleton className="h-16" /></div> : <Announcements items={d.announcements} />}
+              {/* Capped so the row's other cards are not stretched by a long notice board. */}
+              <div className="max-h-[32rem] overflow-y-auto scrollbar-thin">{!d ? <div className="space-y-2"><Skeleton className="h-16" /><Skeleton className="h-16" /></div> : <Announcements items={d.announcements} />}</div>
             </Card>
           </div>
 

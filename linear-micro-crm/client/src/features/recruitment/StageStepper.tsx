@@ -17,7 +17,7 @@ export function StageStepper({ stage }: { stage: CandidateStage }) {
           return (
             <li key={s} className="flex min-w-0 flex-1 items-center gap-1" aria-current={current ? 'step' : undefined}>
               <span className="flex min-w-0 flex-col items-center gap-1 text-center">
-                <span className={clsx('flex h-7 w-7 shrink-0 items-center justify-center rounded-full border text-xs font-semibold', done && 'border-success bg-success text-white', current && 'border-primary bg-primary text-primary-fg', !done && !current && 'border-border bg-surface text-muted')}>
+                <span className={clsx('flex h-7 w-7 shrink-0 items-center justify-center rounded-full border text-xs font-semibold', done && 'border-success bg-success text-status-fg', current && 'border-primary bg-primary text-primary-fg', !done && !current && 'border-border bg-surface text-muted')}>
                   {done ? <Check className="h-3.5 w-3.5" aria-hidden /> : i + 1}
                 </span>
                 <span className={clsx('w-full truncate text-[11px]', current ? 'font-semibold text-fg' : 'text-muted')}>{STAGE_LABELS[s]}</span>

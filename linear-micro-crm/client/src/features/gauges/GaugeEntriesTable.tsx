@@ -3,6 +3,7 @@ import { Link } from 'react-router-dom';
 import type { GaugeEntryWithMeta } from '@lm/shared';
 import { GAUGE_KEYS, GAUGE_LABELS, POSITION_LABELS, funnelRatios, isCheckInOnTime } from '@lm/shared';
 import { Avatar, Button, DataTable, type Column } from '@/components/ui';
+import { useCurrentUser } from '@/auth/AuthProvider';
 import { ColourChip, OnTimeBadge, RatioCell, StopRowEvents } from '@/features/common';
 import { formatDate, formatNumber, formatTime } from '@/lib/format';
 
@@ -21,6 +22,9 @@ export function GaugeEntriesTable({ rows, loading, showEvent = true, showPerson 
   /** Render without the outer border (inside a Card with padded={false}). */
   bare?: boolean;
 }) {
+  const me = useCurrentUser();
+  // The API blanks `checkedInAt`/`notes` on other people's entries unless the viewer is admin or that team's leader.
+  const canSeeCheckIn = (r: GaugeEntryWithMeta) => r.userId === me.id || me.role === 'admin' || (me.role === 'leader' && r.teamId === me.teamId);
   const columns: Column<GaugeEntryWithMeta>[] = [];
   if (showDate) columns.push({ key: 'date', header: 'Date', render: (r) => <span className="whitespace-nowrap">{formatDate(r.date)}</span>, sortValue: (r) => r.date });
   if (showPerson)
@@ -63,12 +67,14 @@ export function GaugeEntriesTable({ rows, loading, showEvent = true, showPerson 
   columns.push({
     key: 'checkin',
     header: 'Check-in',
-    render: (r) => (
+    render: (r) => (r.checkedInAt == null && !canSeeCheckIn(r) ? (
+      <span className="text-muted" aria-label="Check-in not shared">—</span>
+    ) : (
       <span className="flex items-center gap-2 whitespace-nowrap">
         <OnTimeBadge value={isCheckInOnTime(r.date, r.eventStartTime, r.checkedInAt)} />
         {r.checkedInAt && <span className="text-xs text-muted">{formatTime(r.checkedInAt)}</span>}
       </span>
-    ),
+    )),
     sortValue: (r) => r.checkedInAt ?? '',
   });
   if (onEdit || onDelete)

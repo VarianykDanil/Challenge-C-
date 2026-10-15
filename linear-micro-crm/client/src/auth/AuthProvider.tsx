@@ -10,6 +10,8 @@ export interface AuthContextValue {
   login: (input: LoginInput) => Promise<void>;
   logout: () => Promise<void>;
   refresh: () => Promise<void>;
+  /** Drop the signed-in user and every cached query without calling the server (session already gone). */
+  clearSession: () => void;
 }
 
 const AuthContext = createContext<AuthContextValue | null>(null);
@@ -54,7 +56,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
   }, [qc]);
 
-  const value = useMemo(() => ({ user, loading, login, logout, refresh }), [user, loading, login, logout, refresh]);
+  const clearSession = useCallback(() => {
+    setUser(null);
+    qc.clear();
+  }, [qc]);
+
+  const value = useMemo(() => ({ user, loading, login, logout, refresh, clearSession }), [user, loading, login, logout, refresh, clearSession]);
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
 }
 

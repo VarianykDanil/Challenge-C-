@@ -21,9 +21,17 @@ export async function api<T>(path: string, init: RequestInit & { json?: unknown 
   });
   if (res.status === 204) return undefined as T;
   const body = await res.json().catch(() => null);
-  if (!res.ok) throw new ApiError(res.status, body);
+  if (!res.ok) {
+    // A 401 on anything but the auth probes means the session ended (expired, deactivated, signed out elsewhere):
+    // let the app clear its state and route to sign-in once, instead of every page showing a raw error.
+    if (res.status === 401 && !path.startsWith('/auth/') && typeof window !== 'undefined') window.dispatchEvent(new CustomEvent(UNAUTHENTICATED_EVENT));
+    throw new ApiError(res.status, body);
+  }
   return body as T;
 }
+
+/** Window event fired when a signed-in request is answered with 401. */
+export const UNAUTHENTICATED_EVENT = 'lm:unauthenticated';
 
 export function qs(params: Record<string, string | number | boolean | null | undefined>): string {
   const sp = new URLSearchParams();

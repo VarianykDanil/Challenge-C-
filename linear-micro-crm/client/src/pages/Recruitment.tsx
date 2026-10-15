@@ -33,6 +33,9 @@ export function RecruitmentPage() {
   const owners = useUsers({});
   const candidates = useCandidates({ source, ownerId: ownerId ? Number(ownerId) : undefined, q: search.trim() || undefined, open: view === 'board' ? true : !showClosed });
   const list = candidates.data ?? [];
+  // Hired candidates leave the open pipeline, so the board's Hired column is fed separately: hires made within the selected range.
+  const hiredQuery = useCandidates({ stage: 'hired', source, ownerId: ownerId ? Number(ownerId) : undefined, q: search.trim() || undefined }, { enabled: view === 'board' });
+  const hiredInRange = useMemo(() => (hiredQuery.data ?? []).filter((c) => { const d = c.stageUpdatedAt.slice(0, 10); return d >= range.from && d <= range.to; }).sort((a, b) => b.stageUpdatedAt.localeCompare(a.stageUpdatedAt)), [hiredQuery.data, range.from, range.to]);
 
   const byStage = useMemo(() => {
     const m = new Map<string, CandidateWithMeta[]>();
@@ -129,15 +132,18 @@ export function RecruitmentPage() {
         <ErrorState error={candidates.error} onRetry={() => void candidates.refetch()} />
       ) : view === 'board' ? (
         <div className="relative -mx-1 overflow-x-auto px-1 pb-2">
-          <div className="grid min-w-[900px] grid-cols-6 gap-3">
+          <div className="grid min-w-[1320px] grid-cols-[repeat(6,minmax(220px,1fr))] gap-3">
             {PIPELINE_STAGES.map((stage) => {
-              const items = byStage.get(stage) ?? [];
+              const isHired = stage === 'hired';
+              const items = isHired ? hiredInRange : byStage.get(stage) ?? [];
+              const loading = isHired ? hiredQuery.isLoading : candidates.isLoading;
               return (
                 <section key={stage} aria-labelledby={`col-${stage}`} className="flex min-h-[200px] flex-col rounded-xl bg-surface-2 p-2">
                   <h3 id={`col-${stage}`} className="mb-2 flex items-center justify-between px-1 text-xs font-semibold uppercase tracking-wide text-muted">
-                    {STAGE_LABELS[stage]}<span className="rounded-full bg-surface px-1.5 py-0.5 text-[11px] tabular-nums text-fg">{candidates.isLoading ? '…' : items.length}</span>
+                    {STAGE_LABELS[stage]}<span className="rounded-full bg-surface px-1.5 py-0.5 text-[11px] tabular-nums text-fg">{loading ? '…' : isHired ? `${items.length} hired` : items.length}</span>
                   </h3>
-                  {candidates.isLoading ? (
+                  {isHired && <p className="mb-1 px-1 text-[11px] normal-case text-muted">Hired {formatDateShort(range.from)} – {formatDateShort(range.to)}</p>}
+                  {loading ? (
                     <div className="space-y-2"><Skeleton className="h-20" /><Skeleton className="h-20" /></div>
                   ) : items.length === 0 ? (
                     <p className="px-1 py-6 text-center text-xs text-muted">Empty</p>

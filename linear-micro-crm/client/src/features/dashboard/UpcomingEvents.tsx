@@ -18,8 +18,8 @@ export function UpcomingEvents({ events }: { events: SalesEventWithMeta[] }) {
               <span>{formatTime(e.startTime)}</span>
             </span>
             <span className="min-w-0 flex-1">
-              <span className="block truncate text-sm font-medium text-fg">{e.name}</span>
-              <span className="flex items-center gap-1 truncate text-xs text-muted"><MapPin className="h-3 w-3" aria-hidden />{e.venue}, {e.city} · {e.teamName}</span>
+              <span className="line-clamp-2 block text-sm font-medium leading-snug text-fg">{e.name}</span>
+              <span className="mt-0.5 flex items-start gap-1 text-xs text-muted"><MapPin className="mt-0.5 h-3 w-3 shrink-0" aria-hidden /><span className="min-w-0">{e.venue}, {e.city} · {e.teamName}</span></span>
             </span>
             <span className="hidden text-xs text-muted sm:block">{formatRelative(e.date)}</span>
             <EventStatusBadge status={e.status} />

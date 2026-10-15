@@ -1,8 +1,9 @@
 // Owned by the Frontend Developer. Routes + auth gate + AppShell wrapper.
-import { Suspense, lazy } from 'react';
+import { Suspense, lazy, useEffect, useRef } from 'react';
 import { Navigate, Outlet, Route, Routes, useLocation, useNavigate } from 'react-router-dom';
 import { AppShell } from '@/components/layout';
-import { ToastProvider } from '@/components/ui';
+import { ToastProvider, useToast } from '@/components/ui';
+import { UNAUTHENTICATED_EVENT } from '@/api/client';
 import { AuthProvider, useAuth } from '@/auth/AuthProvider';
 import { RedirectIfAuthed, RequireAuth } from '@/auth/RequireAuth';
 import { CAMPAIGN_ROLES, GAUGE_ROLES, RECRUITMENT_ROLES, RequireRole } from '@/auth/RequireRole';
@@ -44,6 +45,30 @@ function ShellLayout() {
   );
 }
 
+/** When any request comes back 401 the session is gone: clear state once, say so, and send the user to sign in (returning here afterwards). */
+function SessionWatcher() {
+  const { user, clearSession } = useAuth();
+  const toast = useToast();
+  const navigate = useNavigate();
+  const location = useLocation();
+  const handled = useRef(false);
+  useEffect(() => {
+    handled.current = false;
+  }, [user]);
+  useEffect(() => {
+    const onExpired = () => {
+      if (!user || handled.current) return;
+      handled.current = true;
+      clearSession();
+      toast.info('Your session has ended', 'Sign in again to carry on where you left off.');
+      navigate('/login', { replace: true, state: { from: location.pathname + location.search } });
+    };
+    window.addEventListener(UNAUTHENTICATED_EVENT, onExpired);
+    return () => window.removeEventListener(UNAUTHENTICATED_EVENT, onExpired);
+  }, [user, clearSession, toast, navigate, location.pathname, location.search]);
+  return null;
+}
+
 function PageFallback() {
   return (
     <div className="flex h-64 items-center justify-center text-sm text-muted" role="status" aria-live="polite">
@@ -56,6 +81,7 @@ export default function App() {
   return (
     <AuthProvider>
       <ToastProvider>
+        <SessionWatcher />
         <Routes>
           <Route
             path="/login"

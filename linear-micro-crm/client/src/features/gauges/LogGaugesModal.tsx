@@ -5,9 +5,9 @@ import { EMPTY_TOTALS, GAUGE_KEYS, GAUGE_LABELS, funnelRatios, validateGaugeFunn
 import { AlertTriangle } from 'lucide-react';
 import { Button, Field, Input, Modal, Select, Stepper, Textarea, useToast } from '@/components/ui';
 import { ApiError } from '@/api/client';
-import { useEvents, useGauges, useUpsertGauge, useUsers } from '@/api/hooks';
+import { useEvents, useGauges, useUpdateGauge, useUpsertGauge, useUsers } from '@/api/hooks';
 import { useCurrentUser } from '@/auth/AuthProvider';
-import { errorMessage, RatioCell } from '@/features/common';
+import { errorDetails, errorMessage, RatioCell } from '@/features/common';
 import { isoToLocalInput, nowLocalInput, todayISO, toISODate } from '@/lib/dates';
 import { formatDate, formatDateShort, formatStopsPerSale, fullName } from '@/lib/format';
 import { BENCHMARK_KEYS, RATIO_LABELS } from '@/lib/ratios';
@@ -29,7 +29,7 @@ export interface LogGaugesModalProps {
 export function LogGaugesModal(props: LogGaugesModalProps) {
   // Modal unmounts its children when closed, so the form state resets naturally on every open.
   return (
-    <Modal open={props.open} onClose={props.onClose} title={props.entry ? 'Edit gauges' : 'Log gauges'} description="Stops ≥ to table ≥ presentations ≥ closes ≥ taps ≥ sales. Saving again for the same event updates the entry." size="lg">
+    <Modal open={props.open} onClose={props.onClose} title={props.entry ? 'Update gauges' : 'Log gauges'} description="Stops ≥ to table ≥ presentations ≥ closes ≥ taps ≥ sales. Saving again for the same event updates the entry." size="lg">
       <LogGaugesForm {...props} />
     </Modal>
   );
@@ -57,7 +57,7 @@ function LogGaugesForm({ onClose, event, defaultUserId, entry, onSaved }: LogGau
   const [checkIn, setCheckIn] = useState<string>(entry ? isoToLocalInput(entry.checkedInAt) : '');
   const [notes, setNotes] = useState<string>(entry?.notes ?? '');
   const [prefilledId, setPrefilledId] = useState<number | null>(entry?.id ?? null);
-  const [serverError, setServerError] = useState<string | null>(null);
+  const [serverError, setServerError] = useState<{ message: string; details: string[] } | null>(null);
 
   // Event picker: the last three weeks up to today (reps and leaders: own team only). Cancelled events are not offered.
   const eventsRange = useMemo(() => ({ from: toISODate(subDays(new Date(), 21)), to: today }), [today]);
@@ -112,26 +112,31 @@ function LogGaugesForm({ onClose, event, defaultUserId, entry, onSaved }: LogGau
   const warnings = useMemo(() => validateGaugeFunnel(gauges), [gauges]);
   const ratios = useMemo(() => funnelRatios(gauges), [gauges]);
   const upsert = useUpsertGauge();
+  const update = useUpdateGauge();
+  const saving = upsert.isPending || update.isPending;
   const invalidKeys = useMemo(() => {
     const set = new Set<GaugeKey>();
     for (let i = 1; i < GAUGE_KEYS.length; i++) if (gauges[GAUGE_KEYS[i]!] > gauges[GAUGE_KEYS[i - 1]!]) set.add(GAUGE_KEYS[i]!);
     return set;
   }, [gauges]);
 
-  const canSubmit = eventId != null && userId != null && !!date && repValid && !blocked && warnings.length === 0 && !upsert.isPending;
+  const canSubmit = eventId != null && userId != null && !!date && repValid && !blocked && warnings.length === 0 && !saving;
 
   const submit = async () => {
     if (eventId == null || userId == null || !canSubmit) return;
     setServerError(null);
     try {
-      // Send the wall-clock value the rep typed ("YYYY-MM-DDTHH:mm"); the server stores it verbatim.
-      const saved = await upsert.mutateAsync({ ...gauges, eventId, userId, date, checkedInAt: checkIn || null, notes: notes.trim() || null });
+      // Check-in is the wall-clock value the rep typed ("YYYY-MM-DDTHH:mm"); the server stores it verbatim.
+      // Cleared check-in / notes are sent as explicit null so the server clears them too.
+      const fields = { ...gauges, eventId, userId, date, checkedInAt: checkIn || null, notes: notes.trim() || null };
+      // An entry we already know about is updated in place (PATCH) — never re-posted through the upsert.
+      const saved = prefilledId != null ? await update.mutateAsync({ id: prefilledId, ...fields }) : await upsert.mutateAsync(fields);
       toast.success(prefilledId ? 'Gauges updated' : 'Gauges logged', `${saved.sales} sale${saved.sales === 1 ? '' : 's'} from ${saved.stops} stops · ${saved.eventName}`);
       onSaved?.(saved);
       onClose();
     } catch (e) {
       // Validation and conflict replies (400/403/409) belong in the form; anything else is a toast.
-      if (e instanceof ApiError && e.status >= 400 && e.status < 500) setServerError(errorMessage(e));
+      if (e instanceof ApiError && e.status >= 400 && e.status < 500) setServerError({ message: e.message, details: errorDetails(e) });
       else toast.error('Could not save gauges', errorMessage(e));
     }
   };
@@ -149,8 +154,9 @@ function LogGaugesForm({ onClose, event, defaultUserId, entry, onSaved }: LogGau
     >
       <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
         <Field label="Event" required htmlFor={`${uid}-event`} className="min-w-0 md:col-span-2" error={blocked ?? undefined}>
-          {event ? (
-            <Input id={`${uid}-event`} value={`${event.name} · ${formatDateShort(event.date)} · ${event.venue}`} readOnly aria-readonly invalid={!!blocked} />
+          {event || entry ? (
+            // Fixed by the page, or locked while editing an existing entry.
+            <Input id={`${uid}-event`} value={event ? `${event.name} · ${formatDateShort(event.date)} · ${event.venue}` : `${entry!.eventName} · ${formatDateShort(entry!.date)}`} readOnly aria-readonly invalid={!!blocked} />
           ) : (
             <Select
               id={`${uid}-event`}
@@ -238,15 +244,22 @@ function LogGaugesForm({ onClose, event, defaultUserId, entry, onSaved }: LogGau
       </div>
 
       {serverError && (
-        <p role="alert" className="flex items-start gap-2 rounded-lg border border-danger/40 bg-danger/5 p-3 text-sm text-danger">
+        <div role="alert" className="flex items-start gap-2 rounded-lg border border-danger/40 bg-danger/5 p-3 text-sm text-danger">
           <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" aria-hidden />
-          <span><span className="font-semibold">Not saved.</span> {serverError}</span>
-        </p>
+          <div>
+            <span className="font-semibold">Not saved.</span> {serverError.message}
+            {serverError.details.length > 0 && (
+              <ul className="mt-1 list-disc space-y-0.5 pl-4 text-xs">
+                {serverError.details.map((d) => <li key={d}>{d}</li>)}
+              </ul>
+            )}
+          </div>
+        </div>
       )}
 
       <div className="flex justify-end gap-2">
         <Button type="button" variant="ghost" onClick={onClose}>Cancel</Button>
-        <Button type="submit" disabled={!canSubmit} loading={upsert.isPending}>{prefilledId ? 'Update gauges' : 'Save gauges'}</Button>
+        <Button type="submit" disabled={!canSubmit} loading={saving}>{prefilledId ? 'Update gauges' : 'Save gauges'}</Button>
       </div>
     </form>
   );

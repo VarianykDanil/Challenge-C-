@@ -10,6 +10,7 @@ import {
   coachingInsights,
   weakestStage,
   type BenchmarkSeverity,
+  type BenchmarkStatus,
   type RatioKey as BenchmarkKey,
 } from '@lm/shared';
 
@@ -34,6 +35,12 @@ export function benchmarkFor(key: RatioKey): number {
 /** Map the shared traffic-light severity onto the UI tone names. */
 export function severityTone(severity: BenchmarkSeverity): RatioTone {
   return severity === 'good' ? 'success' : severity === 'watch' ? 'warning' : 'danger';
+}
+
+/** Above / on track / below the benchmark (shared tolerance), for a glyph that does not rely on colour. */
+export function ratioStatus(key: RatioKey, value: number): BenchmarkStatus {
+  if (!Number.isFinite(value)) return 'below';
+  return benchmarkStatus(value, benchmarkFor(key));
 }
 
 /** Colour a ratio against its benchmark using the shared tolerance/danger thresholds. */

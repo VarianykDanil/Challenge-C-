@@ -3,20 +3,28 @@ import { AlertTriangle, RefreshCw } from 'lucide-react';
 import { Button, Card, Skeleton } from '@/components/ui';
 import { ApiError } from '@/api/client';
 
-export function errorMessage(err: unknown, fallback = 'Something went wrong'): string {
+/** Every validation detail as a "field: message" line (zod `{ path, message }` objects or plain strings). */
+export function errorDetails(err: unknown): string[] {
+  if (!(err instanceof ApiError) || !Array.isArray(err.details)) return [];
+  return err.details.map((d: unknown) => {
+    if (typeof d === 'string') return d;
+    if (d && typeof d === 'object') {
+      const { path, message } = d as { path?: unknown; message?: unknown };
+      const p = Array.isArray(path) ? path.join('.') : typeof path === 'string' ? path : '';
+      return `${p ? `${p}: ` : ''}${typeof message === 'string' ? message : JSON.stringify(d)}`;
+    }
+    return String(d);
+  });
+}
+
+/** One-line summary for toasts: the server message plus the first `maxDetails` detail lines. */
+export function errorMessage(err: unknown, fallback = 'Something went wrong', maxDetails = 3): string {
   if (err instanceof ApiError) {
-    if (Array.isArray(err.details) && err.details.length) {
-      // Zod replies carry `{ path, message }` objects; funnel checks carry plain strings.
-      const parts = err.details.map((d: unknown) => {
-        if (typeof d === 'string') return d;
-        if (d && typeof d === 'object') {
-          const { path, message } = d as { path?: unknown; message?: unknown };
-          const p = Array.isArray(path) ? path.join('.') : typeof path === 'string' ? path : '';
-          return `${p ? `${p}: ` : ''}${typeof message === 'string' ? message : JSON.stringify(d)}`;
-        }
-        return String(d);
-      });
-      return `${err.message}: ${parts.join('; ')}`;
+    const details = errorDetails(err);
+    if (details.length) {
+      const shown = details.slice(0, maxDetails);
+      const more = details.length - shown.length;
+      return `${err.message}: ${shown.join('; ')}${more > 0 ? ` (+${more} more)` : ''}`;
     }
     return err.message;
   }

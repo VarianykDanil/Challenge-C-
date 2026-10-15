@@ -1,12 +1,12 @@
 import { useId, useState } from 'react';
 import type { CandidateSource, Position } from '@lm/shared';
-import { POSITIONS, POSITION_LABELS, SOURCE_LABELS } from '@lm/shared';
+import { POSITION_LABELS, SOURCE_LABELS } from '@lm/shared';
 import { Button, Field, Input, Modal, Select, Textarea, useToast } from '@/components/ui';
 import { useCreateCandidate, useUsers } from '@/api/hooks';
 import { useCurrentUser } from '@/auth/AuthProvider';
 import { errorMessage } from '@/features/common';
 import { fullName } from '@/lib/format';
-import { optionsFrom } from '@/lib/labels';
+import { ENTRY_POSITIONS, optionsFrom } from '@/lib/labels';
 
 export function AddCandidateModal({ open, onClose, onCreated }: { open: boolean; onClose: () => void; onCreated?: (id: number) => void }) {
   return (
@@ -65,7 +65,7 @@ function AddCandidateForm({ onClose, onCreated }: { onClose: () => void; onCreat
         <Field label="Email" required htmlFor={`${uid}-email`} error={errors.email}><Input id={`${uid}-email`} type="email" value={f.email} onChange={(e) => set('email')(e.target.value)} invalid={!!errors.email} /></Field>
         <Field label="Phone" htmlFor={`${uid}-phone`}><Input id={`${uid}-phone`} type="tel" value={f.phone} onChange={(e) => set('phone')(e.target.value)} /></Field>
         <Field label="City" htmlFor={`${uid}-city`}><Input id={`${uid}-city`} value={f.city} onChange={(e) => set('city')(e.target.value)} /></Field>
-        <Field label="Position applied for" htmlFor={`${uid}-pos`}><Select id={`${uid}-pos`} value={f.positionApplied} onChange={(e) => set('positionApplied')(e.target.value)} options={optionsFrom(POSITION_LABELS, POSITIONS)} /></Field>
+        <Field label="Position applied for" htmlFor={`${uid}-pos`}><Select id={`${uid}-pos`} value={f.positionApplied} onChange={(e) => set('positionApplied')(e.target.value)} options={optionsFrom(POSITION_LABELS, ENTRY_POSITIONS)} /></Field>
         <Field label="Source" htmlFor={`${uid}-source`}><Select id={`${uid}-source`} value={f.source} onChange={(e) => set('source')(e.target.value)} options={optionsFrom(SOURCE_LABELS)} /></Field>
         {f.source === 'referral' && (
           <Field label="Referred by" htmlFor={`${uid}-ref`}><Select id={`${uid}-ref`} value={f.referredById} onChange={(e) => set('referredById')(e.target.value)} placeholder="Choose a team member" options={people.map((u) => ({ value: String(u.id), label: fullName(u) }))} /></Field>

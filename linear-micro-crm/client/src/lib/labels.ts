@@ -1,13 +1,5 @@
 // Owned by the Frontend Developer. Display labels and badge tones for enum-like fields.
-import type {
-  CampaignSector,
-  CampaignType,
-  CandidateStage,
-  EventStatus,
-  Interview,
-  PayrollStatus,
-  UserStatus,
-} from '@lm/shared';
+import type { CampaignSector, CampaignType, CandidateStage, EventStatus, Interview, PayrollStatus, Position, UserStatus } from '@lm/shared';
 import type { BadgeTone } from '@/components/ui';
 
 export const EVENT_STATUS_LABELS: Record<EventStatus, string> = {
@@ -95,3 +87,6 @@ export function optionsFrom<K extends string>(labels: Record<K, string>, keys?: 
   const ks = keys ?? (Object.keys(labels) as K[]);
   return ks.map((k) => ({ value: k, label: labels[k] }));
 }
+
+/** Positions a candidate can apply for — nobody is hired straight into a leadership or office role. */
+export const ENTRY_POSITIONS: Position[] = ['trainee', 'field_rep'];

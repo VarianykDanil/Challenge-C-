@@ -5,7 +5,7 @@ import { isOpenStage, isOverdue as sharedIsOverdue } from '@lm/shared';
 import { Avatar } from '@/components/ui';
 import { SourceBadge, StarRating } from '@/features/common';
 import { fullName } from '@/lib/format';
-import { MoveStageControl } from './MoveStageControl';
+import { MoveStageControl, TERMINAL_STAGES } from './MoveStageControl';
 
 /** Open candidate whose next action date has passed (shared rule). */
 export function isOverdue(c: CandidateWithMeta): boolean {
@@ -29,7 +29,7 @@ export function CandidateCard({ candidate: c, canMove }: { candidate: CandidateW
         {c.rating != null && <StarRating value={c.rating} size="sm" />}
       </div>
       {c.nextAction && <p className={`mt-2 truncate text-xs ${overdue ? 'text-danger' : 'text-muted'}`} title={c.nextAction}>Next: {c.nextAction}</p>}
-      {canMove && <div className="mt-2"><MoveStageControl candidate={c} compact /></div>}
+      {canMove && !TERMINAL_STAGES.includes(c.stage) && <div className="mt-2"><MoveStageControl candidate={c} compact /></div>}
     </li>
   );
 }

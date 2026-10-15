@@ -24,6 +24,7 @@ import type {
   PayPlan,
   PayrollRunWithUser,
   PayrollStatus,
+  Position,
   RecruitmentSummary,
   Role,
   SalesEvent,
@@ -76,7 +77,8 @@ export interface EventsParams extends RangeParams { teamId?: number | null; camp
 export interface GaugesParams extends RangeParams { userId?: number | null; eventId?: number | null; teamId?: number | null; campaignId?: number | null; limit?: number }
 export interface GaugeSummaryParams extends RangeParams { groupBy: GaugeGroupBy; teamId?: number | null; campaignId?: number | null; userId?: number | null }
 export interface LeaderboardParams { period?: DashboardRange; metric?: 'sales' | 'conversion'; teamId?: number | null }
-export interface PayrollParams extends RangeParams { userId?: number | null; teamId?: number | null; status?: PayrollStatus | '' }
+/** `status` is one status or a comma list (e.g. `pending,failed` = everything still to pay). */
+export interface PayrollParams extends RangeParams { userId?: number | null; teamId?: number | null; status?: PayrollStatus | `${PayrollStatus},${PayrollStatus}` | '' }
 export interface ExpensesParams extends RangeParams { category?: ExpenseCategory | ''; campaignId?: number | null }
 export interface CandidatesParams { stage?: CandidateStage | ''; ownerId?: number | null; source?: CandidateSource | ''; q?: string; open?: boolean }
 export interface InterviewsParams extends RangeParams { candidateId?: number | null }
@@ -466,8 +468,8 @@ export function useUpdateCandidate() {
 export function useMoveCandidateStage() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: ({ id, stage, note }: { id: number; stage: CandidateStage; note?: string }) =>
-      api<CandidateWithMeta>(`/recruitment/candidates/${id}/stage`, { method: 'POST', json: { stage, note } }),
+    mutationFn: ({ id, stage, note, teamId, position }: { id: number; stage: CandidateStage; note?: string; /** hire only */ teamId?: number | null; /** hire only: trainee | field_rep */ position?: Position }) =>
+      api<CandidateWithMeta>(`/recruitment/candidates/${id}/stage`, { method: 'POST', json: { stage, note, ...(teamId !== undefined ? { teamId } : {}), ...(position ? { position } : {}) } }),
     onSuccess: (_c, vars) => {
       invalidateRecruitment(qc);
       if (vars.stage === 'hired') {

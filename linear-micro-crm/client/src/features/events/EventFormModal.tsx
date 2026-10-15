@@ -94,7 +94,8 @@ function EventForm({ onClose, event, onSaved }: EventFormModalProps) {
       endTime: f.endTime,
       targetSales: Number(f.targetSales),
       notes: f.notes.trim() || null,
-      status: f.status,
+      // Only an edit carries a status; on create the server derives it from the date (completed / live / scheduled).
+      ...(event ? { status: f.status } : {}),
     };
     try {
       const saved = event ? await update.mutateAsync({ id: event.id, ...input }) : await create.mutateAsync(input);
