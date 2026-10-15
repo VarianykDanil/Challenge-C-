@@ -4,9 +4,10 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "dev": "tsx watch src/index.ts",
-    "start": "NODE_ENV=production tsx src/index.ts",
-    "seed": "tsx src/db/seed.ts",
+    "dev": "NODE_NO_WARNINGS=1 tsx watch src/index.ts",
+    "start": "NODE_ENV=production NODE_NO_WARNINGS=1 tsx src/index.ts",
+    "seed": "NODE_NO_WARNINGS=1 tsx src/db/seed.ts",
+    "smoke": "NODE_NO_WARNINGS=1 tsx src/smoke.ts",
     "typecheck": "tsc --noEmit -p tsconfig.json"
   },
   "dependencies": {

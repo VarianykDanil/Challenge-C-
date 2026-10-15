@@ -1,0 +1,82 @@
+import { randomBytes } from 'node:crypto';
+import type { NextFunction, Request, RequestHandler, Response } from 'express';
+import type { Role, UserWithTeam } from '@lm/shared';
+import { get, run, type Db } from '../db/connection.ts';
+import { USER_SELECT } from '../db/queries.ts';
+import { forbidden, unauthorized } from '../lib/errors.ts';
+
+export const SESSION_COOKIE = 'lm_session';
+const SESSION_DAYS = 14;
+const SESSION_MS = SESSION_DAYS * 86_400_000;
+
+export function createSession(db: Db, userId: number): string {
+  const token = randomBytes(32).toString('hex');
+  const now = new Date();
+  run(db, `INSERT INTO sessions (token, user_id, created_at, expires_at) VALUES (?, ?, ?, ?)`, [
+    token, userId, now.toISOString(), new Date(now.getTime() + SESSION_MS).toISOString(),
+  ]);
+  return token;
+}
+
+export function destroySession(db: Db, token: string): void {
+  run(db, `DELETE FROM sessions WHERE token = ?`, [token]);
+}
+
+export function purgeExpiredSessions(db: Db): void {
+  run(db, `DELETE FROM sessions WHERE expires_at < ?`, [new Date().toISOString()]);
+}
+
+export function setSessionCookie(res: Response, token: string): void {
+  res.cookie(SESSION_COOKIE, token, {
+    httpOnly: true,
+    sameSite: 'lax',
+    secure: process.env.COOKIE_SECURE === '1',
+    path: '/',
+    maxAge: SESSION_MS,
+  });
+}
+
+export function clearSessionCookie(res: Response): void {
+  res.clearCookie(SESSION_COOKIE, { httpOnly: true, sameSite: 'lax', path: '/' });
+}
+
+/** Attaches `req.user` when a valid session cookie is present; never rejects. */
+export function authenticate(db: Db): RequestHandler {
+  return (req, _res, next) => {
+    const token = (req.cookies as Record<string, string | undefined> | undefined)?.[SESSION_COOKIE];
+    if (!token) return next();
+    const row = get<UserWithTeam & { expiresAt: string }>(
+      db,
+      `${USER_SELECT.replace('SELECT ', 'SELECT s.expires_at AS expiresAt, ')} JOIN sessions s ON s.user_id = u.id WHERE s.token = ?`,
+      [token],
+    );
+    if (!row) return next();
+    if (row.expiresAt < new Date().toISOString()) {
+      destroySession(db, token);
+      return next();
+    }
+    const { expiresAt: _ignored, ...user } = row;
+    req.user = user;
+    req.sessionToken = token;
+    next();
+  };
+}
+
+export const requireAuth: RequestHandler = (req, _res, next) => {
+  if (!req.user) return next(unauthorized());
+  next();
+};
+
+export function requireRole(...roles: Role[]): RequestHandler {
+  return (req: Request, _res: Response, next: NextFunction) => {
+    if (!req.user) return next(unauthorized());
+    if (!roles.includes(req.user.role)) return next(forbidden(`Requires role: ${roles.join(' or ')}`));
+    next();
+  };
+}
+
+/** The signed-in user; throws 401 if the route forgot `requireAuth`. */
+export function currentUser(req: Request): UserWithTeam {
+  if (!req.user) throw unauthorized();
+  return req.user;
+}
