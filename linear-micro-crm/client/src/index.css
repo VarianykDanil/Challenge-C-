@@ -1,0 +1,374 @@
+/*
+ * Linear Hub design tokens — owned by the Product Designer.
+ * Semantic tokens only; pages must never hard-code colours.
+ * See docs/DESIGN.md for the full system (palette, contrast notes, type scale, rules).
+ */
+@import "tailwindcss";
+
+@custom-variant dark (&:where(.dark, .dark *));
+
+/* ──────────────────────────── Light theme ──────────────────────────── */
+:root {
+  color-scheme: light;
+
+  /* Surfaces */
+  --bg: #F5F6FA;
+  --surface: #FFFFFF;
+  --surface-2: #EEF0F6;
+  --surface-3: #E4E7F0;
+  --border: #E2E5EE;
+  --border-strong: #CDD2DF;
+
+  /* Text */
+  --fg: #0F1526;
+  --muted: #5C657A;
+  --subtle: #8B93A7;
+
+  /* Brand — "Linear Violet" + "Ember" accent */
+  --primary: #4B3FD9;
+  --primary-hover: #4034C4;
+  --primary-fg: #FFFFFF;
+  --primary-soft: #ECEAFC;
+  --accent: #C2410C;
+  --accent-fg: #FFFFFF;
+  --accent-soft: #FDEBE1;
+
+  /* Status (all ≥ 4.5:1 on --surface and --bg) */
+  --success: #15803D;
+  --success-soft: #E3F5EA;
+  --warning: #B45309;
+  --warning-soft: #FDF0DF;
+  --danger: #D11A2A;
+  --danger-soft: #FCE6E8;
+  --info: #0E7490;
+  --info-soft: #E0F3F7;
+  /* Text on any solid status colour (all four clear 4.5:1 against it) */
+  --status-fg: #FFFFFF;
+
+  /* Focus */
+  --ring: #4B3FD9;
+
+  /* Charts — distinct hues, every one ≥ 4.5:1 on white */
+  --chart-1: #4B3FD9;
+  --chart-2: #C2410C;
+  --chart-3: #0F766E;
+  --chart-4: #BE185D;
+  --chart-5: #0369A1;
+  --chart-6: #4D7C0F;
+
+  /* Elevation */
+  --shadow-card: 0 1px 2px rgb(15 21 38 / 0.04), 0 1px 3px rgb(15 21 38 / 0.06);
+  --shadow-card-hover: 0 4px 12px rgb(15 21 38 / 0.08), 0 2px 4px rgb(15 21 38 / 0.04);
+  --shadow-pop: 0 12px 32px -8px rgb(15 21 38 / 0.18), 0 2px 6px rgb(15 21 38 / 0.06);
+  --shadow-modal: 0 32px 80px -16px rgb(15 21 38 / 0.35), 0 8px 24px rgb(15 21 38 / 0.08);
+
+  /* Sidebar (slightly cooler than surfaces so the shell frames the content) */
+  --sidebar: #FBFBFD;
+  --topbar: rgb(255 255 255 / 0.78);
+
+  /* "Ink" is the brand navy that stays dark in both themes (login panel, hero blocks) */
+  --ink: #0B1020;
+  --ink-2: #131A30;
+  --ink-fg: #EDEFF7;
+  --ink-muted: #9AA3B8;
+}
+
+/* ──────────────────────────── Dark theme ──────────────────────────── */
+.dark {
+  color-scheme: dark;
+
+  --bg: #0B1020;
+  --surface: #111729;
+  --surface-2: #182038;
+  --surface-3: #1F2946;
+  --border: #243050;
+  --border-strong: #324066;
+
+  --fg: #EDEFF7;
+  --muted: #9AA3B8;
+  --subtle: #6B7590;
+
+  --primary: #9D99FF;
+  --primary-hover: #AEABFF;
+  --primary-fg: #0B1020;
+  --primary-soft: rgb(157 153 255 / 0.14);
+  --accent: #FFA059;
+  --accent-fg: #0B1020;
+  --accent-soft: rgb(255 160 89 / 0.14);
+
+  --success: #4ADE80;
+  --success-soft: rgb(74 222 128 / 0.14);
+  --warning: #FBBF24;
+  --warning-soft: rgb(251 191 36 / 0.14);
+  --danger: #FB7185;
+  --danger-soft: rgb(251 113 133 / 0.14);
+  --info: #38BDF8;
+  --info-soft: rgb(56 189 248 / 0.14);
+  --status-fg: #0B1020;
+
+  --ring: #9D99FF;
+
+  --chart-1: #9D99FF;
+  --chart-2: #FFA059;
+  --chart-3: #2DD4BF;
+  --chart-4: #F472B6;
+  --chart-5: #38BDF8;
+  --chart-6: #A3E635;
+
+  --shadow-card: 0 1px 2px rgb(0 0 0 / 0.3), 0 0 0 1px rgb(255 255 255 / 0.02);
+  --shadow-card-hover: 0 6px 16px rgb(0 0 0 / 0.4), 0 0 0 1px rgb(255 255 255 / 0.04);
+  --shadow-pop: 0 16px 40px -8px rgb(0 0 0 / 0.6), 0 0 0 1px rgb(255 255 255 / 0.05);
+  --shadow-modal: 0 32px 80px -16px rgb(0 0 0 / 0.7), 0 0 0 1px rgb(255 255 255 / 0.06);
+
+  --sidebar: #0D1326;
+  --topbar: rgb(11 16 32 / 0.72);
+
+  --ink: #080C19;
+  --ink-2: #0F1527;
+  --ink-fg: #EDEFF7;
+  --ink-muted: #9AA3B8;
+}
+
+/* ──────────────────────────── Tailwind theme mapping ──────────────────────────── */
+@theme inline {
+  --color-bg: var(--bg);
+  --color-surface: var(--surface);
+  --color-surface-2: var(--surface-2);
+  --color-surface-3: var(--surface-3);
+  --color-border: var(--border);
+  --color-border-strong: var(--border-strong);
+  --color-fg: var(--fg);
+  --color-muted: var(--muted);
+  --color-subtle: var(--subtle);
+  --color-primary: var(--primary);
+  --color-primary-hover: var(--primary-hover);
+  --color-primary-fg: var(--primary-fg);
+  --color-primary-soft: var(--primary-soft);
+  --color-accent: var(--accent);
+  --color-accent-fg: var(--accent-fg);
+  --color-accent-soft: var(--accent-soft);
+  --color-success: var(--success);
+  --color-success-soft: var(--success-soft);
+  --color-warning: var(--warning);
+  --color-warning-soft: var(--warning-soft);
+  --color-danger: var(--danger);
+  --color-danger-soft: var(--danger-soft);
+  --color-info: var(--info);
+  --color-info-soft: var(--info-soft);
+  --color-status-fg: var(--status-fg);
+  --color-ring: var(--ring);
+  --color-sidebar: var(--sidebar);
+  --color-topbar: var(--topbar);
+  --color-ink: var(--ink);
+  --color-ink-2: var(--ink-2);
+  --color-ink-fg: var(--ink-fg);
+  --color-ink-muted: var(--ink-muted);
+  --color-chart-1: var(--chart-1);
+  --color-chart-2: var(--chart-2);
+  --color-chart-3: var(--chart-3);
+  --color-chart-4: var(--chart-4);
+  --color-chart-5: var(--chart-5);
+  --color-chart-6: var(--chart-6);
+
+  --shadow-card: var(--shadow-card);
+  --shadow-card-hover: var(--shadow-card-hover);
+  --shadow-pop: var(--shadow-pop);
+  --shadow-modal: var(--shadow-modal);
+
+  --radius-md: 0.5rem;
+  --radius-lg: 0.625rem;
+  --radius-xl: 0.875rem;
+  --radius-2xl: 1.25rem;
+
+  --font-sans: "Inter", ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  --font-display: "Inter Tight", "Inter", ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  --font-mono: ui-monospace, "SF Mono", "JetBrains Mono", Menlo, Consolas, "Liberation Mono", monospace;
+
+  --animate-fade-in: fade-in 0.18s ease-out both;
+  --animate-scale-in: scale-in 0.18s cubic-bezier(0.16, 1, 0.3, 1) both;
+  --animate-slide-up: slide-up 0.22s cubic-bezier(0.16, 1, 0.3, 1) both;
+  --animate-slide-in-right: slide-in-right 0.26s cubic-bezier(0.16, 1, 0.3, 1) both;
+  --animate-slide-in-left: slide-in-left 0.26s cubic-bezier(0.16, 1, 0.3, 1) both;
+
+  @keyframes fade-in {
+    from { opacity: 0; }
+    to { opacity: 1; }
+  }
+  @keyframes scale-in {
+    from { opacity: 0; transform: translateY(6px) scale(0.98); }
+    to { opacity: 1; transform: translateY(0) scale(1); }
+  }
+  @keyframes slide-up {
+    from { opacity: 0; transform: translateY(12px); }
+    to { opacity: 1; transform: translateY(0); }
+  }
+  @keyframes slide-in-right {
+    from { opacity: 0; transform: translateX(16px); }
+    to { opacity: 1; transform: translateX(0); }
+  }
+  @keyframes slide-in-left {
+    from { opacity: 0; transform: translateX(-16px); }
+    to { opacity: 1; transform: translateX(0); }
+  }
+}
+
+/* Always emitted (used by the `skeleton` utility, not via animate-*) */
+@keyframes shimmer {
+  from { background-position: 200% 0; }
+  to { background-position: -200% 0; }
+}
+
+/* ──────────────────────────── Base ──────────────────────────── */
+@layer base {
+  html, body, #root { height: 100%; }
+
+  html {
+    -webkit-text-size-adjust: 100%;
+    text-rendering: optimizeLegibility;
+    scrollbar-gutter: stable;
+  }
+
+  body {
+    @apply bg-bg text-fg font-sans antialiased;
+    font-feature-settings: "cv11", "ss01", "calt";
+    font-size: 0.9375rem; /* 15px base reads as premium at desktop density */
+    line-height: 1.5;
+  }
+
+  h1, h2, h3, h4 {
+    @apply font-display tracking-tight text-fg;
+    text-wrap: balance;
+  }
+
+  ::selection {
+    background: var(--primary);
+    color: var(--primary-fg);
+  }
+
+  /* Visible focus everywhere, on top of component-level rings */
+  :focus-visible {
+    outline: 2px solid var(--ring);
+    outline-offset: 2px;
+  }
+
+  button, [role="button"] { cursor: pointer; }
+  button:disabled, [aria-disabled="true"] { cursor: not-allowed; }
+
+  /* Scrollbars */
+  * {
+    scrollbar-width: thin;
+    scrollbar-color: var(--border-strong) transparent;
+  }
+  ::-webkit-scrollbar { width: 10px; height: 10px; }
+  ::-webkit-scrollbar-track { background: transparent; }
+  ::-webkit-scrollbar-thumb {
+    background: var(--border-strong);
+    border-radius: 999px;
+    border: 3px solid transparent;
+    background-clip: padding-box;
+  }
+  ::-webkit-scrollbar-thumb:hover { background-color: var(--subtle); background-clip: padding-box; }
+
+  /* Native number input spinners look out of place next to the Stepper */
+  input[type="number"]::-webkit-outer-spin-button,
+  input[type="number"]::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
+  input[type="number"] { -moz-appearance: textfield; appearance: textfield; }
+
+  @media (prefers-reduced-motion: reduce) {
+    *, *::before, *::after {
+      animation-duration: 0.01ms !important;
+      animation-iteration-count: 1 !important;
+      transition-duration: 0.01ms !important;
+      scroll-behavior: auto !important;
+    }
+  }
+}
+
+/* ──────────────────────────── Utilities ────────────────────────────
+ * Registered with @utility (not @layer) so they compose with variants:
+ * `lg:eyebrow`, `[&_td]:tabular`, `hover:card-hover` all work.
+ */
+
+/* Focus ring that respects the page background; use on any interactive element */
+@utility focus-ring {
+  outline: none;
+  &:focus-visible {
+    outline: none;
+    box-shadow: 0 0 0 2px var(--bg), 0 0 0 4px var(--ring);
+  }
+}
+@utility focus-ring-inset {
+  outline: none;
+  &:focus-visible {
+    outline: none;
+    box-shadow: inset 0 0 0 2px var(--ring);
+  }
+}
+
+/* Cards lift gently on hover; keep motion subtle */
+@utility card-hover {
+  transition: box-shadow 0.18s ease, transform 0.18s ease, border-color 0.18s ease;
+  &:hover {
+    box-shadow: var(--shadow-card-hover);
+    transform: translateY(-1px);
+    border-color: var(--border-strong);
+  }
+}
+
+/* KPI numbers: display face, tabular figures so columns line up */
+@utility kpi-number {
+  font-family: var(--font-display);
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  font-variant-numeric: tabular-nums lining-nums;
+  font-feature-settings: "tnum", "lnum", "cv11";
+  line-height: 1.05;
+}
+
+@utility tabular {
+  font-variant-numeric: tabular-nums lining-nums;
+}
+
+@utility scrollbar-thin {
+  scrollbar-width: thin;
+  scrollbar-color: var(--border-strong) transparent;
+  &::-webkit-scrollbar { width: 6px; height: 6px; }
+  &::-webkit-scrollbar-thumb { background: var(--border-strong); border-radius: 999px; border: 0; }
+}
+@utility scrollbar-none {
+  scrollbar-width: none;
+  &::-webkit-scrollbar { display: none; }
+}
+
+/* Skeleton shimmer */
+@utility skeleton {
+  background: linear-gradient(90deg, var(--surface-2) 0%, var(--surface-3) 50%, var(--surface-2) 100%);
+  background-size: 200% 100%;
+  animation: shimmer 1.6s linear infinite;
+}
+
+/* Decorative parallel-line brand pattern (login, empty states) */
+@utility brand-lines {
+  background-image: repeating-linear-gradient(
+    -24deg,
+    transparent 0 22px,
+    color-mix(in oklab, var(--primary) 10%, transparent) 22px 24px
+  );
+}
+
+/* Soft gradient wash used behind hero areas */
+@utility brand-wash {
+  background:
+    radial-gradient(900px 500px at 10% -10%, color-mix(in oklab, var(--primary) 22%, transparent), transparent 60%),
+    radial-gradient(700px 400px at 100% 110%, color-mix(in oklab, var(--accent) 16%, transparent), transparent 60%);
+}
+
+/* Text that should read as a small label */
+@utility eyebrow {
+  font-size: 11px;
+  line-height: 1.2;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--muted);
+}

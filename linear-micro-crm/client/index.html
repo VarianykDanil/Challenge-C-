@@ -1,0 +1,40 @@
+<!doctype html>
+<html lang="en-GB">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+    <meta name="color-scheme" content="light dark" />
+    <meta name="theme-color" media="(prefers-color-scheme: light)" content="#F5F6FA" />
+    <meta name="theme-color" media="(prefers-color-scheme: dark)" content="#0B1020" />
+    <meta name="description" content="Linear Hub — the Linear MCR team platform for field gauges, recruitment and pay." />
+    <meta name="application-name" content="Linear Hub" />
+    <meta name="apple-mobile-web-app-title" content="Linear Hub" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+    <link rel="apple-touch-icon" href="/favicon.svg" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      rel="stylesheet"
+      href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Inter+Tight:wght@600;700;800&display=swap"
+    />
+    <title>Linear Hub</title>
+    <script>
+      // Apply the saved theme before first paint to avoid a flash.
+      // 'lm-theme' is 'light' | 'dark' | 'system' (or absent = system).
+      try {
+        var t = localStorage.getItem('lm-theme');
+        var prefersDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
+        var dark = t === 'dark' || ((t === null || t === 'system') && prefersDark);
+        if (dark) document.documentElement.classList.add('dark');
+        document.documentElement.style.colorScheme = dark ? 'dark' : 'light';
+      } catch (e) {}
+    </script>
+  </head>
+  <body>
+    <div id="root"></div>
+    <noscript>Linear Hub needs JavaScript enabled to run.</noscript>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>

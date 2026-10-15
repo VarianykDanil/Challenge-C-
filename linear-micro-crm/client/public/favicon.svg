@@ -1,0 +1,16 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" width="32" height="32" role="img" aria-label="Linear Hub">
+  <style>
+    .tile { fill: #4B3FD9; }
+    .line { stroke: #FFFFFF; }
+    @media (prefers-color-scheme: dark) {
+      .tile { fill: #9D99FF; }
+      .line { stroke: #0B1020; }
+    }
+  </style>
+  <rect class="tile" x="0" y="0" width="32" height="32" rx="8" />
+  <g class="line" fill="none" stroke-width="3.2" stroke-linecap="round" transform="translate(16 16) skewX(-14) translate(-16 -16)">
+    <path d="M10 10h6" />
+    <path d="M10 16h10" />
+    <path d="M10 22h14" />
+  </g>
+</svg>
