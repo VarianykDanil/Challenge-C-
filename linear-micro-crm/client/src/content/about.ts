@@ -14,7 +14,7 @@ export const ABOUT = {
   /** The product story, one paragraph per entry. */
   story: [
     'Linear MCR runs face-to-face sales for well-known brands and charities: B2B and B2C campaigns, private-site events and fundraising days across the North West. Every rep on every event records the same six gauges — stops, to table, presentations, closes, taps and sales — and judges them against the law of averages. That discipline is the business. Until now, it lived on paper, in WhatsApp threads and in people’s heads.',
-    'Linear Hub puts the gauges, the people and the money in one place. A rep signs in with their work email and employee ID and sees their own numbers, their ratios against the benchmarks, their next payday and where they sit on the ladder. A leader sees the same for their team and can log a day on behalf of anyone on it. The office sees recruitment from application to first day, campaign payouts, payroll and whether people were paid on time.',
+    'Linear Hub puts the gauges, the people and the money in one place. A rep signs in with their work email and employee ID and sees their own numbers, their ratios against the benchmarks, their next payday and where they sit on their team’s board. A leader can read every team’s numbers, schedules events for their own team and can log a day on behalf of anyone on it. The recruiter runs the pipeline from application to hire, and a hire becomes a rep account on the spot. The office sees campaign payouts, payroll and whether people were paid on time.',
     'We built it around the way Linear already works rather than asking the business to change. The funnel rule is enforced at the point of entry (you cannot have more presentations than people at the table). The benchmarks are the company’s own. The pay plan is the one on the wall. The aim is simple: fewer questions that take an hour to answer, and coaching that starts with a ratio instead of a hunch.',
   ],
 
@@ -24,8 +24,8 @@ export const ABOUT = {
   whoItsFor: [
     { role: 'rep', title: 'Field representatives', description: 'Log the day in under a minute, see ratios against the benchmarks, check pay and punctuality.' },
     { role: 'leader', title: 'Team and crew leaders', description: 'Create events, log for the team, see who needs coaching on which stage, and track the team’s week.' },
-    { role: 'recruiter', title: 'Recruiters', description: 'Run the pipeline from application to observation day to hire, with overdue actions surfaced.' },
-    { role: 'admin', title: 'The office', description: 'Campaign payouts, payroll runs, expenses and company finance in one view.' },
+    { role: 'recruiter', title: 'Recruiters', description: 'Run the pipeline from application to observation day to hire, with overdue actions surfaced and a rep account created the moment someone is hired.' },
+    { role: 'admin', title: 'The office', description: 'People, campaign payouts, payroll runs, expenses and company finance in one view — and the only place employee IDs are shown.' },
   ] satisfies RoleSummary[],
 
   stack: [
@@ -44,7 +44,7 @@ export const ABOUT = {
   /** Principles we held to while building. */
   principles: [
     { title: 'Built around the gauges', body: 'Six numbers, in funnel order, validated as you type. Everything else is derived from them.' },
-    { title: 'One sign-in per person', body: 'Work email plus employee ID. Reps see their own data; leaders see their team; the office sees everything.' },
+    { title: 'One sign-in per person', body: 'Work email plus employee ID — no password yet, so IDs are shown only to the office and to you. Reps see their own numbers and their team; leaders read company-wide and change only their own team; recruiters run the pipeline; the office sees everything.' },
     { title: 'Honest about pay', body: 'Every payslip is itemised against the pay plan, and every payday is tracked for punctuality.' },
     { title: 'Works on a phone in a car park', body: 'Large tap targets, a dark theme and nothing that needs a desk.' },
   ],
