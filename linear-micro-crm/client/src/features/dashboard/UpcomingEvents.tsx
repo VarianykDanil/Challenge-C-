@@ -11,18 +11,20 @@ export function UpcomingEvents({ events }: { events: SalesEventWithMeta[] }) {
     <ul className="divide-y divide-border">
       {events.map((e) => (
         <li key={e.id}>
-          <Link to={`/events/${e.id}`} className="flex items-center gap-3 rounded-md py-2.5 hover:bg-surface-2 focus:outline-none focus-visible:ring-2 focus-visible:ring-ring">
-            <span className="h-10 w-1 shrink-0 rounded-full" style={{ backgroundColor: e.campaignColor }} aria-hidden />
-            <span className="flex w-14 shrink-0 flex-col text-xs text-muted">
-              <span className="font-semibold text-fg">{formatDateShort(e.date)}</span>
-              <span>{formatTime(e.startTime)}</span>
+          <Link to={`/events/${e.id}`} className="block rounded-md py-2.5 hover:bg-surface-2 focus:outline-none focus-visible:ring-2 focus-visible:ring-ring">
+            <span className="flex items-start gap-3">
+              <span className="mt-0.5 h-10 w-1 shrink-0 rounded-full" style={{ backgroundColor: e.campaignColor }} aria-hidden />
+              <span className="min-w-0 flex-1">
+                <span className="flex items-start justify-between gap-2">
+                  <span className="line-clamp-2 text-sm font-medium leading-snug text-fg">{e.name}</span>
+                  <EventStatusBadge status={e.status} />
+                </span>
+                <span className="mt-0.5 block text-xs text-muted">
+                  <span className="font-semibold text-fg">{formatDateShort(e.date)}</span> · {formatTime(e.startTime)} · {formatRelative(e.date)}
+                </span>
+                <span className="mt-0.5 flex items-start gap-1 text-xs text-muted"><MapPin className="mt-0.5 h-3 w-3 shrink-0" aria-hidden /><span className="min-w-0 truncate">{e.venue}, {e.city} · {e.teamName}</span></span>
+              </span>
             </span>
-            <span className="min-w-0 flex-1">
-              <span className="line-clamp-2 block text-sm font-medium leading-snug text-fg">{e.name}</span>
-              <span className="mt-0.5 flex items-start gap-1 text-xs text-muted"><MapPin className="mt-0.5 h-3 w-3 shrink-0" aria-hidden /><span className="min-w-0">{e.venue}, {e.city} · {e.teamName}</span></span>
-            </span>
-            <span className="hidden text-xs text-muted sm:block">{formatRelative(e.date)}</span>
-            <EventStatusBadge status={e.status} />
           </Link>
         </li>
       ))}

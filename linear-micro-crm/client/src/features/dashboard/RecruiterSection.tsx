@@ -50,7 +50,7 @@ export function RecruiterSection({ range }: { range: DashboardRange }) {
             <KpiTile label="Interviews this week" value={interviews.data ? formatNumber(interviewsThisWeek) : '—'} hint={`${formatNumber(upcoming.length)} upcoming`} />
             <KpiTile label="Overdue actions" value={formatNumber(s.overdueActions)} tone={s.overdueActions > 0 ? 'danger' : 'success'} hint="open candidates past next action" />
             <KpiTile label={`Hires · ${DASHBOARD_RANGE_LABELS[range].toLowerCase()}`} value={formatNumber(s.hired)} tone="success" hint={`${formatNumber(s.applied)} applied in range`} />
-            <KpiTile label="Avg time to hire" value={`${formatDecimal(s.avgTimeToHireDays)} days`} hint="applied → hired" />
+            <KpiTile label="Avg time to hire" value={s.hired > 0 ? `${formatDecimal(s.avgTimeToHireDays)} days` : '—'} hint={s.hired > 0 ? 'applied → hired' : 'no hires in this range'} />
           </>
         )}
       </div>
