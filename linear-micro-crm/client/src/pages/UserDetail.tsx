@@ -72,7 +72,7 @@ export function UserDetailPage() {
           </div>
           <div className="min-w-0 space-y-5 lg:col-span-3">
             <RangePicker value={range} onChange={setRange} />
-            <PerformancePanel data={perf.data} loading={perf.isLoading} error={perf.error} onRetry={() => void perf.refetch()} />
+            <PerformancePanel data={perf.data} loading={perf.isLoading} error={perf.error} onRetry={() => void perf.refetch()} range={range} />
           </div>
         </div>
       )}

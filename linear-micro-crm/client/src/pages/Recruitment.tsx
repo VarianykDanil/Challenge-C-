@@ -8,8 +8,9 @@ import { Avatar, Button, Card, CardHeader, DataTable, EmptyState, Input, KpiTile
 import { BarsChart, TrendChart } from '@/components/charts';
 import { useCandidates, useRecruitmentSummary, useUsers } from '@/api/hooks';
 import { useCurrentUser } from '@/auth/AuthProvider';
-import { ChartSkeleton, ErrorState, KpiSkeletons, RangePicker, SourceBadge, StageBadge, StarRating, StopRowEvents, ViewToggle, useRangeState } from '@/features/common';
-import { AddCandidateModal, CandidateCard, MoveStageControl, isOverdue } from '@/features/recruitment';
+import { ChartSkeleton, ErrorState, ExportButton, KpiSkeletons, RangePicker, SourceBadge, StageBadge, StarRating, StopRowEvents, ViewToggle, useRangeState } from '@/features/common';
+import { AddCandidateModal, CandidateCard, MoveStageControl, candidateCsvColumns, isOverdue } from '@/features/recruitment';
+import { csvFilename, sortRows } from '@/lib/csv';
 import { formatDate, formatDateShort, formatDecimal, formatNumber, formatPct, fullName } from '@/lib/format';
 import { optionsFrom } from '@/lib/labels';
 import { usePageTitle } from '@/lib/usePageTitle';
@@ -124,6 +125,9 @@ export function RecruitmentPage() {
           {view === 'list' && (
             <Switch size="sm" checked={showClosed} onChange={setShowClosed} label={<span className="text-xs text-muted">Include closed</span>} />
           )}
+          {view === 'list' && (
+            <ExportButton filename={csvFilename(showClosed ? 'candidates-all' : 'candidates-open')} rows={sortRows(list, (c) => c.appliedAt, 'desc')} columns={candidateCsvColumns} disabled={candidates.isLoading} />
+          )}
           <ViewToggle value={view} onChange={setView} options={[{ value: 'board', label: 'Board view', icon: <Columns3 className="h-4 w-4" aria-hidden /> }, { value: 'list', label: 'List view', icon: <List className="h-4 w-4" aria-hidden /> }]} />
         </div>
       </div>
@@ -139,9 +143,13 @@ export function RecruitmentPage() {
               const loading = isHired ? hiredQuery.isLoading : candidates.isLoading;
               return (
                 <section key={stage} aria-labelledby={`col-${stage}`} className="flex min-h-[200px] flex-col rounded-xl bg-surface-2 p-2">
-                  <h3 id={`col-${stage}`} className="mb-2 flex items-center justify-between px-1 text-xs font-semibold uppercase tracking-wide text-muted">
-                    {STAGE_LABELS[stage]}<span className="rounded-full bg-surface px-1.5 py-0.5 text-[11px] tabular-nums text-fg">{loading ? '…' : isHired ? `${items.length} hired` : items.length}</span>
-                  </h3>
+                  <div className="mb-2 flex items-center justify-between gap-2 px-1">
+                    <h3 id={`col-${stage}`} className="text-xs font-semibold uppercase tracking-wide text-muted">{STAGE_LABELS[stage]}</h3>
+                    <span className="flex items-center gap-1.5">
+                      <span className="rounded-full bg-surface px-1.5 py-0.5 text-[11px] tabular-nums text-fg">{loading ? '…' : isHired ? `${items.length} hired` : items.length}</span>
+                      {isHired && <ExportButton size="icon-xs" label="Export hired candidates" filename={csvFilename('hired', range)} rows={items} columns={candidateCsvColumns} disabled={loading} />}
+                    </span>
+                  </div>
                   {isHired && <p className="mb-1 px-1 text-[11px] normal-case text-muted">Hired {formatDateShort(range.from)} – {formatDateShort(range.to)}</p>}
                   {loading ? (
                     <div className="space-y-2"><Skeleton className="h-20" /><Skeleton className="h-20" /></div>

@@ -6,8 +6,9 @@ import { Badge, Button, Card, CardHeader, DataTable, EmptyState, KpiTile, PageHe
 import { DonutChart, TrendChart } from '@/components/charts';
 import { useCampaigns, useDeleteExpense, useExpenses, useFinanceSummary, useMyFinance, usePayRun, usePayroll } from '@/api/hooks';
 import { useCurrentUser } from '@/auth/AuthProvider';
-import { ChartSkeleton, ColourChip, ConfirmDialog, ErrorState, KpiSkeletons, RangePicker, StopRowEvents, errorMessage, useRangeState } from '@/features/common';
-import { AddExpenseModal, PayrollRunsTable, PayslipModal } from '@/features/finance';
+import { ChartSkeleton, ColourChip, ConfirmDialog, ErrorState, ExportButton, KpiSkeletons, RangePicker, StopRowEvents, errorMessage, useRangeState } from '@/features/common';
+import { AddExpenseModal, PayrollRunsTable, PayslipModal, campaignFinanceCsvColumns, expenseCsvColumns, financeWeekCsvColumns, payrollRunCsvColumns, payrollRunsRange } from '@/features/finance';
+import { csvFilename, sortRows } from '@/lib/csv';
 import { todayISO } from '@/lib/dates';
 import { formatDate, formatDateShort, formatDecimal, formatGBP, formatNumber, formatPct, formatRangeLabel, formatRelative } from '@/lib/format';
 import { usePageTitle } from '@/lib/usePageTitle';
@@ -81,7 +82,7 @@ function MyPay({ onOpen }: { onOpen: (r: PayrollRunWithUser) => void }) {
         ) : <EmptyState title={COPY.empty.payroll.title} description={COPY.empty.payroll.description} size="sm" className="border-0" />}
       </Card>
       <Card padded={false} className="min-w-0 overflow-hidden">
-        <div className="p-5 pb-3"><CardHeader title="Payslips" description="Select a week to see the full breakdown" className="mb-0" /></div>
+        <div className="p-5 pb-3"><CardHeader title="Payslips" description="Select a week to see the full breakdown" className="mb-0" actions={<ExportButton filename={csvFilename('payslips', payrollRunsRange(d?.runs ?? []))} rows={sortRows(d?.runs ?? [], (r) => r.weekStart, 'desc')} columns={payrollRunCsvColumns(false)} disabled={q.isLoading} />} /></div>
         <PayrollRunsTable rows={d?.runs ?? []} loading={q.isLoading} onRowClick={onOpen} emptyMessage={`${COPY.empty.payroll.title} — ${COPY.empty.payroll.description}`} bare className="border-t border-border" />
       </Card>
     </div>
@@ -95,7 +96,10 @@ function TeamPay({ teamId, onOpen }: { teamId: number; onOpen: (r: PayrollRunWit
   const totals = useMemo(() => rows.reduce((a, r) => ({ gross: a.gross + r.gross, commission: a.commission + r.commission, pending: a.pending + (r.status === 'pending' ? r.gross : 0) }), { gross: 0, commission: 0, pending: 0 }), [rows]);
   return (
     <div className="space-y-6">
-      <RangePicker value={range} onChange={setRange} presets={['this_week', 'last_week', 'last_4_weeks', 'last_12_weeks', 'this_month']} />
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <RangePicker value={range} onChange={setRange} presets={['this_week', 'last_week', 'last_4_weeks', 'last_12_weeks', 'this_month']} />
+        <ExportButton filename={csvFilename('team-pay', range)} rows={sortRows(rows, (r) => r.weekStart, 'desc')} columns={payrollRunCsvColumns(true)} disabled={q.isLoading} />
+      </div>
       {q.isError ? <ErrorState error={q.error} onRetry={() => void q.refetch()} /> : (
         <>
           <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
@@ -181,7 +185,7 @@ function Company({ onOpen }: { onOpen: (r: PayrollRunWithUser) => void }) {
           </div>
           <div className="grid grid-cols-1 gap-6 lg:grid-cols-3">
             <Card className="min-w-0 lg:col-span-2">
-              <CardHeader title="Weekly money flow" description={s ? `Revenue against payroll and expenses per pay week (Mon–Sun) · ${formatRangeLabel(s.from, s.to)}` : 'Revenue against payroll and expenses per pay week (Mon–Sun)'} />
+              <CardHeader title="Weekly money flow" description={s ? `Revenue against payroll and expenses per pay week (Mon–Sun) · ${formatRangeLabel(s.from, s.to)}` : 'Revenue against payroll and expenses per pay week (Mon–Sun)'} actions={<ExportButton filename={csvFilename('weekly-money-flow', range)} rows={sortRows(s?.weeks ?? [], (w) => w.weekStart)} columns={financeWeekCsvColumns} disabled={!s} />} />
               {!s ? <ChartSkeleton /> : s.weeks.length ? (
                 <TrendChart data={s.weeks.map((w) => ({ week: w.weekStart, revenue: w.revenue, payroll: w.payroll, expenses: w.expenses }))} xKey="week" series={[{ key: 'revenue', label: 'Revenue' }, { key: 'payroll', label: 'Payroll' }, { key: 'expenses', label: 'Expenses' }]} kind="bar" xFormatter={formatDateShort} yFormatter={(v) => formatGBP(v)} height={260} />
               ) : <EmptyState title="No weeks in range" size="sm" className="border-0" />}
@@ -202,7 +206,7 @@ function Company({ onOpen }: { onOpen: (r: PayrollRunWithUser) => void }) {
             </Card>
           </div>
           <Card padded={false} className="min-w-0 overflow-hidden">
-            <div className="p-5 pb-3"><CardHeader title="By campaign" description="Sales, revenue, rep commission and margin" className="mb-0" /></div>
+            <div className="p-5 pb-3"><CardHeader title="By campaign" description="Sales, revenue, rep commission and margin" className="mb-0" actions={<ExportButton filename={csvFilename('finance-by-campaign', range)} rows={sortRows(s?.byCampaign ?? [], (r) => r.revenue, 'desc')} columns={campaignFinanceCsvColumns} disabled={!s} />} /></div>
             <DataTable
               rows={s?.byCampaign ?? []}
               loading={!s}
@@ -222,7 +226,7 @@ function Company({ onOpen }: { onOpen: (r: PayrollRunWithUser) => void }) {
       )}
 
       <Card padded={false} className="min-w-0 overflow-hidden">
-        <div className="p-5 pb-3"><CardHeader title="Runs to pay" description={`Pending and failed runs — mark them paid once the transfer has gone${pending.data?.some((r) => r.status === 'failed') ? ' · failed transfers are flagged' : ''}`} className="mb-0" /></div>
+        <div className="p-5 pb-3"><CardHeader title="Runs to pay" description={`Pending and failed runs — mark them paid once the transfer has gone${pending.data?.some((r) => r.status === 'failed') ? ' · failed transfers are flagged' : ''}`} className="mb-0" actions={<ExportButton filename={csvFilename('runs-to-pay')} rows={sortRows(pending.data ?? [], (r) => r.weekStart, 'desc')} columns={payrollRunCsvColumns(true)} disabled={pending.isLoading} />} /></div>
         {pending.isError ? <ErrorState error={pending.error} onRetry={() => void pending.refetch()} className="m-5" /> : (pending.data?.length ?? 0) > GROUP_RUNS_ABOVE ? (
           <div className="divide-y divide-border border-t border-border">
             {groupByWeek(pending.data ?? []).map(([weekStart, runs], i) => (
@@ -243,7 +247,11 @@ function Company({ onOpen }: { onOpen: (r: PayrollRunWithUser) => void }) {
       <Card padded={false} className="min-w-0 overflow-hidden">
         <div className="flex items-start justify-between gap-3 p-5 pb-3">
           <CardHeader title="Expenses" description={expenses.data ? `${formatNumber(expenses.data.length)} items · ${formatGBP(expenses.data.reduce((a, e) => a + e.amount, 0))}` : undefined} className="mb-0" />
-          <Button size="sm" onClick={() => setAddOpen(true)} leftIcon={<Plus className="h-4 w-4" aria-hidden />}>Add expense</Button>
+          <div className="flex shrink-0 items-center gap-2">
+            {/* Every expense in the range, not only the page shown — the card's count/total describe the same set. */}
+            <ExportButton filename={csvFilename('expenses', range)} rows={[...(expenses.data ?? [])].sort((a, b) => b.date.localeCompare(a.date) || b.id - a.id)} columns={expenseCsvColumns((id) => campaignName(id)?.name ?? null)} disabled={expenses.isLoading} />
+            <Button size="sm" onClick={() => setAddOpen(true)} leftIcon={<Plus className="h-4 w-4" aria-hidden />}>Add expense</Button>
+          </div>
         </div>
         {expenses.isError ? <ErrorState error={expenses.error} onRetry={() => void expenses.refetch()} className="m-5" /> : (
           <DataTable

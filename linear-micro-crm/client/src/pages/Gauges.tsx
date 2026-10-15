@@ -7,8 +7,9 @@ import { Button, Card, CardHeader, EmptyState, PageHeader, SegmentedControl, Sel
 import { TrendChart } from '@/components/charts';
 import { useGaugeSummary, useTeams, useUserPerformance } from '@/api/hooks';
 import { useCurrentUser } from '@/auth/AuthProvider';
-import { ChartSkeleton, ErrorState, RangePicker, useRangeState } from '@/features/common';
-import { GaugeSummaryTable, LogGaugesModal, PerformancePanel } from '@/features/gauges';
+import { ChartSkeleton, ErrorState, ExportButton, RangePicker, useRangeState } from '@/features/common';
+import { GaugeSummaryTable, LogGaugesModal, PerformancePanel, gaugeSummaryCsvColumns } from '@/features/gauges';
+import { csvFilename, sortRows } from '@/lib/csv';
 import { formatDateShort } from '@/lib/format';
 import { usePageTitle } from '@/lib/usePageTitle';
 import { COPY } from '@/content/copy';
@@ -61,7 +62,7 @@ export function GaugesPage() {
 
 function MyPerformance({ userId, range }: { userId: number; range: { from: string; to: string } }) {
   const q = useUserPerformance(userId, { from: range.from, to: range.to });
-  return <PerformancePanel data={q.data} loading={q.isLoading} error={q.error} onRetry={() => void q.refetch()} />;
+  return <PerformancePanel data={q.data} loading={q.isLoading} error={q.error} onRetry={() => void q.refetch()} range={range} />;
 }
 
 function SummaryView({ range, teamId, allowTeamPick, defaultGroupBy }: { range: { from: string; to: string }; teamId?: number | null; allowTeamPick: boolean; defaultGroupBy: GaugeGroupBy }) {
@@ -73,6 +74,9 @@ function SummaryView({ range, teamId, allowTeamPick, defaultGroupBy }: { range: 
   const q = useGaugeSummary({ groupBy, from: range.from, to: range.to, teamId: effectiveTeam });
   const rows = q.data ?? [];
   const isTime = groupBy === 'day' || groupBy === 'week';
+  const teamName = effectiveTeam != null ? teams.data?.find((t) => t.id === effectiveTeam)?.name : undefined;
+  // Same order as the table's default sort, so the file reads like the screen.
+  const exportRows = isTime ? sortRows(rows, (r) => r.key, 'asc') : sortRows(rows, (r) => r.sales, 'desc');
 
   const onRow = (r: GaugeSummaryRow) => {
     if (groupBy === 'user') navigate(`/team/${r.key}`);
@@ -82,9 +86,12 @@ function SummaryView({ range, teamId, allowTeamPick, defaultGroupBy }: { range: 
     <div className="space-y-5">
       <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
         <SegmentedControl<GaugeGroupBy> aria-label="Group by" size="sm" options={GROUP_ITEMS} value={groupBy} onChange={setGroupBy} className="max-w-full overflow-x-auto" />
-        {allowTeamPick && (
-          <Select aria-label="Team" value={pickedTeam} onChange={(e) => setPickedTeam(e.target.value)} placeholder="All teams" options={(teams.data ?? []).map((t) => ({ value: String(t.id), label: t.name }))} size="sm" className="md:w-56" />
-        )}
+        <div className="flex items-center gap-2 [&>span]:flex-1 md:[&>span]:flex-none">
+          {allowTeamPick && (
+            <Select aria-label="Team" value={pickedTeam} onChange={(e) => setPickedTeam(e.target.value)} placeholder="All teams" options={(teams.data ?? []).map((t) => ({ value: String(t.id), label: t.name }))} size="sm" className="w-full md:w-56" />
+          )}
+          <ExportButton filename={csvFilename(['gauges-by', groupBy, teamName].filter(Boolean).join('-'), range)} rows={exportRows} columns={gaugeSummaryCsvColumns(groupBy)} disabled={q.isLoading} />
+        </div>
       </div>
 
       {q.isError ? (

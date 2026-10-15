@@ -8,7 +8,8 @@ import clsx from 'clsx';
 import { Avatar, Badge, DataTable, EmptyState, PageHeader, SegmentedControl, Select, Skeleton, type Column } from '@/components/ui';
 import { useLeaderboard, useTeams } from '@/api/hooks';
 import { useCurrentUser } from '@/auth/AuthProvider';
-import { ErrorState } from '@/features/common';
+import { ErrorState, ExportButton } from '@/features/common';
+import { csvFilename, csvLabel, csvPct, sortRows, type CsvColumn } from '@/lib/csv';
 import { formatNumber, formatPct } from '@/lib/format';
 import { usePageTitle } from '@/lib/usePageTitle';
 
@@ -25,6 +26,18 @@ function Movement({ value }: { value: number | null }) {
   if (value < 0) return <span className="inline-flex items-center gap-0.5 text-xs font-medium text-danger"><ArrowDown className="h-3.5 w-3.5" aria-hidden />{Math.abs(value)}<span className="sr-only"> places down</span></span>;
   return <span className="inline-flex items-center text-xs text-muted"><Minus className="h-3.5 w-3.5" aria-hidden /><span className="sr-only">No change</span></span>;
 }
+
+const CSV_COLUMNS: CsvColumn<LeaderboardRow>[] = [
+  { key: 'rank', header: 'Rank' },
+  { key: 'userName', header: 'Rep' },
+  { key: 'position', header: 'Position', format: csvLabel(POSITION_LABELS) },
+  { key: 'teamName', header: 'Team' },
+  { key: 'sales', header: 'Sales' },
+  { key: 'stops', header: 'Stops' },
+  { key: 'conversion', header: 'Conversion (sales ÷ stops)', format: csvPct(1) },
+  { key: 'days', header: 'Days' },
+  { key: 'movement', header: 'Movement (places)', format: (v) => (v == null ? 'New' : String(v)) },
+];
 
 const PODIUM_ORDER = [1, 0, 2];
 const PODIUM_HEIGHT = ['h-24', 'h-32', 'h-20'];
@@ -83,12 +96,15 @@ export function LeaderboardPage() {
           <SegmentedControl<DashboardRange> aria-label="Period" options={PERIODS} value={period} onChange={setPeriod} />
           <SegmentedControl<Metric> aria-label="Metric" options={METRICS} value={metric} onChange={setMetric} />
         </div>
-        {me.role === 'rep' ? (
-          // The server scopes reps to their own team, so a team picker would silently lie.
-          <span className="inline-flex items-center gap-2 text-sm text-muted">Team <Badge tone="neutral" dot color={teams.data?.find((t) => t.id === me.teamId)?.color}>{me.teamName ?? 'No team'}</Badge></span>
-        ) : (
-          <Select aria-label="Team" value={teamId} onChange={(e) => setTeamId(e.target.value)} placeholder="All teams" options={(teams.data ?? []).map((t) => ({ value: String(t.id), label: t.name }))} size="sm" className="lg:w-56" />
-        )}
+        <div className="flex items-center gap-2 [&>span]:flex-1 lg:[&>span]:flex-none">
+          {me.role === 'rep' ? (
+            // The server scopes reps to their own team, so a team picker would silently lie.
+            <span className="inline-flex items-center gap-2 text-sm text-muted">Team <Badge tone="neutral" dot color={teams.data?.find((t) => t.id === me.teamId)?.color}>{me.teamName ?? 'No team'}</Badge></span>
+          ) : (
+            <Select aria-label="Team" value={teamId} onChange={(e) => setTeamId(e.target.value)} placeholder="All teams" options={(teams.data ?? []).map((t) => ({ value: String(t.id), label: t.name }))} size="sm" className="w-full lg:w-56" />
+          )}
+          <ExportButton filename={csvFilename(`leaderboard-${period}-${metric}`)} rows={sortRows(rows, (r) => r.rank)} columns={CSV_COLUMNS} disabled={q.isLoading} />
+        </div>
       </div>
 
       {q.isError ? (

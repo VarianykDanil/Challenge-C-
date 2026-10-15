@@ -4,8 +4,9 @@ import type { Campaign } from '@lm/shared';
 import { Badge, Button, Card, EmptyState, PageHeader, Skeleton, Tabs } from '@/components/ui';
 import { useCampaigns, useGaugeSummary } from '@/api/hooks';
 import { useCurrentUser } from '@/auth/AuthProvider';
-import { ErrorState } from '@/features/common';
+import { ErrorState, ExportButton } from '@/features/common';
 import { CampaignFormModal } from '@/features/campaigns';
+import { csvDate, csvFilename, csvLabel, csvMoney, csvPct, csvYesNo, type CsvColumn } from '@/lib/csv';
 import { presetRange } from '@/lib/dates';
 import { formatDate, formatGBP, formatNumber, formatPct } from '@/lib/format';
 import { CAMPAIGN_TYPE_LABELS, SECTOR_LABELS } from '@/lib/labels';
@@ -28,12 +29,34 @@ export function CampaignsPage() {
 
   const list = (q.data ?? []).filter((c) => (filter === 'all' ? true : filter === 'active' ? c.active : !c.active));
 
+  const csvColumns = useMemo<CsvColumn<Campaign>[]>(() => {
+    const pct = csvPct(1);
+    return [
+      { key: 'name', header: 'Campaign' },
+      { key: 'code', header: 'Code' },
+      { key: 'sector', header: 'Sector', format: csvLabel(SECTOR_LABELS) },
+      { key: 'type', header: 'Type', format: csvLabel(CAMPAIGN_TYPE_LABELS) },
+      { key: 'payoutPerSale', header: 'Payout per sale', format: csvMoney },
+      { key: 'repCommissionPerSale', header: 'Rep commission per sale', format: csvMoney },
+      { key: 'margin', header: 'Margin %', format: (_, c) => (c.payoutPerSale > 0 ? pct((c.payoutPerSale - c.repCommissionPerSale) / c.payoutPerSale) : '') },
+      { key: 'active', header: 'Active', format: csvYesNo },
+      { key: 'salesThisMonth', header: 'Sales this month', format: (_, c) => String(salesByCampaign.get(String(c.id))?.sales ?? 0) },
+      { key: 'conversionThisMonth', header: 'Conversion this month', format: (_, c) => { const r = salesByCampaign.get(String(c.id)); return r && r.days > 0 ? pct(r.ratios.overallConversion) : ''; } },
+      { key: 'startDate', header: 'Start date', format: csvDate },
+    ];
+  }, [salesByCampaign]);
+
   return (
     <>
       <PageHeader
         title={COPY.nav.campaigns.title}
         description={COPY.nav.campaigns.description}
-        actions={isAdmin ? <Button onClick={() => setCreateOpen(true)} leftIcon={<Plus className="h-4 w-4" aria-hidden />}>New campaign</Button> : undefined}
+        actions={
+          <>
+            <ExportButton size="md" filename={csvFilename(`campaigns-${filter}`)} rows={list} columns={csvColumns} disabled={q.isLoading || sales.isLoading} />
+            {isAdmin && <Button onClick={() => setCreateOpen(true)} leftIcon={<Plus className="h-4 w-4" aria-hidden />}>New campaign</Button>}
+          </>
+        }
       />
       <Tabs variant="pills" className="mb-5" value={filter} onChange={(v) => setFilter(v as Filter)} items={[{ value: 'active', label: 'Active', count: q.data?.filter((c) => c.active).length }, { value: 'inactive', label: 'Inactive', count: q.data?.filter((c) => !c.active).length }, { value: 'all', label: 'All' }]} />
 

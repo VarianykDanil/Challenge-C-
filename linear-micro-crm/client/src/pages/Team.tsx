@@ -6,8 +6,9 @@ import { POSITIONS, POSITION_LABELS } from '@lm/shared';
 import { Avatar, Badge, Button, Card, DataTable, EmptyState, Input, PageHeader, Select, Skeleton, type Column } from '@/components/ui';
 import { useTeams, useUsers } from '@/api/hooks';
 import { useCurrentUser } from '@/auth/AuthProvider';
-import { ErrorState, UserStatusBadge, ViewToggle } from '@/features/common';
-import { UserFormModal } from '@/features/team';
+import { ErrorState, ExportButton, UserStatusBadge, ViewToggle } from '@/features/common';
+import { UserFormModal, userCsvColumns } from '@/features/team';
+import { csvFilename, sortRows } from '@/lib/csv';
 import { formatDate, formatNumber, formatRelative, fullName } from '@/lib/format';
 import { USER_STATUS_LABELS, optionsFrom } from '@/lib/labels';
 import { usePageTitle } from '@/lib/usePageTitle';
@@ -69,7 +70,10 @@ export function TeamPage() {
           <Select aria-label="Position" value={position} onChange={(e) => setPosition(e.target.value as Position | '')} placeholder="All positions" options={optionsFrom(POSITION_LABELS, POSITIONS)} size="sm" />
           <Select aria-label="Status" value={status} onChange={(e) => setStatus(e.target.value as UserStatus | 'all')} options={[...optionsFrom(USER_STATUS_LABELS), { value: 'all', label: 'Everyone' }]} size="sm" />
         </div>
-        <ViewToggle value={view} onChange={setView} options={[{ value: 'grid', label: 'Card view', icon: <LayoutGrid className="h-4 w-4" aria-hidden /> }, { value: 'table', label: 'Table view', icon: <List className="h-4 w-4" aria-hidden /> }]} />
+        <div className="flex items-center justify-end gap-2">
+          <ExportButton filename={csvFilename(`team-directory-${status}`)} rows={sortRows(list, (u) => fullName(u))} columns={userCsvColumns(list.some((u) => !!u.employeeId))} disabled={q.isLoading} />
+          <ViewToggle value={view} onChange={setView} options={[{ value: 'grid', label: 'Card view', icon: <LayoutGrid className="h-4 w-4" aria-hidden /> }, { value: 'table', label: 'Table view', icon: <List className="h-4 w-4" aria-hidden /> }]} />
+        </div>
       </div>
 
       {q.isError ? (

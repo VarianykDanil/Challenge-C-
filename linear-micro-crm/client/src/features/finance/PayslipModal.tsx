@@ -1,19 +1,60 @@
-// Payslip breakdown for a single payroll run.
+// Payslip breakdown for a single payroll run, with a "Print payslip" action that lays it out on A4.
+import { Printer } from 'lucide-react';
 import type { PayrollRunWithUser } from '@lm/shared';
-import { POSITION_LABELS } from '@lm/shared';
-import { Badge, Modal, Skeleton } from '@/components/ui';
+import { BRAND, POSITION_LABELS } from '@lm/shared';
+import { Badge, Button, Modal, Skeleton } from '@/components/ui';
 import { usePayslip } from '@/api/hooks';
 import { ErrorState, OnTimeBadge, PayrollStatusBadge } from '@/features/common';
 import { GaugeEntriesTable } from '@/features/gauges';
 import { formatDate, formatGBP, formatNumber, formatRangeLabel } from '@/lib/format';
+import { PAYROLL_STATUS_LABELS } from '@/lib/labels';
 
 export function PayslipModal({ run, onClose }: { run: PayrollRunWithUser | null; onClose: () => void }) {
   return (
-    <Modal open={!!run} onClose={onClose} title={run ? `Payslip · ${run.reference}` : 'Payslip'} description={run ? `${run.userName} · ${POSITION_LABELS[run.position]} · week ${formatRangeLabel(run.weekStart, run.weekEnd)}` : undefined} size="xl">
+    <Modal
+      open={!!run}
+      onClose={onClose}
+      title={run ? `Payslip · ${run.reference}` : 'Payslip'}
+      description={run ? `${run.userName} · ${POSITION_LABELS[run.position]} · week ${formatRangeLabel(run.weekStart, run.weekEnd)}` : undefined}
+      size="xl"
+      footer={run ? (
+        <Button variant="outline" onClick={() => window.print()} leftIcon={<Printer aria-hidden />}>
+          Print payslip
+        </Button>
+      ) : undefined}
+    >
       {run && <PayslipBody run={run} />}
     </Modal>
   );
 }
+
+/**
+ * Print rules, scoped to the time the payslip is open (the <style> unmounts with the modal). Only the
+ * element marked `data-print-root` is printed; every ancestor (the fixed, scrolling dialog chrome) is
+ * flattened so the payslip flows top-down over as many A4 pages as it needs, and siblings on the way
+ * down (backdrop, dialog header/footer, the app behind it) take no space.
+ */
+const PRINT_CSS = `
+@media print {
+  @page { size: A4; margin: 14mm; }
+  body > * { visibility: hidden !important; }
+  [data-print-root], [data-print-root] * { visibility: visible !important; }
+  *:has([data-print-root]) {
+    position: static !important; display: block !important; overflow: visible !important;
+    width: auto !important; max-width: none !important; height: auto !important; max-height: none !important;
+    inset: auto !important; margin: 0 !important; padding: 0 !important; border: 0 !important;
+    transform: none !important; animation: none !important; box-shadow: none !important;
+    background: transparent !important; backdrop-filter: none !important;
+  }
+  *:has([data-print-root]) > *:not([data-print-root]):not(:has([data-print-root])) { display: none !important; }
+  [data-print-root] { position: static !important; color: black; font-size: 12px; line-height: 1.4; }
+  [data-print-root] * { color: black !important; background: transparent !important; box-shadow: none !important; border-color: rgba(0, 0, 0, 0.35) !important; }
+  [data-print-root] [class*="overflow-"] { overflow: visible !important; }
+  [data-print-root] thead { position: static !important; }
+  [data-print-root] tr, [data-print-root] [data-print-keep] { break-inside: avoid; }
+  [data-print-root] [aria-hidden="true"]:not(svg) { display: none !important; }
+}
+`;
 
 function PayslipBody({ run }: { run: PayrollRunWithUser }) {
   const q = usePayslip(run.id);
@@ -26,15 +67,39 @@ function PayslipBody({ run }: { run: PayrollRunWithUser }) {
     { label: 'Deductions', value: -run.deductions || 0 },
   ];
   return (
-    <div className="space-y-5">
-      <div className="flex flex-wrap items-center gap-2 text-sm">
+    <div className="space-y-5" data-print-root>
+      <style>{PRINT_CSS}</style>
+
+      {/* Letterhead — print only. On screen the dialog title carries the same facts. */}
+      <header className="hidden print:block" data-print-keep>
+        <div className="flex items-start justify-between gap-6 border-b border-border pb-3">
+          <div>
+            <div className="text-lg font-bold text-fg">{BRAND.legalName}</div>
+            <div className="text-xs text-muted">{BRAND.address}</div>
+            <div className="text-xs text-muted">{BRAND.website}</div>
+          </div>
+          <div className="text-right">
+            <div className="text-lg font-bold text-fg">Payslip</div>
+            <div className="text-xs text-muted">Reference {run.reference}</div>
+            <div className="text-xs text-muted">Printed {formatDate(new Date())}</div>
+          </div>
+        </div>
+        <dl className="mt-3 grid grid-cols-2 gap-x-6 gap-y-1 text-sm">
+          <div className="flex justify-between gap-2 border-b border-border py-1"><dt className="text-muted">Employee</dt><dd className="font-medium text-fg">{run.userName}{run.employeeId ? ` · ${run.employeeId}` : ''}</dd></div>
+          <div className="flex justify-between gap-2 border-b border-border py-1"><dt className="text-muted">Position</dt><dd className="font-medium text-fg">{POSITION_LABELS[run.position]}{run.teamName ? ` · ${run.teamName}` : ''}</dd></div>
+          <div className="flex justify-between gap-2 border-b border-border py-1"><dt className="text-muted">Pay week</dt><dd className="font-medium text-fg">{formatRangeLabel(run.weekStart, run.weekEnd)}</dd></div>
+          <div className="flex justify-between gap-2 border-b border-border py-1"><dt className="text-muted">Status</dt><dd className="font-medium text-fg">{PAYROLL_STATUS_LABELS[run.status]} · due {formatDate(run.dueDate)}{run.paidDate ? `, paid ${formatDate(run.paidDate)}` : ''}</dd></div>
+        </dl>
+      </header>
+
+      <div className="flex flex-wrap items-center gap-2 text-sm print:hidden">
         <PayrollStatusBadge status={run.status} />
         <OnTimeBadge value={run.onTime} labels={{ yes: 'Paid on time', no: 'Paid late', none: 'Not yet paid' }} />
         <span className="text-muted">Due {formatDate(run.dueDate)}{run.paidDate ? ` · paid ${formatDate(run.paidDate)}` : ''}</span>
         {run.teamName && <Badge tone="neutral">{run.teamName}</Badge>}
       </div>
-      <div className="grid grid-cols-1 gap-5 md:grid-cols-5">
-        <table className="w-full min-w-0 text-sm md:col-span-3">
+      <div className="grid grid-cols-1 gap-5 md:grid-cols-5 print:grid-cols-5" data-print-keep>
+        <table className="w-full min-w-0 text-sm md:col-span-3 print:col-span-3">
           <caption className="sr-only">Pay breakdown</caption>
           <tbody>
             {lines.map((l) => (
@@ -49,7 +114,7 @@ function PayslipBody({ run }: { run: PayrollRunWithUser }) {
             </tr>
           </tbody>
         </table>
-        <div className="min-w-0 rounded-lg bg-surface-2 p-4 text-sm md:col-span-2">
+        <div className="min-w-0 rounded-lg bg-surface-2 p-4 text-sm md:col-span-2 print:col-span-2 print:border print:border-border">
           <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted">Pay plan</div>
           {q.isLoading ? <div className="space-y-2"><Skeleton /><Skeleton /><Skeleton /></div> : q.isError ? <ErrorState error={q.error} className="p-3" /> : p && (
             <dl className="space-y-1.5">

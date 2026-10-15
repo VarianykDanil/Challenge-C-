@@ -3,15 +3,26 @@
 import type { UserPerformance } from '@/api/hooks';
 import { Card, CardHeader, EmptyState, KpiTile } from '@/components/ui';
 import { FunnelChart, TrendChart } from '@/components/charts';
-import { ChartSkeleton, ErrorState, KpiSkeletons } from '@/features/common';
-import { formatDateShort, formatDecimal, formatNumber, formatPct, formatStopsPerSale } from '@/lib/format';
+import { ChartSkeleton, ErrorState, ExportButton, KpiSkeletons } from '@/features/common';
+import { csvFilename, sortRows } from '@/lib/csv';
+import type { DateRange } from '@/lib/dates';
+import { formatDateShort, formatDecimal, formatNumber, formatPct, formatStopsPerSale, fullName } from '@/lib/format';
 import { ratioTone } from '@/lib/ratios';
 import { COPY } from '@/content/copy';
 import { CoachingInsights } from './CoachingInsights';
 import { GaugeSummaryTable } from './GaugeSummaryTable';
 import { GaugeEntriesTable } from './GaugeEntriesTable';
+import { gaugeEntryCsvColumns, gaugeSummaryCsvColumns } from './csv';
 
-export function PerformancePanel({ data, loading, error, onRetry, showEntries = true }: { data: UserPerformance | undefined; loading: boolean; error: unknown; onRetry?: () => void; showEntries?: boolean }) {
+export function PerformancePanel({ data, loading, error, onRetry, showEntries = true, range }: {
+  data: UserPerformance | undefined;
+  loading: boolean;
+  error: unknown;
+  onRetry?: () => void;
+  showEntries?: boolean;
+  /** The range on screen — only used to name the CSV exports. */
+  range?: DateRange;
+}) {
   if (error) return <ErrorState error={error} onRetry={onRetry} />;
   if (loading || !data) {
     return (
@@ -22,6 +33,7 @@ export function PerformancePanel({ data, loading, error, onRetry, showEntries = 
     );
   }
   const { totals, ratios, days, salesPerDay, trend, byCampaign, recentEntries, punctualityRate } = data;
+  const who = data.user ? fullName(data.user) : 'me';
   const empty = totals.stops === 0 && days === 0;
   return (
     <div className="space-y-6">
@@ -54,12 +66,12 @@ export function PerformancePanel({ data, loading, error, onRetry, showEntries = 
             </Card>
           </div>
           <Card padded={false} className="min-w-0 overflow-hidden">
-            <div className="p-5 pb-3"><CardHeader title="By campaign" description="Where the sales came from" className="mb-0" /></div>
+            <div className="p-5 pb-3"><CardHeader title="By campaign" description="Where the sales came from" className="mb-0" actions={<ExportButton filename={csvFilename(`gauges-${who}-by-campaign`, range)} rows={sortRows(byCampaign, (r) => r.sales, 'desc')} columns={gaugeSummaryCsvColumns('campaign', false)} />} /></div>
             <GaugeSummaryTable rows={byCampaign} groupBy="campaign" perRep={false} bare className="border-t border-border" />
           </Card>
           {showEntries && (
             <Card padded={false} className="min-w-0 overflow-hidden">
-              <div className="p-5 pb-3"><CardHeader title="Recent entries" description="Latest days logged" className="mb-0" /></div>
+              <div className="p-5 pb-3"><CardHeader title="Recent entries" description="Latest days logged" className="mb-0" actions={<ExportButton filename={csvFilename(`gauges-${who}-entries`, range)} rows={sortRows(recentEntries, (r) => r.date, 'desc')} columns={gaugeEntryCsvColumns()} />} /></div>
               <GaugeEntriesTable rows={recentEntries} showPerson={false} bare className="border-t border-border" />
             </Card>
           )}

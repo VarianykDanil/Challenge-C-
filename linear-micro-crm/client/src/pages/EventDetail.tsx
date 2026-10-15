@@ -7,9 +7,10 @@ import { Badge, Button, Card, CardHeader, PageHeader, Skeleton, useToast } from 
 import { FunnelChart } from '@/components/charts';
 import { useDeleteEvent, useDeleteGauge, useEvent } from '@/api/hooks';
 import { useCurrentUser } from '@/auth/AuthProvider';
-import { ConfirmDialog, ErrorState, EventStatusBadge, EventTypeBadge, KpiSkeletons, errorMessage } from '@/features/common';
+import { ConfirmDialog, ErrorState, EventStatusBadge, EventTypeBadge, ExportButton, KpiSkeletons, errorMessage } from '@/features/common';
 import { EventFormModal } from '@/features/events';
-import { GaugeEntriesTable, LogGaugesModal, TotalsKpis } from '@/features/gauges';
+import { GaugeEntriesTable, LogGaugesModal, TotalsKpis, gaugeEntryCsvColumns } from '@/features/gauges';
+import { csvFilename } from '@/lib/csv';
 import { formatDate, formatNumber, formatTime } from '@/lib/format';
 import { usePageTitle } from '@/lib/usePageTitle';
 import { NotFoundPage } from './NotFound';
@@ -100,7 +101,7 @@ export function EventDetailPage() {
               )}
             </Card>
             <Card padded={false} className="min-w-0 overflow-hidden lg:col-span-2">
-              <div className="p-5 pb-3"><CardHeader title="Gauges by rep" description="Each person's day, with check-in punctuality" className="mb-0" /></div>
+              <div className="p-5 pb-3"><CardHeader title="Gauges by rep" description="Each person's day, with check-in punctuality" className="mb-0" actions={ev ? <ExportButton filename={csvFilename(`event-${ev.name}`, ev.date)} rows={ev.entries} columns={gaugeEntryCsvColumns()} /> : undefined} /></div>
               <GaugeEntriesTable
                 rows={ev?.entries ?? []}
                 loading={q.isLoading}
