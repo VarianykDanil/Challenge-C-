@@ -53,7 +53,7 @@ export function Sidebar({ items, collapsed, onToggleCollapsed, drawer, onClose, 
           {compact ? <LogoMark size={30} title="" /> : <Logo size={30} title="" />}
         </NavLink>
         {drawer && onClose && (
-          <button type="button" onClick={onClose} aria-label="Close menu" className="focus-ring -mr-2 inline-flex h-9 w-9 items-center justify-center rounded-lg text-muted hover:bg-surface-2 hover:text-fg">
+          <button type="button" onClick={onClose} aria-label="Close menu" data-drawer-close className="focus-ring -mr-2 inline-flex h-9 w-9 items-center justify-center rounded-lg text-muted hover:bg-surface-2 hover:text-fg">
             <X className="h-5 w-5" aria-hidden />
           </button>
         )}
@@ -109,7 +109,7 @@ export function Sidebar({ items, collapsed, onToggleCollapsed, drawer, onClose, 
         {!compact && (
           <div className="min-w-0 px-2">
             <div className="truncate text-xs font-medium text-fg">{BRAND.name}</div>
-            <div className="truncate text-[11px] text-subtle">{BRAND.tagline}</div>
+            <div className="truncate text-[11px] text-muted">{BRAND.tagline}</div>
           </div>
         )}
         {!drawer && (

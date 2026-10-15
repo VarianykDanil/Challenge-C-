@@ -23,7 +23,7 @@ function PayslipBody({ run }: { run: PayrollRunWithUser }) {
     { label: 'Commission', value: run.commission, hint: p ? `${formatNumber(run.sales)} sale${run.sales === 1 ? '' : 's'} × ${formatGBP(p.plan.commissionPerSale, { cents: true })}` : `${formatNumber(run.sales)} sales` },
     { label: 'Bonus', value: run.bonus, hint: p && p.plan.bonusThreshold > 0 ? `${formatNumber(p.plan.bonusThreshold)}+ sales unlocks ${formatGBP(p.plan.bonusAmount)}` : undefined },
     { label: 'Overrides', value: run.overrides, hint: p && p.plan.overridePerTeamSale > 0 ? `${formatNumber(run.teamSales)} team sales × ${formatGBP(p.plan.overridePerTeamSale, { cents: true })}` : undefined },
-    { label: 'Deductions', value: -run.deductions },
+    { label: 'Deductions', value: -run.deductions || 0 },
   ];
   return (
     <div className="space-y-5">
@@ -33,8 +33,8 @@ function PayslipBody({ run }: { run: PayrollRunWithUser }) {
         <span className="text-muted">Due {formatDate(run.dueDate)}{run.paidDate ? ` · paid ${formatDate(run.paidDate)}` : ''}</span>
         {run.teamName && <Badge tone="neutral">{run.teamName}</Badge>}
       </div>
-      <div className="grid gap-5 md:grid-cols-5">
-        <table className="w-full text-sm md:col-span-3">
+      <div className="grid grid-cols-1 gap-5 md:grid-cols-5">
+        <table className="w-full min-w-0 text-sm md:col-span-3">
           <caption className="sr-only">Pay breakdown</caption>
           <tbody>
             {lines.map((l) => (
@@ -49,7 +49,7 @@ function PayslipBody({ run }: { run: PayrollRunWithUser }) {
             </tr>
           </tbody>
         </table>
-        <div className="rounded-lg bg-surface-2 p-4 text-sm md:col-span-2">
+        <div className="min-w-0 rounded-lg bg-surface-2 p-4 text-sm md:col-span-2">
           <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted">Pay plan</div>
           {q.isLoading ? <div className="space-y-2"><Skeleton /><Skeleton /><Skeleton /></div> : q.isError ? <ErrorState error={q.error} className="p-3" /> : p && (
             <dl className="space-y-1.5">
@@ -58,12 +58,12 @@ function PayslipBody({ run }: { run: PayrollRunWithUser }) {
               <div className="flex justify-between gap-2"><dt className="text-muted">Commission per sale</dt><dd className="tabular-nums">{formatGBP(p.plan.commissionPerSale, { cents: true })}</dd></div>
               <div className="flex justify-between gap-2"><dt className="text-muted">Bonus</dt><dd className="tabular-nums">{p.plan.bonusThreshold > 0 ? `${formatGBP(p.plan.bonusAmount)} at ${p.plan.bonusThreshold} sales` : '—'}</dd></div>
               <div className="flex justify-between gap-2"><dt className="text-muted">Override per team sale</dt><dd className="tabular-nums">{p.plan.overridePerTeamSale > 0 ? formatGBP(p.plan.overridePerTeamSale, { cents: true }) : '—'}</dd></div>
-              <div className="flex justify-between gap-2 border-t border-border pt-1.5"><dt className="text-muted">Employee ID</dt><dd>{run.employeeId}</dd></div>
+              {run.employeeId && <div className="flex justify-between gap-2 border-t border-border pt-1.5"><dt className="text-muted">Employee ID</dt><dd>{run.employeeId}</dd></div>}
             </dl>
           )}
         </div>
       </div>
-      <div>
+      <div className="min-w-0">
         <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted">The week's gauges</div>
         <GaugeEntriesTable rows={p?.entries ?? []} loading={q.isLoading} showPerson={false} emptyMessage="No gauge entries this week" />
       </div>

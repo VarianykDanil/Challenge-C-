@@ -11,22 +11,12 @@ export function canManageTeam(me: UserWithTeam, teamId: number | null): boolean 
   return isLeader(me) && me.teamId !== null && me.teamId === teamId;
 }
 
-/** Who may look at another person's gauges / performance. */
-export function canViewUser(me: UserWithTeam, target: UserWithTeam): boolean {
-  if (isAdmin(me) || me.id === target.id) return true;
-  if (isLeader(me)) return true; // leaders have the company view
-  return me.teamId !== null && me.teamId === target.teamId; // reps/recruiters: own team only
-}
-
-export function assertCanViewUser(me: UserWithTeam, target: UserWithTeam): void {
-  if (!canViewUser(me, target)) throw forbidden('You can only view people in your own team');
-}
-
 /** Who may create/edit a gauge entry for `target` at `event`. */
 export function assertCanWriteGauge(me: UserWithTeam, target: UserWithTeam, event: SalesEventWithMeta): void {
   if (isAdmin(me)) return;
   if (isLeader(me)) {
-    if (target.id === me.id || (me.teamId !== null && target.teamId === me.teamId)) return;
+    if (me.teamId === null || event.teamId !== me.teamId) throw forbidden("Leaders can only record gauges at their own team's events");
+    if (target.id === me.id || target.teamId === me.teamId) return;
     throw forbidden('Leaders can only record gauges for their own team');
   }
   if (me.role === 'rep') {
@@ -41,4 +31,33 @@ export function assertCanWriteGauge(me: UserWithTeam, target: UserWithTeam, even
 export function canViewPayroll(me: UserWithTeam, run: { userId: number; teamId?: number | null }, targetTeamId: number | null): boolean {
   if (isAdmin(me) || run.userId === me.id) return true;
   return isLeader(me) && me.teamId !== null && me.teamId === targetTeamId;
+}
+
+/** The employee ID is half of the sign-in credential: only admins and the person themselves may read it. */
+export function canSeeEmployeeId(me: UserWithTeam, userId: number): boolean {
+  return isAdmin(me) || me.id === userId;
+}
+
+/** Blanks `employeeId` on a user payload unless `me` may see it (the field stays in the type as ''). */
+export function redactUser<T extends { id: number; employeeId: string }>(me: UserWithTeam, user: T): T {
+  return canSeeEmployeeId(me, user.id) ? user : { ...user, employeeId: '' };
+}
+
+/** Same rule for payroll rows and payslips, which embed the run owner's employee ID. */
+export function redactPayroll<T extends { userId: number; employeeId: string }>(me: UserWithTeam, run: T): T {
+  return canSeeEmployeeId(me, run.userId) ? run : { ...run, employeeId: '' };
+}
+
+/**
+ * Who may see the personal details on a gauge entry (check-in time, notes): admins, the person themselves and the
+ * leader of that person's team. Everyone else gets the numbers only.
+ */
+export function canSeeEntryDetails(me: UserWithTeam, owner: { id: number; teamId: number | null }): boolean {
+  if (isAdmin(me) || me.id === owner.id) return true;
+  return isLeader(me) && me.teamId !== null && me.teamId === owner.teamId;
+}
+
+/** Nulls `checkedInAt` and `notes` on an entry unless `me` may see them (`teamId` on the entry is the owner's team). */
+export function redactEntry<T extends { userId: number; teamId: number | null; checkedInAt: string | null; notes: string | null }>(me: UserWithTeam, entry: T): T {
+  return canSeeEntryDetails(me, { id: entry.userId, teamId: entry.teamId }) ? entry : { ...entry, checkedInAt: null, notes: null };
 }

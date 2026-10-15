@@ -8,7 +8,7 @@ import { Avatar, Button, Card, CardHeader, DataTable, EmptyState, Input, KpiTile
 import { BarsChart, TrendChart } from '@/components/charts';
 import { useCandidates, useRecruitmentSummary, useUsers } from '@/api/hooks';
 import { useCurrentUser } from '@/auth/AuthProvider';
-import { ChartSkeleton, ErrorState, KpiSkeletons, RangePicker, SourceBadge, StageBadge, StarRating, ViewToggle, useRangeState } from '@/features/common';
+import { ChartSkeleton, ErrorState, KpiSkeletons, RangePicker, SourceBadge, StageBadge, StarRating, StopRowEvents, ViewToggle, useRangeState } from '@/features/common';
 import { AddCandidateModal, CandidateCard, MoveStageControl, isOverdue } from '@/features/recruitment';
 import { formatDate, formatDateShort, formatDecimal, formatNumber, formatPct, fullName } from '@/lib/format';
 import { optionsFrom } from '@/lib/labels';
@@ -43,6 +43,8 @@ export function RecruitmentPage() {
 
   const s = summary.data;
   const inInterview = s ? s.openByStage.interview + s.openByStage.observation : 0;
+  // `s.hired` counts hires made in the range; the rate uses the applied cohort, like the funnel and by-source chart.
+  const cohortHired = s ? (s.funnel.find((f) => f.stage === 'hired')?.count ?? 0) : 0;
 
   const columns = useMemo<Column<CandidateWithMeta>[]>(
     () => [
@@ -54,11 +56,13 @@ export function RecruitmentPage() {
       { key: 'applied', header: 'Applied', render: (c) => formatDate(c.appliedAt), sortValue: (c) => c.appliedAt },
       { key: 'days', header: 'Days', align: 'right', render: (c) => formatNumber(c.daysInPipeline), sortValue: (c) => c.daysInPipeline },
       { key: 'next', header: 'Next action', render: (c) => (c.nextAction ? <span className={isOverdue(c) ? 'text-danger' : undefined}>{c.nextAction}{c.nextActionAt ? <span className="block text-xs text-muted">{formatDate(c.nextActionAt)}</span> : null}</span> : <span className="text-muted">—</span>), sortValue: (c) => c.nextActionAt ?? '' },
-      ...(canWrite ? [{ key: 'move', header: <span className="sr-only">Move stage</span>, render: (c: CandidateWithMeta) => <div className="w-36"><MoveStageControl candidate={c} compact /></div> }] : []),
+      ...(canWrite ? [{ key: 'move', header: <span className="sr-only">Move stage</span>, render: (c: CandidateWithMeta) => <StopRowEvents className="w-36"><MoveStageControl candidate={c} compact /></StopRowEvents> }] : []),
     ],
     [canWrite],
   );
 
+  // The board scroller is `relative` so absolutely positioned bits inside the cards (select chevrons) are clipped by it
+  // instead of widening the whole page on phones.
   return (
     <>
       <PageHeader
@@ -78,20 +82,20 @@ export function RecruitmentPage() {
               <>
                 <KpiTile label="Applied" value={formatNumber(s.applied)} hint="in range" />
                 <KpiTile label="In interview" value={formatNumber(inInterview)} hint="interview + observation" />
-                <KpiTile label="Hired" value={formatNumber(s.hired)} tone="success" hint={s.applied ? `${formatPct(s.hired / s.applied)} of applied` : undefined} />
+                <KpiTile label="Hired" value={formatNumber(s.hired)} tone="success" hint={s.applied ? `in range · ${formatPct(cohortHired / s.applied)} of ${formatNumber(s.applied)} applicants hired` : 'in range'} />
                 <KpiTile label="Avg time to hire" value={`${formatDecimal(s.avgTimeToHireDays)} days`} />
                 <KpiTile label="Overdue actions" value={formatNumber(s.overdueActions)} tone={s.overdueActions > 0 ? 'danger' : 'default'} hint="open candidates past next action" />
               </>
             )}
           </div>
-          <div className="grid gap-6 lg:grid-cols-3">
-            <Card className="lg:col-span-2">
+          <div className="grid grid-cols-1 gap-6 lg:grid-cols-3">
+            <Card className="min-w-0 lg:col-span-2">
               <CardHeader title="Weekly activity" description="Applications, interviews and hires per week" />
               {!s ? <ChartSkeleton /> : s.weekly.length ? (
                 <TrendChart data={s.weekly.map((w) => ({ week: w.weekStart, applied: w.applied, interviews: w.interviews, hired: w.hired }))} xKey="week" series={[{ key: 'applied', label: 'Applied' }, { key: 'interviews', label: 'Interviews' }, { key: 'hired', label: 'Hired' }]} kind="bar" xFormatter={formatDateShort} height={240} />
               ) : <EmptyState title="No activity in range" size="sm" className="border-0" />}
             </Card>
-            <Card>
+            <Card className="min-w-0">
               <CardHeader title="Conversion by source" description="Applied → hired" />
               {!s ? <ChartSkeleton /> : s.bySource.length ? (
                 <BarsChart
@@ -124,7 +128,7 @@ export function RecruitmentPage() {
       {candidates.isError ? (
         <ErrorState error={candidates.error} onRetry={() => void candidates.refetch()} />
       ) : view === 'board' ? (
-        <div className="-mx-1 overflow-x-auto px-1 pb-2">
+        <div className="relative -mx-1 overflow-x-auto px-1 pb-2">
           <div className="grid min-w-[900px] grid-cols-6 gap-3">
             {PIPELINE_STAGES.map((stage) => {
               const items = byStage.get(stage) ?? [];
@@ -146,7 +150,7 @@ export function RecruitmentPage() {
           </div>
         </div>
       ) : (
-        <DataTable columns={columns} rows={list} rowKey={(c) => c.id} loading={candidates.isLoading} onRowClick={(c) => navigate(`/recruitment/${c.id}`)} empty={<EmptyState title={COPY.empty.candidates.title} description={COPY.empty.candidates.description} size="sm" className="border-0" />} initialSort={{ key: 'applied', dir: 'desc' }} />
+        <DataTable columns={columns} rows={list} rowKey={(c) => c.id} loading={candidates.isLoading} className="min-w-0 max-w-full" onRowClick={(c) => navigate(`/recruitment/${c.id}`)} empty={<EmptyState title={COPY.empty.candidates.title} description={COPY.empty.candidates.description} size="sm" className="border-0" />} initialSort={{ key: 'applied', dir: 'desc' }} />
       )}
 
       {canWrite && <AddCandidateModal open={addOpen} onClose={() => setAddOpen(false)} onCreated={(id) => navigate(`/recruitment/${id}`)} />}

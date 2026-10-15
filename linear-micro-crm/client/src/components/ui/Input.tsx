@@ -1,4 +1,4 @@
-import { forwardRef, useId, type InputHTMLAttributes, type ReactNode, type TextareaHTMLAttributes } from 'react';
+import { cloneElement, forwardRef, isValidElement, useId, type InputHTMLAttributes, type ReactElement, type ReactNode, type TextareaHTMLAttributes } from 'react';
 import clsx from 'clsx';
 
 export interface FieldProps {
@@ -19,6 +19,10 @@ export interface FieldProps {
 
 export function Field({ label, hint, error, required, optional, children, className, htmlFor, as = 'label', trailing }: FieldProps) {
   const Tag = as;
+  // The asterisk is visual only; tell assistive tech too when the field wraps a single control.
+  const child = required && isValidElement<{ 'aria-required'?: boolean }>(children) && children.props['aria-required'] === undefined
+    ? cloneElement(children as ReactElement<{ 'aria-required'?: boolean }>, { 'aria-required': true })
+    : children;
   return (
     <Tag className={clsx('block text-sm', className)} htmlFor={as === 'label' ? htmlFor : undefined}>
       {label && (
@@ -26,12 +30,12 @@ export function Field({ label, hint, error, required, optional, children, classN
           <span className="font-medium text-fg">
             {label}
             {required && <span className="ml-0.5 text-danger" aria-hidden>*</span>}
-            {optional && <span className="ml-1.5 text-xs font-normal text-subtle">Optional</span>}
+            {optional && <span className="ml-1.5 text-xs font-normal text-muted">Optional</span>}
           </span>
           {trailing && <span className="text-xs text-muted">{trailing}</span>}
         </span>
       )}
-      {children}
+      {child}
       {error ? (
         <span className="mt-1.5 block text-xs font-medium text-danger" role="alert">{error}</span>
       ) : hint ? (
@@ -48,7 +52,8 @@ export const controlClass = (invalid?: boolean) =>
     'focus:outline-none focus:border-primary focus:ring-[3px] focus:ring-primary/20',
     'disabled:cursor-not-allowed disabled:bg-surface-2 disabled:text-muted disabled:shadow-none',
     'read-only:bg-surface-2/60',
-    invalid ? 'border-danger focus:border-danger focus:ring-danger/20' : 'border-border hover:border-border-strong',
+    // Field boundaries need >= 3:1 against the surface (WCAG 1.4.11); `--control-border` is tuned for that in both themes.
+    invalid ? 'border-danger focus:border-danger focus:ring-danger/20' : 'border-control-border hover:border-muted',
   );
 
 export interface InputProps extends Omit<InputHTMLAttributes<HTMLInputElement>, 'size'> {
@@ -112,7 +117,7 @@ export const Textarea = forwardRef<HTMLTextAreaElement, TextareaProps>(function 
         {...rest}
       />
       {showCount && maxLength && (
-        <span id={id} className="pointer-events-none absolute bottom-2 right-3 text-[11px] tabular text-subtle">
+        <span id={id} className="pointer-events-none absolute bottom-2 right-3 text-[11px] tabular text-muted">
           {len} / {maxLength}
         </span>
       )}

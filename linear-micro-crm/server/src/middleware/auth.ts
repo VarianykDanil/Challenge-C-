@@ -22,25 +22,38 @@ export function destroySession(db: Db, token: string): void {
   run(db, `DELETE FROM sessions WHERE token = ?`, [token]);
 }
 
+/** Revoke every live session of one user (used when an admin deactivates them). */
+export function destroyUserSessions(db: Db, userId: number): number {
+  return run(db, `DELETE FROM sessions WHERE user_id = ?`, [userId]).changes;
+}
+
 export function purgeExpiredSessions(db: Db): void {
   run(db, `DELETE FROM sessions WHERE expires_at < ?`, [new Date().toISOString()]);
 }
 
-export function setSessionCookie(res: Response, token: string): void {
+/** `Secure` whenever the request arrived over HTTPS (behind the trusted proxy) or `COOKIE_SECURE=1` forces it. */
+export function cookieSecure(req: Request): boolean {
+  return req.secure || process.env.COOKIE_SECURE === '1';
+}
+
+export function setSessionCookie(req: Request, res: Response, token: string): void {
   res.cookie(SESSION_COOKIE, token, {
     httpOnly: true,
     sameSite: 'lax',
-    secure: process.env.COOKIE_SECURE === '1',
+    secure: cookieSecure(req),
     path: '/',
     maxAge: SESSION_MS,
   });
 }
 
-export function clearSessionCookie(res: Response): void {
-  res.clearCookie(SESSION_COOKIE, { httpOnly: true, sameSite: 'lax', path: '/' });
+export function clearSessionCookie(req: Request, res: Response): void {
+  res.clearCookie(SESSION_COOKIE, { httpOnly: true, sameSite: 'lax', secure: cookieSecure(req), path: '/' });
 }
 
-/** Attaches `req.user` when a valid session cookie is present; never rejects. */
+/**
+ * Attaches `req.user` when a valid session cookie is present; never rejects. Expired sessions and sessions of users
+ * whose status is `left` are deleted on sight, so a deactivated account loses access immediately, not at expiry.
+ */
 export function authenticate(db: Db): RequestHandler {
   return (req, _res, next) => {
     const token = (req.cookies as Record<string, string | undefined> | undefined)?.[SESSION_COOKIE];
@@ -51,9 +64,9 @@ export function authenticate(db: Db): RequestHandler {
       [token],
     );
     if (!row) return next();
-    if (row.expiresAt < new Date().toISOString()) {
+    if (row.expiresAt < new Date().toISOString() || row.status === 'left') {
       destroySession(db, token);
-      return next();
+      return next(); // requireAuth answers 401
     }
     const { expiresAt: _ignored, ...user } = row;
     req.user = user;

@@ -44,6 +44,10 @@ const OUTLINE: Record<BadgeTone, string> = {
   accent: 'ring-1 ring-inset ring-accent/40 text-accent',
 };
 
+/**
+ * Pill label. Children may mix a leading icon (`<svg>`) with text — icons are kept inline, sized to
+ * the pill and spaced from the label, so an icon + text badge always renders on one line.
+ */
 export function Badge({ tone = 'neutral', dot, color, size = 'md', variant = 'soft', className, children, ...rest }: BadgeProps) {
   const styles = variant === 'solid' ? SOLID : variant === 'outline' ? OUTLINE : SOFT;
   return (
@@ -63,7 +67,17 @@ export function Badge({ tone = 'neutral', dot, color, size = 'md', variant = 'so
           aria-hidden
         />
       )}
-      <span className="truncate">{children}</span>
+      <span
+        className={clsx(
+          'min-w-0 truncate',
+          // Preflight makes <svg> display:block, which would push the label onto a second line.
+          // Icons go before the label (CSS cannot tell a trailing icon from a leading one next to a text node).
+          '[&_svg]:mr-1 [&_svg]:inline-block [&_svg]:shrink-0 [&_svg]:align-[-0.2em]',
+          size === 'sm' ? '[&_svg]:h-3 [&_svg]:w-3' : '[&_svg]:h-3.5 [&_svg]:w-3.5',
+        )}
+      >
+        {children}
+      </span>
     </span>
   );
 }

@@ -27,6 +27,11 @@ export function nowISO(): string {
   return new Date().toISOString();
 }
 
+/** Local wall-clock `HH:MM` (the business zone when TZ is pinned). */
+export function nowHHMM(d = new Date()): string {
+  return toLocalISO(d).slice(11, 16);
+}
+
 /** Parse `YYYY-MM-DD` as UTC midnight. */
 export function parseDate(s: string): Date {
   const [y, m, d] = s.split('-').map(Number);
@@ -115,11 +120,17 @@ export function rangeForPeriod(period: Period, today = todayISO()): { from: stri
   return { from: mondayOf(today), to: today };
 }
 
-/** The period of equal length immediately before [from, to]. */
-export function previousRange(from: string, to: string): { from: string; to: string } {
-  const len = diffDays(from, to) + 1;
-  const prevTo = addDays(from, -1);
-  return { from: addDays(prevTo, -(len - 1)), to: prevTo };
+/**
+ * The comparison window for a to-date range: the same to-date span of the *previous* period, not the preceding N
+ * calendar days. Week Mon 12 – Thu 15 Oct → Mon 5 – Thu 8 Oct; month 1–15 Oct → 1–15 Sep; quarter 1–15 Oct → 1–15 Jul.
+ * The end is clamped to the previous period's last day for shorter months (1–31 Mar → 1–28 Feb).
+ */
+export function previousToDateRange(period: Period, r: { from: string; to: string }): { from: string; to: string } {
+  if (period === 'week') return { from: addDays(r.from, -7), to: addDays(r.to, -7) };
+  const prevEnd = addDays(r.from, -1); // last day of the previous month / quarter
+  const prevStart = period === 'month' ? startOfMonth(prevEnd) : startOfQuarter(prevEnd);
+  const to = addDays(prevStart, diffDays(r.from, r.to)); // same day-offset into the previous period
+  return { from: prevStart, to: to < prevEnd ? to : prevEnd };
 }
 
 /** Clamp a time (ms since epoch) into an ISO date string in local calendar terms. */
@@ -137,10 +148,27 @@ export function toLocalISO(d: Date): string {
 
 const NAIVE_TS_RE = /^(\d{4}-\d{2}-\d{2})T(\d{2}):(\d{2})(?::(\d{2}))?(?:\.\d+)?$/;
 
+/** The business runs in one zone; event start times and check-ins are wall-clock times in it. */
+export const BUSINESS_TZ = 'Europe/London';
+
+const BUSINESS_TZ_FORMAT = new Intl.DateTimeFormat('en-GB', {
+  timeZone: BUSINESS_TZ,
+  hourCycle: 'h23',
+  year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', second: '2-digit',
+});
+
+/** Naive `YYYY-MM-DDTHH:MM:SS` wall-clock time in Europe/London for an instant, whatever the process zone is. */
+export function toBusinessISO(d: Date): string {
+  const parts: Record<string, string> = {};
+  for (const p of BUSINESS_TZ_FORMAT.formatToParts(d)) parts[p.type] = p.value;
+  return `${parts.year}-${parts.month}-${parts.day}T${parts.hour}:${parts.minute}:${parts.second}`;
+}
+
 /**
- * Check-in timestamps are stored as naive local time (`2026-10-15T10:03:00`) so that
- * `isCheckInOnTime` compares like with like against the event's local start time.
- * A zoned value from a client (`…Z` / `±hh:mm`) is converted to the server's local components.
+ * Check-in timestamps are stored as naive wall-clock time (`2026-10-15T10:03:00`) so that
+ * `isCheckInOnTime` compares like with like against the event's start time. A naive value is kept verbatim
+ * (seconds padded); a zoned value from a client (`…Z` / `±hh:mm`) is converted to Europe/London wall-clock time,
+ * not to the server's process zone, so a container running in UTC never shifts BST check-ins by an hour.
  */
 export function normaliseCheckIn(value: string | null | undefined): string | null {
   if (value === null || value === undefined || value === '') return null;
@@ -148,5 +176,5 @@ export function normaliseCheckIn(value: string | null | undefined): string | nul
   if (m) return `${m[1]}T${m[2]}:${m[3]}:${m[4] ?? '00'}`;
   const d = new Date(value);
   if (Number.isNaN(d.getTime())) return null;
-  return toLocalISO(d);
+  return toBusinessISO(d);
 }

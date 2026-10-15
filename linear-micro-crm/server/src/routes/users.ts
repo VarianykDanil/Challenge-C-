@@ -7,9 +7,9 @@ import { AVATAR_PALETTE } from '../db/seed-data.ts';
 import { mondayOf, todayISO } from '../lib/dates.ts';
 import { badRequest, conflict, notFound } from '../lib/errors.ts';
 import { punctualityFor, ratiosOf, salesPerDay, summaryRows, totalsFor, trendFor } from '../lib/metrics.ts';
-import { assertCanViewUser } from '../lib/scope.ts';
+import { redactEntry, redactUser } from '../lib/scope.ts';
 import { hexColor, idParam, isoDate, optionalIdQuery, optionalString, parseRange } from '../lib/validate.ts';
-import { currentUser, requireRole } from '../middleware/auth.ts';
+import { currentUser, destroyUserSessions, requireRole } from '../middleware/auth.ts';
 
 const ROLES = ['admin', 'leader', 'recruiter', 'rep'] as const;
 const STATUSES = ['active', 'on_leave', 'left'] as const;
@@ -49,6 +49,7 @@ export function usersRouter(db: Db): Router {
   const router = Router();
 
   router.get('/', (req, res) => {
+    const me = currentUser(req);
     const where = new Where();
     const teamId = optionalIdQuery(req.query.teamId, 'teamId');
     const role = optionalString(req.query.role);
@@ -65,36 +66,38 @@ export function usersRouter(db: Db): Router {
     }
     if (q) {
       const like = `%${q.toLowerCase()}%`;
-      where.add(`(lower(u.first_name || ' ' || u.last_name) LIKE ? OR lower(u.email) LIKE ? OR lower(u.employee_id) LIKE ?)`, like, like, like);
+      // The employee ID is a credential: only admins may search by it (otherwise `q` would be a guessing oracle).
+      if (me.role === 'admin') where.add(`(lower(u.first_name || ' ' || u.last_name) LIKE ? OR lower(u.email) LIKE ? OR lower(u.employee_id) LIKE ?)`, like, like, like);
+      else where.add(`(lower(u.first_name || ' ' || u.last_name) LIKE ? OR lower(u.email) LIKE ?)`, like, like);
     }
-    res.json(all<UserWithTeam>(db, `${USER_SELECT} ${where} ORDER BY u.last_name, u.first_name`, where.params));
+    res.json(all<UserWithTeam>(db, `${USER_SELECT} ${where} ORDER BY u.last_name, u.first_name`, where.params).map((u) => redactUser(me, u)));
   });
 
   router.get('/:id', (req, res) => {
     const user = getUser(db, idParam(req));
     if (!user) throw notFound('User');
-    res.json(user);
+    res.json(redactUser(currentUser(req), user));
   });
 
   router.get('/:id/performance', (req, res) => {
     const me = currentUser(req);
     const user = getUser(db, idParam(req));
     if (!user) throw notFound('User');
-    assertCanViewUser(me, user);
+    // read-only for every signed-in user; personal details on the entries are stripped below unless allowed
     const today = todayISO();
     const { from, to } = parseRange(req.query, { from: mondayOf(today), to: today });
     const where = new Where().add('g.user_id = ?', user.id).add('g.date BETWEEN ? AND ?', from, to);
     const totals = totalsFor(db, where);
     const { days, ...plain } = totals;
     res.json({
-      user,
+      user: redactUser(me, user),
       totals: plain,
       ratios: ratiosOf(totals),
       days,
       salesPerDay: salesPerDay(totals, days),
       trend: trendFor(db, where, from, to, 'day'),
       byCampaign: summaryRows(db, 'campaign', where),
-      recentEntries: listGauges(db, 'WHERE g.user_id = ?', [user.id], 'g.date DESC, g.submitted_at DESC', 10),
+      recentEntries: listGauges(db, 'WHERE g.user_id = ?', [user.id], 'g.date DESC, g.submitted_at DESC', 10).map((e) => redactEntry(me, e)),
       punctualityRate: punctualityFor(db, where),
     });
   });
@@ -117,10 +120,12 @@ export function usersRouter(db: Db): Router {
   });
 
   router.patch('/:id', requireRole('admin'), (req, res) => {
+    const me = currentUser(req);
     const id = idParam(req);
     const existing = getUser(db, id);
     if (!existing) throw notFound('User');
     const patch = userBody.partial().parse(req.body);
+    if (patch.status === 'left' && id === me.id) throw badRequest('You cannot deactivate your own account');
     if (patch.employeeId && get(db, `SELECT 1 FROM users WHERE lower(employee_id) = lower(?) AND id <> ?`, [patch.employeeId, id])) throw conflict(`Employee ID ${patch.employeeId} is already in use`);
     if (patch.email && get(db, `SELECT 1 FROM users WHERE lower(email) = lower(?) AND id <> ?`, [patch.email, id])) throw conflict(`Email ${patch.email} is already in use`);
     if (patch.teamId !== undefined && patch.teamId !== null && !get(db, `SELECT 1 FROM teams WHERE id = ?`, [patch.teamId])) throw badRequest('Unknown teamId');
@@ -131,6 +136,8 @@ export function usersRouter(db: Db): Router {
       `UPDATE users SET employee_id = ?, email = ?, first_name = ?, last_name = ?, role = ?, position = ?, team_id = ?, pay_plan_id = ?, start_date = ?, status = ?, phone = ?, avatar_color = ?, city = ? WHERE id = ?`,
       [next.employeeId, next.email, next.firstName, next.lastName, next.role, next.position, next.teamId, next.payPlanId, next.startDate, next.status, next.phone, next.avatarColor, next.city, id],
     );
+    // Deactivation revokes access at once: every live session of that user goes (authenticate also rejects any stragglers).
+    if (next.status === 'left') destroyUserSessions(db, id);
     res.json(getUser(db, id));
   });
 

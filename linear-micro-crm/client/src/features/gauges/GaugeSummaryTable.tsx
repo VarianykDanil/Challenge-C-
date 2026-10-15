@@ -14,18 +14,22 @@ function labelFor(groupBy: GaugeGroupBy, row: GaugeSummaryRow): string {
   return row.label;
 }
 
-export function GaugeSummaryTable({ rows, groupBy, loading, onRowClick, showDays = true, emptyMessage = 'No gauges logged for this range', className, bare }: {
+export function GaugeSummaryTable({ rows, groupBy, loading, onRowClick, showDays = true, perRep = groupBy !== 'user', emptyMessage = 'No gauges logged for this range', className, bare }: {
   rows: GaugeSummaryRow[];
   groupBy: GaugeGroupBy;
   loading?: boolean;
   onRowClick?: (row: GaugeSummaryRow) => void;
   showDays?: boolean;
+  /** `days` counts distinct rep × day pairs (API: rep-days). Only for a single person does that equal days worked — pass false then. */
+  perRep?: boolean;
   emptyMessage?: string;
   className?: string;
   /** Render without the outer border (inside a Card with padded={false}). */
   bare?: boolean;
 }) {
   const firstHeader = { user: 'Person', team: 'Team', campaign: 'Campaign', day: 'Day', week: 'Week' }[groupBy];
+  const daysHeader = perRep ? 'Rep-days' : 'Days';
+  const spdHeader = perRep ? 'Sales/rep-day' : 'Sales/day';
   const columns: Column<GaugeSummaryRow>[] = [
     {
       key: 'label',
@@ -33,7 +37,7 @@ export function GaugeSummaryTable({ rows, groupBy, loading, onRowClick, showDays
       render: (r) => <ColourChip color={groupBy === 'day' || groupBy === 'week' ? null : r.color} label={labelFor(groupBy, r)} className="font-medium text-fg" />,
       sortValue: (r) => (groupBy === 'day' || groupBy === 'week' ? r.key : r.label),
     },
-    ...(showDays ? [{ key: 'days', header: 'Days', align: 'right' as const, render: (r: GaugeSummaryRow) => formatNumber(r.days), sortValue: (r: GaugeSummaryRow) => r.days }] : []),
+    ...(showDays ? [{ key: 'days', header: <span title={perRep ? 'Distinct rep × day combinations in the range' : 'Days worked'}>{daysHeader}</span>, align: 'right' as const, render: (r: GaugeSummaryRow) => formatNumber(r.days), sortValue: (r: GaugeSummaryRow) => r.days }] : []),
     ...GAUGE_KEYS.map(
       (k): Column<GaugeSummaryRow> => ({
         key: k,
@@ -43,7 +47,7 @@ export function GaugeSummaryTable({ rows, groupBy, loading, onRowClick, showDays
         sortValue: (r) => r[k],
       }),
     ),
-    { key: 'salesPerDay', header: 'Sales/day', align: 'right', render: (r) => formatDecimal(r.salesPerDay), sortValue: (r) => r.salesPerDay },
+    { key: 'salesPerDay', header: spdHeader, align: 'right', render: (r) => formatDecimal(r.salesPerDay), sortValue: (r) => r.salesPerDay },
     ...RATIO_COLUMNS.map(
       (k): Column<GaugeSummaryRow> => ({
         key: k,

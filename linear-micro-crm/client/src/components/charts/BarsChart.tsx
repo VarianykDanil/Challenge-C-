@@ -129,7 +129,7 @@ export function BarsChart({
           ]}
         />
       )}
-      <table className="sr-only">
+      <div className="sr-only">{/* a <table> treats width as a minimum, so the clipping box must be a div */}<table>
         <caption>{summary}</caption>
         <thead>
           <tr>
@@ -147,7 +147,7 @@ export function BarsChart({
             </tr>
           ))}
         </tbody>
-      </table>
+      </table></div>
     </div>
   );
 }

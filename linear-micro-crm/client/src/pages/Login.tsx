@@ -63,6 +63,9 @@ export function LoginPage() {
 
   const busy = submitting !== null;
   const year = new Date().getFullYear();
+  // The API may legitimately return no demo accounts; then the whole section disappears (no skeleton, no note).
+  const demoAccounts = demo.data?.accounts ?? [];
+  const showDemo = demo.isLoading || demo.isError || demoAccounts.length > 0;
 
   return (
     <div className="grid min-h-dvh bg-bg text-fg lg:grid-cols-[minmax(0,1.05fr)_minmax(0,1fr)]">
@@ -111,7 +114,7 @@ export function LoginPage() {
           <div className="lg:hidden">
             <Logo size={30} />
           </div>
-          <span className="hidden text-xs text-subtle lg:inline">{BRAND.legalName}</span>
+          <span className="hidden text-xs text-muted lg:inline">{BRAND.legalName}</span>
           <ThemeToggle />
         </div>
 
@@ -142,6 +145,8 @@ export function LoginPage() {
                   name="email"
                   autoComplete="email username"
                   inputMode="email"
+                  required
+                  aria-required
                   placeholder="you@linear-mcr.co.uk"
                   value={email}
                   onChange={(e) => setEmail(e.target.value)}
@@ -159,6 +164,8 @@ export function LoginPage() {
                   autoComplete="off"
                   autoCapitalize="characters"
                   spellCheck={false}
+                  required
+                  aria-required
                   placeholder="LM-0042"
                   value={employeeId}
                   onChange={(e) => setEmployeeId(e.target.value.toUpperCase())}
@@ -173,26 +180,29 @@ export function LoginPage() {
               <Button type="submit" size="lg" fullWidth loading={submitting === 'form'} disabled={busy} rightIcon={<ArrowRight />}>
                 {COPY.login.submit}
               </Button>
-              <p className="flex items-center justify-center gap-1.5 text-xs text-subtle">
+              <p className="flex items-center justify-center gap-1.5 text-xs text-muted">
                 <ShieldCheck className="h-3.5 w-3.5" aria-hidden />
                 Secure session · no passwords to remember
               </p>
             </form>
 
-            <Divider label={COPY.login.demoTitle} spacing="lg" />
-
-            <DemoAccounts
-              accounts={demo.data?.accounts}
-              loading={demo.isLoading}
-              failed={demo.isError}
-              busyId={typeof submitting === 'string' && submitting !== 'form' ? submitting : null}
-              disabled={busy}
-              onPick={pickDemo}
-            />
+            {showDemo && (
+              <>
+                <Divider label={COPY.login.demoTitle} spacing="lg" />
+                <DemoAccounts
+                  accounts={demoAccounts}
+                  loading={demo.isLoading}
+                  failed={demo.isError}
+                  busyId={typeof submitting === 'string' && submitting !== 'form' ? submitting : null}
+                  disabled={busy}
+                  onPick={pickDemo}
+                />
+              </>
+            )}
           </div>
         </div>
 
-        <footer className="flex flex-col items-center justify-between gap-2 px-5 py-5 text-xs text-subtle sm:flex-row sm:px-8">
+        <footer className="flex flex-col items-center justify-between gap-2 px-5 py-5 text-xs text-muted sm:flex-row sm:px-8">
           <span>© {year} {BRAND.legalName}. All rights reserved.</span>
           <span className="inline-flex items-center gap-1.5">
             <LogoMark size={14} title="" /> {BRAND.product} · {BRAND.city}
@@ -235,7 +245,7 @@ function DemoAccounts({ accounts, loading, failed, busyId, disabled, onPick }: D
     );
   }
   if (failed || !accounts?.length) {
-    return <p className="text-center text-xs text-subtle">Demo accounts aren’t available right now — sign in with your own details above.</p>;
+    return <p className="text-center text-xs text-muted">Demo accounts aren’t available right now — sign in with your own details above.</p>;
   }
   return (
     <ul className="grid gap-2">

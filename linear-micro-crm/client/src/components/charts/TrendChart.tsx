@@ -254,7 +254,7 @@ export function TrendChart({
         />
       )}
       {data.length <= 100 && (
-        <table className="sr-only">
+        <div className="sr-only">{/* a <table> treats width as a minimum, so the clipping box must be a div */}<table>
           <caption>{label}</caption>
           <thead>
             <tr>
@@ -276,7 +276,7 @@ export function TrendChart({
               </tr>
             ))}
           </tbody>
-        </table>
+        </table></div>
       )}
     </div>
   );

@@ -30,12 +30,14 @@ export interface AppOptions {
 export function createApp(db: Db, opts: AppOptions = {}): Express {
   const app = express();
   app.disable('x-powered-by');
+  app.set('trust proxy', 1); // behind a TLS terminator: req.secure / req.ip follow X-Forwarded-*
   app.use(express.json({ limit: '1mb' }));
   app.use(cookieParser());
   app.use(
     cors({
       origin: ['http://localhost:5173', 'http://127.0.0.1:5173', ...(opts.corsOrigins ?? [])],
       credentials: true,
+      exposedHeaders: ['X-Total-Count'],
     }),
   );
 

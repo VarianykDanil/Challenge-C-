@@ -3,10 +3,10 @@ import { Link } from 'react-router-dom';
 import type { GaugeEntryWithMeta } from '@lm/shared';
 import { GAUGE_KEYS, GAUGE_LABELS, POSITION_LABELS, funnelRatios, isCheckInOnTime } from '@lm/shared';
 import { Avatar, Button, DataTable, type Column } from '@/components/ui';
-import { ColourChip, OnTimeBadge, RatioCell } from '@/features/common';
+import { ColourChip, OnTimeBadge, RatioCell, StopRowEvents } from '@/features/common';
 import { formatDate, formatNumber, formatTime } from '@/lib/format';
 
-export function GaugeEntriesTable({ rows, loading, showEvent = true, showPerson = true, showDate = true, onEdit, onDelete, emptyMessage = 'No gauge entries yet', className, bare }: {
+export function GaugeEntriesTable({ rows, loading, showEvent = true, showPerson = true, showDate = true, onEdit, onDelete, canEditRow, emptyMessage = 'No gauge entries yet', className, bare }: {
   rows: GaugeEntryWithMeta[];
   loading?: boolean;
   showEvent?: boolean;
@@ -14,6 +14,8 @@ export function GaugeEntriesTable({ rows, loading, showEvent = true, showPerson 
   showDate?: boolean;
   onEdit?: (row: GaugeEntryWithMeta) => void;
   onDelete?: (row: GaugeEntryWithMeta) => void;
+  /** Show Edit/Delete only on rows the viewer may change (e.g. a rep's own entry). Defaults to every row. */
+  canEditRow?: (row: GaugeEntryWithMeta) => boolean;
   emptyMessage?: string;
   className?: string;
   /** Render without the outer border (inside a Card with padded={false}). */
@@ -74,12 +76,12 @@ export function GaugeEntriesTable({ rows, loading, showEvent = true, showPerson 
       key: 'actions',
       header: <span className="sr-only">Actions</span>,
       align: 'right',
-      render: (r) => (
-        <span className="flex justify-end gap-1">
-          {onEdit && <Button variant="ghost" size="sm" onClick={(e) => { e.stopPropagation(); onEdit(r); }}>Edit</Button>}
-          {onDelete && <Button variant="ghost" size="sm" className="text-danger" onClick={(e) => { e.stopPropagation(); onDelete(r); }}>Delete</Button>}
-        </span>
-      ),
+      render: (r) => (canEditRow && !canEditRow(r) ? null : (
+        <StopRowEvents className="flex justify-end gap-1">
+          {onEdit && <Button variant="ghost" size="sm" onClick={() => onEdit(r)} aria-label={`Edit ${r.userName}'s entry`}>Edit</Button>}
+          {onDelete && <Button variant="ghost" size="sm" className="text-danger" onClick={() => onDelete(r)} aria-label={`Delete ${r.userName}'s entry`}>Delete</Button>}
+        </StopRowEvents>
+      )),
     });
 
   return <DataTable columns={columns} rows={rows} rowKey={(r) => r.id} loading={loading} dense emptyMessage={emptyMessage} initialSort={{ key: 'date', dir: 'desc' }} className={className} bare={bare} />;

@@ -92,7 +92,7 @@ export function Stepper({ value, onChange, min = 0, max = Number.MAX_SAFE_INTEGE
         className={clsx(
           'inline-flex items-stretch overflow-hidden rounded-xl border bg-surface shadow-card transition-[border-color,box-shadow] duration-150',
           'focus-within:border-primary focus-within:ring-[3px] focus-within:ring-primary/20',
-          invalid ? 'border-danger' : 'border-border',
+          invalid ? 'border-danger' : 'border-control-border',
           disabled && 'opacity-60',
           fullWidth && 'w-full',
           s.h,

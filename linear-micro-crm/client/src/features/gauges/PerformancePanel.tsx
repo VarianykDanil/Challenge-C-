@@ -17,7 +17,7 @@ export function PerformancePanel({ data, loading, error, onRetry, showEntries = 
     return (
       <div className="space-y-6">
         <div className="grid grid-cols-2 gap-3 md:grid-cols-3 xl:grid-cols-6"><KpiSkeletons count={6} /></div>
-        <div className="grid gap-6 lg:grid-cols-2"><Card><ChartSkeleton /></Card><Card><ChartSkeleton /></Card></div>
+        <div className="grid grid-cols-1 gap-6 lg:grid-cols-2"><Card className="min-w-0"><ChartSkeleton /></Card><Card className="min-w-0"><ChartSkeleton /></Card></div>
       </div>
     );
   }
@@ -38,13 +38,13 @@ export function PerformancePanel({ data, loading, error, onRetry, showEntries = 
         <EmptyState title={COPY.empty.gauges.title} description={COPY.empty.gauges.description} />
       ) : (
         <>
-          <div className="grid gap-6 lg:grid-cols-2">
-            <Card>
+          <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
+            <Card className="min-w-0">
               <CardHeader title="Funnel vs benchmarks" description="Each stage compared with the law of averages" />
               <FunnelChart totals={totals} ratios={ratios} showBenchmarks />
               <CoachingInsights totals={totals} ratios={ratios} className="mt-3" />
             </Card>
-            <Card>
+            <Card className="min-w-0">
               <CardHeader title="Trend" description="Sales and stops per day" />
               {trend.length ? (
                 <TrendChart data={trend.map((t) => ({ date: t.date, sales: t.sales, stops: t.stops, presentations: t.presentations }))} xKey="date" series={[{ key: 'sales', label: 'Sales' }, { key: 'stops', label: 'Stops' }]} kind="area" xFormatter={formatDateShort} height={240} />
@@ -53,12 +53,12 @@ export function PerformancePanel({ data, loading, error, onRetry, showEntries = 
               )}
             </Card>
           </div>
-          <Card padded={false}>
+          <Card padded={false} className="min-w-0 overflow-hidden">
             <div className="p-5 pb-3"><CardHeader title="By campaign" description="Where the sales came from" className="mb-0" /></div>
-            <GaugeSummaryTable rows={byCampaign} groupBy="campaign" bare className="border-t border-border" />
+            <GaugeSummaryTable rows={byCampaign} groupBy="campaign" perRep={false} bare className="border-t border-border" />
           </Card>
           {showEntries && (
-            <Card padded={false}>
+            <Card padded={false} className="min-w-0 overflow-hidden">
               <div className="p-5 pb-3"><CardHeader title="Recent entries" description="Latest days logged" className="mb-0" /></div>
               <GaugeEntriesTable rows={recentEntries} showPerson={false} bare className="border-t border-border" />
             </Card>

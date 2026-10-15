@@ -1,9 +1,10 @@
-import { Fragment } from 'react';
+import { Fragment, useLayoutEffect, useRef, useState } from 'react';
 import clsx from 'clsx';
 import {
   GAUGE_KEYS,
   GAUGE_LABELS,
   GAUGE_SHORT_LABELS,
+  RATIO_SHORT_LABELS,
   benchmarkSeverity,
   compareToBenchmark,
   funnelRatios,
@@ -39,6 +40,23 @@ export interface FunnelChartProps {
 const STAGE_OPACITY = [0.35, 0.48, 0.61, 0.74, 0.87, 1];
 
 const STATUS_TEXT = { above: 'above benchmark', on_track: 'on track', below: 'below benchmark' } as const;
+
+/** Width of the chart's container, so the ratio chips can change layout before they would overlap. */
+function useContainerWidth() {
+  const ref = useRef<HTMLDivElement>(null);
+  const [width, setWidth] = useState<number>(Number.POSITIVE_INFINITY);
+  useLayoutEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+    const update = () => setWidth(el.getBoundingClientRect().width);
+    update();
+    if (typeof ResizeObserver === 'undefined') return;
+    const ro = new ResizeObserver(update);
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, []);
+  return [ref, width] as const;
+}
 const STATUS_GLYPH = { above: '▲', on_track: '●', below: '▼' } as const;
 
 function severityColor(c: BenchmarkComparison): string {
@@ -52,12 +70,15 @@ function RatioChip({
   fromCount,
   showBenchmarks,
   compact,
+  dense = compact,
 }: {
   step: RatioStep;
   comparison: BenchmarkComparison;
   fromCount: number;
   showBenchmarks: boolean;
   compact: boolean;
+  /** Drop the "/ benchmark" suffix (the tooltip keeps it) so the chip fits a narrow slot. */
+  dense?: boolean;
 }) {
   const noData = fromCount <= 0;
   const pct = noData ? '—' : formatPercent(comparison.actual);
@@ -72,7 +93,7 @@ function RatioChip({
     <span
       title={title}
       className={clsx(
-        'inline-flex max-w-full items-center gap-1 whitespace-nowrap rounded-full font-semibold tabular-nums text-fg',
+        'inline-flex max-w-full items-center gap-1 overflow-hidden whitespace-nowrap rounded-full font-semibold tabular-nums text-fg',
         compact ? 'px-1.5 py-px text-[10px] leading-4' : 'px-2 py-0.5 text-[11px] leading-4',
       )}
       style={{ background: coloured ? wash(color, 16) : chartTokens.surface2 }}
@@ -83,7 +104,7 @@ function RatioChip({
         </span>
       )}
       <span>{pct}</span>
-      {coloured && !compact && <span className="font-normal text-muted">/ {formatPercent(comparison.benchmark)}</span>}
+      {coloured && !dense && <span className="font-normal text-muted">/ {formatPercent(comparison.benchmark)}</span>}
     </span>
   );
 }
@@ -107,6 +128,10 @@ export function FunnelChart({
 }: FunnelChartProps) {
   const resolvedBarHeight = barHeight ?? (compact ? 56 : 120);
   const hasData = GAUGE_KEYS.some((k) => totals[k] > 0);
+  const [containerRef, width] = useContainerWidth();
+  // Chip layout by available width: below ~560px the "/ benchmark" suffix goes (tooltip keeps it);
+  // below 420px (300px compact) the five chips collapse into one wrapping "vs benchmark" legend row.
+  const chipMode: 'full' | 'tight' | 'legend' = width < (compact ? 300 : 420) ? 'legend' : !compact && width < 560 ? 'tight' : 'full';
 
   if (!hasData) {
     return (
@@ -184,7 +209,7 @@ export function FunnelChart({
   // Horizontal: a 12-column grid so each ratio chip sits centred on the boundary between two stages.
   const valueBand = compact ? 16 : 20;
   return (
-    <div role="img" aria-label={summary} className={clsx('w-full', className)}>
+    <div ref={containerRef} role="img" aria-label={summary} className={clsx('w-full', className)}>
       <div className="grid gap-y-1" style={{ gridTemplateColumns: 'repeat(12, minmax(0, 1fr))' }}>
         {GAUGE_KEYS.map((k, i) => {
           const bar = barFor(k, i);
@@ -217,11 +242,23 @@ export function FunnelChart({
             {labels[k]}
           </div>
         ))}
-        {ratioKeys.map((step, i) => (
-          <div key={step.key} className="flex justify-center" style={{ gridColumn: `${2 * i + 2} / span 2`, gridRow: 3 }}>
-            <RatioChip step={step} comparison={byKey.get(step.key)!} fromCount={totals[step.from]} showBenchmarks={showBenchmarks} compact={compact} />
+        {chipMode === 'legend' ? (
+          <div className="flex flex-wrap items-center justify-center gap-x-2 gap-y-1" style={{ gridColumn: '1 / -1', gridRow: 3 }}>
+            {showBenchmarks && <span className={clsx('text-muted', compact ? 'text-[10px]' : 'text-[11px]')}>vs benchmark:</span>}
+            {ratioKeys.map((step) => (
+              <span key={step.key} className="inline-flex items-center gap-1">
+                <span className={clsx('text-muted', compact ? 'text-[10px]' : 'text-[11px]')}>{RATIO_SHORT_LABELS[step.key]}</span>
+                <RatioChip step={step} comparison={byKey.get(step.key)!} fromCount={totals[step.from]} showBenchmarks={showBenchmarks} compact={compact} dense />
+              </span>
+            ))}
           </div>
-        ))}
+        ) : (
+          ratioKeys.map((step, i) => (
+            <div key={step.key} className="flex min-w-0 justify-center" style={{ gridColumn: `${2 * i + 2} / span 2`, gridRow: 3 }}>
+              <RatioChip step={step} comparison={byKey.get(step.key)!} fromCount={totals[step.from]} showBenchmarks={showBenchmarks} compact={compact} dense={compact || chipMode === 'tight'} />
+            </div>
+          ))
+        )}
       </div>
     </div>
   );

@@ -1,6 +1,6 @@
 import { useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { ArrowRight, PlusCircle, Quote } from 'lucide-react';
+import { ArrowRight, Megaphone, PlusCircle, Quote } from 'lucide-react';
 import type { DashboardRange } from '@lm/shared';
 import { DASHBOARD_RANGE_LABELS, POSITION_LABELS } from '@lm/shared';
 import { Button, Card, CardHeader, EmptyState, KpiTile, PageHeader, SegmentedControl, Skeleton } from '@/components/ui';
@@ -8,10 +8,11 @@ import { FunnelChart, TrendChart } from '@/components/charts';
 import { useDashboard, useLeaderboard } from '@/api/hooks';
 import { useCurrentUser } from '@/auth/AuthProvider';
 import { GAUGE_ROLES, hasRole } from '@/auth/RequireRole';
-import { Announcements, CompanySection, MiniLeaderboard, UpcomingEvents } from '@/features/dashboard';
+import { Announcements, CompanySection, MiniLeaderboard, NewAnnouncementModal, UpcomingEvents } from '@/features/dashboard';
 import { ChartSkeleton, ErrorState, KpiSkeletons } from '@/features/common';
 import { CoachingInsights, LogGaugesModal } from '@/features/gauges';
 import { COPY, greetingFor, motivationForDate } from '@/content/copy';
+import { todayISO } from '@/lib/dates';
 import { formatDate, formatDateShort, formatGBP, formatNumber, formatPct, formatRangeLabel, formatRelative } from '@/lib/format';
 import { ratioTone } from '@/lib/ratios';
 import { usePageTitle } from '@/lib/usePageTitle';
@@ -23,6 +24,8 @@ export function DashboardPage() {
   const me = useCurrentUser();
   const [range, setRange] = useState<DashboardRange>('week');
   const [logOpen, setLogOpen] = useState(false);
+  const [announceOpen, setAnnounceOpen] = useState(false);
+  const canAnnounce = me.role === 'admin' || me.role === 'leader';
   const q = useDashboard(range);
   const d = q.data;
   const rangeLabel = useMemo(() => (d ? formatRangeLabel(d.from, d.to) : ''), [d]);
@@ -74,15 +77,15 @@ export function DashboardPage() {
                 <KpiTile label="Conversion" value={formatPct(d.personal.ratios.overallConversion, 1)} delta={d.personal.deltas.conversion} tone={ratioTone('overallConversion', d.personal.ratios.overallConversion)} hint="sales ÷ stops" />
                 <KpiTile label="Stops" value={formatNumber(d.personal.totals.stops)} delta={d.personal.deltas.stops} hint={`${formatNumber(d.personal.totals.presentations)} presentations`} />
                 <KpiTile label="Earnings to date" value={formatGBP(d.personal.earningsToDate)} hint="gross, this period" />
-                <KpiTile label="Next payday" value={d.personal.nextPayday ? formatDateShort(d.personal.nextPayday) : '—'} hint={d.personal.nextPayday ? `${d.personal.nextPayAmount != null ? formatGBP(d.personal.nextPayAmount, { cents: true }) : 'amount pending'} · ${formatRelative(d.personal.nextPayday)}` : 'No pending run'} />
+                <KpiTile label="Next payday" value={d.personal.nextPayday ? formatDateShort(d.personal.nextPayday) : '—'} tone={d.personal.nextPayday && d.personal.nextPayday < todayISO() ? 'danger' : 'default'} hint={d.personal.nextPayday ? `${d.personal.nextPayAmount != null ? formatGBP(d.personal.nextPayAmount, { cents: true }) : 'amount pending'} · ${d.personal.nextPayday < todayISO() ? 'overdue · ' : ''}${formatRelative(d.personal.nextPayday)}` : 'No pending run'} />
                 <KpiTile label="Punctuality" value={d.personal.punctualityRate == null ? '—' : formatPct(d.personal.punctualityRate)} tone={d.personal.punctualityRate == null ? 'default' : d.personal.punctualityRate >= 0.9 ? 'success' : d.personal.punctualityRate >= 0.75 ? 'warning' : 'danger'} hint="check-ins on time" />
               </>
             )}
           </div>
 
           {/* Personal charts */}
-          <div className="grid gap-6 lg:grid-cols-5">
-            <Card className="lg:col-span-3">
+          <div className="grid grid-cols-1 gap-6 lg:grid-cols-5">
+            <Card className="min-w-0 lg:col-span-3">
               <CardHeader title="Your trend" description="Sales and stops per day" />
               {!d ? <ChartSkeleton /> : d.personal.trend.length ? (
                 <TrendChart data={d.personal.trend.map((t) => ({ date: t.date, sales: t.sales, stops: t.stops }))} xKey="date" series={[{ key: 'sales', label: 'Sales' }, { key: 'stops', label: 'Stops' }]} kind="area" xFormatter={formatDateShort} height={240} />
@@ -90,7 +93,7 @@ export function DashboardPage() {
                 <EmptyState title="No days logged yet" description="Log your gauges after a shift and your trend will build up here." size="sm" className="border-0" action={canLog ? <Button size="sm" onClick={() => setLogOpen(true)}>Log gauges</Button> : undefined} />
               )}
             </Card>
-            <Card className="lg:col-span-2">
+            <Card className="min-w-0 lg:col-span-2">
               <CardHeader title="Your funnel" description="Against the law of averages" />
               {!d ? <ChartSkeleton /> : (
                 <>
@@ -102,8 +105,8 @@ export function DashboardPage() {
           </div>
 
           {/* Team, events, announcements */}
-          <div className="grid gap-6 lg:grid-cols-3">
-            <Card>
+          <div className="grid grid-cols-1 gap-6 lg:grid-cols-3 lg:items-start">
+            <Card className="min-w-0">
               <CardHeader title={d?.team ? d.team.teamName : 'Top performers'} description={d?.team ? `${formatNumber(d.team.members)} members · ${formatNumber(d.team.totals.sales)} sales` : d ? 'Across every team this period' : undefined} actions={<Link to="/leaderboard" className="flex items-center gap-1 text-xs text-primary hover:underline">Leaderboard <ArrowRight className="h-3 w-3" aria-hidden /></Link>} />
               {!d ? (
                 <div className="space-y-2"><Skeleton className="h-10" /><Skeleton className="h-10" /><Skeleton className="h-10" /></div>
@@ -120,12 +123,12 @@ export function DashboardPage() {
                 </>
               )}
             </Card>
-            <Card>
+            <Card className="min-w-0">
               <CardHeader title="Upcoming events" actions={<Link to="/events" className="flex items-center gap-1 text-xs text-primary hover:underline">All events <ArrowRight className="h-3 w-3" aria-hidden /></Link>} />
               {!d ? <div className="space-y-2"><Skeleton className="h-12" /><Skeleton className="h-12" /><Skeleton className="h-12" /></div> : <UpcomingEvents events={d.upcomingEvents} />}
             </Card>
-            <Card>
-              <CardHeader title="Announcements" />
+            <Card className="min-w-0">
+              <CardHeader title="Announcements" actions={canAnnounce ? <Button size="sm" variant="outline" onClick={() => setAnnounceOpen(true)} leftIcon={<Megaphone className="h-3.5 w-3.5" aria-hidden />}>New announcement</Button> : undefined} />
               {!d ? <div className="space-y-2"><Skeleton className="h-16" /><Skeleton className="h-16" /></div> : <Announcements items={d.announcements} />}
             </Card>
           </div>
@@ -135,6 +138,7 @@ export function DashboardPage() {
       )}
 
       {canLog && <LogGaugesModal open={logOpen} onClose={() => setLogOpen(false)} />}
+      {canAnnounce && <NewAnnouncementModal open={announceOpen} onClose={() => setAnnounceOpen(false)} />}
     </>
   );
 }

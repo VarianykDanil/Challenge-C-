@@ -5,7 +5,19 @@ import { ApiError } from '@/api/client';
 
 export function errorMessage(err: unknown, fallback = 'Something went wrong'): string {
   if (err instanceof ApiError) {
-    if (Array.isArray(err.details) && err.details.length) return `${err.message}: ${err.details.join('; ')}`;
+    if (Array.isArray(err.details) && err.details.length) {
+      // Zod replies carry `{ path, message }` objects; funnel checks carry plain strings.
+      const parts = err.details.map((d: unknown) => {
+        if (typeof d === 'string') return d;
+        if (d && typeof d === 'object') {
+          const { path, message } = d as { path?: unknown; message?: unknown };
+          const p = Array.isArray(path) ? path.join('.') : typeof path === 'string' ? path : '';
+          return `${p ? `${p}: ` : ''}${typeof message === 'string' ? message : JSON.stringify(d)}`;
+        }
+        return String(d);
+      });
+      return `${err.message}: ${parts.join('; ')}`;
+    }
     return err.message;
   }
   if (err instanceof Error) return err.message;

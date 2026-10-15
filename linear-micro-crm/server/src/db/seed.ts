@@ -24,6 +24,7 @@ import {
 import { openDb, run, transaction, type Db } from './connection.ts';
 import { createSchema } from './schema.ts';
 import { Rng } from '../lib/prng.ts';
+import { RECRUITER_HIRES_SQL } from '../lib/pay.ts';
 import * as D from '../lib/dates.ts';
 import * as S from './seed-data.ts';
 
@@ -77,6 +78,7 @@ interface WeekAgg {
   sales: number;
 }
 
+const MONTH_NAMES = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
 const clamp = (n: number, min: number, max: number) => Math.min(max, Math.max(min, n));
 const ts = (date: string, hour: number, minute = 0) => new Date(`${date}T${String(hour).padStart(2, '0')}:${String(minute).padStart(2, '0')}:00`).toISOString();
 const addMs = (iso: string, ms: number) => new Date(new Date(iso).getTime() + ms).toISOString();
@@ -177,6 +179,13 @@ export function seed(db: Db, today: string = D.todayISO()): SeedStats {
        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     );
     const northernLightsId = teamIds.get('Northern Lights')!;
+    const nowHHMM = D.nowHHMM(new Date(nowMs)); // seed-time clock: today's events are only "live" once they have started
+    const venueTaken = new Set<string>(); // `${date}|${venue}` — one crew per venue per day
+    /** A start time at least 90 minutes ago (on the half hour, not before 07:00) so the demo accounts have live data today. */
+    const demoStartTime = (): string => {
+      const mins = Math.max(7 * 60, Math.floor((Number(nowHHMM.slice(0, 2)) * 60 + Number(nowHHMM.slice(3, 5)) - 90) / 30) * 30);
+      return `${String(Math.floor(mins / 60)).padStart(2, '0')}:${String(mins % 60).padStart(2, '0')}`;
+    };
     for (let monday = firstMonday; monday <= lastEventDate; monday = D.addDays(monday, 7)) {
       for (const teamSeed of S.TEAMS) {
         const teamId = teamIds.get(teamSeed.name)!;
@@ -185,15 +194,22 @@ export function seed(db: Db, today: string = D.todayISO()): SeedStats {
           if (date > lastEventDate) break;
           const guaranteed = teamId === northernLightsId && monday === thisMonday && date <= today;
           if (!guaranteed && rng.chance(0.15)) continue;
-          const code = rng.weighted(teamSeed.campaignMix);
+          // Volt Energy is B2B at business parks: weekdays only
+          const mix = dow === 5 ? teamSeed.campaignMix.filter(([c]) => c !== 'VLT') : teamSeed.campaignMix;
+          const code = rng.weighted(mix);
           const campaign = campaigns.get(code)!;
           let type = rng.weighted(campaign.eventTypes);
           if (dow === 5 && code === 'CHN' && rng.chance(0.5)) type = 'event';
-          const venue = rng.pick(S.VENUES[type]);
-          const [startTime, endTime] = rng.pick(S.EVENT_TIMES[type]);
+          let venue = rng.pick(S.VENUES[type]);
+          for (let tries = 0; venueTaken.has(`${date}|${venue.venue}`) && tries < 8; tries++) venue = rng.pick(S.VENUES[type]);
+          if (venueTaken.has(`${date}|${venue.venue}`) && !guaranteed) continue; // every venue busy that day: no event
+          venueTaken.add(`${date}|${venue.venue}`);
+          let [startTime, endTime] = rng.pick(S.EVENT_TIMES[type]);
+          if (guaranteed && date === today && startTime > nowHHMM) startTime = demoStartTime();
           const size = teamSize.get(teamId) ?? 6;
           const targetSales = clamp(Math.round(rng.gauss(size * 2.2, 2)), 8, 20);
-          let status: EventStatus = date < today ? 'completed' : date === today ? 'live' : 'scheduled';
+          const started = date < today || (date === today && startTime <= nowHHMM);
+          let status: EventStatus = date < today ? 'completed' : started ? 'live' : 'scheduled';
           if (!guaranteed && rng.chance(0.03)) status = 'cancelled';
           const name = `${campaign.name} — ${venue.venue}`;
           const notes = rng.chance(0.15)
@@ -231,7 +247,7 @@ export function seed(db: Db, today: string = D.todayISO()): SeedStats {
       return u.skill + (u.skillEnd - u.skill) * t;
     };
     const baseStops: Record<Position, number> = {
-      trainee: 50, field_rep: 68, team_leader: 75, crew_leader: 80, assistant_owner: 75, owner: 70,
+      trainee: 50, field_rep: 68, team_leader: 75, crew_leader: 80, assistant_owner: 75, owner: 70, recruiter: 0,
     };
 
     function genGauges(u: SeededUser, ev: SeededEvent): GaugeTotals {
@@ -260,6 +276,7 @@ export function seed(db: Db, today: string = D.todayISO()): SeedStats {
       return totals;
     }
 
+    const seniorDays = new Set<string>(); // `${userId}|${date}` — the owner / assistant owner work one site a day
     for (const ev of events) {
       if (ev.status !== 'completed' && ev.status !== 'live') continue;
       const monday = D.mondayOf(ev.date);
@@ -269,16 +286,19 @@ export function seed(db: Db, today: string = D.todayISO()): SeedStats {
         if (u.teamId !== null) {
           if (u.teamId !== ev.teamId) continue;
           if (monday === thisMonday && (u.id === jordan.id || u.id === amelia.id)) p = 1;
-        }
+        } else if (seniorDays.has(`${u.id}|${ev.date}`)) continue;
         if (!rng.chance(p)) continue;
+        if (u.teamId === null) seniorDays.add(`${u.id}|${ev.date}`);
         const g = genGauges(u, ev);
         const [sh, sm] = ev.startTime.split(':').map(Number);
         const [eh, em] = ev.endTime.split(':').map(Number);
         const start = new Date(`${ev.date}T${ev.startTime}:00`).getTime();
         let checkedInAt: string | null = null;
         if (!rng.chance(0.08)) {
-          const offsetMin = rng.chance(0.85) ? rng.float(-25, 4) : rng.float(6, 45);
-          checkedInAt = D.toLocalISO(new Date(start + offsetMin * 60_000));
+          // the demo crew leader is punctual (always this week, 96% otherwise); everyone else is late 15% of the time
+          const onTimeP = u.id === amelia.id ? (monday === thisMonday ? 1 : 0.96) : 0.85;
+          const offsetMin = rng.chance(onTimeP) ? rng.float(-25, 4) : rng.float(6, 45);
+          checkedInAt = D.toLocalISO(new Date(Math.min(start + offsetMin * 60_000, nowMs))); // never in the future
         }
         const submittedAt = ev.status === 'live'
           ? new Date(Math.min(nowMs, start + rng.float(2, 5) * HOUR)).toISOString()
@@ -298,77 +318,6 @@ export function seed(db: Db, today: string = D.todayISO()): SeedStats {
           list.push(ev.id);
           attendedEvents.set(key, list);
         }
-      }
-    }
-
-    // ── Payroll ──────────────────────────────────────────────────────────────
-    const insertRun = db.prepare(
-      `INSERT INTO payroll_runs (user_id, week_start, week_end, days_worked, sales, team_sales, base_pay, commission, bonus, overrides, deductions, gross, due_date, paid_date, status, reference)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-    );
-    const completedMondays: string[] = [];
-    for (let monday = firstMonday; D.sundayOf(monday) < today; monday = D.addDays(monday, 7)) completedMondays.push(monday);
-    const lastCompletedMonday = completedMondays[completedMondays.length - 1];
-
-    for (const monday of completedMondays) {
-      const sunday = D.sundayOf(monday);
-      const dueDate = paydayForWeek(monday); // Friday after the Mon–Sun pay week (shared rule)
-      const { year, week } = D.isoWeek(monday);
-      // team sales this week by team (for overrides)
-      const teamWeekSales = new Map<number, number>();
-      for (const u of users) {
-        if (!u.teamId) continue;
-        const agg = userWeek.get(`${u.id}|${monday}`);
-        if (agg) teamWeekSales.set(u.teamId, (teamWeekSales.get(u.teamId) ?? 0) + agg.sales);
-      }
-      for (const u of users) {
-        if (!(u.startDate <= sunday && (!u.stoppedOn || u.stoppedOn > monday))) continue;
-        const plan = plans.get(u.position)!;
-        const agg = userWeek.get(`${u.id}|${monday}`);
-        let daysWorked = agg?.days.size ?? 0;
-        const sales = agg?.sales ?? 0;
-        if (u.role === 'recruiter') {
-          // office-based: paid Mon–Fri
-          const firstDay = u.startDate > monday ? u.startDate : monday;
-          daysWorked = Math.max(0, Math.min(5, D.diffDays(firstDay, D.addDays(monday, 4)) + 1));
-        }
-        let teamSales = 0;
-        if (plan.overridePerTeamSale > 0) {
-          if (u.teamId) teamSales = Math.max(0, (teamWeekSales.get(u.teamId) ?? 0) - sales);
-          else {
-            // owners without a team: override on the other reps' sales at the events they ran
-            for (const evId of attendedEvents.get(`${u.id}|${monday}`) ?? []) {
-              for (const [uid, s] of salesByEventUser(evId)) if (uid !== u.id) teamSales += s;
-            }
-          }
-        }
-        const deductions = rng.chance(0.08) ? rng.pick([12.5, 20, 35, 50]) : 0;
-        const pay = calculatePayroll(plan, { daysWorked, sales, teamSales, deductions });
-        if (pay.gross <= 0) continue;
-        let status: PayrollStatus = 'pending';
-        let paidDate: string | null = null;
-        if (monday !== lastCompletedMonday && dueDate < today) {
-          const r = rng.next();
-          if (r < 0.88) {
-            status = 'paid';
-            paidDate = D.addDays(dueDate, -rng.int(0, 2));
-          } else if (r < 0.97) {
-            status = 'late';
-            paidDate = D.addDays(dueDate, rng.int(1, 6));
-            if (paidDate > today) paidDate = today;
-          } else if (r < 0.98) {
-            status = 'failed';
-          } else {
-            status = 'paid';
-            paidDate = dueDate;
-          }
-        }
-        const reference = `PAY-${year}${String(week).padStart(2, '0')}-${u.employeeId}`;
-        insertRun.run(
-          u.id, monday, sunday, daysWorked, sales, teamSales, pay.basePay, pay.commission, pay.bonus, pay.overrides, pay.deductions, pay.gross,
-          dueDate, paidDate, status, reference,
-        );
-        stats.payrollRuns++;
       }
     }
 
@@ -516,6 +465,10 @@ export function seed(db: Db, today: string = D.todayISO()): SeedStats {
             break;
           }
         }
+        // nobody sits at Offer for more than three weeks: a stale offer is withdrawn or declined (a real hire needs a real user)
+        if (stage === 'offer' && changes[changes.length - 1]!.to === 'offer' && nowMs - t > 21 * DAY) {
+          changes.push({ from: 'offer', to: rng.chance(0.6) ? 'withdrawn' : 'rejected', at: t + rng.int(7, 20) * DAY + rng.int(0, 8) * HOUR });
+        }
         const person = randomPerson();
         const source = pickSource();
         plansToInsert.push({
@@ -577,27 +530,119 @@ export function seed(db: Db, today: string = D.todayISO()): SeedStats {
         if (nextChange) {
           at = c.at + (nextChange.at - c.at) * rng.float(0.3, 0.8);
           if (nextChange.to === 'rejected') outcome = rng.chance(0.15) ? 'no_show' : 'failed';
-          else if (nextChange.to === 'withdrawn') outcome = rng.chance(0.5) ? 'no_show' : 'pending';
+          else if (nextChange.to === 'withdrawn') outcome = rng.chance(0.5) ? 'no_show' : 'passed'; // never left "pending"
           else outcome = 'passed';
-        } else if (nowMs - c.at < 4 * DAY || rng.chance(0.6)) {
-          // open candidate: the stage interview is still to come
+        } else if (nowMs - c.at < 10 * DAY && (nowMs - c.at < 4 * DAY || rng.chance(0.6))) {
+          // open candidate who entered the stage recently: the stage interview is still to come
           at = nowMs + rng.int(1, 7) * DAY;
           outcome = 'pending';
         } else {
           at = c.at + rng.int(1, 3) * DAY;
-          outcome = rng.chance(0.7) ? 'passed' : 'pending';
+          outcome = 'passed'; // "pending" is reserved for interviews that are still in the future
         }
         const d = new Date(at);
+        // office hours, Monday to Friday
         d.setHours(rng.int(9, 16), rng.pick([0, 15, 30, 45]), 0, 0);
         if (d.getDay() === 0) d.setDate(d.getDate() + 1);
+        else if (d.getDay() === 6) d.setDate(d.getDate() + 2);
         const interviewNotes = outcome === 'passed' ? rng.pick(S.STAGE_NOTES.interview!) : outcome === 'no_show' ? 'Did not attend; left voicemail.' : null;
         insertInterview.run(candidateId, type, d.toISOString(), interviewer, outcome, interviewNotes);
         stats.interviews++;
       }
     }
 
+    // ── Payroll ──────────────────────────────────────────────────────────────
+    const insertRun = db.prepare(
+      `INSERT INTO payroll_runs (user_id, week_start, week_end, days_worked, sales, team_sales, base_pay, commission, bonus, overrides, deductions, gross, due_date, paid_date, status, reference)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    );
+    const completedMondays: string[] = [];
+    for (let monday = firstMonday; D.sundayOf(monday) < today; monday = D.addDays(monday, 7)) completedMondays.push(monday);
+    const lastCompletedMonday = completedMondays[completedMondays.length - 1];
+    // recruiters are paid a bonus on hires, so their weekly "sales" figure is the hires they closed (same rule as lib/pay.ts)
+    const hiresInWeek = db.prepare(RECRUITER_HIRES_SQL);
+
+    for (const monday of completedMondays) {
+      const sunday = D.sundayOf(monday);
+      const dueDate = paydayForWeek(monday); // Friday after the Mon–Sun pay week (shared rule)
+      const { year, week } = D.isoWeek(monday);
+      // team sales this week by team (for overrides)
+      const teamWeekSales = new Map<number, number>();
+      for (const u of users) {
+        if (!u.teamId) continue;
+        const agg = userWeek.get(`${u.id}|${monday}`);
+        if (agg) teamWeekSales.set(u.teamId, (teamWeekSales.get(u.teamId) ?? 0) + agg.sales);
+      }
+      for (const u of users) {
+        if (!(u.startDate <= sunday && (!u.stoppedOn || u.stoppedOn > monday))) continue;
+        const plan = plans.get(u.position)!;
+        const agg = userWeek.get(`${u.id}|${monday}`);
+        let daysWorked = agg?.days.size ?? 0;
+        let sales = agg?.sales ?? 0;
+        if (u.role === 'recruiter') {
+          // office-based: paid Mon–Fri; "sales" = hires closed this week (the recruiter plan's bonus counts hires)
+          const firstDay = u.startDate > monday ? u.startDate : monday;
+          daysWorked = Math.max(0, Math.min(5, D.diffDays(firstDay, D.addDays(monday, 4)) + 1));
+          sales = Number((hiresInWeek.get(u.id, monday, sunday) as { n: number }).n);
+        }
+        let teamSales = 0;
+        if (plan.overridePerTeamSale > 0) {
+          if (u.teamId) teamSales = Math.max(0, (teamWeekSales.get(u.teamId) ?? 0) - sales);
+          else {
+            // owners without a team: override on the other reps' sales at the events they ran
+            for (const evId of attendedEvents.get(`${u.id}|${monday}`) ?? []) {
+              for (const [uid, s] of salesByEventUser(evId)) if (uid !== u.id) teamSales += s;
+            }
+          }
+        }
+        const deductions = rng.chance(0.08) ? rng.pick([12.5, 20, 35, 50]) : 0;
+        const pay = calculatePayroll(plan, { daysWorked, sales, teamSales, deductions });
+        if (pay.gross <= 0) continue;
+        let status: PayrollStatus = 'pending';
+        let paidDate: string | null = null;
+        if (monday !== lastCompletedMonday && dueDate < today) {
+          const r = rng.next();
+          if (r < 0.88) {
+            status = 'paid';
+            paidDate = D.addDays(dueDate, -rng.int(0, 2));
+          } else if (r < 0.97) {
+            status = 'late';
+            paidDate = D.addDays(dueDate, rng.int(1, 6));
+            if (paidDate > today) paidDate = today;
+          } else if (r < 0.98) {
+            status = 'failed';
+          } else {
+            status = 'paid';
+            paidDate = dueDate;
+          }
+        }
+        const reference = `PAY-${year}${String(week).padStart(2, '0')}-${u.employeeId}`;
+        insertRun.run(
+          u.id, monday, sunday, daysWorked, sales, teamSales, pay.basePay, pay.commission, pay.bonus, pay.overrides, pay.deductions, pay.gross,
+          dueDate, paidDate, status, reference,
+        );
+        stats.payrollRuns++;
+      }
+    }
+
     // ── Announcements ────────────────────────────────────────────────────────
+    // Every name or number an announcement quotes is derived from the data generated above, so it is always true.
     const thomas = users.find((u) => u.employeeId === 'LM-0006')!;
+    const monthEnd = D.addDays(D.startOfMonth(today), -1); // last day of the previous calendar month
+    const monthStart = D.startOfMonth(monthEnd);
+    const monthName = MONTH_NAMES[Number(monthStart.slice(5, 7)) - 1]!;
+    const monthBoard = db
+      .prepare(
+        `SELECT u.first_name AS firstName, u.first_name || ' ' || u.last_name AS name, SUM(g.sales) AS sales, SUM(g.stops) AS stops
+         FROM gauge_entries g JOIN users u ON u.id = g.user_id WHERE g.date BETWEEN ? AND ?
+         GROUP BY u.id ORDER BY sales DESC, stops ASC, name ASC`,
+      )
+      .all(monthStart, monthEnd) as { firstName: string; name: string; sales: number; stops: number }[];
+    const [top, runnerUp] = monthBoard;
+    const bestConversion = monthBoard.filter((r) => r.stops >= 200).sort((a, b) => b.sales / b.stops - a.sales / a.stops)[0];
+    const crewSales = monthBoard.reduce((acc, r) => acc + Number(r.sales), 0);
+    const inPipeline = Number((db.prepare(`SELECT COUNT(*) AS n FROM candidates WHERE stage IN ('interview', 'observation')`).get() as { n: number }).n);
+
     const announcements: [string, string, number, number, boolean][] = [
       [
         'Breast Cancer Awareness Month — October push',
@@ -610,13 +655,8 @@ export function seed(db: Db, today: string = D.todayISO()): SeedStats {
         users.find((u) => u.employeeId === 'LM-0004')!.id, 9, false,
       ],
       [
-        'September leaderboard — congratulations Isla and Ruby',
-        'Isla Moran topped the September board with 61 sales and Ruby Fletcher took second on 58. Best conversion went to Oliver Bennett at 5.1%. Shout out to the Northern Lights trainees for the strongest first month we have seen this year.',
-        amelia.id, 12, false,
-      ],
-      [
         'Observation days: bring a trainee candidate with you',
-        'We have 14 candidates at interview or observation stage right now. If you are running a retail or private-site day next week, let me know and I will pair you with one. Observation feedback forms go back to me the same day please.',
+        `We have ${inPipeline} candidate${inPipeline === 1 ? '' : 's'} at interview or observation stage right now. If you are running a retail or private-site day next week, let me know and I will pair you with one. Observation feedback forms go back to me the same day please.`,
         priya.id, 5, false,
       ],
       [
@@ -630,6 +670,18 @@ export function seed(db: Db, today: string = D.todayISO()): SeedStats {
         thomas.id, 1, false,
       ],
     ];
+    if (top && runnerUp && bestConversion) {
+      const pct = (Math.round((bestConversion.sales / bestConversion.stops) * 1000) / 10).toFixed(1);
+      // posted the day after the month closed, or 12 days ago when the month ended longer ago than that
+      const postedDaysAgo = Math.max(0, Math.min(12, D.diffDays(monthEnd, today) - 1));
+      announcements.push([
+        `${monthName} leaderboard — congratulations ${top.firstName} and ${runnerUp.firstName}`,
+        `${top.name} topped the ${monthName} board with ${top.sales} sales and ${runnerUp.name} took second on ${runnerUp.sales}. ` +
+          `Best conversion went to ${bestConversion.name} at ${pct}% (${bestConversion.sales} sales from ${bestConversion.stops} stops). ` +
+          `The crew closed ${monthName} on ${crewSales} sales — well done everyone.`,
+        amelia.id, postedDaysAgo, false,
+      ]);
+    }
     for (const [title, body, authorId, daysAgo, pinned] of announcements) {
       run(db, `INSERT INTO announcements (title, body, author_id, created_at, pinned) VALUES (?, ?, ?, ?, ?)`, [
         title, body, authorId, new Date(nowMs - daysAgo * DAY - rng.int(0, 6) * HOUR).toISOString(), pinned,

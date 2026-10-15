@@ -18,25 +18,27 @@
   --surface-3: #E4E7F0;
   --border: #E2E5EE;
   --border-strong: #CDD2DF;
+  /* Form-control boundary: >= 3:1 against --surface (WCAG 1.4.11) in both themes */
+  --control-border: #7A8398;
 
-  /* Text */
+  /* Text (--subtle is for placeholders and decorative glyphs; it still clears 4.5:1 on --surface) */
   --fg: #0F1526;
   --muted: #5C657A;
-  --subtle: #8B93A7;
+  --subtle: #6B7489;
 
   /* Brand — "Linear Violet" + "Ember" accent */
   --primary: #4B3FD9;
   --primary-hover: #4034C4;
   --primary-fg: #FFFFFF;
   --primary-soft: #ECEAFC;
-  --accent: #C2410C;
+  --accent: #B83C0B;
   --accent-fg: #FFFFFF;
   --accent-soft: #FDEBE1;
 
-  /* Status (all ≥ 4.5:1 on --surface and --bg) */
-  --success: #15803D;
+  /* Status (all ≥ 4.5:1 on --surface, --bg and on their own soft tint, so text-on-tint badges pass) */
+  --success: #137537;
   --success-soft: #E3F5EA;
-  --warning: #B45309;
+  --warning: #A64A08;
   --warning-soft: #FDF0DF;
   --danger: #D11A2A;
   --danger-soft: #FCE6E8;
@@ -83,10 +85,11 @@
   --surface-3: #1F2946;
   --border: #243050;
   --border-strong: #324066;
+  --control-border: #586889;
 
   --fg: #EDEFF7;
   --muted: #9AA3B8;
-  --subtle: #6B7590;
+  --subtle: #8089A3;
 
   --primary: #9D99FF;
   --primary-hover: #AEABFF;
@@ -108,12 +111,14 @@
 
   --ring: #9D99FF;
 
-  --chart-1: #9D99FF;
-  --chart-2: #FFA059;
-  --chart-3: #2DD4BF;
-  --chart-4: #F472B6;
-  --chart-5: #38BDF8;
-  --chart-6: #A3E635;
+  /* Charts — selected dark steps (OKLCH L 0.54–0.66, not the UI tints): every one ≥ 3:1 on --surface,
+     adjacent pairs ≥ ΔE 11 under protan/deutan simulation (dataviz validator, --mode dark) */
+  --chart-1: #8983E7;
+  --chart-2: #D3782C;
+  --chart-3: #00A997;
+  --chart-4: #B4367D;
+  --chart-5: #059FD7;
+  --chart-6: #70A500;
 
   --shadow-card: 0 1px 2px rgb(0 0 0 / 0.3), 0 0 0 1px rgb(255 255 255 / 0.02);
   --shadow-card-hover: 0 6px 16px rgb(0 0 0 / 0.4), 0 0 0 1px rgb(255 255 255 / 0.04);
@@ -137,6 +142,7 @@
   --color-surface-3: var(--surface-3);
   --color-border: var(--border);
   --color-border-strong: var(--border-strong);
+  --color-control-border: var(--control-border);
   --color-fg: var(--fg);
   --color-muted: var(--muted);
   --color-subtle: var(--subtle);

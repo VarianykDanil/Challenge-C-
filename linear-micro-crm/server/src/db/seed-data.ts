@@ -1,9 +1,10 @@
 /** Static reference data for the seed. Dynamic dates (recent starters, leavers) are expressed in weeks ago. */
 import type { CampaignSector, CampaignType, EventType, Position, Role, UserStatus } from '@lm/shared';
 
+/** Avatar backgrounds: every colour has ≥ 4.5:1 contrast with the white initials drawn on it (WCAG AA). */
 export const AVATAR_PALETTE = [
-  '#4F46E5', '#0891B2', '#059669', '#D97706', '#DC2626', '#7C3AED', '#DB2777',
-  '#2563EB', '#0D9488', '#CA8A04', '#EA580C', '#9333EA', '#16A34A', '#BE185D',
+  '#4F46E5', '#0E7490', '#047857', '#B45309', '#DC2626', '#7C3AED', '#DB2777',
+  '#2563EB', '#0F766E', '#A16207', '#C2410C', '#9333EA', '#15803D', '#BE185D',
 ];
 
 export interface TeamSeed {
@@ -37,6 +38,8 @@ export const PAY_PLANS: PayPlanSeed[] = [
   { name: 'Crew leader plan', position: 'crew_leader', basePerDay: 90, commissionPerSale: 45, bonusThreshold: 15, bonusAmount: 150, overridePerTeamSale: 12 },
   { name: 'Assistant owner plan', position: 'assistant_owner', basePerDay: 120, commissionPerSale: 40, bonusThreshold: 0, bonusAmount: 0, overridePerTeamSale: 15 },
   { name: 'Owner (salaried)', position: 'owner', basePerDay: 0, commissionPerSale: 0, bonusThreshold: 0, bonusAmount: 0, overridePerTeamSale: 20 },
+  // Office recruiter: Mon–Fri base, no sales commission; the bonus threshold counts HIRES closed in the week, not sales.
+  { name: 'Office recruiter plan', position: 'recruiter', basePerDay: 95, commissionPerSale: 0, bonusThreshold: 2, bonusAmount: 100, overridePerTeamSale: 0 },
 ];
 
 export interface CampaignSeed {
@@ -196,7 +199,7 @@ export interface UserSeed {
 export const USERS: UserSeed[] = [
   { no: 1, firstName: 'Danil', lastName: 'Varianyk', email: 'danil@linear-mcr.co.uk', role: 'admin', position: 'owner', team: null, start: '2024-02-27', status: 'active', city: 'Manchester', skill: 1.3, attendance: 0.04 },
   { no: 2, firstName: 'Amelia', lastName: 'Hart', role: 'leader', position: 'crew_leader', team: 'Northern Lights', start: '2024-03-04', status: 'active', city: 'Salford', skill: 1.2, leadsTeam: true },
-  { no: 3, firstName: 'Priya', lastName: 'Shah', role: 'recruiter', position: 'field_rep', team: null, start: '2024-06-10', status: 'active', city: 'Manchester', skill: 1, attendance: 0 },
+  { no: 3, firstName: 'Priya', lastName: 'Shah', role: 'recruiter', position: 'recruiter', team: null, start: '2024-06-10', status: 'active', city: 'Manchester', skill: 1, attendance: 0 },
   { no: 4, firstName: 'Marcus', lastName: 'Doyle', role: 'admin', position: 'assistant_owner', team: null, start: '2024-04-15', status: 'active', city: 'Manchester', skill: 1.2, attendance: 0.08 },
   { no: 5, firstName: 'Oliver', lastName: 'Bennett', role: 'leader', position: 'team_leader', team: 'Northern Lights', start: '2024-05-13', status: 'active', city: 'Stockport', skill: 1.12 },
   { no: 6, firstName: 'Thomas', lastName: 'Grainger', role: 'leader', position: 'team_leader', team: 'Deansgate', start: '2024-07-01', status: 'active', city: 'Manchester', skill: 1.15, leadsTeam: true },

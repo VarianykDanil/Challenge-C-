@@ -1,9 +1,9 @@
 import { Router } from 'express';
 import { z } from 'zod';
-import { periodDeltas, previousRange, type Dashboard, type GaugeTotals } from '@lm/shared';
+import { periodDeltas, type Dashboard, type GaugeTotals } from '@lm/shared';
 import { all, get, type Db } from '../db/connection.ts';
 import { Where, listAnnouncements, listEvents } from '../db/queries.ts';
-import { addDays, rangeForPeriod, todayISO } from '../lib/dates.ts';
+import { addDays, previousToDateRange, rangeForPeriod, todayISO } from '../lib/dates.ts';
 import { leaderboard, punctualityFor, ratiosOf, salesPerDay, totalsFor, trendFor, GAUGE_FROM } from '../lib/metrics.ts';
 import { earningsForRange, nextPay } from '../lib/pay.ts';
 import { currentUser } from '../middleware/auth.ts';
@@ -18,7 +18,8 @@ export function dashboardRouter(db: Db): Router {
     const range = rangeParam.parse(req.query.range);
     const today = todayISO();
     const { from, to } = rangeForPeriod(range, today);
-    const prev = previousRange({ from, to });
+    // deltas and movement compare with the same to-date span of the previous week / month / quarter
+    const prev = previousToDateRange(range, { from, to });
     const granularity = range === 'quarter' ? 'week' : 'day';
 
     // ── personal ──
@@ -26,8 +27,11 @@ export function dashboardRouter(db: Db): Router {
     const ownPrev = new Where().add('g.user_id = ?', me.id).add('g.date BETWEEN ? AND ?', prev.from, prev.to);
     const totals = totalsFor(db, own);
     const prevTotals = totalsFor(db, ownPrev);
-    const companyBoard = leaderboard(db, { from, to, previous: prev });
-    const myRow = companyBoard.find((r) => r.userId === me.id);
+    // reps are ranked against their own team (the board GET /leaderboard shows them); leaders and admins company-wide
+    const board = me.role === 'rep'
+      ? (me.teamId === null ? [] : leaderboard(db, { from, to, previous: prev, teamId: me.teamId }))
+      : leaderboard(db, { from, to, previous: prev });
+    const myRow = board.find((r) => r.userId === me.id);
     const pay = nextPay(db, me, today);
 
     const personal: Dashboard['personal'] = {
@@ -37,7 +41,7 @@ export function dashboardRouter(db: Db): Router {
       salesPerDay: salesPerDay(totals, totals.days),
       deltas: periodDeltas(totals, prevTotals),
       rank: myRow?.rank ?? null,
-      rankOutOf: companyBoard.length,
+      rankOutOf: board.length,
       earningsToDate: earningsForRange(db, me, from, to),
       nextPayday: pay.nextPayday,
       nextPayAmount: pay.nextPayAmount,
@@ -69,17 +73,14 @@ export function dashboardRouter(db: Db): Router {
       const c = totalsFor(db, cw);
       const revenue = get<{ r: number }>(db, `SELECT COALESCE(SUM(g.sales * c.payout_per_sale), 0) AS r ${GAUGE_FROM} ${cw}`, cw.params)!.r;
       const activeReps = get<{ n: number }>(db, `SELECT COUNT(*) AS n FROM users WHERE status = 'active' AND role IN ('rep', 'leader')`)!.n;
-      let settled = get<{ paid: number; total: number }>(
-        db,
-        `SELECT COALESCE(SUM(status = 'paid'), 0) AS paid, COUNT(*) AS total FROM payroll_runs WHERE status IN ('paid', 'late') AND due_date BETWEEN ? AND ?`,
-        [from, to],
-      )!;
+      // Settled runs due in the range; when nothing was due yet (Mon–Thu of a week) fall back to the runs due in the
+      // last 12 weeks up to today, and say so via payrollOnTimeWindow.
+      const settledSql = `SELECT COALESCE(SUM(status = 'paid'), 0) AS paid, COUNT(*) AS total FROM payroll_runs WHERE status IN ('paid', 'late') AND due_date BETWEEN ? AND ?`;
+      let payrollOnTimeWindow: 'range' | 'last12Weeks' = 'range';
+      let settled = get<{ paid: number; total: number }>(db, settledSql, [from, to])!;
       if (!settled.total) {
-        settled = get<{ paid: number; total: number }>(
-          db,
-          `SELECT COALESCE(SUM(status = 'paid'), 0) AS paid, COUNT(*) AS total FROM payroll_runs WHERE status IN ('paid', 'late') AND due_date >= ?`,
-          [addDays(today, -84)],
-        )!;
+        payrollOnTimeWindow = 'last12Weeks';
+        settled = get<{ paid: number; total: number }>(db, settledSql, [addDays(today, -84), today])!;
       }
       const openCandidates = get<{ n: number }>(db, `SELECT COUNT(*) AS n FROM candidates WHERE stage NOT IN ('hired', 'rejected', 'withdrawn')`)!.n;
       const hires = get<{ n: number }>(
@@ -100,6 +101,7 @@ export function dashboardRouter(db: Db): Router {
         activeReps: Number(activeReps),
         revenue: Math.round(Number(revenue) * 100) / 100,
         payrollOnTimeRate: settled.total ? Math.round((Number(settled.paid) / Number(settled.total)) * 10_000) / 10_000 : 0,
+        payrollOnTimeWindow,
         openCandidates: Number(openCandidates),
         hiresThisPeriod: Number(hires),
         trend: trendFor(db, cw, from, to, granularity),
@@ -116,6 +118,7 @@ export function dashboardRouter(db: Db): Router {
       range,
       from,
       to,
+      previous: prev,
       user: me,
       personal,
       team,

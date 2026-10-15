@@ -17,7 +17,9 @@ const num = new Intl.NumberFormat(BRAND.locale);
 const num1 = new Intl.NumberFormat(BRAND.locale, { maximumFractionDigits: 1 });
 
 export function formatGBP(n: number, opts: { cents?: boolean } = {}): string {
-  return (opts.cents ? gbp2 : gbp).format(Number.isFinite(n) ? n : 0);
+  const v = Number.isFinite(n) ? n : 0;
+  // `-0` (e.g. a negated zero deduction) would otherwise print as "-£0.00".
+  return (opts.cents ? gbp2 : gbp).format(v === 0 ? 0 : v);
 }
 export function formatNumber(n: number): string {
   return Number.isFinite(n) ? num.format(n) : '—';

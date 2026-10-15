@@ -171,6 +171,12 @@ when loss-making); `marginAmount` is the same in pounds.
   | null | today > due | `late` |
 
   `failed` is never derived — finance sets it by hand when a transfer bounces.
+
+  The server never writes the `null / today > due → late` branch back to the database: a stored run stays
+  `pending` (or `failed`) until an admin marks it paid, because the stored `late` status means *paid late* everywhere
+  else (on-time rates, "money landed" counts, the 409 guard on paying twice). That branch is a display derivation only —
+  clients use it to badge an unpaid run as overdue. `nextPay` (server) keeps returning the earliest unpaid run even
+  when it is overdue, so money owed never drops off the "Next payday" tile.
 * `daysLate(dueDate, paidDate, today?)` → whole days after the due date (0 when on time); pass `today`
   to measure an unpaid run.
 * `onTimeRate(runs)` → share (0..1) of **paid** runs paid on time; unpaid runs are excluded; 0 when

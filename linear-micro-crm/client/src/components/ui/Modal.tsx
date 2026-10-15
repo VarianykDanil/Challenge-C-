@@ -1,4 +1,4 @@
-import { useEffect, useId, useRef, type ReactNode } from 'react';
+import { useEffect, useId, useRef, useState, type CSSProperties, type ReactNode, type SyntheticEvent } from 'react';
 import { createPortal } from 'react-dom';
 import { X } from 'lucide-react';
 import clsx from 'clsx';
@@ -19,11 +19,12 @@ export interface ModalProps {
   icon?: ReactNode;
   tone?: 'default' | 'danger' | 'warning' | 'success';
   className?: string;
-  /** Element to focus on open; defaults to the first focusable control. */
+  /** Element to focus on open; defaults to the first form control, then the first focusable control. */
   initialFocusRef?: React.RefObject<HTMLElement | null>;
 }
 
-const WIDTH = { sm: 'max-w-sm', md: 'max-w-lg', lg: 'max-w-2xl', xl: 'max-w-4xl', full: 'max-w-[calc(100vw-2rem)]' } as const;
+// Full-width bottom sheet on phones; capped widths from `sm` up.
+const WIDTH = { sm: 'sm:max-w-sm', md: 'sm:max-w-lg', lg: 'sm:max-w-2xl', xl: 'sm:max-w-4xl', full: 'sm:max-w-[calc(100vw-2rem)]' } as const;
 const TONE = {
   default: 'bg-primary-soft text-primary',
   danger: 'bg-danger-soft text-danger',
@@ -31,14 +32,58 @@ const TONE = {
   success: 'bg-success-soft text-success',
 } as const;
 
-const FOCUSABLE = 'a[href], button:not([disabled]), textarea:not([disabled]), input:not([disabled]), select:not([disabled]), [tabindex]:not([tabindex="-1"])';
+const FOCUSABLE_PARTS = [
+  'a[href]',
+  'button:not([disabled])',
+  'textarea:not([disabled])',
+  'input:not([disabled]):not([type="hidden"])',
+  'select:not([disabled])',
+  '[tabindex]:not([tabindex="-1"])',
+];
+/** Selector for every keyboard-focusable element. Shared with the mobile nav drawer. */
+export const FOCUSABLE = FOCUSABLE_PARTS.join(', ');
+// `:not()` must be applied to every entry — appended to the joined list it only qualified the last one.
+const FOCUSABLE_NOT_CLOSE = FOCUSABLE_PARTS.map((s) => `${s}:not([data-modal-close])`).join(', ');
+const FORM_CONTROL = 'input:not([disabled]):not([type="hidden"]), select:not([disabled]), textarea:not([disabled])';
+
+const isVisible = (n: HTMLElement) => n.offsetParent !== null || n === document.activeElement;
+const stop = (e: SyntheticEvent) => e.stopPropagation();
 
 let openCount = 0;
+
+/**
+ * On a phone, a page that overflows horizontally inflates the layout viewport, so `inset-0` no
+ * longer matches what the user can see. While that is the case, pin the overlay to the visual
+ * viewport instead; otherwise return nothing and let the CSS `inset-0` apply.
+ */
+function useVisualViewportBox(open: boolean): CSSProperties | undefined {
+  const [box, setBox] = useState<CSSProperties | undefined>(undefined);
+  useEffect(() => {
+    if (!open) { setBox(undefined); return; }
+    const vv = window.visualViewport;
+    if (!vv) return;
+    const update = () => {
+      const inflated = document.documentElement.clientWidth - vv.width > 1 && vv.scale <= 1.01;
+      setBox(inflated ? { left: vv.offsetLeft, top: vv.offsetTop, width: vv.width, height: vv.height } : undefined);
+    };
+    update();
+    vv.addEventListener('resize', update);
+    vv.addEventListener('scroll', update);
+    window.addEventListener('scroll', update, true);
+    return () => {
+      vv.removeEventListener('resize', update);
+      vv.removeEventListener('scroll', update);
+      window.removeEventListener('scroll', update, true);
+    };
+  }, [open]);
+  return box;
+}
 
 export function Modal({ open, onClose, title, description, children, footer, size = 'md', hideClose, persistent, icon, tone = 'default', className, initialFocusRef }: ModalProps) {
   const id = useId();
   const panelRef = useRef<HTMLDivElement>(null);
   const restoreRef = useRef<HTMLElement | null>(null);
+  const box = useVisualViewportBox(open);
 
   // Scroll lock + focus management
   useEffect(() => {
@@ -52,8 +97,13 @@ export function Modal({ open, onClose, title, description, children, footer, siz
     if (scrollbar > 0) document.body.style.paddingRight = `${scrollbar}px`;
 
     const raf = requestAnimationFrame(() => {
-      const target = initialFocusRef?.current ?? panelRef.current?.querySelector<HTMLElement>(`${FOCUSABLE}:not([data-modal-close])`) ?? panelRef.current;
-      target?.focus({ preventScroll: true });
+      const panel = panelRef.current;
+      if (!panel) return;
+      // A field with `autoFocus` (or anything already focused inside the dialog) wins.
+      if (document.activeElement && document.activeElement !== panel && panel.contains(document.activeElement)) return;
+      const first = (selector: string) => Array.from(panel.querySelectorAll<HTMLElement>(selector)).find(isVisible);
+      const target = initialFocusRef?.current ?? first(FORM_CONTROL) ?? first(FOCUSABLE_NOT_CLOSE) ?? panel;
+      target.focus({ preventScroll: true });
     });
 
     return () => {
@@ -67,36 +117,53 @@ export function Modal({ open, onClose, title, description, children, footer, siz
     };
   }, [open, initialFocusRef]);
 
-  // Escape + focus trap
+  // Escape + focus trap. Handled on the overlay itself (keys inside the dialog bubble to it) and,
+  // as a fallback, on the document for the moment focus sits outside the panel (e.g. on <body>).
+  const handleKey = (e: KeyboardEvent) => {
+    if (e.key === 'Escape') {
+      e.stopPropagation();
+      onClose();
+      return;
+    }
+    if (e.key !== 'Tab' || !panelRef.current) return;
+    const nodes = Array.from(panelRef.current.querySelectorAll<HTMLElement>(FOCUSABLE)).filter(isVisible);
+    if (nodes.length === 0) { e.preventDefault(); panelRef.current.focus(); return; }
+    const first = nodes[0]!;
+    const last = nodes[nodes.length - 1]!;
+    const activeEl = document.activeElement as HTMLElement | null;
+    if (e.shiftKey && (activeEl === first || !panelRef.current.contains(activeEl))) { e.preventDefault(); last.focus(); }
+    else if (!e.shiftKey && (activeEl === last || !panelRef.current.contains(activeEl))) { e.preventDefault(); first.focus(); }
+  };
+  const handleKeyRef = useRef(handleKey);
+  handleKeyRef.current = handleKey;
   useEffect(() => {
     if (!open) return;
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') {
-        e.stopPropagation();
-        onClose();
-        return;
-      }
-      if (e.key !== 'Tab' || !panelRef.current) return;
-      const nodes = Array.from(panelRef.current.querySelectorAll<HTMLElement>(FOCUSABLE)).filter((n) => n.offsetParent !== null || n === document.activeElement);
-      if (nodes.length === 0) { e.preventDefault(); panelRef.current.focus(); return; }
-      const first = nodes[0]!;
-      const last = nodes[nodes.length - 1]!;
-      const activeEl = document.activeElement as HTMLElement | null;
-      if (e.shiftKey && (activeEl === first || !panelRef.current.contains(activeEl))) { e.preventDefault(); last.focus(); }
-      else if (!e.shiftKey && activeEl === last) { e.preventDefault(); first.focus(); }
-    };
-    document.addEventListener('keydown', onKey);
-    return () => document.removeEventListener('keydown', onKey);
-  }, [open, onClose]);
+    const onDocKey = (e: KeyboardEvent) => handleKeyRef.current(e);
+    document.addEventListener('keydown', onDocKey);
+    return () => document.removeEventListener('keydown', onDocKey);
+  }, [open]);
 
   if (!open || typeof document === 'undefined') return null;
 
   return createPortal(
+    // React synthetic events bubble through the component tree even across the portal, so a modal
+    // opened from inside a clickable table row would otherwise re-trigger the row. Stop them here.
     <div
       className="fixed inset-0 z-[60] flex items-end justify-center p-0 sm:items-center sm:p-4"
-      onMouseDown={(e) => { if (!persistent && e.target === e.currentTarget) onClose(); }}
+      style={box}
+      onClick={stop}
+      onKeyDown={(e) => {
+        // Stopping the synthetic event also stops the native one at <body>, so handle the keys here.
+        e.stopPropagation();
+        handleKey(e.nativeEvent);
+      }}
+      onMouseDown={(e) => {
+        e.stopPropagation();
+        const t = e.target as HTMLElement;
+        if (!persistent && (t === e.currentTarget || t.hasAttribute('data-modal-backdrop'))) onClose();
+      }}
     >
-      <div className="absolute inset-0 animate-fade-in bg-fg/40 backdrop-blur-sm dark:bg-bg/70" aria-hidden />
+      <div className="absolute inset-0 animate-fade-in bg-fg/40 backdrop-blur-sm dark:bg-bg/70" data-modal-backdrop aria-hidden />
       <div
         ref={panelRef}
         role="dialog"
@@ -105,7 +172,8 @@ export function Modal({ open, onClose, title, description, children, footer, siz
         aria-describedby={description ? `${id}-desc` : undefined}
         tabIndex={-1}
         className={clsx(
-          'relative flex max-h-[calc(100dvh-1rem)] w-full flex-col overflow-hidden rounded-t-2xl border border-border bg-surface shadow-modal outline-none sm:max-h-[calc(100dvh-2rem)] sm:rounded-2xl',
+          'relative flex max-h-[100dvh] w-full max-w-[100vw] flex-col overflow-hidden rounded-t-2xl border border-border bg-surface shadow-modal outline-none',
+          'pb-[env(safe-area-inset-bottom)] sm:max-h-[calc(100dvh-2rem)] sm:rounded-2xl sm:pb-0',
           'animate-slide-up sm:animate-scale-in',
           WIDTH[size],
           className,

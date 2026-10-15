@@ -13,6 +13,8 @@ import { formatNumber, formatPct } from '@/lib/format';
 import { usePageTitle } from '@/lib/usePageTitle';
 
 type Metric = 'sales' | 'conversion';
+/** The API returns at most this many rows (docs/API.md › Leaderboard). */
+const LEADERBOARD_LIMIT = 25;
 const PERIODS: { value: DashboardRange; label: string }[] = (['week', 'month', 'quarter'] as DashboardRange[]).map((value) => ({ value, label: DASHBOARD_RANGE_LABELS[value] }));
 const METRICS: { value: Metric; label: string }[] = [
   { value: 'sales', label: 'Sales' },
@@ -75,7 +77,8 @@ export function LeaderboardPage() {
 
   return (
     <>
-      <PageHeader title={COPY.nav.leaderboard.title} description={myRow ? `${COPY.nav.leaderboard.description} You're #${myRow.rank} of ${rows.length} this ${period}.` : COPY.nav.leaderboard.description} />
+      {/* Only people with a row are ranked (admins/recruiters with no sales just see the board). The API caps the board at 25 rows, so avoid "#25 of 25". */}
+      <PageHeader title={COPY.nav.leaderboard.title} description={myRow ? `${COPY.nav.leaderboard.description} You're #${myRow.rank}${rows.length < LEADERBOARD_LIMIT ? ` of ${rows.length}` : ''} this ${period}.` : rows.length >= LEADERBOARD_LIMIT ? `${COPY.nav.leaderboard.description} Top ${LEADERBOARD_LIMIT} shown.` : COPY.nav.leaderboard.description} />
 
       <div className="mb-5 flex flex-col gap-3 rounded-xl border border-border bg-surface p-3 lg:flex-row lg:items-center lg:justify-between">
         <div className="flex flex-wrap items-center gap-3">

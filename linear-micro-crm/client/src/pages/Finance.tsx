@@ -1,18 +1,27 @@
 import { useMemo, useState } from 'react';
 import { Plus, Trash2 } from 'lucide-react';
-import type { Expense, PayrollRunWithUser } from '@lm/shared';
+import type { Expense, FinanceWeek, PayrollRunWithUser } from '@lm/shared';
 import { EXPENSE_CATEGORY_LABELS } from '@lm/shared';
 import { Badge, Button, Card, CardHeader, DataTable, EmptyState, KpiTile, PageHeader, Tabs, useToast, type Column } from '@/components/ui';
 import { DonutChart, TrendChart } from '@/components/charts';
 import { useCampaigns, useDeleteExpense, useExpenses, useFinanceSummary, useMyFinance, usePayRun, usePayroll } from '@/api/hooks';
 import { useCurrentUser } from '@/auth/AuthProvider';
-import { ChartSkeleton, ColourChip, ConfirmDialog, ErrorState, KpiSkeletons, RangePicker, errorMessage, useRangeState } from '@/features/common';
+import { ChartSkeleton, ColourChip, ConfirmDialog, ErrorState, KpiSkeletons, RangePicker, StopRowEvents, errorMessage, useRangeState } from '@/features/common';
 import { AddExpenseModal, PayrollRunsTable, PayslipModal } from '@/features/finance';
-import { formatDate, formatDateShort, formatDecimal, formatGBP, formatNumber, formatPct, formatRelative } from '@/lib/format';
+import { todayISO } from '@/lib/dates';
+import { formatDate, formatDateShort, formatDecimal, formatGBP, formatNumber, formatPct, formatRangeLabel, formatRelative } from '@/lib/format';
 import { usePageTitle } from '@/lib/usePageTitle';
 import { COPY } from '@/content/copy';
 
 type Tab = 'me' | 'team' | 'company';
+
+/** "Next payday" tile: an unpaid run whose due date has passed is overdue, not upcoming. */
+function nextPaydayTile(nextPayday: string | null, nextPayAmount: number | null, none: string): { value: string; hint: string; tone: 'default' | 'danger' } {
+  if (!nextPayday) return { value: '—', hint: none, tone: 'default' };
+  const amount = nextPayAmount != null ? formatGBP(nextPayAmount, { cents: true }) : 'amount pending';
+  const overdue = nextPayday < todayISO();
+  return { value: formatDateShort(nextPayday), hint: `${amount} · ${overdue ? 'overdue · ' : ''}${formatRelative(nextPayday)}`, tone: overdue ? 'danger' : 'default' };
+}
 
 export function FinancePage() {
   usePageTitle(COPY.nav.finance.title);
@@ -58,7 +67,7 @@ function MyPay({ onOpen }: { onOpen: (r: PayrollRunWithUser) => void }) {
             <KpiTile label="Earned · last 12 weeks" value={formatGBP(d.totals.gross)} tone="primary" hint={`${formatNumber(d.runs.length)} payslips`} />
             <KpiTile label="Commission" value={formatGBP(d.totals.commission)} hint={d.totals.gross ? `${formatPct(d.totals.commission / d.totals.gross)} of gross` : undefined} />
             <KpiTile label="Paid on time" value={d.totals.onTimeRate == null ? '—' : formatPct(d.totals.onTimeRate)} tone={d.totals.onTimeRate == null ? 'default' : d.totals.onTimeRate >= 0.95 ? 'success' : 'warning'} hint="of paid runs" />
-            <KpiTile label="Next payday" value={d.nextPayday ? formatDateShort(d.nextPayday) : '—'} hint={d.nextPayday ? `${d.nextPayAmount != null ? formatGBP(d.nextPayAmount, { cents: true }) : 'amount pending'} · ${formatRelative(d.nextPayday)}` : 'Nothing pending'} />
+            <KpiTile label="Next payday" {...nextPaydayTile(d.nextPayday, d.nextPayAmount, 'Nothing pending')} />
           </>
         )}
       </div>
@@ -68,7 +77,7 @@ function MyPay({ onOpen }: { onOpen: (r: PayrollRunWithUser) => void }) {
           <TrendChart data={trend} xKey="week" series={[...paySeries]} kind="bar" stacked xFormatter={formatDateShort} yFormatter={(v) => formatGBP(v)} height={240} />
         ) : <EmptyState title={COPY.empty.payroll.title} description={COPY.empty.payroll.description} size="sm" className="border-0" />}
       </Card>
-      <Card padded={false}>
+      <Card padded={false} className="min-w-0 overflow-hidden">
         <div className="p-5 pb-3"><CardHeader title="Payslips" description="Select a week to see the full breakdown" className="mb-0" /></div>
         <PayrollRunsTable rows={d?.runs ?? []} loading={q.isLoading} onRowClick={onOpen} emptyMessage={`${COPY.empty.payroll.title} — ${COPY.empty.payroll.description}`} bare className="border-t border-border" />
       </Card>
@@ -116,6 +125,8 @@ function Company({ onOpen }: { onOpen: (r: PayrollRunWithUser) => void }) {
   const [deleting, setDeleting] = useState<Expense | null>(null);
   const [markingId, setMarkingId] = useState<number | null>(null);
   const s = summary.data;
+  // Weeks without settled runs may carry a live payroll estimate (optional server field).
+  const hasEstimate = (s?.weeks ?? []).some((w: FinanceWeek & { estimated?: boolean }) => w.estimated === true);
   const campaignName = (id: number | null) => (id == null ? null : campaigns.data?.find((c) => c.id === id) ?? null);
 
   const expenseColumns: Column<Expense>[] = [
@@ -124,7 +135,7 @@ function Company({ onOpen }: { onOpen: (r: PayrollRunWithUser) => void }) {
     { key: 'description', header: 'Description', render: (e) => <span className="text-fg">{e.description}</span>, sortValue: (e) => e.description },
     { key: 'campaign', header: 'Campaign', render: (e) => { const c = campaignName(e.campaignId); return c ? <ColourChip color={c.color} label={c.name} /> : <span className="text-muted">—</span>; }, sortValue: (e) => campaignName(e.campaignId)?.name ?? '' },
     { key: 'amount', header: 'Amount', align: 'right', render: (e) => <span className="font-medium tabular-nums text-fg">{formatGBP(e.amount, { cents: true })}</span>, sortValue: (e) => e.amount },
-    { key: 'actions', header: <span className="sr-only">Actions</span>, align: 'right', render: (e) => <Button size="sm" variant="ghost" className="text-danger" aria-label={`Delete expense ${e.description}`} onClick={() => setDeleting(e)}><Trash2 className="h-4 w-4" aria-hidden /></Button> },
+    { key: 'actions', header: <span className="sr-only">Actions</span>, align: 'right', render: (e) => <StopRowEvents className="inline-flex"><Button size="sm" variant="ghost" className="text-danger" aria-label={`Delete expense ${e.description}`} onClick={() => setDeleting(e)}><Trash2 className="h-4 w-4" aria-hidden /></Button></StopRowEvents> },
   ];
 
   const markPaid = (run: PayrollRunWithUser) => {
@@ -145,21 +156,21 @@ function Company({ onOpen }: { onOpen: (r: PayrollRunWithUser) => void }) {
             {!s ? <KpiSkeletons count={5} /> : (
               <>
                 <KpiTile label="Revenue" value={formatGBP(s.totals.revenue)} tone="primary" hint="client payouts" />
-                <KpiTile label="Payroll" value={formatGBP(s.totals.payroll)} hint={s.totals.revenue ? `${formatPct(s.totals.payroll / s.totals.revenue)} of revenue` : undefined} />
+                <KpiTile label="Payroll" value={formatGBP(s.totals.payroll)} hint={[s.totals.revenue ? `${formatPct(s.totals.payroll / s.totals.revenue)} of revenue` : null, hasEstimate ? "incl. this week's estimate" : null].filter(Boolean).join(' · ') || undefined} />
                 <KpiTile label="Expenses" value={formatGBP(s.totals.expenses)} />
-                <KpiTile label="Profit" value={formatGBP(s.totals.profit)} tone={s.totals.profit >= 0 ? 'success' : 'danger'} hint={s.totals.revenue ? `${formatPct(s.totals.profit / s.totals.revenue)} margin` : undefined} />
+                <KpiTile label="Profit" value={formatGBP(s.totals.profit)} tone={s.totals.profit >= 0 ? 'success' : 'danger'} hint={[s.totals.revenue ? `${formatPct(s.totals.profit / s.totals.revenue)} margin` : null, hasEstimate ? "incl. this week's estimate" : null].filter(Boolean).join(' · ') || undefined} />
                 <KpiTile label="Sales" value={formatNumber(s.totals.sales)} hint={s.totals.sales ? `${formatGBP(s.totals.revenue / s.totals.sales)} per sale` : undefined} />
               </>
             )}
           </div>
-          <div className="grid gap-6 lg:grid-cols-3">
-            <Card className="lg:col-span-2">
-              <CardHeader title="Weekly money flow" description="Revenue against payroll and expenses" />
+          <div className="grid grid-cols-1 gap-6 lg:grid-cols-3">
+            <Card className="min-w-0 lg:col-span-2">
+              <CardHeader title="Weekly money flow" description={s ? `Revenue against payroll and expenses per pay week (Mon–Sun) · ${formatRangeLabel(s.from, s.to)}` : 'Revenue against payroll and expenses per pay week (Mon–Sun)'} />
               {!s ? <ChartSkeleton /> : s.weeks.length ? (
-                <TrendChart data={s.weeks.map((w) => ({ week: w.weekStart, revenue: w.revenue, payroll: w.payroll, expenses: w.expenses }))} xKey="week" series={[{ key: 'revenue', label: 'Revenue' }, { key: 'payroll', label: 'Payroll' }, { key: 'expenses', label: 'Expenses' }]} kind="bar" stacked xFormatter={formatDateShort} yFormatter={(v) => formatGBP(v)} height={260} />
+                <TrendChart data={s.weeks.map((w) => ({ week: w.weekStart, revenue: w.revenue, payroll: w.payroll, expenses: w.expenses }))} xKey="week" series={[{ key: 'revenue', label: 'Revenue' }, { key: 'payroll', label: 'Payroll' }, { key: 'expenses', label: 'Expenses' }]} kind="bar" xFormatter={formatDateShort} yFormatter={(v) => formatGBP(v)} height={260} />
               ) : <EmptyState title="No weeks in range" size="sm" className="border-0" />}
             </Card>
-            <Card>
+            <Card className="min-w-0">
               <CardHeader title="Payroll punctuality" description={s ? `${formatNumber(s.payroll.runs)} runs · avg ${formatDecimal(s.payroll.avgDaysLate)} days late when late` : undefined} />
               {!s ? <ChartSkeleton height={200} /> : (
                 <>
@@ -174,7 +185,7 @@ function Company({ onOpen }: { onOpen: (r: PayrollRunWithUser) => void }) {
               )}
             </Card>
           </div>
-          <Card padded={false}>
+          <Card padded={false} className="min-w-0 overflow-hidden">
             <div className="p-5 pb-3"><CardHeader title="By campaign" description="Sales, revenue, rep commission and margin" className="mb-0" /></div>
             <DataTable
               rows={s?.byCampaign ?? []}
@@ -194,14 +205,14 @@ function Company({ onOpen }: { onOpen: (r: PayrollRunWithUser) => void }) {
         </>
       )}
 
-      <Card padded={false}>
+      <Card padded={false} className="min-w-0 overflow-hidden">
         <div className="p-5 pb-3"><CardHeader title="Pending payroll" description="Runs awaiting payment — mark them paid once the transfer has gone" className="mb-0" /></div>
         {pending.isError ? <ErrorState error={pending.error} onRetry={() => void pending.refetch()} className="m-5" /> : (
           <PayrollRunsTable rows={pending.data ?? []} loading={pending.isLoading} showUser onRowClick={onOpen} onMarkPaid={markPaid} markingId={markingId} emptyMessage="Everyone is paid up" bare className="border-t border-border" />
         )}
       </Card>
 
-      <Card padded={false}>
+      <Card padded={false} className="min-w-0 overflow-hidden">
         <div className="flex items-start justify-between gap-3 p-5 pb-3">
           <CardHeader title="Expenses" description={expenses.data ? `${formatNumber(expenses.data.length)} items · ${formatGBP(expenses.data.reduce((a, e) => a + e.amount, 0))}` : undefined} className="mb-0" />
           <Button size="sm" onClick={() => setAddOpen(true)} leftIcon={<Plus className="h-4 w-4" aria-hidden />}>Add expense</Button>

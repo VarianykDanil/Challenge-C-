@@ -44,13 +44,13 @@ export function CandidateDetailPage() {
       {q.isError ? (
         <ErrorState error={q.error} onRetry={() => void q.refetch()} title="Could not load this candidate" />
       ) : !c ? (
-        <div className="grid gap-6 lg:grid-cols-3"><Skeleton className="h-64" /><Skeleton className="h-64 lg:col-span-2" /></div>
+        <div className="grid grid-cols-1 gap-6 lg:grid-cols-3"><Skeleton className="h-64" /><Skeleton className="h-64 lg:col-span-2" /></div>
       ) : (
         <div className="space-y-6">
           <Card><CardHeader title="Pipeline" description={`Currently at ${STAGE_LABELS[c.stage]} since ${formatDate(c.stageUpdatedAt)}`} /><StageStepper stage={c.stage} /></Card>
 
-          <div className="grid gap-6 lg:grid-cols-3">
-            <div className="space-y-6">
+          <div className="grid grid-cols-1 gap-6 lg:grid-cols-3">
+            <div className="min-w-0 space-y-6">
               <Card>
                 <CardHeader title="Profile" actions={<StageBadge stage={c.stage} />} />
                 <dl className="space-y-3 text-sm">
@@ -67,7 +67,7 @@ export function CandidateDetailPage() {
               <NotesForm key={c.id + c.stageUpdatedAt} candidate={c} canWrite={canWrite} />
             </div>
 
-            <div className="space-y-6 lg:col-span-2">
+            <div className="min-w-0 space-y-6 lg:col-span-2">
               <Card>
                 <CardHeader title="Interviews" description={`${c.interviews.length} scheduled`} actions={canWrite ? <Button size="sm" variant="outline" onClick={() => setScheduleOpen(true)}>Schedule</Button> : undefined} />
                 {c.interviews.length === 0 ? (

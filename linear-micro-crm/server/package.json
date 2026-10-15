@@ -4,10 +4,10 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "dev": "NODE_NO_WARNINGS=1 tsx watch src/index.ts",
-    "start": "NODE_ENV=production NODE_NO_WARNINGS=1 tsx src/index.ts",
+    "dev": "TZ=Europe/London NODE_NO_WARNINGS=1 tsx watch src/index.ts",
+    "start": "TZ=Europe/London NODE_ENV=production NODE_NO_WARNINGS=1 tsx src/index.ts",
     "seed": "NODE_NO_WARNINGS=1 tsx src/db/seed.ts",
-    "smoke": "NODE_NO_WARNINGS=1 tsx src/smoke.ts",
+    "smoke": "TZ=Europe/London NODE_NO_WARNINGS=1 tsx src/smoke.ts",
     "typecheck": "tsc --noEmit -p tsconfig.json"
   },
   "dependencies": {

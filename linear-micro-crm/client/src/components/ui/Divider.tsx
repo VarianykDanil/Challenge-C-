@@ -23,7 +23,7 @@ export function Divider({ label, orientation = 'horizontal', className, spacing 
   return (
     <div role="separator" className={clsx('flex items-center gap-3', SPACE_H[spacing], className)}>
       <span className="h-px flex-1 bg-border" />
-      <span className="text-xs font-medium uppercase tracking-wider text-subtle">{label}</span>
+      <span className="text-xs font-medium uppercase tracking-wider text-muted">{label}</span>
       <span className="h-px flex-1 bg-border" />
     </div>
   );

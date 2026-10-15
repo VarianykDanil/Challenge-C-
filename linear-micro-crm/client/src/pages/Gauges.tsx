@@ -2,6 +2,7 @@ import { useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { PlusCircle } from 'lucide-react';
 import type { GaugeGroupBy, GaugeSummaryRow } from '@lm/shared';
+import { BENCHMARK_DANGER_THRESHOLD, BENCHMARK_TOLERANCE } from '@lm/shared';
 import { Button, Card, CardHeader, EmptyState, PageHeader, SegmentedControl, Select, Tabs } from '@/components/ui';
 import { TrendChart } from '@/components/charts';
 import { useGaugeSummary, useTeams, useUserPerformance } from '@/api/hooks';
@@ -101,7 +102,7 @@ function SummaryView({ range, teamId, allowTeamPick, defaultGroupBy }: { range: 
             </Card>
           )}
           <GaugeSummaryTable rows={rows} groupBy={groupBy} loading={q.isLoading} onRowClick={groupBy === 'user' ? onRow : undefined} />
-          <p className="text-xs text-muted">Ratio cells are tinted against the law of averages: green at or above benchmark, amber within 20% below, red further below.</p>
+          <p className="text-xs text-muted">Ratio cells are tinted against the law of averages: green within {Math.round(BENCHMARK_TOLERANCE * 100)}% of benchmark or above, amber {Math.round(BENCHMARK_TOLERANCE * 100)}–{Math.round(BENCHMARK_DANGER_THRESHOLD * 100)}% below, red more than {Math.round(BENCHMARK_DANGER_THRESHOLD * 100)}% below.</p>
         </>
       )}
     </div>

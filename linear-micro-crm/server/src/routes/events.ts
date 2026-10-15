@@ -3,9 +3,9 @@ import { z } from 'zod';
 import { funnelRatios } from '@lm/shared';
 import { get, run, type Db } from '../db/connection.ts';
 import { Where, getEvent, listEvents, listGauges } from '../db/queries.ts';
-import { addDays, todayISO } from '../lib/dates.ts';
+import { addDays, nowHHMM, todayISO } from '../lib/dates.ts';
 import { badRequest, forbidden, notFound } from '../lib/errors.ts';
-import { canManageTeam } from '../lib/scope.ts';
+import { canManageTeam, redactEntry } from '../lib/scope.ts';
 import { idParam, isoDate, nonNegativeInt, optionalIdQuery, optionalString, parseRange, timeHHMM } from '../lib/validate.ts';
 import { currentUser, requireRole } from '../middleware/auth.ts';
 
@@ -27,9 +27,11 @@ const eventBody = z.object({
   notes: z.string().trim().max(2000).nullable().optional().default(null),
 });
 
-function defaultStatus(date: string): (typeof EVENT_STATUSES)[number] {
+/** Past → completed; today → live only once the start time has passed; otherwise scheduled. */
+function defaultStatus(date: string, startTime: string): (typeof EVENT_STATUSES)[number] {
   const today = todayISO();
-  return date < today ? 'completed' : date === today ? 'live' : 'scheduled';
+  if (date < today) return 'completed';
+  return date === today && startTime <= nowHHMM() ? 'live' : 'scheduled';
 }
 
 export function eventsRouter(db: Db): Router {
@@ -61,8 +63,8 @@ export function eventsRouter(db: Db): Router {
     const me = currentUser(req);
     const event = getEvent(db, idParam(req));
     if (!event) throw notFound('Event');
-    if (me.role === 'rep' && event.teamId !== me.teamId) throw forbidden('You can only view events of your own team');
-    const entries = listGauges(db, 'WHERE g.event_id = ?', [event.id], 'g.sales DESC, u.last_name ASC');
+    // read-only for every role; check-in times and notes of other people are stripped unless admin / that team's leader
+    const entries = listGauges(db, 'WHERE g.event_id = ?', [event.id], 'g.sales DESC, u.last_name ASC').map((e) => redactEntry(me, e));
     res.json({ ...event, entries, ratios: funnelRatios(event.totals) });
   });
 
@@ -77,7 +79,7 @@ export function eventsRouter(db: Db): Router {
       db,
       `INSERT INTO events (campaign_id, team_id, name, venue, city, type, date, start_time, end_time, status, target_sales, notes)
        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-      [body.campaignId, body.teamId, body.name, body.venue, body.city, body.type, body.date, body.startTime, body.endTime, body.status ?? defaultStatus(body.date), body.targetSales, body.notes],
+      [body.campaignId, body.teamId, body.name, body.venue, body.city, body.type, body.date, body.startTime, body.endTime, body.status ?? defaultStatus(body.date, body.startTime), body.targetSales, body.notes],
     );
     res.status(201).json(getEvent(db, r.lastInsertRowid));
   });

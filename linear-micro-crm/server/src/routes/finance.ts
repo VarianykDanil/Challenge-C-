@@ -12,14 +12,16 @@ import {
   type FinanceWeek,
   type PayPlan,
 } from '@lm/shared';
-import { all, get, run, type Db } from '../db/connection.ts';
+import { all, get, placeholders, run, type Db } from '../db/connection.ts';
+import { ensurePayrollMaterialised } from '../db/maintenance.ts';
 import { EXPENSE_SELECT, PAY_PLAN_SELECT, Where, getExpense, getPayPlan, getPayroll, getUser, listGauges, listPayroll } from '../db/queries.ts';
 import { addDays, eachMonday, mondayOf, sundayOf, todayISO } from '../lib/dates.ts';
 import { badRequest, conflict, forbidden, notFound } from '../lib/errors.ts';
 import { GAUGE_FROM } from '../lib/metrics.ts';
+import { estimateWeekPayroll, nextPay } from '../lib/pay.ts';
+import { redactPayroll } from '../lib/scope.ts';
 import { idParam, isoDate, optionalIdQuery, optionalString, parseRange } from '../lib/validate.ts';
 import { currentUser, requireRole } from '../middleware/auth.ts';
-import { nextPay } from '../lib/pay.ts';
 
 const PAYROLL_STATUSES = ['pending', 'paid', 'late', 'failed'] as const;
 const EXPENSE_CATEGORIES = ['venue', 'travel', 'office', 'software', 'recruitment', 'marketing', 'other'] as const;
@@ -44,14 +46,17 @@ export function financeRouter(db: Db): Router {
   router.get('/payroll', (req, res) => {
     const me = currentUser(req);
     const today = todayISO();
+    ensurePayrollMaterialised(db, today);
     const { from, to } = parseRange(req.query, last12Weeks(today));
     const where = new Where().add('p.week_start BETWEEN ? AND ?', from, to);
     const userId = optionalIdQuery(req.query.userId, 'userId');
     const teamId = optionalIdQuery(req.query.teamId, 'teamId');
     const status = optionalString(req.query.status);
     if (status) {
-      if (!PAYROLL_STATUSES.includes(status as (typeof PAYROLL_STATUSES)[number])) throw badRequest('Invalid status');
-      where.add('p.status = ?', status);
+      // one status or a comma list, e.g. status=pending,failed for "everything still to pay"
+      const statuses = status.split(',').map((s) => s.trim()).filter(Boolean);
+      if (!statuses.length || statuses.some((s) => !PAYROLL_STATUSES.includes(s as (typeof PAYROLL_STATUSES)[number]))) throw badRequest('Invalid status');
+      where.add(`p.status IN (${placeholders(statuses.length)})`, ...statuses);
     }
     if (me.role === 'rep' || me.role === 'recruiter') {
       if (userId && userId !== me.id) throw forbidden('You can only view your own payroll');
@@ -70,18 +75,20 @@ export function financeRouter(db: Db): Router {
       if (userId) where.add('p.user_id = ?', userId);
       if (teamId) where.add('u.team_id = ?', teamId);
     }
-    res.json(listPayroll(db, `${where}`, where.params));
+    res.json(listPayroll(db, `${where}`, where.params).map((r) => redactPayroll(me, r)));
   });
 
   // ── my earnings ── (declared before /payroll/:id so the literal path wins)
   router.get('/me', (req, res) => {
     const me = currentUser(req);
+    const today = todayISO();
+    ensurePayrollMaterialised(db, today);
     const weeksRaw = Number(req.query.weeks ?? 12);
     const weeks = Number.isInteger(weeksRaw) && weeksRaw > 0 ? Math.min(weeksRaw, 104) : 12;
-    const since = addDays(mondayOf(todayISO()), -weeks * 7);
+    const since = addDays(mondayOf(today), -weeks * 7);
     const runs = listPayroll(db, 'WHERE p.user_id = ? AND p.week_start >= ?', [me.id, since]);
     const settled = runs.filter((r) => r.paidDate !== null);
-    const pay = nextPay(db, me);
+    const pay = nextPay(db, me, today);
     res.json({
       runs,
       totals: {
@@ -94,8 +101,11 @@ export function financeRouter(db: Db): Router {
     });
   });
 
-  router.get('/pay-plans', (_req, res) => {
-    res.json(all<PayPlan>(db, `${PAY_PLAN_SELECT} ORDER BY id`));
+  // Pay plans are HR-sensitive: admins see them all, everyone else only the plan they are on (an array of one).
+  router.get('/pay-plans', (req, res) => {
+    const me = currentUser(req);
+    if (me.role === 'admin') return res.json(all<PayPlan>(db, `${PAY_PLAN_SELECT} ORDER BY id`));
+    res.json(all<PayPlan>(db, `${PAY_PLAN_SELECT} WHERE id = ?`, [me.payPlanId]));
   });
 
   // ── payslip ──
@@ -109,13 +119,14 @@ export function financeRouter(db: Db): Router {
     if (!allowed) throw forbidden('You cannot view this payslip');
     const plan = getPayPlan(db, target.payPlanId);
     const entries = listGauges(db, 'WHERE g.user_id = ? AND g.date BETWEEN ? AND ?', [run_.userId, run_.weekStart, run_.weekEnd], 'g.date ASC');
-    res.json({ ...run_, plan, entries });
+    res.json({ ...redactPayroll(me, run_), plan, entries });
   });
 
   router.post('/payroll/:id/pay', requireRole('admin'), (req, res) => {
     const id = idParam(req);
     const existing = getPayroll(db, id);
     if (!existing) throw notFound('Payroll run');
+    // pending AND failed runs can be paid; only money that already landed is refused
     if (existing.status === 'paid' || existing.status === 'late') throw conflict(`Payroll run ${existing.reference} was already paid on ${existing.paidDate}`);
     const { paidDate } = z.object({ paidDate: isoDate.optional() }).parse(req.body ?? {});
     const today = todayISO();
@@ -132,7 +143,8 @@ export function financeRouter(db: Db): Router {
     const { from, to } = parseRange(req.query, last12Weeks(today));
     const teamId = me.role === 'leader' ? me.teamId : null;
     if (me.role === 'leader' && teamId === null) throw forbidden('You are not assigned to a team');
-    res.json(financeSummary(db, from, to, teamId));
+    ensurePayrollMaterialised(db, today);
+    res.json(financeSummary(db, from, to, teamId, today));
   });
 
   // ── expenses ──
@@ -170,36 +182,52 @@ export function financeRouter(db: Db): Router {
   return router;
 }
 
-/** Company-wide (teamId null) or team-scoped finance summary. */
-export function financeSummary(db: Db, from: string, to: string, teamId: number | null): FinanceSummary {
+/**
+ * Company-wide (teamId null) or team-scoped finance summary.
+ *
+ * Payroll runs are weekly (Mon–Sun), so the requested window is snapped outwards to whole pay weeks
+ * (`mondayOf(from)` … `sundayOf(to)`) and revenue, payroll and expenses are all measured over those identical days —
+ * a month preset therefore never charges a full week's wages against four days of revenue, and adjacent months never
+ * double-count a run. The response's `from`/`to` are the snapped window. A week that has started but has no runs yet
+ * (the week in progress) is charged at the live estimate and flagged `estimated`.
+ */
+export function financeSummary(db: Db, from: string, to: string, teamId: number | null, today = todayISO()): FinanceSummary {
+  const wkFrom = mondayOf(from);
+  const wkTo = sundayOf(to);
   const teamGauge = teamId ? ' AND u.team_id = ?' : '';
   const teamPayroll = teamId ? ' AND u.team_id = ?' : '';
   const teamExpense = teamId ? ' AND x.event_id IN (SELECT id FROM events WHERE team_id = ?)' : '';
   const tp = (): (number | string)[] => (teamId ? [teamId] : []);
+  const latestRunWeek = get<{ w: string | null }>(db, `SELECT MAX(week_start) AS w FROM payroll_runs`)!.w ?? '';
 
   const weeks: FinanceWeek[] = [];
-  for (const monday of eachMonday(from, to)) {
-    const wFrom = monday < from ? from : monday;
-    const wTo = sundayOf(monday) > to ? to : sundayOf(monday);
+  for (const monday of eachMonday(wkFrom, wkTo)) {
+    const sunday = sundayOf(monday);
     const g = get<{ revenue: number; sales: number }>(
       db,
       `SELECT COALESCE(SUM(g.sales * c.payout_per_sale), 0) AS revenue, COALESCE(SUM(g.sales), 0) AS sales ${GAUGE_FROM} WHERE g.date BETWEEN ? AND ?${teamGauge}`,
-      [wFrom, wTo, ...tp()],
+      [monday, sunday, ...tp()],
     )!;
-    const p = get<{ payroll: number }>(
+    const p = get<{ payroll: number; runs: number }>(
       db,
-      `SELECT COALESCE(SUM(p.gross), 0) AS payroll FROM payroll_runs p JOIN users u ON u.id = p.user_id WHERE p.week_start = ?${teamPayroll}`,
+      `SELECT COALESCE(SUM(p.gross), 0) AS payroll, COUNT(*) AS runs FROM payroll_runs p JOIN users u ON u.id = p.user_id WHERE p.week_start = ?${teamPayroll}`,
       [monday, ...tp()],
     )!;
     const x = get<{ expenses: number }>(
       db,
       `SELECT COALESCE(SUM(x.amount), 0) AS expenses FROM expenses x WHERE x.date BETWEEN ? AND ?${teamExpense}`,
-      [wFrom, wTo, ...tp()],
+      [monday, sunday, ...tp()],
     )!;
     const revenue = round2(Number(g.revenue));
-    const payroll = round2(Number(p.payroll));
     const expenses = round2(Number(x.expenses));
-    weeks.push({ weekStart: monday, revenue, payroll, expenses, profit: round2(revenue - payroll - expenses), sales: Number(g.sales) });
+    const week: FinanceWeek = { weekStart: monday, revenue, payroll: round2(Number(p.payroll)), expenses, profit: 0, sales: Number(g.sales) };
+    // No runs yet for a week that has started and lies after the last materialised week → the week in progress.
+    if (Number(p.runs) === 0 && monday <= today && monday > latestRunWeek) {
+      week.payroll = estimateWeekPayroll(db, monday, teamId, today);
+      week.estimated = true;
+    }
+    week.profit = round2(revenue - week.payroll - expenses);
+    weeks.push(week);
   }
   const totals = weeks.reduce(
     (acc, w) => ({
@@ -212,14 +240,18 @@ export function financeSummary(db: Db, from: string, to: string, teamId: number 
     { revenue: 0, payroll: 0, expenses: 0, profit: 0, sales: 0 },
   );
 
+  // Commission is what the reps actually earn on each campaign's sales — their pay-plan rate, the same figure payroll
+  // uses — not the campaign's nominal rep_commission_per_sale rate card. Margin = revenue − that commission, in pounds.
   const byCampaign = all<{ campaignId: number; campaignName: string; campaignColor: string; sales: number; revenue: number; commission: number }>(
     db,
     `SELECT c.id AS campaignId, c.name AS campaignName, c.color AS campaignColor,
             COALESCE(SUM(g.sales), 0) AS sales,
             COALESCE(SUM(g.sales * c.payout_per_sale), 0) AS revenue,
-            COALESCE(SUM(g.sales * c.rep_commission_per_sale), 0) AS commission
-     ${GAUGE_FROM} WHERE g.date BETWEEN ? AND ?${teamGauge} GROUP BY c.id ORDER BY revenue DESC`,
-    [from, to, ...tp()],
+            COALESCE(SUM(g.sales * pp.commission_per_sale), 0) AS commission
+     ${GAUGE_FROM}
+     JOIN pay_plans pp ON pp.id = u.pay_plan_id
+     WHERE g.date BETWEEN ? AND ?${teamGauge} GROUP BY c.id ORDER BY revenue DESC`,
+    [wkFrom, wkTo, ...tp()],
   ).map<CampaignFinance>((r) => ({
     ...r,
     revenue: round2(Number(r.revenue)),
@@ -229,7 +261,7 @@ export function financeSummary(db: Db, from: string, to: string, teamId: number 
 
   // paid = money has landed (status paid OR late); late = the subset paid after the due date;
   // failed is derived by the UI as runs − paid − pending.
-  const runs = listPayroll(db, `WHERE p.week_start BETWEEN ? AND ?${teamPayroll}`, [mondayOf(from), to, ...tp()]);
+  const runs = listPayroll(db, `WHERE p.week_start BETWEEN ? AND ?${teamPayroll}`, [wkFrom, wkTo, ...tp()]);
   const settled = runs.filter((r) => r.status === 'paid' || r.status === 'late');
   const late = settled.filter((r) => r.status === 'late');
   const pendingRuns = runs.filter((r) => r.status === 'pending');
@@ -237,12 +269,12 @@ export function financeSummary(db: Db, from: string, to: string, teamId: number 
   const expensesByCategory = all<{ category: FinanceSummary['expensesByCategory'][number]['category']; amount: number }>(
     db,
     `SELECT x.category, COALESCE(SUM(x.amount), 0) AS amount FROM expenses x WHERE x.date BETWEEN ? AND ?${teamExpense} GROUP BY x.category ORDER BY amount DESC`,
-    [from, to, ...tp()],
+    [wkFrom, wkTo, ...tp()],
   ).map((r) => ({ category: r.category, amount: round2(Number(r.amount)) }));
 
   return {
-    from,
-    to,
+    from: wkFrom,
+    to: wkTo,
     totals,
     weeks,
     byCampaign,

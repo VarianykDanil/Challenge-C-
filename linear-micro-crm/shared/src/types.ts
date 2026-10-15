@@ -21,7 +21,9 @@ export type Position =
   | 'team_leader'
   | 'crew_leader'
   | 'assistant_owner'
-  | 'owner';
+  | 'owner'
+  /** Office-based recruiter (no field sales; paid Mon–Fri, bonus on hires). */
+  | 'recruiter';
 
 export const POSITIONS: Position[] = [
   'trainee',
@@ -30,6 +32,7 @@ export const POSITIONS: Position[] = [
   'crew_leader',
   'assistant_owner',
   'owner',
+  'recruiter',
 ];
 
 export type UserStatus = 'active' | 'on_leave' | 'left';
@@ -266,6 +269,8 @@ export interface FinanceWeek {
   expenses: number;
   profit: number;
   sales: number;
+  /** true when the week has no payroll runs yet (the week in progress) and `payroll` is the live estimate. */
+  estimated?: boolean;
 }
 
 export interface CampaignFinance {
@@ -441,6 +446,8 @@ export interface Dashboard {
   range: DashboardRange;
   from: string;
   to: string;
+  /** Comparison window behind `personal.deltas` and leaderboard `movement`: the same to-date span of the previous week / month / quarter. */
+  previous?: { from: string; to: string };
   user: UserWithTeam;
   personal: {
     totals: GaugeTotals;
@@ -473,6 +480,8 @@ export interface Dashboard {
     activeReps: number;
     revenue: number;
     payrollOnTimeRate: number;
+    /** Which window `payrollOnTimeRate` describes: the requested range, or the last 12 weeks when nothing was due in range. */
+    payrollOnTimeWindow?: 'range' | 'last12Weeks';
     openCandidates: number;
     hiresThisPeriod: number;
     trend: TrendPoint[];

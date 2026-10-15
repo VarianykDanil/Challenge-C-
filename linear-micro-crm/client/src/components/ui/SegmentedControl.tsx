@@ -37,6 +37,10 @@ export function SegmentedControl<V extends string = string>({ options, value, on
     const active = list.querySelector<HTMLElement>('[data-active="true"]');
     if (!active) return setIndicator(null);
     setIndicator({ left: active.offsetLeft, width: active.offsetWidth });
+    // On narrow screens the control scrolls inside itself; keep the chosen option in view (horizontal only).
+    const right = active.offsetLeft + active.offsetWidth;
+    if (right > list.scrollLeft + list.clientWidth) list.scrollLeft = right - list.clientWidth + 4;
+    else if (active.offsetLeft < list.scrollLeft) list.scrollLeft = Math.max(0, active.offsetLeft - 4);
   };
 
   useLayoutEffect(measure, [value, options.length, size, fullWidth]);
@@ -72,7 +76,8 @@ export function SegmentedControl<V extends string = string>({ options, value, on
       aria-label={ariaLabel}
       onKeyDown={onKeyDown}
       className={clsx(
-        'relative inline-flex items-stretch gap-0.5 rounded-lg bg-surface-2 p-0.5 ring-1 ring-inset ring-border',
+        // max-w-full + overflow-x-auto: a wide option set scrolls within the control instead of widening the page on phones.
+        'scrollbar-none relative inline-flex max-w-full items-stretch gap-0.5 overflow-x-auto rounded-lg bg-surface-2 p-0.5 ring-1 ring-inset ring-border',
         fullWidth && 'flex w-full',
         SIZE[size],
         className,
@@ -99,7 +104,7 @@ export function SegmentedControl<V extends string = string>({ options, value, on
             tabIndex={active ? 0 : -1}
             onClick={() => onChange(o.value)}
             className={clsx(
-              'focus-ring relative z-10 inline-flex flex-1 items-center justify-center gap-1.5 whitespace-nowrap rounded-md font-medium transition-colors duration-150 disabled:opacity-40',
+              'focus-ring-inset relative z-10 inline-flex flex-1 items-center justify-center gap-1.5 whitespace-nowrap rounded-md font-medium transition-colors duration-150 disabled:opacity-40',
               active ? 'text-fg' : 'text-muted hover:text-fg',
             )}
           >

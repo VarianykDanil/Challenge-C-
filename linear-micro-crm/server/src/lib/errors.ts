@@ -14,3 +14,4 @@ export const unauthorized = (message = 'Authentication required') => new HttpErr
 export const forbidden = (message = 'Forbidden') => new HttpError(403, message);
 export const notFound = (what = 'Resource') => new HttpError(404, `${what} not found`);
 export const conflict = (message: string) => new HttpError(409, message);
+export const tooManyRequests = (message: string) => new HttpError(429, message);

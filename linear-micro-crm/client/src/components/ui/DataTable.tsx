@@ -1,4 +1,4 @@
-import { useMemo, useState, type ReactNode } from 'react';
+import { useEffect, useMemo, useRef, useState, type ReactNode, type SyntheticEvent } from 'react';
 import { ArrowDown, ArrowUp, ChevronsUpDown, Inbox } from 'lucide-react';
 import clsx from 'clsx';
 
@@ -49,6 +49,22 @@ export interface DataTableProps<T> {
   bare?: boolean;
 }
 
+/** Descendants that own their own interaction — a click or key inside them must not activate the row. */
+const INTERACTIVE = 'button, a, input, select, textarea, label, [role="dialog"], [role="menu"], [role="listbox"], [role="combobox"], [data-stop-row]';
+
+/**
+ * True when an event on a clickable row should count as activating the row. Ignores events whose
+ * target lives in a nested control, and events that only reach the row through React's tree (a
+ * portaled Modal or Dropdown opened from inside the row bubbles synthetic events to the <tr>).
+ */
+function isRowActivation(e: SyntheticEvent<HTMLTableRowElement>): boolean {
+  const row = e.currentTarget;
+  const target = e.target as HTMLElement | null;
+  if (!target || !row.contains(target)) return false;
+  const hit = target.closest(INTERACTIVE);
+  return !hit || !row.contains(hit) || hit === row;
+}
+
 const HIDE = { sm: 'hidden sm:table-cell', md: 'hidden md:table-cell', lg: 'hidden lg:table-cell', xl: 'hidden xl:table-cell' } as const;
 
 function compare(a: string | number | null, b: string | number | null): number {
@@ -90,15 +106,41 @@ export function DataTable<T>({
       .map((x) => x.r);
   }, [rows, sort, columns, onSortChange]);
 
+  // Horizontal overflow affordance: edge fades + a one-off "swipe" hint instead of silently clipping columns.
+  const scrollRef = useRef<HTMLDivElement>(null);
+  const [edge, setEdge] = useState({ left: false, right: false });
+  useEffect(() => {
+    const el = scrollRef.current;
+    if (!el) return;
+    const update = () => {
+      const max = el.scrollWidth - el.clientWidth;
+      const next = { left: el.scrollLeft > 1, right: max - el.scrollLeft > 1 };
+      setEdge((prev) => (prev.left === next.left && prev.right === next.right ? prev : next));
+    };
+    update();
+    el.addEventListener('scroll', update, { passive: true });
+    const ro = typeof ResizeObserver !== 'undefined' ? new ResizeObserver(update) : null;
+    ro?.observe(el);
+    if (el.firstElementChild) ro?.observe(el.firstElementChild);
+    return () => { el.removeEventListener('scroll', update); ro?.disconnect(); };
+  }, []);
+  const scrollable = edge.left || edge.right;
+
   const cellPad = dense ? 'px-3 py-1.5' : 'px-4 py-3';
   const alignClass = (a?: Column<T>['align']) => (a === 'right' ? 'text-right' : a === 'center' ? 'text-center' : 'text-left');
   const isEmpty = !loading && rows.length === 0;
 
   return (
-    <div
-      className={clsx('relative w-full overflow-auto scrollbar-thin', !bare && 'rounded-xl border border-border bg-surface shadow-card', className)}
-      style={maxHeight ? { maxHeight } : undefined}
-    >
+    <div className={clsx('relative w-full', !bare && 'rounded-xl border border-border bg-surface shadow-card', className)}>
+      <div
+        ref={scrollRef}
+        className="scrollbar-thin relative w-full overflow-auto rounded-[inherit]"
+        style={maxHeight ? { maxHeight } : undefined}
+        // A scrollable region must be reachable by keyboard; it gets a name from the caption.
+        tabIndex={scrollable ? 0 : undefined}
+        role={scrollable ? 'region' : undefined}
+        aria-label={scrollable ? (caption ?? 'Scrollable table') : undefined}
+      >
       <table className={clsx('w-full border-separate border-spacing-0 text-sm', dense && 'text-[13px]')}>
         {caption && <caption className="sr-only">{caption}</caption>}
         <thead className={clsx(stickyHeader && 'sticky top-0 z-10')}>
@@ -126,12 +168,13 @@ export function DataTable<T>({
                       type="button"
                       onClick={() => toggle(c)}
                       className={clsx(
-                        'focus-ring -mx-1.5 inline-flex max-w-full items-center gap-1 rounded-md px-1.5 py-0.5 transition-colors hover:text-fg',
+                        // No truncation: the header sets the column's minimum width so titles always read in full.
+                        'focus-ring -mx-1.5 inline-flex items-center gap-1 whitespace-nowrap rounded-md px-1.5 py-0.5 transition-colors hover:text-fg',
                         c.align === 'right' && 'flex-row-reverse',
                         active && 'text-fg',
                       )}
                     >
-                      <span className="truncate">{c.header}</span>
+                      <span>{c.header}</span>
                       <Icon className={clsx('h-3.5 w-3.5 shrink-0', active ? 'text-primary' : 'text-subtle')} aria-hidden />
                     </button>
                   ) : (
@@ -172,8 +215,13 @@ export function DataTable<T>({
               return (
                 <tr
                   key={key}
-                  onClick={onRowClick ? () => onRowClick(r) : undefined}
-                  onKeyDown={onRowClick ? (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onRowClick(r); } } : undefined}
+                  onClick={onRowClick ? (e) => { if (isRowActivation(e)) onRowClick(r); } : undefined}
+                  onKeyDown={onRowClick ? (e) => {
+                    if (e.key !== 'Enter' && e.key !== ' ') return;
+                    if (!isRowActivation(e)) return; // let nested controls (select, buttons, dialogs) handle their own keys
+                    e.preventDefault();
+                    onRowClick(r);
+                  } : undefined}
                   tabIndex={onRowClick ? 0 : undefined}
                   aria-selected={selected || undefined}
                   className={clsx(
@@ -215,6 +263,14 @@ export function DataTable<T>({
           </tfoot>
         )}
       </table>
+      </div>
+      {edge.right && <div aria-hidden className="pointer-events-none absolute inset-y-0 right-0 z-20 w-12 rounded-r-[inherit] bg-gradient-to-l from-surface to-transparent" />}
+      {edge.left && <div aria-hidden className="pointer-events-none absolute inset-y-0 left-0 z-20 w-8 rounded-l-[inherit] bg-gradient-to-r from-surface to-transparent" />}
+      {edge.right && !edge.left && (
+        <div aria-hidden className="pointer-events-none absolute bottom-2 right-3 z-20 rounded-full bg-fg/85 px-2 py-0.5 text-[11px] font-medium text-bg shadow-pop">
+          <span className="pointer-coarse:hidden">Scroll</span><span className="hidden pointer-coarse:inline">Swipe</span> to see more →
+        </div>
+      )}
     </div>
   );
 }

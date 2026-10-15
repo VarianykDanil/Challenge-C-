@@ -34,15 +34,15 @@ export function UserDetailPage() {
       <PageHeader
         breadcrumbs={<Link to="/team" className="inline-flex items-center gap-1 hover:underline"><ArrowLeft className="h-3 w-3" aria-hidden /> Team</Link>}
         title={u ? <span className="flex items-center gap-3"><Avatar name={fullName(u)} color={u.avatarColor} size="lg" />{fullName(u)}{u.id === me.id && <Badge tone="primary">You</Badge>}</span> : <Skeleton className="h-9 w-64" />}
-        description={u ? <span className="flex flex-wrap items-center gap-2">{POSITION_LABELS[u.position]} · {ROLE_LABELS[u.role]}{u.teamName && <Badge tone="neutral">{u.teamName}</Badge>}<UserStatusBadge status={u.status} /><span className="font-mono text-xs">{u.employeeId}</span></span> : undefined}
+        description={u ? <span className="flex flex-wrap items-center gap-2">{POSITION_LABELS[u.position]} · {ROLE_LABELS[u.role]}{u.teamName && <Badge tone="neutral">{u.teamName}</Badge>}<UserStatusBadge status={u.status} />{u.employeeId && <span className="font-mono text-xs">{u.employeeId}</span>}</span> : undefined}
         actions={isAdmin && u ? <Button variant="outline" onClick={() => setEditOpen(true)} leftIcon={<Pencil className="h-4 w-4" aria-hidden />}>Edit profile</Button> : undefined}
       />
 
       {userQ.isError ? (
         <ErrorState error={userQ.error} onRetry={() => void userQ.refetch()} title="Could not load this profile" />
       ) : (
-        <div className="grid gap-6 lg:grid-cols-4">
-          <div className="space-y-6">
+        <div className="grid grid-cols-1 gap-6 lg:grid-cols-4">
+          <div className="min-w-0 space-y-6">
             <Card>
               <CardHeader title="Contact" />
               {!u ? <div className="space-y-2"><Skeleton /><Skeleton /><Skeleton /></div> : (
@@ -70,7 +70,7 @@ export function UserDetailPage() {
               </Card>
             )}
           </div>
-          <div className="space-y-5 lg:col-span-3">
+          <div className="min-w-0 space-y-5 lg:col-span-3">
             <RangePicker value={range} onChange={setRange} />
             <PerformancePanel data={perf.data} loading={perf.isLoading} error={perf.error} onRetry={() => void perf.refetch()} />
           </div>

@@ -124,15 +124,29 @@ export function recruitmentRouter(db: Db): Router {
     const id = idParam(req);
     const candidate = getCandidate(db, id);
     if (!candidate) throw notFound('Candidate');
-    const { stage, note } = z.object({ stage: z.enum(STAGES), note: z.string().trim().max(2000).optional() }).parse(req.body);
+    const { stage, note, teamId, position } = z
+      .object({
+        stage: z.enum(STAGES),
+        note: z.string().trim().max(2000).optional(),
+        /** hire only: the team the new rep joins (default: the candidate owner's team, or none) */
+        teamId: z.number().int().positive().nullable().optional(),
+        /** hire only: entry positions only — nobody is minted as a leader or owner through recruitment */
+        position: z.enum(['trainee', 'field_rep']).optional(),
+      })
+      .parse(req.body);
     if (candidate.stage === stage) throw conflict(`Candidate is already at stage ${stage}`);
     if (candidate.stage === 'hired') throw conflict('Hired candidates cannot change stage');
+    if (stage === 'hired' && teamId != null && !get(db, `SELECT 1 FROM teams WHERE id = ?`, [teamId])) throw badRequest('Unknown teamId');
     const now = nowISO();
     const isTerminal = TERMINAL_STAGES.includes(stage);
     transaction(db, () => {
       let hiredUserId: number | null = candidate.hiredUserId;
       if (stage === 'hired' && hiredUserId === null) {
         const owner = candidate.ownerId ? getUser(db, candidate.ownerId) : undefined;
+        const newTeamId = teamId !== undefined ? teamId : (owner?.teamId ?? null);
+        // the position is restricted to entry roles and the pay plan is always the server default for it,
+        // whatever the body or the application said (recruiters/leaders cannot choose plans)
+        const newPosition: Position = position ?? (candidate.positionApplied === 'field_rep' ? 'field_rep' : 'trainee');
         const base = `${candidate.firstName}.${candidate.lastName}`.toLowerCase().replace(/[^a-z0-9.]/g, '');
         let email = `${base}@linear-mcr.co.uk`;
         for (let i = 2; get(db, `SELECT 1 FROM users WHERE lower(email) = ?`, [email]); i++) email = `${base}${i}@linear-mcr.co.uk`;
@@ -142,8 +156,8 @@ export function recruitmentRouter(db: Db): Router {
           `INSERT INTO users (employee_id, email, first_name, last_name, role, position, team_id, pay_plan_id, start_date, status, phone, avatar_color, city)
            VALUES (?, ?, ?, ?, 'rep', ?, ?, ?, ?, 'active', ?, ?, ?)`,
           [
-            nextEmployeeId(db), email, candidate.firstName, candidate.lastName, candidate.positionApplied, owner?.teamId ?? null,
-            defaultPayPlanId(db, candidate.positionApplied), todayISO(), candidate.phone, pickAvatarColor(Number(count)), candidate.city,
+            nextEmployeeId(db), email, candidate.firstName, candidate.lastName, newPosition, newTeamId,
+            defaultPayPlanId(db, newPosition), todayISO(), candidate.phone, pickAvatarColor(Number(count)), candidate.city,
           ],
         );
         hiredUserId = r.lastInsertRowid;

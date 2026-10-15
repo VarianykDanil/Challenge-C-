@@ -88,8 +88,8 @@ export function EventDetailPage() {
 
           {ev && ratios ? <TotalsKpis totals={ev.totals} ratios={ratios} days={ev.repCount} /> : <div className="grid grid-cols-2 gap-3 md:grid-cols-3 xl:grid-cols-6"><KpiSkeletons count={6} /></div>}
 
-          <div className="grid gap-6 lg:grid-cols-3">
-            <Card className="lg:col-span-1">
+          <div className="grid grid-cols-1 gap-6 lg:grid-cols-3">
+            <Card className="min-w-0 lg:col-span-1">
               <CardHeader title="Event funnel" description="All reps combined vs benchmarks" />
               {ev && ratios ? <FunnelChart totals={ev.totals} ratios={ratios} showBenchmarks /> : <Skeleton className="h-48" />}
               {ev?.notes && (
@@ -99,15 +99,16 @@ export function EventDetailPage() {
                 </div>
               )}
             </Card>
-            <Card padded={false} className="lg:col-span-2">
+            <Card padded={false} className="min-w-0 overflow-hidden lg:col-span-2">
               <div className="p-5 pb-3"><CardHeader title="Gauges by rep" description="Each person's day, with check-in punctuality" className="mb-0" /></div>
               <GaugeEntriesTable
                 rows={ev?.entries ?? []}
                 loading={q.isLoading}
                 showEvent={false}
                 showDate={false}
-                onEdit={canManageGauges || !!myEntry ? (row) => { if (canManageGauges || row.userId === me.id) { setEditEntry(row); setLogOpen(true); } } : undefined}
+                onEdit={canManageGauges || !!myEntry ? (row) => { setEditEntry(row); setLogOpen(true); } : undefined}
                 onDelete={canManageGauges ? (row) => setDeleteEntry(row) : undefined}
+                canEditRow={(row) => canManageGauges || row.userId === me.id}
                 emptyMessage="No gauges logged for this event yet"
                 bare className="border-t border-border"
               />

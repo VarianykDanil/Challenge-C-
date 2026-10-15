@@ -1,12 +1,12 @@
 import { useMemo, useState } from 'react';
 import { CalendarDays, Plus } from 'lucide-react';
-import type { EventStatus } from '@lm/shared';
+import type { EventStatus, SalesEventWithMeta } from '@lm/shared';
 import { Button, EmptyState, PageHeader, Select } from '@/components/ui';
 import { useCampaigns, useEvents, useTeams } from '@/api/hooks';
 import { useCurrentUser } from '@/auth/AuthProvider';
 import { ErrorState, ListSkeleton, RangePicker, useRangeState } from '@/features/common';
 import { EventFormModal, EventRow } from '@/features/events';
-import { isTodayISO } from '@/lib/dates';
+import { isTodayISO, todayISO } from '@/lib/dates';
 import { formatDayHeading, pluralise } from '@/lib/format';
 import { EVENT_STATUS_LABELS, optionsFrom } from '@/lib/labels';
 import { usePageTitle } from '@/lib/usePageTitle';
@@ -26,15 +26,22 @@ export function EventsPage() {
   const campaigns = useCampaigns();
   const q = useEvents({ from: range.from, to: range.to, teamId: teamId ? Number(teamId) : undefined, campaignId: campaignId ? Number(campaignId) : undefined, status });
 
-  const groups = useMemo(() => {
+  const today = todayISO();
+  // When the range spans today (e.g. the default "Upcoming" preset), list today and what is coming first,
+  // then last week's completed days under an "Earlier" divider, so nobody scrolls past history to find today.
+  const spansToday = range.from <= today && range.to >= today;
+  const { upcoming, earlier } = useMemo(() => {
     const map = new Map<string, typeof q.data>();
     for (const e of q.data ?? []) {
       const list = map.get(e.date) ?? [];
       list.push(e);
       map.set(e.date, list);
     }
-    return [...map.entries()].sort(([a], [b]) => a.localeCompare(b));
-  }, [q.data]);
+    const sorted = [...map.entries()].sort(([a], [b]) => a.localeCompare(b));
+    if (!spansToday) return { upcoming: sorted, earlier: [] as typeof sorted };
+    return { upcoming: sorted.filter(([d]) => d >= today), earlier: sorted.filter(([d]) => d < today).reverse() };
+  }, [q.data, spansToday, today]);
+  const groups = useMemo(() => [...upcoming, ...earlier], [upcoming, earlier]);
 
   return (
     <>
@@ -66,26 +73,35 @@ export function EventsPage() {
         />
       ) : (
         <div className="space-y-6">
-          <p className="text-xs text-muted">{pluralise(q.data?.length ?? 0, 'event')} across {pluralise(groups.length, 'day')}</p>
-          {groups.map(([date, events]) => {
-            const today = isTodayISO(date);
-            return (
-              <section key={date} aria-labelledby={`day-${date}`}>
-                <h2 id={`day-${date}`} className={`mb-2 flex items-center gap-2 text-sm font-semibold ${today ? 'text-primary' : 'text-fg'}`}>
-                  {today && <span className="h-2 w-2 rounded-full bg-primary" aria-hidden />}
-                  {formatDayHeading(date)}
-                  <span className="text-xs font-normal text-muted">· {pluralise(events?.length ?? 0, 'event')}</span>
-                </h2>
-                <ul className={`space-y-2 ${today ? 'rounded-xl bg-primary/5 p-2 ring-1 ring-primary/20' : ''}`}>
-                  {(events ?? []).map((e) => <EventRow key={e.id} event={e} />)}
-                </ul>
-              </section>
-            );
-          })}
+          <p className="text-xs text-muted">{pluralise(q.data?.length ?? 0, 'event')} across {pluralise(groups.length, 'day')}{spansToday && earlier.length ? ` · ${pluralise(upcoming.reduce((n, [, ev]) => n + (ev?.length ?? 0), 0), 'event')} from today` : ''}</p>
+          {spansToday && upcoming.length === 0 && <p className="rounded-xl border border-dashed border-border p-4 text-sm text-muted">Nothing scheduled from today in this range.</p>}
+          {upcoming.map(([date, events]) => <DayGroup key={date} date={date} events={events ?? []} />)}
+          {earlier.length > 0 && (
+            <>
+              <h2 className="flex items-center gap-3 text-xs font-semibold uppercase tracking-wide text-muted"><span>Earlier</span><span className="h-px flex-1 bg-border" aria-hidden /></h2>
+              {earlier.map(([date, events]) => <DayGroup key={date} date={date} events={events ?? []} />)}
+            </>
+          )}
         </div>
       )}
 
       {canCreate && <EventFormModal open={createOpen} onClose={() => setCreateOpen(false)} />}
     </>
+  );
+}
+
+function DayGroup({ date, events }: { date: string; events: SalesEventWithMeta[] }) {
+  const today = isTodayISO(date);
+  return (
+    <section aria-labelledby={`day-${date}`}>
+      <h2 id={`day-${date}`} className={`mb-2 flex items-center gap-2 text-sm font-semibold ${today ? 'text-primary' : 'text-fg'}`}>
+        {today && <span className="h-2 w-2 rounded-full bg-primary" aria-hidden />}
+        {formatDayHeading(date)}
+        <span className="text-xs font-normal text-muted">· {pluralise(events.length, 'event')}</span>
+      </h2>
+      <ul className={`space-y-2 ${today ? 'rounded-xl bg-primary/5 p-2 ring-1 ring-primary/20' : ''}`}>
+        {events.map((e) => <EventRow key={e.id} event={e} />)}
+      </ul>
+    </section>
   );
 }

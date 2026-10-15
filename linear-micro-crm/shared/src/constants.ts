@@ -21,6 +21,7 @@ export const POSITION_LABELS: Record<Position, string> = {
   crew_leader: 'Crew Leader',
   assistant_owner: 'Assistant Owner',
   owner: 'Owner',
+  recruiter: 'Recruiter',
 };
 
 export const ROLE_LABELS: Record<Role, string> = {

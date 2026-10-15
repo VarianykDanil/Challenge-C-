@@ -48,7 +48,12 @@ const EDGE: Record<KpiTone, string> = {
   info: 'before:bg-info',
 };
 
-const VALUE_SIZE = { sm: 'text-xl', md: 'text-[28px]', lg: 'text-4xl' } as const;
+// clamp(): the number shrinks with the viewport instead of truncating (desktop sizes stay 20 / 28 / 36px).
+const VALUE_SIZE = {
+  sm: 'text-[clamp(1.125rem,1.8vw,1.25rem)]',
+  md: 'text-[clamp(1.25rem,2.2vw,1.75rem)]',
+  lg: 'text-[clamp(1.5rem,2.8vw,2.25rem)]',
+} as const;
 
 export function KpiTile({ label, value, delta, deltaLabel, invertDelta, icon, hint, tone = 'default', sparkline, className, loading, size = 'md', onClick, suffix }: KpiTileProps) {
   const Tag = onClick ? 'button' : 'div';
@@ -80,16 +85,16 @@ export function KpiTile({ label, value, delta, deltaLabel, invertDelta, icon, hi
           {loading ? (
             <div className={clsx('skeleton rounded-md', size === 'sm' ? 'h-6 w-20' : 'h-8 w-28')} aria-hidden />
           ) : (
-            <div className={clsx('kpi-number flex items-baseline gap-1 truncate text-fg', VALUE_SIZE[size])}>
-              <span className="truncate">{value}</span>
+            <div className={clsx('kpi-number flex min-w-0 flex-wrap items-baseline gap-1 text-fg', VALUE_SIZE[size])}>
+              <span className="min-w-0 break-words">{value}</span>
               {suffix && <span className="font-sans text-sm font-medium text-muted">{suffix}</span>}
             </div>
           )}
           {(delta !== undefined || hint) && (
             <div className="mt-2 flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-muted">
               {delta !== undefined && !loading && <StatDelta value={delta} invert={invertDelta} />}
-              {delta !== undefined && !loading && <span className="truncate">{deltaLabel ?? 'vs previous period'}</span>}
-              {hint && <span className={clsx('truncate', delta !== undefined && 'before:mr-2 before:content-["·"]')}>{hint}</span>}
+              {delta !== undefined && !loading && <span className="line-clamp-2">{deltaLabel ?? 'vs previous period'}</span>}
+              {hint && <span className={clsx('line-clamp-2', delta !== undefined && 'before:mr-2 before:content-["·"]')}>{hint}</span>}
             </div>
           )}
         </div>

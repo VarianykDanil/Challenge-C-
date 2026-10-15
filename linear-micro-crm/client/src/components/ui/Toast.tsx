@@ -49,11 +49,12 @@ function ToastItem({ t, onDismiss }: { t: ToastMessage; onDismiss: (id: number) 
     setTimeout(() => onDismiss(t.id), 160);
   }, [onDismiss, t.id]);
 
+  const disarm = () => { if (timer.current) clearTimeout(timer.current); timer.current = null; };
   const arm = useCallback(() => {
     if (!duration) return;
+    if (timer.current) clearTimeout(timer.current);
     timer.current = setTimeout(close, duration);
   }, [close, duration]);
-  const disarm = () => { if (timer.current) clearTimeout(timer.current); };
 
   useEffect(() => { arm(); return disarm; }, [arm]);
 
@@ -61,8 +62,11 @@ function ToastItem({ t, onDismiss }: { t: ToastMessage; onDismiss: (id: number) 
   return (
     <div
       role={t.tone === 'error' ? 'alert' : 'status'}
+      // Pause the auto-dismiss while hovered or while any control inside has keyboard focus.
       onMouseEnter={disarm}
       onMouseLeave={arm}
+      onFocus={disarm}
+      onBlur={(e) => { if (!e.currentTarget.contains(e.relatedTarget as Node | null)) arm(); }}
       className={clsx(
         'pointer-events-auto relative flex w-[min(92vw,360px)] items-start gap-3 overflow-hidden rounded-xl border border-border bg-surface p-3.5 pr-10 shadow-pop',
         'before:absolute before:inset-y-0 before:left-0 before:w-1 before:content-[""]',
@@ -88,7 +92,7 @@ function ToastItem({ t, onDismiss }: { t: ToastMessage; onDismiss: (id: number) 
         type="button"
         onClick={close}
         aria-label="Dismiss notification"
-        className="focus-ring absolute right-2 top-2 inline-flex h-7 w-7 items-center justify-center rounded-md text-subtle transition-colors hover:bg-surface-2 hover:text-fg"
+        className="focus-ring absolute right-2 top-2 inline-flex h-7 w-7 items-center justify-center rounded-md text-muted transition-colors hover:bg-surface-2 hover:text-fg"
       >
         <X className="h-4 w-4" aria-hidden />
       </button>
@@ -125,7 +129,7 @@ export function ToastProvider({ children, position = 'bottom-right' }: { childre
   return (
     <ToastContext.Provider value={value}>
       {children}
-      <div className={clsx('pointer-events-none fixed z-[80] flex flex-col gap-2', pos)} aria-live="polite" aria-relevant="additions">
+      <div className={clsx('pointer-events-none fixed z-[80] flex flex-col gap-2', pos)} role="region" aria-label="Notifications" aria-live="polite" aria-relevant="additions">
         {items.map((t) => <ToastItem key={t.id} t={t} onDismiss={dismiss} />)}
       </div>
     </ToastContext.Provider>

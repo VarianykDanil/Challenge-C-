@@ -71,10 +71,16 @@ export function trendFor(db: Db, where: Where, from: string, to: string, granula
     where.params,
   );
   const byKey = new Map<string, TrendPoint>();
-  const keys = granularity === 'week' ? eachMonday(from, to) : eachDay(from, to);
+  // Weekly buckets are keyed by their Monday, except that the first bucket is clamped to `from`, so a quarter that
+  // starts mid-week is not labelled with a date before the period (its first point is the partial week from day 1).
+  const weekKey = (d: string): string => {
+    const m = mondayOf(d);
+    return m < from ? from : m;
+  };
+  const keys = granularity === 'week' ? eachMonday(from, to).map(weekKey) : eachDay(from, to);
   for (const k of keys) byKey.set(k, { date: k, sales: 0, stops: 0, presentations: 0 });
   for (const r of rows) {
-    const k = granularity === 'week' ? mondayOf(r.date) : r.date;
+    const k = granularity === 'week' ? weekKey(r.date) : r.date;
     const p = byKey.get(k);
     if (!p) continue;
     p.sales += Number(r.sales);
@@ -129,13 +135,18 @@ export interface LeaderboardOptions {
  * (previousRank − currentRank; null when the person was not ranked last period).
  */
 export function leaderboard(db: Db, opts: LeaderboardOptions): LeaderboardRow[] {
+  return rankedBoard(db, opts).rows;
+}
+
+/** The ranked rows (cut to `limit`) plus `total`, the number of people ranked before the cut. */
+export function rankedBoard(db: Db, opts: LeaderboardOptions): { rows: LeaderboardRow[]; total: number } {
   const metric = opts.metric ?? 'sales';
   const tieBreak: LeaderboardMetric = metric === 'conversion' ? 'sales' : 'conversion';
   const current = rankRows(fetchRows(db, opts.from, opts.to, opts.teamId, metric), metric, { tieBreak });
   const previous = rankRows(fetchRows(db, opts.previous.from, opts.previous.to, opts.teamId, metric), metric, { tieBreak });
   const prevRank = new Map(previous.map((r) => [r.userId, r.rank]));
   const rows = current.map((r) => ({ ...r, movement: movement(prevRank.get(r.userId), r.rank) }));
-  return opts.limit ? rows.slice(0, opts.limit) : rows;
+  return { rows: opts.limit ? rows.slice(0, opts.limit) : rows, total: rows.length };
 }
 
 export type SummaryGroup = 'user' | 'team' | 'campaign' | 'day' | 'week';

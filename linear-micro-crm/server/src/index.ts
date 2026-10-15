@@ -1,9 +1,9 @@
-/** Linear Hub API — bootstrap: open the SQLite database, create/seed it, mount the app. */
+/** Linear Hub API — bootstrap: open the SQLite database, create/seed it, run maintenance, mount the app. */
 import path from 'node:path';
 import { createApp } from './app.ts';
 import { openDb } from './db/connection.ts';
 import { createSchema, isSeeded } from './db/schema.ts';
-import { rollForwardEventStatuses } from './db/maintenance.ts';
+import { materialisePayrollRuns, rollForwardEventStatuses } from './db/maintenance.ts';
 import { DEFAULT_DB_PATH, seed } from './db/seed.ts';
 import { purgeExpiredSessions } from './middleware/auth.ts';
 
@@ -19,8 +19,28 @@ if (!isSeeded(db)) {
   );
 }
 purgeExpiredSessions(db);
-const rolled = rollForwardEventStatuses(db);
-if (rolled.completed || rolled.live) console.log(`Rolled event statuses forward: ${rolled.completed} completed, ${rolled.live} live`);
+
+/** Event statuses follow the clock (today's events go live at their start time): cheap, so every 15 minutes. */
+function rollEvents(): void {
+  const rolled = rollForwardEventStatuses(db);
+  if (rolled.completed || rolled.live) console.log(`Rolled event statuses forward: ${rolled.completed} completed, ${rolled.live} live`);
+}
+/** Payroll runs for newly completed pay weeks: once a day (the finance routes also guard for it). */
+function materialisePayroll(): void {
+  const created = materialisePayrollRuns(db);
+  if (created) console.log(`Materialised ${created} pending payroll runs for completed pay weeks`);
+}
+const guarded = (fn: () => void) => () => {
+  try {
+    fn();
+  } catch (err) {
+    console.error('Maintenance failed', err);
+  }
+};
+rollEvents();
+materialisePayroll();
+setInterval(guarded(rollEvents), 15 * 60_000).unref();
+setInterval(guarded(materialisePayroll), 86_400_000).unref();
 
 const isProduction = process.env.NODE_ENV === 'production';
 const app = createApp(db, {

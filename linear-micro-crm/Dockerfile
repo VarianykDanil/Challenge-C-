@@ -11,13 +11,13 @@ RUN npm run build
 
 FROM node:22-alpine
 WORKDIR /app
-ENV NODE_ENV=production PORT=4000 NODE_NO_WARNINGS=1
+ENV NODE_ENV=production PORT=4000 NODE_NO_WARNINGS=1 TZ=Europe/London
 COPY --from=build /app/package.json /app/package-lock.json ./
 COPY --from=build /app/shared ./shared
 COPY --from=build /app/server ./server
 COPY --from=build /app/client/dist ./client/dist
 COPY --from=build /app/client/package.json ./client/package.json
-RUN npm ci --omit=dev --no-audit --no-fund -w shared -w server && mkdir -p server/data
+RUN apk add --no-cache tzdata && npm ci --omit=dev --no-audit --no-fund -w shared -w server && mkdir -p server/data
 EXPOSE 4000
 VOLUME ["/app/server/data"]
 CMD ["npm", "start"]
