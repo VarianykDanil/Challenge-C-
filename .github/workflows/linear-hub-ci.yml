@@ -1,0 +1,36 @@
+name: Linear Hub CI
+
+on:
+  push:
+    paths: ['linear-micro-crm/**', '.github/workflows/linear-hub-ci.yml']
+  pull_request:
+    paths: ['linear-micro-crm/**', '.github/workflows/linear-hub-ci.yml']
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: linear-micro-crm
+    env:
+      TZ: Europe/London
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: linear-micro-crm/package-lock.json
+      - name: Install
+        run: npm ci --no-audit --no-fund
+      - name: Typecheck
+        run: npm run typecheck
+      - name: Unit tests (shared logic)
+        run: npm test
+      - name: API smoke test
+        run: npm run smoke -w server
+      - name: Build client
+        run: npm run build
+      - name: Docker image builds
+        run: docker build -t linear-hub:ci .
