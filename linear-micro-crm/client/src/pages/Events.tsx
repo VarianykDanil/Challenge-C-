@@ -16,7 +16,7 @@ export function EventsPage() {
   usePageTitle(COPY.nav.events.title);
   const me = useCurrentUser();
   const canCreate = me.role === 'admin' || (me.role === 'leader' && me.teamId != null);
-  const [range, setRange] = useRangeState('next_3_weeks');
+  const [range, setRange] = useRangeState('next_3_weeks', false);
   const [teamId, setTeamId] = useState<string>(me.role === 'rep' || me.role === 'leader' ? String(me.teamId ?? '') : '');
   const [campaignId, setCampaignId] = useState('');
   const [status, setStatus] = useState<EventStatus | ''>('');
@@ -45,7 +45,7 @@ export function EventsPage() {
       />
 
       <div className="mb-5 flex flex-col gap-3 rounded-xl border border-border bg-surface p-3 lg:flex-row lg:items-center lg:justify-between">
-        <RangePicker value={range} onChange={setRange} presets={['next_3_weeks', 'this_week', 'last_week', 'this_month', 'last_month']} />
+        <RangePicker value={range} onChange={setRange} presets={['next_3_weeks', 'this_week', 'last_week', 'this_month', 'last_month']} clampToToday={false} />
         <div className="grid grid-cols-1 gap-2 sm:grid-cols-3">
           <Select aria-label="Team" value={teamId} onChange={(e) => setTeamId(e.target.value)} placeholder="All teams" options={(teams.data ?? []).map((t) => ({ value: String(t.id), label: t.name }))} size="sm" />
           <Select aria-label="Campaign" value={campaignId} onChange={(e) => setCampaignId(e.target.value)} placeholder="All campaigns" options={(campaigns.data ?? []).map((c) => ({ value: String(c.id), label: c.name }))} size="sm" />

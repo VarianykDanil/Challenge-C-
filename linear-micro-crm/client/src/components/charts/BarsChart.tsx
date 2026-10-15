@@ -67,6 +67,10 @@ export function BarsChart({
     ariaLabel ??
     `Bar chart of ${primaryName} by category: ${summaryItems.join(', ')}${data.length > 12 ? ` and ${data.length - 12} more` : ''}.`;
 
+  // Fractional measures (e.g. conversion rates) need decimal ticks and the caller's formatter on the axis.
+  const maxValue = data.reduce((m, d) => Math.max(m, d.value, typeof d.secondary === 'number' ? d.secondary : 0), 0);
+  const fractional = maxValue > 0 && maxValue < 10;
+  const tickFmt = valueFormatter ?? formatCompact;
   const margin = horizontal ? { top: 4, right: values ? 48 : 12, bottom: 0, left: 0 } : { top: values ? 20 : 8, right: 12, bottom: 0, left: 0 };
   const valueLabelProps = { fill: chartTokens.fg, fontSize: 11, formatter: (v: number) => fmt(v) } as const;
 
@@ -76,16 +80,16 @@ export function BarsChart({
         <ResponsiveContainer width="100%" height="100%">
           <BarChart data={data} layout={horizontal ? 'vertical' : 'horizontal'} margin={margin} barGap={2} barCategoryGap="25%">
             <CartesianGrid horizontal={!horizontal} vertical={horizontal} stroke={chartTokens.border} strokeWidth={1} />
+            {/* Recharts 2 locates axes by child type and does not look inside fragments, so each axis is a direct child. */}
             {horizontal ? (
-              <>
-                <XAxis type="number" tick={AXIS_TICK} axisLine={false} tickLine={false} tickFormatter={formatCompact} allowDecimals={false} />
-                <YAxis type="category" dataKey="label" width={categoryWidth} tick={AXIS_TICK} axisLine={false} tickLine={false} interval={0} />
-              </>
+              <XAxis type="number" tick={AXIS_TICK} axisLine={false} tickLine={false} tickFormatter={tickFmt} allowDecimals={fractional} />
             ) : (
-              <>
-                <XAxis dataKey="label" type="category" tick={AXIS_TICK} axisLine={false} tickLine={false} tickMargin={8} interval={data.length <= 10 ? 0 : 'preserveStartEnd'} />
-                <YAxis type="number" tick={AXIS_TICK} axisLine={false} tickLine={false} width={44} tickFormatter={formatCompact} allowDecimals={false} />
-              </>
+              <XAxis dataKey="label" type="category" tick={AXIS_TICK} axisLine={false} tickLine={false} tickMargin={8} interval={data.length <= 10 ? 0 : 'preserveStartEnd'} />
+            )}
+            {horizontal ? (
+              <YAxis type="category" dataKey="label" width={categoryWidth} tick={AXIS_TICK} axisLine={false} tickLine={false} interval={0} />
+            ) : (
+              <YAxis type="number" tick={AXIS_TICK} axisLine={false} tickLine={false} width={44} tickFormatter={tickFmt} allowDecimals={fractional} />
             )}
             <Tooltip content={<ChartTooltip valueFormatter={(v) => fmt(v)} />} cursor={{ fill: chartTokens.surface2 }} isAnimationActive={false} />
             <Bar

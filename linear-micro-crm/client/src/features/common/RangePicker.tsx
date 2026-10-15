@@ -5,16 +5,18 @@ import { PERFORMANCE_PRESETS, RANGE_PRESET_LABELS, presetRange, type DateRange, 
 
 export interface RangeValue extends DateRange { preset: RangePreset | 'custom' }
 
-export function useRangeState(initial: RangePreset = 'this_week'): [RangeValue, (v: RangeValue) => void] {
-  const [value, setValue] = useState<RangeValue>(() => ({ preset: initial, ...presetRange(initial) }));
+export function useRangeState(initial: RangePreset = 'this_week', clampToToday = true): [RangeValue, (v: RangeValue) => void] {
+  const [value, setValue] = useState<RangeValue>(() => ({ preset: initial, ...presetRange(initial, new Date(), clampToToday) }));
   return [value, setValue];
 }
 
-export function RangePicker({ value, onChange, presets = PERFORMANCE_PRESETS, allowCustom = true, className }: {
+export function RangePicker({ value, onChange, presets = PERFORMANCE_PRESETS, allowCustom = true, clampToToday = true, className }: {
   value: RangeValue;
   onChange: (v: RangeValue) => void;
   presets?: RangePreset[];
   allowCustom?: boolean;
+  /** End current periods today (performance pages) instead of at the period end (planning pages such as Events). */
+  clampToToday?: boolean;
   className?: string;
 }) {
   const id = useId();
@@ -29,7 +31,7 @@ export function RangePicker({ value, onChange, presets = PERFORMANCE_PRESETS, al
         value={value.preset}
         onChange={(v) => {
           if (v === 'custom') onChange({ ...value, preset: 'custom' });
-          else onChange({ preset: v, ...presetRange(v) });
+          else onChange({ preset: v, ...presetRange(v, new Date(), clampToToday) });
         }}
         className="max-w-full overflow-x-auto"
       />

@@ -34,8 +34,18 @@ export function todayISO(): string {
   return toISODate(new Date());
 }
 
-/** Compute an inclusive `{from,to}` range for a preset. Weeks start on Monday. */
-export function presetRange(preset: RangePreset, now: Date = new Date()): DateRange {
+/**
+ * Compute an inclusive `{from,to}` range for a preset. Weeks start on Monday.
+ * With `clampToToday`, current periods (this week/month) end today rather than at the period end,
+ * so performance charts do not trail off into days that have not happened yet.
+ */
+export function presetRange(preset: RangePreset, now: Date = new Date(), clampToToday = false): DateRange {
+  const r = rawPresetRange(preset, now);
+  const today = toISODate(now);
+  return clampToToday && r.to > today && r.from <= today ? { from: r.from, to: today } : r;
+}
+
+function rawPresetRange(preset: RangePreset, now: Date): DateRange {
   switch (preset) {
     case 'this_week':
       return { from: toISODate(startOfWeek(now, WEEK_OPTS)), to: toISODate(endOfWeek(now, WEEK_OPTS)) };

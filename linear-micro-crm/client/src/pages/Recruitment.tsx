@@ -94,7 +94,13 @@ export function RecruitmentPage() {
             <Card>
               <CardHeader title="Conversion by source" description="Applied → hired" />
               {!s ? <ChartSkeleton /> : s.bySource.length ? (
-                <BarsChart data={s.bySource.map((b) => ({ label: SOURCE_LABELS[b.source], value: b.conversion, secondary: b.applied }))} horizontal valueFormatter={(v) => formatPct(v)} secondaryLabel="applied" height={240} />
+                <BarsChart
+                  data={[...s.bySource].sort((a, b) => b.applied - a.applied).map((b) => ({ label: `${SOURCE_LABELS[b.source]} · ${b.hired}/${b.applied}`, value: b.conversion }))}
+                  horizontal
+                  label="Hired"
+                  valueFormatter={(v) => formatPct(v)}
+                  height={240}
+                />
               ) : <EmptyState title="No sources yet" size="sm" className="border-0" />}
             </Card>
           </div>

@@ -42,7 +42,14 @@ function MyPay({ onOpen }: { onOpen: (r: PayrollRunWithUser) => void }) {
   const q = useMyFinance(12);
   const d = q.data;
   if (q.isError) return <ErrorState error={q.error} onRetry={() => void q.refetch()} />;
-  const trend = d ? [...d.runs].sort((a, b) => a.weekStart.localeCompare(b.weekStart)).map((r) => ({ week: r.weekStart, gross: r.gross, commission: r.commission, base: r.basePay })) : [];
+  const trend = d ? [...d.runs].sort((a, b) => a.weekStart.localeCompare(b.weekStart)).map((r) => ({ week: r.weekStart, base: r.basePay, commission: r.commission, bonus: r.bonus, overrides: r.overrides })) : [];
+  // Only plot the pay components this person actually earns (a trainee has no overrides, an owner no base).
+  const paySeries = ([
+    { key: 'base', label: 'Base' },
+    { key: 'commission', label: 'Commission' },
+    { key: 'bonus', label: 'Bonus' },
+    { key: 'overrides', label: 'Overrides' },
+  ] as const).filter((s) => trend.some((t) => t[s.key] > 0));
   return (
     <div className="space-y-6">
       <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
@@ -56,9 +63,9 @@ function MyPay({ onOpen }: { onOpen: (r: PayrollRunWithUser) => void }) {
         )}
       </div>
       <Card>
-        <CardHeader title="Earnings" description="Gross pay per week, with the commission share" />
-        {!d ? <ChartSkeleton /> : trend.length ? (
-          <TrendChart data={trend} xKey="week" series={[{ key: 'base', label: 'Base' }, { key: 'commission', label: 'Commission' }]} kind="bar" stacked xFormatter={formatDateShort} yFormatter={(v) => formatGBP(v)} height={240} />
+        <CardHeader title="Earnings" description="Gross pay per week, split by pay component" />
+        {!d ? <ChartSkeleton /> : trend.length && paySeries.length ? (
+          <TrendChart data={trend} xKey="week" series={[...paySeries]} kind="bar" stacked xFormatter={formatDateShort} yFormatter={(v) => formatGBP(v)} height={240} />
         ) : <EmptyState title={COPY.empty.payroll.title} description={COPY.empty.payroll.description} size="sm" className="border-0" />}
       </Card>
       <Card padded={false}>

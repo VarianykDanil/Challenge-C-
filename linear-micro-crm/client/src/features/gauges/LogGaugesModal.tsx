@@ -149,7 +149,7 @@ function LogGaugesForm({ onClose, event, defaultUserId, entry, onSaved }: LogGau
           </Field>
         )}
         <Field label="Date" required htmlFor={`${uid}-date`} hint={prefilledId ? 'An entry already exists for this day — saving will update it.' : undefined}>
-          <Input id={`${uid}-date`} type="date" value={date} max={presetRange('this_week').to} onChange={(e) => setDate(e.target.value)} required />
+          <Input id={`${uid}-date`} type="date" value={date} max={todayISO()} onChange={(e) => setDate(e.target.value)} required />
         </Field>
       </div>
 

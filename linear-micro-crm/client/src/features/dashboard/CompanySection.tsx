@@ -36,14 +36,6 @@ export function CompanySection({ company, rangeLabel }: { company: NonNullable<D
           ) : (
             <EmptyState title="No sales yet" size="sm" className="border-0" />
           )}
-          <ul className="mt-3 space-y-1.5 text-sm">
-            {company.byCampaign.map((c) => (
-              <li key={c.campaignId} className="flex items-center justify-between gap-2">
-                <span className="flex items-center gap-2 truncate text-muted"><span className="h-2.5 w-2.5 rounded-full" style={{ backgroundColor: c.color }} aria-hidden />{c.name}</span>
-                <span className="font-medium tabular-nums text-fg">{formatNumber(c.sales)}</span>
-              </li>
-            ))}
-          </ul>
           <p className="mt-3 text-xs text-muted">Overall conversion is <span className={`font-semibold ${ratioTone('overallConversion', company.ratios.overallConversion) === 'success' ? 'text-success' : 'text-warning'}`}>{formatPct(company.ratios.overallConversion, 1)}</span>.</p>
         </Card>
       </div>

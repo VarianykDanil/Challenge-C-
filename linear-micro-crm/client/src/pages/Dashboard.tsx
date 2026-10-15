@@ -5,15 +5,15 @@ import type { DashboardRange } from '@lm/shared';
 import { DASHBOARD_RANGE_LABELS, POSITION_LABELS } from '@lm/shared';
 import { Button, Card, CardHeader, EmptyState, KpiTile, PageHeader, SegmentedControl, Skeleton } from '@/components/ui';
 import { FunnelChart, TrendChart } from '@/components/charts';
-import { useDashboard } from '@/api/hooks';
+import { useDashboard, useLeaderboard } from '@/api/hooks';
 import { useCurrentUser } from '@/auth/AuthProvider';
 import { GAUGE_ROLES, hasRole } from '@/auth/RequireRole';
 import { Announcements, CompanySection, MiniLeaderboard, UpcomingEvents } from '@/features/dashboard';
-import { ChartSkeleton, ErrorState, KpiSkeletons, RatioCell } from '@/features/common';
+import { ChartSkeleton, ErrorState, KpiSkeletons } from '@/features/common';
 import { CoachingInsights, LogGaugesModal } from '@/features/gauges';
 import { COPY, greetingFor, motivationForDate } from '@/content/copy';
 import { formatDate, formatDateShort, formatGBP, formatNumber, formatPct, formatRangeLabel, formatRelative } from '@/lib/format';
-import { BENCHMARK_KEYS, RATIO_SHORT_LABELS, ratioTone } from '@/lib/ratios';
+import { ratioTone } from '@/lib/ratios';
 import { usePageTitle } from '@/lib/usePageTitle';
 
 const RANGE_ITEMS: { value: DashboardRange; label: string }[] = (['week', 'month', 'quarter'] as DashboardRange[]).map((value) => ({ value, label: DASHBOARD_RANGE_LABELS[value] }));
@@ -27,6 +27,10 @@ export function DashboardPage() {
   const d = q.data;
   const rangeLabel = useMemo(() => (d ? formatRangeLabel(d.from, d.to) : ''), [d]);
   const canLog = hasRole(me.role, GAUGE_ROLES);
+  // Owners/admins run the business rather than a pitch: lead with the company view.
+  const companyFirst = me.role === 'admin';
+  // People without a team (owner, office, recruiters) see the company-wide top performers instead of a team card.
+  const companyBoard = useLeaderboard({ period: range, metric: 'sales' });
 
   return (
     <>
@@ -51,6 +55,15 @@ export function DashboardPage() {
         <ErrorState error={q.error} onRetry={() => void q.refetch()} title="Could not load your dashboard" />
       ) : (
         <div className="space-y-8">
+          {companyFirst && d?.company && <CompanySection company={d.company} rangeLabel={`${formatDate(d.from)} – ${formatDate(d.to)}`} />}
+
+          {companyFirst && (
+            <div>
+              <h2 className="text-lg font-semibold text-fg">Your activity</h2>
+              <p className="text-sm text-muted">Days you worked in the field yourself{rangeLabel ? ` · ${rangeLabel}` : ''}</p>
+            </div>
+          )}
+
           {/* KPI tiles */}
           <div className="grid grid-cols-2 gap-3 md:grid-cols-3 xl:grid-cols-6">
             {!d ? (
@@ -82,11 +95,6 @@ export function DashboardPage() {
               {!d ? <ChartSkeleton /> : (
                 <>
                   <FunnelChart totals={d.personal.totals} ratios={d.personal.ratios} showBenchmarks compact />
-                  <div className="mt-3 flex flex-wrap gap-1.5">
-                    {BENCHMARK_KEYS.map((k) => (
-                      <span key={k} className="flex items-center gap-1 text-[11px] text-muted">{RATIO_SHORT_LABELS[k]} <RatioCell keyName={k} value={d.personal.ratios[k]} /></span>
-                    ))}
-                  </div>
                   <CoachingInsights totals={d.personal.totals} ratios={d.personal.ratios} className="mt-3" />
                 </>
               )}
@@ -96,11 +104,11 @@ export function DashboardPage() {
           {/* Team, events, announcements */}
           <div className="grid gap-6 lg:grid-cols-3">
             <Card>
-              <CardHeader title={d?.team ? d.team.teamName : 'Team'} description={d?.team ? `${formatNumber(d.team.members)} members · ${formatNumber(d.team.totals.sales)} sales` : undefined} actions={<Link to="/leaderboard" className="flex items-center gap-1 text-xs text-primary hover:underline">Leaderboard <ArrowRight className="h-3 w-3" aria-hidden /></Link>} />
+              <CardHeader title={d?.team ? d.team.teamName : 'Top performers'} description={d?.team ? `${formatNumber(d.team.members)} members · ${formatNumber(d.team.totals.sales)} sales` : d ? 'Across every team this period' : undefined} actions={<Link to="/leaderboard" className="flex items-center gap-1 text-xs text-primary hover:underline">Leaderboard <ArrowRight className="h-3 w-3" aria-hidden /></Link>} />
               {!d ? (
                 <div className="space-y-2"><Skeleton className="h-10" /><Skeleton className="h-10" /><Skeleton className="h-10" /></div>
               ) : !d.team ? (
-                <EmptyState title="You're not in a team yet" size="sm" className="border-0" />
+                companyBoard.data ? <MiniLeaderboard rows={companyBoard.data} highlightUserId={me.id} /> : companyBoard.isError ? <EmptyState title="Leaderboard unavailable" size="sm" className="border-0" /> : <div className="space-y-2"><Skeleton className="h-10" /><Skeleton className="h-10" /><Skeleton className="h-10" /></div>
               ) : (
                 <>
                   <dl className="mb-3 grid grid-cols-3 gap-2 text-center">
@@ -122,7 +130,7 @@ export function DashboardPage() {
             </Card>
           </div>
 
-          {d?.company && <CompanySection company={d.company} rangeLabel={`${formatDate(d.from)} – ${formatDate(d.to)}`} />}
+          {!companyFirst && d?.company && <CompanySection company={d.company} rangeLabel={`${formatDate(d.from)} – ${formatDate(d.to)}`} />}
         </div>
       )}
 
