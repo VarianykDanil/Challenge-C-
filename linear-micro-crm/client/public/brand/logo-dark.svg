@@ -1,0 +1,15 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 168 36" width="168" height="36" role="img" aria-label="Linear Hub">
+  <!-- Placeholder lockup for DARK backgrounds (dark theme, ink panels), exported from client/src/components/brand/Logo.tsx. Replace with the real logo; keep the file name. -->
+  <style>
+    text { font-family: "Inter Tight", "Inter", ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; letter-spacing: -0.02em; }
+  </style>
+  <g transform="translate(0 2)">
+    <rect x="0" y="0" width="32" height="32" rx="8" fill="#9D99FF" />
+    <g fill="none" stroke="#0B1020" stroke-width="3.2" stroke-linecap="round" transform="translate(16 16) skewX(-14) translate(-16 -16)">
+      <path d="M10 10h6" />
+      <path d="M10 16h10" />
+      <path d="M10 22h14" />
+    </g>
+  </g>
+  <text x="42" y="25" font-size="21" font-weight="700" fill="#EDEFF7">Linear <tspan fill="#9D99FF" font-weight="600">Hub</tspan></text>
+</svg>

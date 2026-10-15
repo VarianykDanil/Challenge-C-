@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" width="32" height="32" role="img" aria-label="Linear Hub">
+  <!-- Placeholder mark exported from client/src/components/brand/Logo.tsx. Replace with the real mark; keep the file name. -->
+  <rect x="0" y="0" width="32" height="32" rx="8" fill="#4B3FD9" />
+  <g fill="none" stroke="#FFFFFF" stroke-width="3.2" stroke-linecap="round" transform="translate(16 16) skewX(-14) translate(-16 -16)">
+    <path d="M10 10h6" />
+    <path d="M10 16h10" />
+    <path d="M10 22h14" />
+  </g>
+</svg>

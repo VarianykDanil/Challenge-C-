@@ -2,8 +2,11 @@
 // Linear MCR / Linear Hub identity: a forward-leaning wedge of three parallel lines
 // (the "linear" motif — momentum, stops stacking into sales) on a rounded tile.
 // Colours come from tokens so the mark works in both themes; the wordmark uses currentColor.
+// `source="file"` renders the SVG files listed in content/brand.ts instead (for the real logo artwork);
+// the default comes from BRAND_LOGO_SOURCE there, so flipping that one constant swaps every logo in the app.
 import type { CSSProperties } from 'react';
 import clsx from 'clsx';
+import { BRAND_ASSETS, BRAND_LOGO_SOURCE, type LogoSource } from '@/content/brand';
 
 export type LogoVariant = 'full' | 'mark' | 'wordmark';
 export type LogoTone = 'brand' | 'mono' | 'inverse';
@@ -23,6 +26,11 @@ export interface LogoProps {
   text?: string;
   /** Accessible label; set to "" to hide the logo from screen readers. */
   title?: string;
+  /**
+   * inline — draw the mark from CSS tokens (default, see BRAND_LOGO_SOURCE)
+   * file   — render the SVG files in BRAND_ASSETS (light/dark pair for the lockup, mark.svg for the mark)
+   */
+  source?: LogoSource;
 }
 
 const MARK_STYLES: Record<LogoTone, { tile: string; line: string }> = {
@@ -85,8 +93,25 @@ export function Wordmark({ size = 28, text = 'Linear Hub', className, tone = 'br
   );
 }
 
+/** The logo rendered from the files in `client/public/brand/` (see content/brand.ts). */
+function FileLogo({ variant, size, className, tone, title }: { variant: 'full' | 'mark'; size: number; className?: string; tone: LogoTone; title: string }) {
+  const a11y = title ? { role: 'img' as const, 'aria-label': title } : { 'aria-hidden': true as const };
+  if (variant === 'mark') {
+    return <img src={BRAND_ASSETS.mark} alt="" width={size} height={size} className={clsx('shrink-0 select-none', className)} draggable={false} {...a11y} />;
+  }
+  // The lockup has a light and a dark file; `.dark` on <html> picks one, `tone="inverse"` (ink panels) forces the dark one.
+  const imgClass = 'block h-full w-auto select-none';
+  return (
+    <span className={clsx('inline-flex shrink-0 items-center', className)} style={{ height: size }} {...a11y}>
+      {tone !== 'inverse' && <img src={BRAND_ASSETS.logoLight} alt="" height={size} className={clsx(imgClass, 'dark:hidden')} draggable={false} />}
+      <img src={BRAND_ASSETS.logoDark} alt="" height={size} className={clsx(imgClass, tone !== 'inverse' && 'hidden dark:block')} draggable={false} />
+    </span>
+  );
+}
+
 /** Full lockup by default. Compose `LogoMark` and `Wordmark` directly for custom layouts. */
-export function Logo({ variant = 'full', size = 28, className, tone = 'brand', text = 'Linear Hub', title = 'Linear Hub' }: LogoProps) {
+export function Logo({ variant = 'full', size = 28, className, tone = 'brand', text = 'Linear Hub', title = 'Linear Hub', source = BRAND_LOGO_SOURCE }: LogoProps) {
+  if (source === 'file' && variant !== 'wordmark') return <FileLogo variant={variant} size={size} className={className} tone={tone} title={title} />;
   if (variant === 'mark') return <LogoMark size={size} tone={tone} className={className} title={title} />;
   if (variant === 'wordmark') return <Wordmark size={size} text={text} tone={tone} className={className} />;
   return (

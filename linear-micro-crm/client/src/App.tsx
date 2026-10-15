@@ -1,5 +1,6 @@
 // Owned by the Frontend Developer. Routes + auth gate + AppShell wrapper.
-import { Suspense, lazy, useEffect, useRef } from 'react';
+// Public landing (`/` signed out, `/welcome` always) added by the Product Designer — see pages/Landing.tsx.
+import { Suspense, lazy, useEffect, useRef, type ReactNode } from 'react';
 import { Navigate, Outlet, Route, Routes, useLocation, useNavigate } from 'react-router-dom';
 import { AppShell } from '@/components/layout';
 import { ToastProvider, useToast } from '@/components/ui';
@@ -10,6 +11,7 @@ import { CAMPAIGN_ROLES, GAUGE_ROLES, RECRUITMENT_ROLES, RequireRole } from '@/a
 import { LoginPage } from '@/pages/Login';
 import { AboutPage } from '@/pages/About';
 import { NotFoundPage } from '@/pages/NotFound';
+import { FullPageSpinner } from '@/features/common/FullPageSpinner';
 
 // Pages are code-split so the first paint of the dashboard stays light.
 const DashboardPage = lazy(() => import('@/pages/Dashboard').then((m) => ({ default: m.DashboardPage })));
@@ -24,8 +26,11 @@ const CampaignsPage = lazy(() => import('@/pages/Campaigns').then((m) => ({ defa
 const TeamPage = lazy(() => import('@/pages/Team').then((m) => ({ default: m.TeamPage })));
 const UserDetailPage = lazy(() => import('@/pages/UserDetail').then((m) => ({ default: m.UserDetailPage })));
 const SettingsPage = lazy(() => import('@/pages/Settings').then((m) => ({ default: m.SettingsPage })));
+// The public page carries the charts bundle, so it is split too: signed-in users never download it.
+const LandingPage = lazy(() => import('@/pages/Landing').then((m) => ({ default: m.LandingPage })));
 
-function ShellLayout() {
+/** Signed-in shell. Renders `children` when given (the `/` home route), otherwise the nested route via <Outlet />. */
+function ShellLayout({ children }: { children?: ReactNode }) {
   const { user, logout } = useAuth();
   const navigate = useNavigate();
   const { pathname } = useLocation();
@@ -39,9 +44,30 @@ function ShellLayout() {
       }}
     >
       <Suspense fallback={<PageFallback />}>
-        <Outlet />
+        {children ?? <Outlet />}
       </Suspense>
     </AppShell>
+  );
+}
+
+/** The public landing page (also the sign-out destination's neighbour): lazy, outside the shell. */
+function PublicLanding() {
+  return (
+    <Suspense fallback={<FullPageSpinner label="Loading…" />}>
+      <LandingPage />
+    </Suspense>
+  );
+}
+
+/** `/`: the public landing page when signed out, the dashboard inside the shell when signed in. */
+function HomeRoute() {
+  const { user, loading } = useAuth();
+  if (loading) return <FullPageSpinner label="Loading…" />;
+  if (!user) return <PublicLanding />;
+  return (
+    <ShellLayout>
+      <DashboardPage />
+    </ShellLayout>
   );
 }
 
@@ -83,6 +109,8 @@ export default function App() {
       <ToastProvider>
         <SessionWatcher />
         <Routes>
+          <Route path="/" element={<HomeRoute />} />
+          <Route path="/welcome" element={<PublicLanding />} />
           <Route
             path="/login"
             element={
@@ -98,7 +126,6 @@ export default function App() {
               </RequireAuth>
             }
           >
-            <Route index element={<DashboardPage />} />
             <Route path="events" element={<EventsPage />} />
             <Route path="events/:id" element={<EventDetailPage />} />
             <Route path="gauges" element={<RequireRole roles={GAUGE_ROLES}><GaugesPage /></RequireRole>} />

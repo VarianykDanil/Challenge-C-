@@ -1,7 +1,7 @@
 // Topbar — owned by the Product Designer.
 import { useEffect, useId, useMemo, useRef, useState, type KeyboardEvent as ReactKeyboardEvent, type ReactNode, type RefObject } from 'react';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
-import { Bell, ChevronDown, ChevronRight, Circle, Inbox, Info, LogOut, Menu as MenuIcon, Moon, Search, Settings, Sun, SunMoon } from 'lucide-react';
+import { Bell, ChevronDown, ChevronRight, Circle, Globe, Inbox, Info, LogOut, Menu as MenuIcon, Moon, Search, Settings, Sun, SunMoon } from 'lucide-react';
 import clsx from 'clsx';
 import { BRAND, POSITION_LABELS, ROLE_LABELS, type UserWithTeam } from '@lm/shared';
 import { Avatar } from '../ui/Avatar';
@@ -314,6 +314,7 @@ export function Topbar({ user, items, onLogout, onOpenMenu, menuButtonRef, title
           items={[
             { label: 'Settings', icon: <Settings />, onSelect: () => navigate('/settings') },
             { label: 'About Linear Hub', icon: <Info />, onSelect: () => navigate('/about') },
+            { label: 'Public page', icon: <Globe />, onSelect: () => navigate('/welcome') },
             { label: 'Light', icon: <Sun />, checked: theme === 'light', onSelect: () => setTheme('light'), separatorBefore: true },
             { label: 'Dark', icon: <Moon />, checked: theme === 'dark', onSelect: () => setTheme('dark') },
             { label: 'Match system', icon: <SunMoon />, checked: theme === 'system', onSelect: () => setTheme('system') },

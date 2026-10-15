@@ -1,6 +1,6 @@
 // Owned by the Product Designer. Contract: exports LoginPage(); uses useAuth() and pickDemoAccounts().
 import { useEffect, useRef, useState, type FormEvent } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { Link, useNavigate } from 'react-router-dom';
 import { ArrowRight, Check, CircleAlert, IdCard, Mail, MapPin, ShieldCheck } from 'lucide-react';
 import clsx from 'clsx';
 import { BRAND, ROLE_LABELS } from '@lm/shared';
@@ -9,6 +9,7 @@ import { useAuth } from '@/auth/AuthProvider';
 import { pickDemoAccounts } from '@/api/hooks';
 import { ApiError } from '@/api/client';
 import { Logo, LogoMark } from '@/components/brand/Logo';
+import { BrandBackdrop } from '@/components/brand/BrandBackdrop';
 import { ThemeToggle } from '@/components/layout/theme';
 import { Avatar, Badge, Button, Divider, Field, Input, Skeleton } from '@/components/ui';
 
@@ -150,7 +151,9 @@ export function LoginPage() {
                   placeholder="you@linear-mcr.co.uk"
                   value={email}
                   onChange={(e) => setEmail(e.target.value)}
-                  onBlur={() => setTouched((t) => ({ ...t, email: true }))}
+                  // Validate on blur only once something was typed: an empty field left by clicking elsewhere
+                  // (e.g. a footer link) must not grow an error line under the cursor mid-click.
+                  onBlur={() => { if (email.trim()) setTouched((t) => ({ ...t, email: true })); }}
                   invalid={!!emailError}
                   leftIcon={<Mail />}
                   size="lg"
@@ -169,7 +172,7 @@ export function LoginPage() {
                   placeholder="LM-0042"
                   value={employeeId}
                   onChange={(e) => setEmployeeId(e.target.value.toUpperCase())}
-                  onBlur={() => setTouched((t) => ({ ...t, employeeId: true }))}
+                  onBlur={() => { if (employeeId.trim()) setTouched((t) => ({ ...t, employeeId: true })); }}
                   invalid={!!idError}
                   leftIcon={<IdCard />}
                   size="lg"
@@ -204,8 +207,14 @@ export function LoginPage() {
 
         <footer className="flex flex-col items-center justify-between gap-2 px-5 py-5 text-xs text-muted sm:flex-row sm:px-8">
           <span>© {year} {BRAND.legalName}. All rights reserved.</span>
-          <span className="inline-flex items-center gap-1.5">
-            <LogoMark size={14} title="" /> {BRAND.product} · {BRAND.city}
+          <span className="inline-flex flex-wrap items-center justify-center gap-x-2 gap-y-1">
+            <Link to="/welcome" className="focus-ring rounded-md font-medium text-primary underline-offset-4 hover:underline">
+              About {BRAND.name}
+            </Link>
+            <span aria-hidden>·</span>
+            <span className="inline-flex items-center gap-1.5">
+              <LogoMark size={14} title="" /> {BRAND.product} · {BRAND.city}
+            </span>
           </span>
         </footer>
       </section>
@@ -284,23 +293,5 @@ function DemoAccounts({ accounts, loading, failed, busyId, disabled, onPick }: D
         );
       })}
     </ul>
-  );
-}
-
-/** Decorative parallel-line field behind the brand panel: the mark, blown up and fading. */
-function BrandBackdrop() {
-  return (
-    <div className="pointer-events-none absolute inset-0" aria-hidden>
-      <div className="brand-wash absolute inset-0 opacity-90" />
-      <svg className="absolute -right-24 -top-16 h-[140%] w-auto opacity-[0.16]" viewBox="0 0 400 600" fill="none" preserveAspectRatio="xMaxYMid slice">
-        <g stroke="var(--primary)" strokeWidth="14" strokeLinecap="round" transform="translate(200 300) skewX(-14) translate(-200 -300)">
-          {Array.from({ length: 11 }).map((_, i) => (
-            <path key={i} d={`M${60 + i * 6} ${80 + i * 46}h${80 + i * 22}`} opacity={0.35 + (i % 4) * 0.18} />
-          ))}
-        </g>
-      </svg>
-      <div className="brand-lines absolute inset-x-0 bottom-0 h-72 opacity-50 [mask-image:linear-gradient(to_top,black,transparent)]" />
-      <div className="absolute inset-0 bg-gradient-to-t from-ink via-transparent to-transparent" />
-    </div>
   );
 }

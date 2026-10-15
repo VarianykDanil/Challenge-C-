@@ -26,14 +26,23 @@
   --muted: #5C657A;
   --subtle: #6B7489;
 
-  /* Brand — "Linear Violet" + "Ember" accent */
-  --primary: #4B3FD9;
-  --primary-hover: #4034C4;
-  --primary-fg: #FFFFFF;
-  --primary-soft: #ECEAFC;
-  --accent: #B83C0B;
+  /* ── Brand palette (light) ──────────────────────────────────────────────────────────────
+   * The ONLY brand hexes in this theme. Mirrored in client/src/content/brand.ts (BRAND_PALETTE);
+   * edit both together to rebrand. --primary, --accent, --ink, --ring, the soft tints and chart-1
+   * below are all derived from these four, so nothing else needs touching. */
+  --brand-primary: #4B3FD9;        /* "Linear Violet" */
+  --brand-primary-hover: #4034C4;
+  --brand-accent: #B83C0B;         /* "Ember" */
+  --brand-ink: #0B1020;            /* always-dark brand navy */
+
+  /* Brand tokens — derived from the palette above; keep these as var()/color-mix(), not hex */
+  --primary: var(--brand-primary);
+  --primary-hover: var(--brand-primary-hover);
+  --primary-fg: #FFFFFF;           /* text on primary — use var(--brand-ink) instead if the new primary is light */
+  --primary-soft: color-mix(in srgb, var(--brand-primary) 11%, var(--surface));
+  --accent: var(--brand-accent);
   --accent-fg: #FFFFFF;
-  --accent-soft: #FDEBE1;
+  --accent-soft: color-mix(in srgb, var(--brand-accent) 10%, var(--surface));
 
   /* Status (all ≥ 4.5:1 on --surface, --bg and on their own soft tint, so text-on-tint badges pass) */
   --success: #137537;
@@ -48,10 +57,10 @@
   --status-fg: #FFFFFF;
 
   /* Focus */
-  --ring: #4B3FD9;
+  --ring: var(--brand-primary);
 
-  /* Charts — distinct hues, every one ≥ 4.5:1 on white */
-  --chart-1: #4B3FD9;
+  /* Charts — distinct hues, every one ≥ 4.5:1 on white (chart-1 is the brand primary) */
+  --chart-1: var(--brand-primary);
   --chart-2: #C2410C;
   --chart-3: #0F766E;
   --chart-4: #BE185D;
@@ -69,7 +78,7 @@
   --topbar: rgb(255 255 255 / 0.78);
 
   /* "Ink" is the brand navy that stays dark in both themes (login panel, hero blocks) */
-  --ink: #0B1020;
+  --ink: var(--brand-ink);
   --ink-2: #131A30;
   --ink-fg: #EDEFF7;
   --ink-muted: #9AA3B8;
@@ -91,13 +100,19 @@
   --muted: #9AA3B8;
   --subtle: #8089A3;
 
-  --primary: #9D99FF;
-  --primary-hover: #AEABFF;
+  /* ── Brand palette (dark) — lighter tints of the same hues; mirrored in brand.ts ── */
+  --brand-primary: #9D99FF;
+  --brand-primary-hover: #AEABFF;
+  --brand-accent: #FFA059;
+  --brand-ink: #080C19;
+
+  --primary: var(--brand-primary);
+  --primary-hover: var(--brand-primary-hover);
   --primary-fg: #0B1020;
-  --primary-soft: rgb(157 153 255 / 0.14);
-  --accent: #FFA059;
+  --primary-soft: color-mix(in srgb, var(--brand-primary) 14%, transparent);
+  --accent: var(--brand-accent);
   --accent-fg: #0B1020;
-  --accent-soft: rgb(255 160 89 / 0.14);
+  --accent-soft: color-mix(in srgb, var(--brand-accent) 14%, transparent);
 
   --success: #4ADE80;
   --success-soft: rgb(74 222 128 / 0.14);
@@ -109,10 +124,11 @@
   --info-soft: rgb(56 189 248 / 0.14);
   --status-fg: #0B1020;
 
-  --ring: #9D99FF;
+  --ring: var(--brand-primary);
 
   /* Charts — selected dark steps (OKLCH L 0.54–0.66, not the UI tints): every one ≥ 3:1 on --surface,
-     adjacent pairs ≥ ΔE 11 under protan/deutan simulation (dataviz validator, --mode dark) */
+     adjacent pairs ≥ ΔE 11 under protan/deutan simulation (dataviz validator, --mode dark).
+     chart-1 is a deliberately darker step of the brand violet; re-select it if the brand hue changes. */
   --chart-1: #8983E7;
   --chart-2: #D3782C;
   --chart-3: #00A997;
@@ -128,7 +144,7 @@
   --sidebar: #0D1326;
   --topbar: rgb(11 16 32 / 0.72);
 
-  --ink: #080C19;
+  --ink: var(--brand-ink);
   --ink-2: #0F1527;
   --ink-fg: #EDEFF7;
   --ink-muted: #9AA3B8;

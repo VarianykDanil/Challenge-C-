@@ -8,7 +8,9 @@ Source of truth:
 | What | Where |
 |---|---|
 | Tokens (colours, shadows, radii, fonts, animations) | `client/src/index.css` |
-| Brand mark + wordmark | `client/src/components/brand/Logo.tsx`, `client/public/favicon.svg`, `client/public/logo.svg` |
+| Brand config (logo files, palette mirror, inline/file switch) | `client/src/content/brand.ts` — **start here to rebrand** |
+| Brand mark + wordmark | `client/src/components/brand/Logo.tsx` (inline default), `client/public/brand/{logo,logo-dark,mark}.svg`, `client/public/favicon.svg` |
+| Public landing page (`/` signed out, `/welcome` always) | `client/src/pages/Landing.tsx`, copy in `client/src/content/landing.ts` |
 | UI kit | `client/src/components/ui/**` (barrel: `@/components/ui`) |
 | App shell, theme | `client/src/components/layout/**` (barrel: `@/components/layout`) |
 | Microcopy | `client/src/content/copy.ts` (Marketing) — import `COPY`, never inline strings for shared copy |
@@ -49,6 +51,24 @@ import { Logo, LogoMark, Wordmark } from '@/components/brand/Logo';
 - `tone="mono"` uses `currentColor` for the tile.
 - The wordmark sets the first word in `currentColor` (bold) and the rest in `--primary` (semibold).
 - Never recolour the mark with arbitrary hex, stretch it, or place it on busy imagery without the wash.
+- `source="file"` renders the SVGs in `client/public/brand/` instead of the inline mark (light/dark pair for
+  the lockup, `mark.svg` for the mark). The default comes from `BRAND_LOGO_SOURCE` in `content/brand.ts`.
+- `<BrandBackdrop />` (`components/brand`) is the decorative parallel-line field used behind ink panels
+  (login, landing hero). Always decorative, always `aria-hidden`.
+
+### Rebranding (real logo and colours)
+
+The placeholder identity is routed through one config, `client/src/content/brand.ts`:
+
+1. **Logo** — replace `client/public/brand/logo.svg`, `logo-dark.svg`, `mark.svg` and `client/public/favicon.svg`
+   with the real artwork (same file names), then set `BRAND_LOGO_SOURCE = 'file'`.
+2. **Colours** — the only brand hexes in `index.css` are the `--brand-primary`, `--brand-primary-hover`,
+   `--brand-accent` and `--brand-ink` properties at the top of `:root` (light) and `.dark`. `--primary`,
+   `--primary-hover`, `--accent`, `--ink`, `--ring`, `--chart-1` (light) and both soft tints are derived from
+   them with `var()` / `color-mix()`. Edit those eight values and the matching `BRAND_PALETTE` mirror in
+   `brand.ts`; nothing else needs touching. Re-check `--primary-fg` / `--accent-fg` and the contrast table
+   below if the new hues are much lighter or darker.
+3. Names, legal name, address and website stay in `shared/src/constants.ts` → `BRAND` (Logic Builder's file).
 
 ---
 
@@ -185,7 +205,17 @@ Persisted as `lm-theme`. Sidebar collapse state is `lm-sidebar`.
 
 ---
 
-## 7. App shell
+## 7. Public landing page
+
+`client/src/pages/Landing.tsx` (copy: `client/src/content/landing.ts`) is the outward-facing first page: sticky
+translucent top bar (logo, section anchors, `ThemeToggle`, **Sign in**), ink hero with `<BrandBackdrop />` and
+an *illustrative* dashboard preview built from the real kit (`KpiTile`, `FunnelChart`, `TrendChart`), then
+What we do · How we work (six gauges + law of averages) · Careers (ladder stepper) · Linear Hub · CTA band ·
+footer. Routing: `/` shows it when signed out and the dashboard when signed in; `/welcome` always shows it.
+Semantic tokens only, both themes, landmarks + skip link, heading order h1 → h2 (sections) → h3/h4 (cards).
+Facts about the company are limited to what the business publishes; no statistics are quoted.
+
+## 8. App shell
 
 ```tsx
 <AppShell user={user} onLogout={logout} title={<CustomCrumb/>} fluid>{children}</AppShell>
@@ -201,7 +231,7 @@ Persisted as `lm-theme`. Sidebar collapse state is `lm-sidebar`.
 
 ---
 
-## 8. Component inventory
+## 9. Component inventory
 
 All from `@/components/ui`. Prop names in the skeleton files are stable; everything listed as *added* is optional.
 
@@ -235,7 +265,7 @@ Custom CSS utilities: `focus-ring`, `focus-ring-inset`, `card-hover`, `kpi-numbe
 
 ---
 
-## 9. Do / Don't
+## 10. Do / Don't
 
 **Do**
 - Compose pages from the kit: `PageHeader` → KPI row (`KpiTile` ×3–4) → `Card`s with `CardHeader` → `DataTable`.
@@ -255,7 +285,7 @@ Custom CSS utilities: `focus-ring`, `focus-ring-inset`, `card-hover`, `kpi-numbe
 
 ---
 
-## 10. Checklist before you ship a page
+## 11. Checklist before you ship a page
 
 - [ ] Looks right in light **and** dark (`ThemeToggle` in the topbar).
 - [ ] Phone width (375px): no horizontal page scroll (`documentElement.scrollWidth <= innerWidth`), actions reachable; wide tables scroll inside their card (DataTable shows the fade + hint), `hideBelow` only for optional columns; grids are `grid-cols-1 lg:grid-cols-N` with `min-w-0` children.
