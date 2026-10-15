@@ -225,14 +225,15 @@ export function Topbar({ user, items, onLogout, onOpenMenu, menuButtonRef, title
             {current && (
               <>
                 <ChevronRight className="hidden h-3.5 w-3.5 shrink-0 text-subtle sm:inline" aria-hidden />
-                <span className="min-w-0 truncate font-semibold text-fg" aria-current="page">{current.label}</span>
+                <span className="min-w-[4.5rem] truncate font-semibold text-fg" aria-current="page">{current.label}</span>
               </>
             )}
           </nav>
         )}
       </div>
 
-      <QuickNav items={items} inputRef={inlineSearchRef} className="hidden w-64 shrink-0 lg:block xl:w-72" />
+      {/* The field may shrink (to 10rem) before the page name does; it never pushes the breadcrumb out. */}
+      <QuickNav items={items} inputRef={inlineSearchRef} className="hidden w-64 min-w-[10rem] shrink lg:block xl:w-72" />
 
       <div className="flex shrink-0 items-center gap-1">
         <div className="relative lg:hidden">
@@ -325,14 +326,15 @@ export function Topbar({ user, items, onLogout, onOpenMenu, menuButtonRef, title
               aria-label={`Account menu for ${fullName}, ${ROLE_LABELS[user.role]}`}
             >
               <Avatar name={fullName} color={user.avatarColor} size="sm" />
-              <span className="hidden min-w-0 flex-col items-start text-left leading-tight md:flex">
+              {/* Name shown on tablets (no sidebar) and from xl; at lg the sidebar leaves too little room. */}
+              <span className="hidden min-w-0 flex-col items-start text-left leading-tight md:flex lg:hidden xl:flex">
                 <span className="max-w-[140px] truncate text-sm font-medium text-fg">{fullName}</span>
                 <span className="max-w-[140px] truncate text-[11px] text-muted">
                   {POSITION_LABELS[user.position]}
                   {user.teamName ? ` · ${user.teamName}` : ''}
                 </span>
               </span>
-              <ChevronDown className={clsx('hidden h-4 w-4 text-subtle md:block')} aria-hidden />
+              <ChevronDown className={clsx('hidden h-4 w-4 text-subtle md:block lg:hidden xl:block')} aria-hidden />
             </button>
           }
         />
