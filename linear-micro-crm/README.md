@@ -30,6 +30,8 @@ Linear Hub fixes those four things without asking the business to change how it 
 | **Finance & Pay** | **My pay** for everyone: twelve weeks of itemised payslips (base per day, commission, bonus, leader overrides, deductions) and the next payday. **Team pay** for leaders. **Company** for administrators: revenue, payroll, expenses and profit per pay week, **Runs to pay** with one-click **Mark paid**, payroll punctuality, expenses and margin by campaign. |
 | **Team** | The directory: who is on which team, their position on the ladder (Trainee → Field Representative → Team Leader → Crew Leader → Assistant Owner → Owner, plus the office **Recruiter** position), and a performance view per person. |
 | **Campaigns** | The clients Linear represents, with sector, type, payout per sale, default rep commission and active/inactive status. |
+| **Public page** | Signed-out visitors land on an outward-facing page about Linear MCR and Linear Hub (what we do, the six gauges, the careers ladder) with **Sign in**; staff can review it any time at `/welcome`. The logo and colours come from one config (`client/src/content/brand.ts` and the `--brand-*` block in `client/src/index.css`). |
+| **Export & print** | Every table has **Download as CSV** (Excel-ready, exactly the rows on screen, filters in the file name), and each payslip has **Print payslip** for a clean A4 copy. |
 
 ### Roles
 
