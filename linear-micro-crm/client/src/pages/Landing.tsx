@@ -230,9 +230,14 @@ function TopBar({ signedIn, appHref }: { signedIn: boolean; appHref: string }) {
   return (
     <header className="sticky top-0 z-40 border-b border-border bg-topbar backdrop-blur-md">
       <Container className="flex h-16 items-center justify-between gap-3">
-        <a href="#top" className="focus-ring rounded-lg">
-          <Logo size={28} text={BRAND.name} title={`${BRAND.name} — back to top`} />
-        </a>
+        <Link
+          to="/welcome"
+          onClick={() => window.scrollTo({ top: 0 })}
+          aria-label={`${BRAND.name} — top of the public page`}
+          className="focus-ring -m-1 inline-flex rounded-lg p-1 transition-colors hover:bg-surface-2 focus-visible:bg-surface-2"
+        >
+          <Logo size={28} text={BRAND.name} />
+        </Link>
 
         <nav aria-label="Sections" className="hidden items-center gap-1 md:flex">
           {LANDING.nav.map((n) => (
@@ -271,7 +276,7 @@ function Hero({ signedIn, appHref }: { signedIn: boolean; appHref: string }) {
   const h = LANDING.hero;
   return (
     <section className="relative overflow-hidden bg-ink text-ink-fg" aria-labelledby="hero-title">
-      <BrandBackdrop intensity="soft" />
+      <BrandBackdrop intensity="strong" variant="ink" vignette="left" />
       <Container className="relative grid gap-12 py-14 sm:py-20 lg:grid-cols-[minmax(0,1.05fr)_minmax(0,1fr)] lg:items-center lg:gap-16 lg:py-28">
         <div className="max-w-xl animate-slide-up">
           <Eyebrow className="text-ink-muted">
@@ -515,7 +520,7 @@ function CtaBand({ signedIn, appHref }: { signedIn: boolean; appHref: string }) 
   const c = signedIn ? LANDING.cta.signedIn : LANDING.cta.signedOut;
   return (
     <section aria-labelledby="cta-title" className="relative overflow-hidden bg-ink text-ink-fg">
-      <div className="brand-lines absolute inset-0 opacity-70 [mask-image:linear-gradient(to_right,transparent,black)]" aria-hidden />
+      <BrandBackdrop intensity="soft" variant="ink" vignette="left" />
       <Container className="relative flex flex-col items-start gap-6 py-14 sm:flex-row sm:items-center sm:justify-between sm:py-16">
         <div className="max-w-xl">
           <h2 id="cta-title" className="text-3xl font-bold tracking-tight text-ink-fg">{c.title}</h2>

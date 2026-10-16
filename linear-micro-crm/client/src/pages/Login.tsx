@@ -1,7 +1,7 @@
 // Owned by the Product Designer. Contract: exports LoginPage(); uses useAuth() and pickDemoAccounts().
 import { useEffect, useRef, useState, type FormEvent } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
-import { ArrowRight, Check, CircleAlert, IdCard, Mail, MapPin, ShieldCheck } from 'lucide-react';
+import { ArrowLeft, ArrowRight, Check, CircleAlert, IdCard, Mail, MapPin, ShieldCheck } from 'lucide-react';
 import clsx from 'clsx';
 import { BRAND, ROLE_LABELS } from '@lm/shared';
 import { COPY } from '@/content/copy';
@@ -72,9 +72,19 @@ export function LoginPage() {
     <div className="grid min-h-dvh bg-bg text-fg lg:grid-cols-[minmax(0,1.05fr)_minmax(0,1fr)]">
       {/* ───────── Brand panel ───────── */}
       <section className="relative hidden overflow-hidden bg-ink text-ink-fg lg:flex lg:flex-col lg:justify-between lg:p-12 xl:p-16" aria-label={`${BRAND.name} introduction`}>
-        <BrandBackdrop />
-        <div className="relative">
-          <Logo size={36} tone="inverse" />
+        <BrandBackdrop intensity="strong" variant="ink" vignette="left" />
+        <div className="relative flex items-center gap-4">
+          <Link
+            to="/welcome"
+            aria-label={`Back to the ${BRAND.name} public page`}
+            className="focus-ring -m-1.5 inline-flex rounded-xl p-1.5 transition-colors hover:bg-ink-fg/10 focus-visible:bg-ink-fg/10"
+          >
+            <Logo size={36} tone="inverse" />
+          </Link>
+          <Link to="/welcome" className="focus-ring inline-flex items-center gap-1 rounded-md text-sm font-medium text-ink-muted transition-colors hover:text-ink-fg">
+            <ArrowLeft className="h-4 w-4" aria-hidden />
+            Back
+          </Link>
         </div>
 
         <div className="relative max-w-xl">
@@ -112,8 +122,18 @@ export function LoginPage() {
       {/* ───────── Form panel ───────── */}
       <section className="relative flex min-h-dvh flex-col lg:min-h-0" aria-label="Sign in">
         <div className="flex h-16 items-center justify-between px-5 sm:px-8">
-          <div className="lg:hidden">
-            <Logo size={30} />
+          <div className="flex items-center gap-3 lg:hidden">
+            <Link
+              to="/welcome"
+              aria-label={`Back to the ${BRAND.name} public page`}
+              className="focus-ring -m-1 inline-flex rounded-lg p-1 transition-colors hover:bg-surface-2 focus-visible:bg-surface-2"
+            >
+              <Logo size={30} />
+            </Link>
+            <Link to="/welcome" className="focus-ring inline-flex items-center gap-1 rounded-md text-sm font-medium text-muted transition-colors hover:text-fg">
+              <ArrowLeft className="h-4 w-4" aria-hidden />
+              Back
+            </Link>
           </div>
           <span className="hidden text-xs text-muted lg:inline">{BRAND.legalName}</span>
           <ThemeToggle />
@@ -257,11 +277,11 @@ function DemoAccounts({ accounts, loading, failed, busyId, disabled, onPick }: D
     return <p className="text-center text-xs text-muted">Demo accounts aren’t available right now — sign in with your own details above.</p>;
   }
   return (
-    <ul className="grid gap-2">
+    <ul className="grid grid-cols-1 gap-2">
       {accounts.map((acc) => {
         const isBusy = busyId === acc.employeeId;
         return (
-          <li key={acc.employeeId}>
+          <li key={acc.employeeId} className="min-w-0">
             <button
               type="button"
               onClick={() => onPick(acc)}
@@ -275,9 +295,9 @@ function DemoAccounts({ accounts, loading, failed, busyId, disabled, onPick }: D
             >
               <Avatar name={acc.label} size="sm" />
               <span className="min-w-0 flex-1">
-                <span className="flex items-center gap-2">
-                  <span className="truncate text-sm font-semibold text-fg">{acc.label}</span>
-                  <Badge size="sm" tone={ROLE_TONE[acc.role] ?? 'neutral'}>{ROLE_LABELS[acc.role as keyof typeof ROLE_LABELS] ?? acc.role}</Badge>
+                <span className="flex min-w-0 items-center gap-2">
+                  <span className="min-w-0 truncate text-sm font-semibold text-fg">{acc.label}</span>
+                  <Badge size="sm" className="shrink-0" tone={ROLE_TONE[acc.role] ?? 'neutral'}>{ROLE_LABELS[acc.role as keyof typeof ROLE_LABELS] ?? acc.role}</Badge>
                 </span>
                 <span className="mt-0.5 block truncate text-xs text-muted">
                   {acc.email} · <span className="font-mono">{acc.employeeId}</span>
