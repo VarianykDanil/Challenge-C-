@@ -22,8 +22,10 @@ export interface PortHolder {
   host: string;
   /** `lsof`/`ss` output for the listener, when the OS could tell us. */
   details: string | null;
-  /** True when the listener answered /api/health like this app: an earlier copy of Linear Hub still running. */
+  /** True when the listener answered /api/health like this app, or its command line is this server: an earlier copy of Linear Hub. */
   linearHub: boolean;
+  /** True when it is a Linear Hub copy that no longer answers HTTP (hung, stopped or paused in a debugger). */
+  hung: boolean;
 }
 
 /** Try to connect to `host:port`; resolves true if something accepted the connection. */
@@ -82,6 +84,21 @@ export function listeningPids(port: number): number[] {
   return [...pids];
 }
 
+/** The command line of a process (`ps`), or null when it cannot be read. */
+export function processCommand(pid: number): string | null {
+  try {
+    const out = execFileSync('ps', ['-o', 'command=', '-p', String(pid)], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'], timeout: 3000 });
+    return out.trim() || null;
+  } catch {
+    return null;
+  }
+}
+
+/** Does this command line look like a copy of this server (node/tsx running src/index.ts, or anything from this repo)? */
+export function looksLikeLinearHub(command: string | null): boolean {
+  return !!command && /(^|[\s/])(node|tsx)\b.*\bsrc\/index\.ts\b|linear-micro-crm[\/]server/.test(command);
+}
+
 /** Does the process answering on host:port look like this app (GET /api/health → {ok:true, version})? */
 export async function isLinearHub(host: string, port: number, timeoutMs = 1500): Promise<boolean> {
   try {
@@ -99,7 +116,9 @@ export async function isLinearHub(host: string, port: number, timeoutMs = 1500):
 export async function findPortHolder(port: number, timeoutMs = 600): Promise<PortHolder | null> {
   for (const host of ['127.0.0.1', '::1']) {
     if (await accepts(host, port, timeoutMs)) {
-      return { host, details: describePortHolder(port), linearHub: await isLinearHub(host, port) };
+      const answers = await isLinearHub(host, port);
+      const ours = answers || listeningPids(port).some((pid) => looksLikeLinearHub(processCommand(pid)));
+      return { host, details: describePortHolder(port), linearHub: ours, hung: ours && !answers };
     }
   }
   return null;
@@ -114,10 +133,12 @@ export function portBusyMessage(port: number, holder: PortHolder): string {
   const who = holder.details ? `Listening right now:\n${holder.details.replace(/^/gm, '  ')}` : 'The OS did not report which process holds it.';
   if (holder.linearHub) {
     return [
-      `Port ${port} is already in use by an earlier copy of Linear Hub that is still running (started from another terminal or window).`,
+      holder.hung
+        ? `Port ${port} is held by an earlier copy of Linear Hub that is stuck: it no longer answers requests and may ignore a plain kill.`
+        : `Port ${port} is already in use by an earlier copy of Linear Hub that is still running (started from another terminal or window).`,
       `That is why the browser shows a blank or stale page on http://localhost:${port}: it is talking to that old process, not to this one.`,
       who,
-      'Stop it and start again:',
+      holder.hung ? 'Stop it (npm run stop forces it if needed) and start again:' : 'Stop it and start again:',
       '  npm run stop',
       '  npm start',
       `Or start this one on another port:  PORT=${port + 1} npm start   (then open http://localhost:${port + 1})`,
