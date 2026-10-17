@@ -1,11 +1,13 @@
-import { Monitor, Moon, Sun } from 'lucide-react';
+import { useState } from 'react';
+import { KeyRound, Monitor, Moon, RefreshCw, ShieldCheck, ShieldOff, Sun } from 'lucide-react';
 import { BRAND, POSITION_LABELS, ROLE_LABELS } from '@lm/shared';
 import clsx from 'clsx';
-import { Avatar, Badge, Card, CardHeader, PageHeader } from '@/components/ui';
-import { useHealth } from '@/api/hooks';
+import { Avatar, Badge, Button, Card, CardHeader, PageHeader, Skeleton } from '@/components/ui';
+import { useHealth, useTwoFactorStatus } from '@/api/hooks';
 import { useCurrentUser } from '@/auth/AuthProvider';
-import { UserStatusBadge } from '@/features/common';
-import { formatDate, formatDateTime, fullName } from '@/lib/format';
+import { UserStatusBadge, errorMessage } from '@/features/common';
+import { RecoveryCodesModal, TwoFactorDisableModal, TwoFactorSetupModal } from '@/features/settings';
+import { formatDate, formatDateTime, fullName, pluralise } from '@/lib/format';
 import { useTheme, type Theme } from '@/components/layout';
 import { usePageTitle } from '@/lib/usePageTitle';
 import { COPY } from '@/content/copy';
@@ -38,29 +40,33 @@ export function SettingsPage() {
     <>
       <PageHeader title={COPY.nav.settings.title} description={COPY.nav.settings.description} />
       <div className="grid gap-6 lg:grid-cols-3">
-        <Card className="lg:col-span-2">
-          <CardHeader title="Profile" description="Details are managed by the office — ask an administrator to change them." />
-          <div className="mb-5 flex items-center gap-4">
-            <Avatar name={fullName(user)} color={user.avatarColor} size="xl" />
-            <div>
-              <div className="text-lg font-semibold text-fg">{fullName(user)}</div>
-              <div className="mt-1 flex flex-wrap items-center gap-2 text-sm text-muted">
-                <Badge tone="primary">{POSITION_LABELS[user.position]}</Badge>
-                <UserStatusBadge status={user.status} />
+        <div className="min-w-0 space-y-6 lg:col-span-2">
+          <Card>
+            <CardHeader title="Profile" description="Details are managed by the office — ask an administrator to change them." />
+            <div className="mb-5 flex items-center gap-4">
+              <Avatar name={fullName(user)} color={user.avatarColor} size="xl" />
+              <div>
+                <div className="text-lg font-semibold text-fg">{fullName(user)}</div>
+                <div className="mt-1 flex flex-wrap items-center gap-2 text-sm text-muted">
+                  <Badge tone="primary">{POSITION_LABELS[user.position]}</Badge>
+                  <UserStatusBadge status={user.status} />
+                </div>
               </div>
             </div>
-          </div>
-          <dl className="grid gap-x-6 gap-y-3 sm:grid-cols-2">
-            {rows.map((r) => (
-              <div key={r.label} className="flex flex-col border-b border-border pb-2">
-                <dt className="text-xs font-medium text-muted">{r.label}</dt>
-                <dd className="text-sm text-fg">{r.value}</dd>
-              </div>
-            ))}
-          </dl>
-        </Card>
+            <dl className="grid gap-x-6 gap-y-3 sm:grid-cols-2">
+              {rows.map((r) => (
+                <div key={r.label} className="flex flex-col border-b border-border pb-2">
+                  <dt className="text-xs font-medium text-muted">{r.label}</dt>
+                  <dd className="text-sm text-fg">{r.value}</dd>
+                </div>
+              ))}
+            </dl>
+          </Card>
 
-        <div className="space-y-6">
+          <SecurityCard />
+        </div>
+
+        <div className="min-w-0 space-y-6">
           <Card>
             <CardHeader title="Appearance" description="Theme is saved on this device." />
             <div role="radiogroup" aria-label="Theme" className="grid gap-2">
@@ -101,5 +107,79 @@ export function SettingsPage() {
         </div>
       </div>
     </>
+  );
+}
+
+/* ───────────────────────────── Security ───────────────────────────── */
+
+type SecurityModal = null | 'setup' | 'disable' | 'codes';
+
+/** Security section: the "Two-step verification" card with its status and the three actions. */
+function SecurityCard() {
+  const t = COPY.security;
+  const status = useTwoFactorStatus();
+  const [modal, setModal] = useState<SecurityModal>(null);
+  const s = status.data;
+  const close = () => setModal(null);
+
+  return (
+    <Card>
+      <CardHeader title={t.title} description={t.description} icon={<ShieldCheck aria-hidden />} />
+
+      <section aria-labelledby="two-factor-title" data-testid="two-factor-card" className="rounded-xl border border-border p-4">
+        <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+          <div className="min-w-0 flex-1">
+            <div className="flex flex-wrap items-center gap-2">
+              <h4 id="two-factor-title" className="font-sans text-sm font-semibold tracking-normal text-fg">{t.twoFactor.title}</h4>
+              {status.isLoading ? (
+                <Skeleton className="h-5 w-12 rounded-full" />
+              ) : s ? (
+                <Badge tone={s.enabled ? 'success' : 'neutral'} dot={s.enabled} data-testid="two-factor-badge">
+                  {s.enabled ? t.twoFactor.on : t.twoFactor.off}
+                </Badge>
+              ) : null}
+            </div>
+
+            <p className="mt-1 text-sm text-muted" data-testid="two-factor-status">
+              {status.isLoading ? (
+                <Skeleton className="h-3.5 w-64" />
+              ) : status.isError ? (
+                <span className="inline-flex flex-wrap items-center gap-2 text-danger">
+                  {errorMessage(status.error, 'Could not load the status')}
+                  <Button variant="outline" size="xs" onClick={() => void status.refetch()} leftIcon={<RefreshCw aria-hidden />}>Try again</Button>
+                </span>
+              ) : s?.enabled ? (
+                <>
+                  On since <span className="font-medium text-fg">{formatDate(s.enabledAt)}</span>
+                  <span aria-hidden> · </span>
+                  <span className={clsx(s.recoveryCodesLeft <= 2 && 'font-medium text-warning')}>{pluralise(s.recoveryCodesLeft, 'recovery code')} left</span>
+                </>
+              ) : (
+                t.twoFactor.offHint
+              )}
+            </p>
+
+            {s?.enabled && s.recoveryCodesLeft <= 2 && <p className="mt-1.5 text-xs text-warning">{t.twoFactor.lowCodesHint}</p>}
+            {s && !s.enabled && s.pendingSetup && <p className="mt-1.5 text-xs text-muted">{t.twoFactor.pendingHint}</p>}
+          </div>
+
+          <div className="flex shrink-0 flex-wrap gap-2">
+            {s?.enabled ? (
+              <>
+                <Button variant="outline" size="sm" onClick={() => setModal('codes')} leftIcon={<KeyRound aria-hidden />}>{t.twoFactor.newCodes}</Button>
+                <Button variant="outline" size="sm" onClick={() => setModal('disable')} leftIcon={<ShieldOff aria-hidden />}>{t.twoFactor.turnOff}</Button>
+              </>
+            ) : (
+              <Button size="sm" onClick={() => setModal('setup')} disabled={!s} leftIcon={<ShieldCheck aria-hidden />}>{t.twoFactor.setUp}</Button>
+            )}
+          </div>
+        </div>
+        <p className="mt-3 text-xs text-muted">{t.twoFactor.description}</p>
+      </section>
+
+      <TwoFactorSetupModal open={modal === 'setup'} onClose={close} />
+      <TwoFactorDisableModal open={modal === 'disable'} onClose={close} />
+      <RecoveryCodesModal open={modal === 'codes'} onClose={close} />
+    </Card>
   );
 }

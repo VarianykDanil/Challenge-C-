@@ -1,4 +1,5 @@
 // Owned by the Frontend Developer. TanStack Query hooks for every endpoint in docs/API.md.
+import { useCallback } from 'react';
 import { useMutation, useQuery, useQueryClient, type UseQueryOptions } from '@tanstack/react-query';
 import type {
   Announcement,
@@ -32,11 +33,15 @@ import type {
   StageChange,
   Team,
   TrendPoint,
+  TwoFactorEnabled,
+  TwoFactorSetup,
+  TwoFactorStatus,
   User,
   UserStatus,
   UserWithTeam,
 } from '@lm/shared';
 import { api, qs } from './client';
+import { useAuth } from '@/auth/AuthProvider';
 
 // ───────────────────────────── Response shapes not in shared/types ─────────────────────────────
 
@@ -95,6 +100,7 @@ export type AnnouncementInput = Pick<Announcement, 'title' | 'body' | 'pinned'>;
 
 export const keys = {
   demoAccounts: ['demo-accounts'] as const,
+  twoFactor: ['auth', 'two-factor'] as const,
   dashboard: (range: DashboardRange) => ['dashboard', range] as const,
   users: (p: UsersParams = {}) => ['users', 'list', p] as const,
   user: (id: number) => ['users', 'detail', id] as const,
@@ -148,6 +154,70 @@ export function useCreateAnnouncement() {
       void qc.invalidateQueries({ queryKey: ['announcements'] });
       void qc.invalidateQueries({ queryKey: ['dashboard'] });
     },
+  });
+}
+
+// ───────────────────────────── Two-step verification (TOTP) ─────────────────────────────
+
+export function useTwoFactorStatus(opts: QueryOpts<TwoFactorStatus> = {}) {
+  return useQuery({ queryKey: keys.twoFactor, queryFn: () => api<TwoFactorStatus>('/auth/2fa'), ...opts });
+}
+
+/**
+ * After the second factor changes: refetch the status card and the signed-in user (`/auth/me` carries
+ * `twoFactorEnabled`). `['auth']` also covers any future query keyed under it.
+ */
+function useInvalidateTwoFactor() {
+  const qc = useQueryClient();
+  const { refresh } = useAuth();
+  return useCallback(() => {
+    void qc.invalidateQueries({ queryKey: ['auth'] });
+    void refresh();
+  }, [qc, refresh]);
+}
+
+/** POST /auth/2fa/setup → a new *pending* secret with its QR. Calling it again replaces the pending one. */
+export function useStartTwoFactorSetup() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: () => api<TwoFactorSetup>('/auth/2fa/setup', { method: 'POST' }),
+    onSuccess: () => void qc.invalidateQueries({ queryKey: keys.twoFactor }),
+  });
+}
+
+/** POST /auth/2fa/enable with a code from the app → the one-time list of recovery codes. */
+export function useEnableTwoFactor() {
+  const invalidate = useInvalidateTwoFactor();
+  return useMutation({
+    mutationFn: (input: { code: string }) => api<TwoFactorEnabled>('/auth/2fa/enable', { method: 'POST', json: input }),
+    onSuccess: invalidate,
+  });
+}
+
+/** POST /auth/2fa/disable with a current code or an unused recovery code. */
+export function useDisableTwoFactor() {
+  const invalidate = useInvalidateTwoFactor();
+  return useMutation({
+    mutationFn: (input: { code?: string; recoveryCode?: string }) => api<void>('/auth/2fa/disable', { method: 'POST', json: input }),
+    onSuccess: invalidate,
+  });
+}
+
+/** POST /auth/2fa/recovery-codes → a fresh set; the old codes stop working. */
+export function useRegenerateRecoveryCodes() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (input: { code: string }) => api<TwoFactorEnabled>('/auth/2fa/recovery-codes', { method: 'POST', json: input }),
+    onSuccess: () => void qc.invalidateQueries({ queryKey: keys.twoFactor }),
+  });
+}
+
+/** Admin: POST /users/:id/2fa/reset — clears another person's second factor (lost device) and signs them out everywhere. */
+export function useResetUserTwoFactor(userId: number) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: () => api<void>(`/users/${userId}/2fa/reset`, { method: 'POST' }),
+    onSuccess: () => void qc.invalidateQueries({ queryKey: ['users'] }),
   });
 }
 

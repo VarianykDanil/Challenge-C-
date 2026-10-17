@@ -1,11 +1,15 @@
 // Admin-only create / edit user form.
 import { useId, useState } from 'react';
+import { ShieldCheck, ShieldOff } from 'lucide-react';
 import type { Position, Role, UserStatus, UserWithTeam } from '@lm/shared';
 import { POSITIONS, POSITION_LABELS, ROLE_LABELS } from '@lm/shared';
-import { Button, Field, Input, Modal, Select, useToast } from '@/components/ui';
-import { useCreateUser, usePayPlans, useTeams, useUpdateUser } from '@/api/hooks';
-import { errorMessage } from '@/features/common';
+import { Badge, Button, Field, Input, Modal, Select, useToast } from '@/components/ui';
+import { useCreateUser, usePayPlans, useResetUserTwoFactor, useTeams, useUpdateUser } from '@/api/hooks';
+import { useCurrentUser } from '@/auth/AuthProvider';
+import { ConfirmDialog, errorMessage } from '@/features/common';
+import { COPY } from '@/content/copy';
 import { todayISO } from '@/lib/dates';
+import { fullName } from '@/lib/format';
 import { USER_STATUS_LABELS, optionsFrom } from '@/lib/labels';
 
 export function UserFormModal({ open, onClose, user, onSaved }: { open: boolean; onClose: () => void; user?: UserWithTeam | null; onSaved?: (u: UserWithTeam) => void }) {
@@ -19,6 +23,7 @@ export function UserFormModal({ open, onClose, user, onSaved }: { open: boolean;
 function UserForm({ onClose, user, onSaved }: { onClose: () => void; user?: UserWithTeam | null; onSaved?: (u: UserWithTeam) => void }) {
   const toast = useToast();
   const uid = useId();
+  const me = useCurrentUser();
   const teams = useTeams();
   const plans = usePayPlans();
   const create = useCreateUser();
@@ -97,10 +102,66 @@ function UserForm({ onClose, user, onSaved }: { onClose: () => void; user?: User
           </span>
         </Field>
       </div>
+
+      {/* Lost-device recovery for someone else; your own second factor is managed from Settings → Security. */}
+      {user && user.id !== me.id && <TwoFactorResetSection user={user} />}
+
       <div className="flex justify-end gap-2">
         <Button type="button" variant="ghost" onClick={onClose}>Cancel</Button>
         <Button type="submit" loading={create.isPending || update.isPending}>{user ? 'Save changes' : 'Add member'}</Button>
       </div>
     </form>
+  );
+}
+
+/** Edit mode only: "Reset two-step verification" with a confirmation. The state badge shows only when the API sends `twoFactorEnabled`. */
+function TwoFactorResetSection({ user }: { user: UserWithTeam }) {
+  const toast = useToast();
+  const uid = useId();
+  const reset = useResetUserTwoFactor(user.id);
+  const [confirm, setConfirm] = useState(false);
+  const t = COPY.security.admin;
+  const known = user.twoFactorEnabled !== undefined;
+
+  async function onConfirm() {
+    try {
+      await reset.mutateAsync();
+      toast.success(t.toast, fullName(user));
+      setConfirm(false);
+    } catch (err) {
+      toast.error('Could not reset', errorMessage(err));
+    }
+  }
+
+  return (
+    <section aria-labelledby={`${uid}-2fa`} data-testid="admin-two-factor" className="rounded-xl border border-border bg-surface-2/50 p-4">
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+        <div className="min-w-0">
+          <div className="flex flex-wrap items-center gap-2">
+            <ShieldCheck className="h-4 w-4 text-muted" aria-hidden />
+            <h4 id={`${uid}-2fa`} className="font-sans text-sm font-semibold tracking-normal text-fg">{t.title}</h4>
+            {known && (
+              <Badge tone={user.twoFactorEnabled ? 'success' : 'neutral'} dot={user.twoFactorEnabled} size="sm">
+                {user.twoFactorEnabled ? COPY.security.twoFactor.on : t.notSetUp}
+              </Badge>
+            )}
+          </div>
+          <p className="mt-1 text-xs leading-relaxed text-muted">{t.body}</p>
+        </div>
+        <Button type="button" variant="outline" size="sm" className="shrink-0" onClick={() => setConfirm(true)} disabled={user.twoFactorEnabled === false} leftIcon={<ShieldOff aria-hidden />}>
+          {t.reset}
+        </Button>
+      </div>
+      <ConfirmDialog
+        open={confirm}
+        onClose={() => setConfirm(false)}
+        onConfirm={() => void onConfirm()}
+        tone="danger"
+        title={t.confirmTitle}
+        description={`${fullName(user)} ${t.confirmBody}`}
+        confirmLabel={t.reset}
+        loading={reset.isPending}
+      />
+    </section>
   );
 }

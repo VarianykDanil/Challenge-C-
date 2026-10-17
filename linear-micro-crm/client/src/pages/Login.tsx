@@ -1,22 +1,26 @@
-// Owned by the Product Designer. Contract: exports LoginPage(); uses useAuth() and pickDemoAccounts().
+// Owned by the Product Designer (layout); the two-step verification step by the Frontend Developer.
+// Contract: exports LoginPage(); uses useAuth() and pickDemoAccounts().
 import { useEffect, useRef, useState, type FormEvent } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
-import { ArrowLeft, ArrowRight, Check, CircleAlert, IdCard, Mail, MapPin, ShieldCheck } from 'lucide-react';
+import { ArrowLeft, ArrowRight, Check, CircleAlert, IdCard, Info, Mail, MapPin, ShieldCheck, Smartphone } from 'lucide-react';
 import clsx from 'clsx';
 import { BRAND, ROLE_LABELS } from '@lm/shared';
 import { COPY } from '@/content/copy';
 import { useAuth } from '@/auth/AuthProvider';
 import { pickDemoAccounts } from '@/api/hooks';
 import { ApiError } from '@/api/client';
+import { apiMessage } from '@/features/common/QueryStates';
+import { OneTimeCodeInput, RECOVERY_CODE_RE, RecoveryCodeInput, isCompleteCode } from '@/features/settings/OneTimeCodeInput';
 import { Logo, LogoMark } from '@/components/brand/Logo';
 import { BrandBackdrop } from '@/components/brand/BrandBackdrop';
 import { ThemeToggle } from '@/components/layout/theme';
 import { Avatar, Badge, Button, Divider, Field, Input, Skeleton } from '@/components/ui';
 
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+const NETWORK_ERROR = 'We couldn’t reach the server. Check your connection and try again.';
 
 export function LoginPage() {
-  const { login } = useAuth();
+  const { login, completeTwoFactor } = useAuth();
   const navigate = useNavigate();
   const demo = pickDemoAccounts();
 
@@ -24,25 +28,52 @@ export function LoginPage() {
   const [employeeId, setEmployeeId] = useState('');
   const [touched, setTouched] = useState<{ email?: boolean; employeeId?: boolean }>({});
   const [error, setError] = useState<string | null>(null);
+  /** Informational banner on step one, e.g. after a verification challenge expired. */
+  const [notice, setNotice] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState<null | 'form' | string>(null);
   const emailRef = useRef<HTMLInputElement>(null);
 
-  useEffect(() => { emailRef.current?.focus(); }, []);
+  // Step two (only for accounts with two-step verification on).
+  const [challenge, setChallenge] = useState<string | null>(null);
+  const [useRecovery, setUseRecovery] = useState(false);
+  const [code, setCode] = useState('');
+  const [recoveryCode, setRecoveryCode] = useState('');
+  const [codeError, setCodeError] = useState<string | null>(null);
+  const [locked, setLocked] = useState(false);
+  const [verifying, setVerifying] = useState(false);
+  const codeRef = useRef<HTMLInputElement>(null);
+  const stage: 'credentials' | 'code' = challenge ? 'code' : 'credentials';
+
+  useEffect(() => { if (stage === 'credentials') emailRef.current?.focus(); }, [stage]);
 
   const emailError = touched.email && !EMAIL_RE.test(email.trim()) ? 'Enter a valid work email.' : undefined;
   const idError = touched.employeeId && employeeId.trim().length < 3 ? 'Enter your employee ID, e.g. LM-0042.' : undefined;
 
   async function signIn(creds: { email: string; employeeId: string }, source: 'form' | string) {
     setError(null);
+    setNotice(null);
     setSubmitting(source);
     try {
-      await login({ email: creds.email.trim().toLowerCase(), employeeId: creds.employeeId.trim().toUpperCase() });
+      const result = await login({ email: creds.email.trim().toLowerCase(), employeeId: creds.employeeId.trim().toUpperCase() });
+      if (result.requiresTwoFactor) {
+        // No session yet: swap the form for the code step and keep the credentials for "Back".
+        setEmail(creds.email.trim().toLowerCase());
+        setEmployeeId(creds.employeeId.trim().toUpperCase());
+        setUseRecovery(false);
+        setCode('');
+        setRecoveryCode('');
+        setCodeError(null);
+        setLocked(false);
+        setChallenge(result.challengeToken);
+        setSubmitting(null);
+        return;
+      }
       navigate('/', { replace: true });
     } catch (e) {
       if (e instanceof ApiError) {
         setError(e.status === 401 ? 'We couldn’t match that email and employee ID. Check both and try again.' : e.message);
       } else {
-        setError('We couldn’t reach the server. Check your connection and try again.');
+        setError(NETWORK_ERROR);
       }
       setSubmitting(null);
     }
@@ -60,6 +91,61 @@ export function LoginPage() {
     setEmployeeId(acc.employeeId);
     setTouched({});
     void signIn(acc, acc.employeeId);
+  }
+
+  /** Back to step one. `message` becomes the info banner (used when the challenge expired). */
+  function backToCredentials(message: string | null = null) {
+    setChallenge(null);
+    setCode('');
+    setRecoveryCode('');
+    setCodeError(null);
+    setLocked(false);
+    setVerifying(false);
+    setError(null);
+    setNotice(message);
+  }
+
+  async function verify(input: { code?: string; recoveryCode?: string }) {
+    if (!challenge || verifying || locked) return;
+    setCodeError(null);
+    setVerifying(true);
+    try {
+      await completeTwoFactor({ challengeToken: challenge, ...input });
+      navigate('/', { replace: true });
+    } catch (e) {
+      if (e instanceof ApiError && e.status === 410) {
+        backToCredentials(COPY.security.login.expired);
+        return;
+      }
+      if (e instanceof ApiError && e.status === 429) {
+        setLocked(true);
+        setCodeError(apiMessage(e, COPY.security.login.tooMany));
+      } else if (e instanceof ApiError) {
+        setCodeError(apiMessage(e, COPY.security.login.invalid));
+        setCode('');
+        setRecoveryCode('');
+        requestAnimationFrame(() => codeRef.current?.focus());
+      } else {
+        setCodeError(NETWORK_ERROR);
+      }
+      setVerifying(false);
+    }
+  }
+
+  function onVerifySubmit(e: FormEvent) {
+    e.preventDefault();
+    if (useRecovery) {
+      if (RECOVERY_CODE_RE.test(recoveryCode)) void verify({ recoveryCode });
+    } else if (isCompleteCode(code)) {
+      void verify({ code });
+    }
+  }
+
+  function toggleRecovery() {
+    setUseRecovery((v) => !v);
+    setCode('');
+    setRecoveryCode('');
+    if (!locked) setCodeError(null);
   }
 
   const busy = submitting !== null;
@@ -141,85 +227,113 @@ export function LoginPage() {
 
         <div className="flex flex-1 items-center justify-center px-5 py-8 sm:px-8">
           <div className="w-full max-w-[420px] animate-slide-up">
-            <div className="mb-8 lg:hidden">
-              <h1 className="text-3xl font-bold tracking-tight">{COPY.login.headline}</h1>
-              <p className="mt-2 text-sm text-muted">{COPY.login.subheadline}</p>
-            </div>
-            <div className="mb-8 hidden lg:block">
-              <h2 className="text-2xl font-bold tracking-tight">Sign in to {BRAND.product}</h2>
-              <p className="mt-1.5 text-sm text-muted">Use your work email and the employee ID on your welcome email.</p>
-            </div>
-
-            {error && (
-              <div role="alert" className="mb-5 flex items-start gap-3 rounded-xl border border-danger/30 bg-danger-soft px-4 py-3 text-sm text-danger animate-scale-in">
-                <CircleAlert className="mt-0.5 h-4 w-4 shrink-0" aria-hidden />
-                <span className="text-fg">{error}</span>
-              </div>
-            )}
-
-            <form onSubmit={onSubmit} noValidate className="space-y-5">
-              <Field label={COPY.login.emailLabel} htmlFor="login-email" error={emailError} required>
-                <Input
-                  ref={emailRef}
-                  id="login-email"
-                  type="email"
-                  name="email"
-                  autoComplete="email username"
-                  inputMode="email"
-                  required
-                  aria-required
-                  placeholder="you@linear-mcr.co.uk"
-                  value={email}
-                  onChange={(e) => setEmail(e.target.value)}
-                  // Validate on blur only once something was typed: an empty field left by clicking elsewhere
-                  // (e.g. a footer link) must not grow an error line under the cursor mid-click.
-                  onBlur={() => { if (email.trim()) setTouched((t) => ({ ...t, email: true })); }}
-                  invalid={!!emailError}
-                  leftIcon={<Mail />}
-                  size="lg"
-                  disabled={busy}
-                />
-              </Field>
-              <Field label={COPY.login.employeeIdLabel} htmlFor="login-employee-id" error={idError} hint={idError ? undefined : 'Format LM-0000. Ask your team leader if you don’t have one yet.'} required>
-                <Input
-                  id="login-employee-id"
-                  name="employeeId"
-                  autoComplete="off"
-                  autoCapitalize="characters"
-                  spellCheck={false}
-                  required
-                  aria-required
-                  placeholder="LM-0042"
-                  value={employeeId}
-                  onChange={(e) => setEmployeeId(e.target.value.toUpperCase())}
-                  onBlur={() => { if (employeeId.trim()) setTouched((t) => ({ ...t, employeeId: true })); }}
-                  invalid={!!idError}
-                  leftIcon={<IdCard />}
-                  size="lg"
-                  className="font-mono tracking-wider"
-                  disabled={busy}
-                />
-              </Field>
-              <Button type="submit" size="lg" fullWidth loading={submitting === 'form'} disabled={busy} rightIcon={<ArrowRight />}>
-                {COPY.login.submit}
-              </Button>
-              <p className="flex items-center justify-center gap-1.5 text-xs text-muted">
-                <ShieldCheck className="h-3.5 w-3.5" aria-hidden />
-                Secure session · no passwords to remember
-              </p>
-            </form>
-
-            {showDemo && (
+            {stage === 'code' ? (
+              <TwoFactorStep
+                email={email}
+                useRecovery={useRecovery}
+                code={code}
+                recoveryCode={recoveryCode}
+                error={codeError}
+                locked={locked}
+                verifying={verifying}
+                inputRef={codeRef}
+                onCodeChange={(v) => { setCode(v); if (codeError && !locked) setCodeError(null); }}
+                onRecoveryChange={(v) => { setRecoveryCode(v); if (codeError && !locked) setCodeError(null); }}
+                onComplete={(c) => void verify({ code: c })}
+                onSubmit={onVerifySubmit}
+                onToggleRecovery={toggleRecovery}
+                onBack={() => backToCredentials()}
+              />
+            ) : (
               <>
-                <Divider label={COPY.login.demoTitle} spacing="lg" />
-                <DemoAccounts
-                  accounts={demoAccounts}
-                  loading={demo.isLoading}
-                  failed={demo.isError}
-                  busyId={typeof submitting === 'string' && submitting !== 'form' ? submitting : null}
-                  disabled={busy}
-                  onPick={pickDemo}
-                />
+                <div className="mb-8 lg:hidden">
+                  <h1 className="text-3xl font-bold tracking-tight">{COPY.login.headline}</h1>
+                  <p className="mt-2 text-sm text-muted">{COPY.login.subheadline}</p>
+                </div>
+                <div className="mb-8 hidden lg:block">
+                  <h2 className="text-2xl font-bold tracking-tight">Sign in to {BRAND.product}</h2>
+                  <p className="mt-1.5 text-sm text-muted">Use your work email and the employee ID on your welcome email.</p>
+                </div>
+
+                {notice && !error && (
+                  <div role="status" data-testid="login-notice" className="mb-5 flex items-start gap-3 rounded-xl border border-info/30 bg-info-soft px-4 py-3 text-sm text-info animate-scale-in">
+                    <Info className="mt-0.5 h-4 w-4 shrink-0" aria-hidden />
+                    <span className="text-fg">{notice}</span>
+                  </div>
+                )}
+
+                {error && (
+                  <div role="alert" className="mb-5 flex items-start gap-3 rounded-xl border border-danger/30 bg-danger-soft px-4 py-3 text-sm text-danger animate-scale-in">
+                    <CircleAlert className="mt-0.5 h-4 w-4 shrink-0" aria-hidden />
+                    <span className="text-fg">{error}</span>
+                  </div>
+                )}
+
+                <form onSubmit={onSubmit} noValidate className="space-y-5">
+                  <Field label={COPY.login.emailLabel} htmlFor="login-email" error={emailError} required>
+                    <Input
+                      ref={emailRef}
+                      id="login-email"
+                      type="email"
+                      name="email"
+                      autoComplete="email username"
+                      inputMode="email"
+                      required
+                      aria-required
+                      placeholder="you@linear-mcr.co.uk"
+                      value={email}
+                      onChange={(e) => setEmail(e.target.value)}
+                      // Validate on blur only once something was typed: an empty field left by clicking elsewhere
+                      // (e.g. a footer link) must not grow an error line under the cursor mid-click.
+                      onBlur={() => { if (email.trim()) setTouched((t) => ({ ...t, email: true })); }}
+                      invalid={!!emailError}
+                      leftIcon={<Mail />}
+                      size="lg"
+                      disabled={busy}
+                    />
+                  </Field>
+                  <Field label={COPY.login.employeeIdLabel} htmlFor="login-employee-id" error={idError} hint={idError ? undefined : 'Format LM-0000. Ask your team leader if you don’t have one yet.'} required>
+                    <Input
+                      id="login-employee-id"
+                      name="employeeId"
+                      autoComplete="off"
+                      autoCapitalize="characters"
+                      spellCheck={false}
+                      required
+                      aria-required
+                      placeholder="LM-0042"
+                      value={employeeId}
+                      onChange={(e) => setEmployeeId(e.target.value.toUpperCase())}
+                      onBlur={() => { if (employeeId.trim()) setTouched((t) => ({ ...t, employeeId: true })); }}
+                      invalid={!!idError}
+                      leftIcon={<IdCard />}
+                      size="lg"
+                      className="font-mono tracking-wider"
+                      disabled={busy}
+                    />
+                  </Field>
+                  <Button type="submit" size="lg" fullWidth loading={submitting === 'form'} disabled={busy} rightIcon={<ArrowRight />}>
+                    {COPY.login.submit}
+                  </Button>
+                  <p className="flex items-center justify-center gap-1.5 text-xs text-muted">
+                    <ShieldCheck className="h-3.5 w-3.5" aria-hidden />
+                    Secure session · no passwords to remember
+                  </p>
+                </form>
+
+                {showDemo && (
+                  <>
+                    <Divider label={COPY.login.demoTitle} spacing="lg" />
+                    <DemoAccounts
+                      accounts={demoAccounts}
+                      loading={demo.isLoading}
+                      failed={demo.isError}
+                      busyId={typeof submitting === 'string' && submitting !== 'form' ? submitting : null}
+                      disabled={busy}
+                      onPick={pickDemo}
+                    />
+                  </>
+                )}
               </>
             )}
           </div>
@@ -243,6 +357,93 @@ export function LoginPage() {
 }
 
 /* ───────────────────────────── pieces ───────────────────────────── */
+
+interface TwoFactorStepProps {
+  email: string;
+  useRecovery: boolean;
+  code: string;
+  recoveryCode: string;
+  error: string | null;
+  /** 429 from the server: inputs stay disabled with the message until the user goes back. */
+  locked: boolean;
+  verifying: boolean;
+  inputRef: React.RefObject<HTMLInputElement | null>;
+  onCodeChange: (value: string) => void;
+  onRecoveryChange: (value: string) => void;
+  onComplete: (code: string) => void;
+  onSubmit: (e: FormEvent) => void;
+  onToggleRecovery: () => void;
+  onBack: () => void;
+}
+
+/** Step two of sign-in: the authenticator code (auto-submits on the sixth digit) or a recovery code. */
+function TwoFactorStep({ email, useRecovery, code, recoveryCode, error, locked, verifying, inputRef, onCodeChange, onRecoveryChange, onComplete, onSubmit, onToggleRecovery, onBack }: TwoFactorStepProps) {
+  const t = COPY.security.login;
+  const canSubmit = useRecovery ? RECOVERY_CODE_RE.test(recoveryCode) : isCompleteCode(code);
+  const disabled = locked || verifying;
+
+  return (
+    <div data-testid="login-2fa" className="animate-slide-up">
+      <span className="mb-5 inline-flex h-12 w-12 items-center justify-center rounded-xl bg-primary-soft text-primary" aria-hidden>
+        <Smartphone className="h-6 w-6" />
+      </span>
+      <h2 className="text-2xl font-bold tracking-tight">{t.heading}</h2>
+      <p className="mt-1.5 text-sm text-muted">{useRecovery ? t.bodyRecovery : t.body}</p>
+      <p className="mt-2 text-xs text-muted">
+        {t.signingInAs} <span className="font-medium text-fg">{email}</span>
+      </p>
+
+      {error && (
+        <div role="alert" data-testid="login-2fa-error" className="mt-5 flex items-start gap-3 rounded-xl border border-danger/30 bg-danger-soft px-4 py-3 text-sm text-danger animate-scale-in">
+          <CircleAlert className="mt-0.5 h-4 w-4 shrink-0" aria-hidden />
+          <span className="text-fg">{error}</span>
+        </div>
+      )}
+
+      <form onSubmit={onSubmit} noValidate className="mt-6 space-y-5">
+        {useRecovery ? (
+          <Field label={t.recoveryLabel} htmlFor="login-recovery-code" hint={t.recoveryHint}>
+            <RecoveryCodeInput
+              ref={inputRef}
+              id="login-recovery-code"
+              name="recoveryCode"
+              autoFocus
+              value={recoveryCode}
+              onChange={onRecoveryChange}
+              disabled={disabled}
+              invalid={!!error}
+            />
+          </Field>
+        ) : (
+          <Field label={t.codeLabel} htmlFor="login-code" hint={t.codeHint}>
+            <OneTimeCodeInput
+              ref={inputRef}
+              id="login-code"
+              name="code"
+              autoFocus
+              value={code}
+              onChange={onCodeChange}
+              onComplete={onComplete}
+              disabled={disabled}
+              invalid={!!error}
+            />
+          </Field>
+        )}
+        <Button type="submit" size="lg" fullWidth loading={verifying} disabled={locked || !canSubmit} rightIcon={<ArrowRight />}>
+          {t.verify}
+        </Button>
+        <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-2 text-sm">
+          <Button type="button" variant="link" size="sm" onClick={onToggleRecovery} disabled={verifying}>
+            {useRecovery ? t.useApp : t.useRecovery}
+          </Button>
+          <Button type="button" variant="link" size="sm" onClick={onBack} disabled={verifying} leftIcon={<ArrowLeft />}>
+            {t.back}
+          </Button>
+        </div>
+      </form>
+    </div>
+  );
+}
 
 interface DemoAccountsProps {
   accounts?: { label: string; role: string; email: string; employeeId: string }[];

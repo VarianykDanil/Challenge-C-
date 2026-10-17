@@ -32,6 +32,12 @@ export function errorMessage(err: unknown, fallback = 'Something went wrong', ma
   return fallback;
 }
 
+/** The server's own message when it sent one, otherwise `fallback` (the generic "Request failed (n)" is never shown). */
+export function apiMessage(err: unknown, fallback: string): string {
+  if (err instanceof ApiError) return err.message && !/^Request failed/.test(err.message) ? err.message : fallback;
+  return errorMessage(err, fallback);
+}
+
 export function ErrorState({ error, onRetry, title = 'Could not load this section', className }: { error: unknown; onRetry?: () => void; title?: string; className?: string }) {
   return (
     <div role="alert" className={`flex flex-col items-center justify-center gap-2 rounded-xl border border-danger/40 bg-danger/5 p-8 text-center ${className ?? ''}`}>
