@@ -97,6 +97,7 @@ Every command below exists in `package.json` (root) or `server/package.json`.
 | `PORT` | `4000` | Port the API (and, in production, the client) listens on |
 | `DB_PATH` | `server/data/linear.sqlite` | Where the SQLite file lives; the directory is created if needed |
 | `LM_DEMO_ACCOUNTS` | unset | Set to `0` on any deployment with real users: the sign-in page then shows no demo accounts and the API never publishes a login |
+| `LM_APP_SECRET` | unset (development key) | Key material for encrypting two-step verification secrets at rest (AES-256-GCM, key = SHA-256 of the value). Set a long random string on every real deployment; in `NODE_ENV=production` the server warns once at start-up when it is unset |
 | `COOKIE_SECURE` | unset | Set to `1` to force the `Secure` flag on the session cookie; it is set automatically when the request arrived over HTTPS (`X-Forwarded-Proto: https`, `trust proxy` is on) |
 | `TZ` | `Europe/London` | The business time zone — "today" for events and pay weeks. The npm scripts and the Dockerfile pin it; keep it if you run the server another way |
 | `NODE_ENV` | — | `production` makes the server serve `client/dist`; `npm start` sets it |

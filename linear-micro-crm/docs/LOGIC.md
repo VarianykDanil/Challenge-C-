@@ -284,3 +284,24 @@ useful, and renders `EmptyChart` when there is nothing to plot.
 `BENCHMARK_TOLERANCE` (0.1), `BENCHMARK_DANGER_THRESHOLD` (0.25), `TARGET_SALES_PER_DAY` (2),
 `PERFORMANCE_WEIGHTS` ({ funnel: 0.6, volume: 0.4 }), `MIN_STOPS_FOR_INSIGHTS` (20),
 `PAYDAY_DAYS_AFTER_WEEK_END` (5), `DASHBOARD_RANGE_LABELS`.
+
+## 13. Two-step verification (server-side, `server/src/lib/totp.ts`)
+
+Not domain logic, but rules worth stating once. The server implements RFC 4226 (HOTP) and RFC 6238 (TOTP)
+with Node's `crypto` only — no third-party OTP library:
+
+* **Secret**: 20 random bytes, shown as RFC 4648 base32 without padding (32 characters, `A–Z2–7`).
+* **Code**: `HOTP(secret, T)` where `T = floor(unixSeconds / 30)`; HMAC-SHA1, dynamic truncation
+  (`offset = last nibble`, 31-bit big-endian word), `mod 10^6`, zero-padded to 6 digits.
+* **Verification** accepts `T−1`, `T` and `T+1` (±30 s of clock drift or a code typed just before
+  roll-over), compares every candidate in constant time and always checks all three.
+* **Recovery codes**: 10 × `xxxx-xxxx`, lower-case `a–z0–9` drawn uniformly from `crypto.randomBytes`
+  (rejection sampling), stored as SHA-256 hashes, single use; typed codes are lower-cased and the
+  hyphen/spaces are optional.
+* **Limits**: 6 wrong codes per user in 10 minutes → `429`; wrong codes at login also count towards the
+  8-per-IP+email login limiter. A login challenge lives 5 minutes and is deleted after one successful use.
+* **At rest**: secrets are AES-256-GCM encrypted (`lib/crypto.ts`) with a key derived from `LM_APP_SECRET`.
+
+Reference vectors (RFC 6238 appendix B, secret `12345678901234567890`): T = 59 → `94287082` (8 digits) /
+`287082` (6); 1111111109 → `081804`; 1234567890 → `005924`; 2000000000 → `279037` — all covered by
+`npm test -w server`.

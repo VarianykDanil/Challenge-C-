@@ -58,9 +58,9 @@ export function authenticate(db: Db): RequestHandler {
   return (req, _res, next) => {
     const token = (req.cookies as Record<string, string | undefined> | undefined)?.[SESSION_COOKIE];
     if (!token) return next();
-    const row = get<UserWithTeam & { expiresAt: string }>(
+    const row = get<UserWithTeam & { expiresAt: string; totpOn: number }>(
       db,
-      `${USER_SELECT.replace('SELECT ', 'SELECT s.expires_at AS expiresAt, ')} JOIN sessions s ON s.user_id = u.id WHERE s.token = ?`,
+      `${USER_SELECT.replace('SELECT ', 'SELECT s.expires_at AS expiresAt, (u.totp_enabled_at IS NOT NULL) AS totpOn, ')} JOIN sessions s ON s.user_id = u.id WHERE s.token = ?`,
       [token],
     );
     if (!row) return next();
@@ -68,8 +68,9 @@ export function authenticate(db: Db): RequestHandler {
       destroySession(db, token);
       return next(); // requireAuth answers 401
     }
-    const { expiresAt: _ignored, ...user } = row;
-    req.user = user;
+    const { expiresAt: _ignored, totpOn, ...user } = row;
+    // The caller's own flag rides on req.user so /auth/me and the dashboard's `user` carry it; other users' rows never do.
+    req.user = { ...user, twoFactorEnabled: Boolean(totpOn) };
     req.sessionToken = token;
     next();
   };

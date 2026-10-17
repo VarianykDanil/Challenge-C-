@@ -8,7 +8,8 @@
     "start": "TZ=Europe/London NODE_ENV=production NODE_NO_WARNINGS=1 tsx src/index.ts",
     "seed": "NODE_NO_WARNINGS=1 tsx src/db/seed.ts",
     "smoke": "TZ=Europe/London NODE_NO_WARNINGS=1 tsx src/smoke.ts",
-    "typecheck": "tsc --noEmit -p tsconfig.json"
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "test": "NODE_NO_WARNINGS=1 node --import tsx --test \"src/**/*.test.ts\""
   },
   "dependencies": {
     "@lm/shared": "*",

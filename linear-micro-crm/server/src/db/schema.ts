@@ -33,7 +33,10 @@ CREATE TABLE IF NOT EXISTS users (
   status TEXT NOT NULL DEFAULT 'active',
   phone TEXT,
   avatar_color TEXT NOT NULL,
-  city TEXT
+  city TEXT,
+  totp_secret_enc TEXT,
+  totp_pending_enc TEXT,
+  totp_enabled_at TEXT
 );
 CREATE INDEX IF NOT EXISTS idx_users_team ON users(team_id);
 
@@ -181,14 +184,62 @@ CREATE TABLE IF NOT EXISTS sessions (
   expires_at TEXT NOT NULL
 );
 
+CREATE TABLE IF NOT EXISTS recovery_codes (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  code_hash TEXT NOT NULL,
+  used_at TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_recovery_codes_user ON recovery_codes(user_id);
+
+CREATE TABLE IF NOT EXISTS two_factor_challenges (
+  token TEXT PRIMARY KEY,
+  user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  created_at TEXT NOT NULL,
+  expires_at TEXT NOT NULL,
+  attempts INTEGER NOT NULL DEFAULT 0
+);
+
 CREATE TABLE IF NOT EXISTS meta (
   key TEXT PRIMARY KEY,
   value TEXT NOT NULL
 );
 `;
 
-export function createSchema(db: Db): void {
+/**
+ * Columns added after the first release. `CREATE TABLE IF NOT EXISTS` leaves an existing table alone, so a database
+ * created before the column existed is upgraded here with a guarded `ALTER TABLE … ADD COLUMN` (SQLite has no
+ * `ADD COLUMN IF NOT EXISTS`). Every entry must be nullable or carry a default so existing rows stay valid.
+ */
+const COLUMN_UPGRADES: { table: string; column: string; ddl: string }[] = [
+  { table: 'users', column: 'totp_secret_enc', ddl: 'TEXT' },
+  { table: 'users', column: 'totp_pending_enc', ddl: 'TEXT' },
+  { table: 'users', column: 'totp_enabled_at', ddl: 'TEXT' },
+];
+
+export function tableColumns(db: Db, table: string): string[] {
+  return (db.prepare(`PRAGMA table_info(${table})`).all() as { name: string }[]).map((c) => c.name);
+}
+
+/** Adds the missing columns from `COLUMN_UPGRADES`; returns their names. Idempotent. */
+export function upgradeSchema(db: Db): string[] {
+  const added: string[] = [];
+  const known = new Map<string, Set<string>>();
+  for (const u of COLUMN_UPGRADES) {
+    if (!known.has(u.table)) known.set(u.table, new Set(tableColumns(db, u.table)));
+    const cols = known.get(u.table)!;
+    if (cols.has(u.column)) continue;
+    db.exec(`ALTER TABLE ${u.table} ADD COLUMN ${u.column} ${u.ddl}`);
+    cols.add(u.column);
+    added.push(`${u.table}.${u.column}`);
+  }
+  return added;
+}
+
+/** Creates every table and index that is missing, then brings older tables up to date. Safe to run on every start. */
+export function createSchema(db: Db): string[] {
   db.exec(SCHEMA_SQL);
+  return upgradeSchema(db);
 }
 
 export function isSeeded(db: Db): boolean {

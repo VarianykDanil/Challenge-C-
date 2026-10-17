@@ -11,11 +11,14 @@ import { createApp } from './app.ts';
 import { all, get, openDb, run } from './db/connection.ts';
 import { materialisePayrollRuns } from './db/maintenance.ts';
 import { getUser } from './db/queries.ts';
-import { createSchema } from './db/schema.ts';
+import { SCHEMA_SQL, createSchema, tableColumns } from './db/schema.ts';
 import { seed } from './db/seed.ts';
 import { AVATAR_PALETTE } from './db/seed-data.ts';
 import { addDays, dayOfWeek, mondayOf, normaliseCheckIn, nowHHMM, previousToDateRange, startOfMonth, startOfQuarter, sundayOf, todayISO } from './lib/dates.ts';
 import { nextPay } from './lib/pay.ts';
+import { totp } from './lib/totp.ts';
+import { purgeExpiredChallenges, resetCodeFailures } from './lib/twofactor.ts';
+import { resetLoginFailures } from './routes/auth.ts';
 
 /** WCAG contrast ratio of white text on a hex background. */
 function contrastWithWhite(hex: string): number {
@@ -473,7 +476,8 @@ async function main(): Promise<void> {
     ok(r.json.every((e: Json) => typeof e.totals?.sales === 'number' && typeof e.repCount === 'number'), 'meta shape');
     const f = await admin.get('/events?teamId=1&status=scheduled');
     ok(f.json.length > 0 && f.json.every((e: Json) => e.teamId === 1 && e.status === 'scheduled'), 'team+status filter');
-    futureNlEvent = f.json[0];
+    // "future" must mean after today: before the first start time of the day, today's events are still `scheduled`
+    futureNlEvent = f.json.find((e: Json) => e.date > today) ?? f.json[0];
     const repList = await rep.get(`/events?from=${weekAgo}&to=${addDays(today, 21)}&teamId=2`);
     ok(repList.json.length > 0 && repList.json.every((e: Json) => e.teamId === 1), 'rep only sees own team');
     const todays = await admin.get(`/events?from=${today}&to=${today}`);
@@ -946,6 +950,263 @@ async function main(): Promise<void> {
     eq(c.json.authorName, 'Amelia Hart', 'author');
     eq(c.json.pinned, false, 'not pinned');
   });
+
+  // ── two-step verification (TOTP) — a non-demo user so the demo sign-in keeps working ──
+  const tfa = {
+    employeeId: 'LM-0920', email: 'smoke.totp@linear-mcr.co.uk', firstName: 'Smoke', lastName: 'Totp', role: 'rep', position: 'field_rep',
+    teamId: 2, startDate: today, status: 'active', phone: null, city: 'Manchester',
+  };
+  const tfaLogin = { email: tfa.email, employeeId: tfa.employeeId };
+  let tfaUserId = 0;
+  const RECOVERY_RE = /^[a-z0-9]{4}-[a-z0-9]{4}$/;
+  /** A code that is certainly wrong right now: the current one with its last digit changed. */
+  const wrongCode = (secret: string) => {
+    const right = totp(secret);
+    return right.slice(0, 5) + String((Number(right[5]) + 1) % 10);
+  };
+  /** Setup + enable for a signed-in client; returns the secret and the recovery codes. */
+  const enable2fa = async (client: Client): Promise<{ secret: string; codes: string[] }> => {
+    const setup = await client.post('/auth/2fa/setup');
+    status(setup, 201, 'setup');
+    const enabled = await client.post('/auth/2fa/enable', { code: totp(setup.json.secret) });
+    status(enabled, 200, 'enable');
+    return { secret: setup.json.secret, codes: enabled.json.recoveryCodes };
+  };
+  const tfaDbRow = () => get<Json>(db, `SELECT totp_secret_enc AS s, totp_pending_enc AS p, totp_enabled_at AS e FROM users WHERE id = ?`, [tfaUserId])!;
+  const recoveryRows = () => get<Json>(db, `SELECT COUNT(*) AS n FROM recovery_codes WHERE user_id = ?`, [tfaUserId])!.n as number;
+  const tfaUser = new Client(base, 'totp');
+  let tfaSecret = '';
+  let tfaCodes: string[] = [];
+
+  await check('2FA setup → enable: QR + otpauth, wrong code 400, 10 recovery codes, other sessions signed out', async () => {
+    const created = await admin.post('/users', tfa);
+    status(created, 201, 'create user');
+    tfaUserId = created.json.id;
+    const other = new Client(base, 'totp-other');
+    const login = await tfaUser.post('/auth/login', tfaLogin);
+    status(login, 200, 'login');
+    eq(login.json.user.twoFactorEnabled, false, 'login carries twoFactorEnabled=false');
+    status(await other.post('/auth/login', tfaLogin), 200, 'second session');
+    eq((await tfaUser.get('/auth/me')).json.user.twoFactorEnabled, false, '/auth/me flag off');
+    const off = await tfaUser.get('/auth/2fa');
+    status(off, 200, 'status');
+    eq(JSON.stringify(off.json), JSON.stringify({ enabled: false, enabledAt: null, recoveryCodesLeft: 0, pendingSetup: false }), 'status off');
+    status(await tfaUser.post('/auth/2fa/enable', { code: '123456' }), 409, 'enable with nothing pending');
+    status(await tfaUser.post('/auth/2fa/disable', { code: '123456' }), 409, 'disable while off');
+    status(await tfaUser.post('/auth/2fa/recovery-codes', { code: '123456' }), 409, 'recovery codes while off');
+    const first = await tfaUser.post('/auth/2fa/setup');
+    status(first, 201, 'setup');
+    ok(/^[A-Z2-7]{32}$/.test(first.json.secret), `base32 secret (${first.json.secret})`);
+    ok(first.json.otpauthUrl.startsWith('otpauth://totp/Linear%20Hub:smoke.totp%40linear-mcr.co.uk?'), `otpauth label (${first.json.otpauthUrl})`);
+    ok(first.json.otpauthUrl.includes(`secret=${first.json.secret}`) && first.json.otpauthUrl.includes('issuer=Linear%20Hub'), 'otpauth params');
+    ok(typeof first.json.qrSvg === 'string' && first.json.qrSvg.startsWith('<svg') && first.json.qrSvg.length > 500, 'inline SVG QR');
+    eq((await tfaUser.get('/auth/2fa')).json.pendingSetup, true, 'pendingSetup after setup');
+    const second = await tfaUser.post('/auth/2fa/setup');
+    status(second, 201, 'setup again replaces the pending secret');
+    ok(second.json.secret !== first.json.secret, 'new secret');
+    tfaSecret = second.json.secret;
+    const bad = await tfaUser.post('/auth/2fa/enable', { code: wrongCode(tfaSecret) });
+    status(bad, 400, 'wrong code');
+    eq(bad.json.error, 'That code is not valid', 'wrong code message');
+    status(await tfaUser.post('/auth/2fa/enable', { code: '12 34' }), 400, 'malformed code');
+    status(await tfaUser.post('/auth/2fa/enable', { code: totp(first.json.secret) }), 400, 'code from the replaced secret');
+    status(await tfaUser.post('/auth/2fa/enable', {}), 400, 'missing code → validation');
+    const on = await tfaUser.post('/auth/2fa/enable', { code: totp(tfaSecret) });
+    status(on, 200, 'enable');
+    tfaCodes = on.json.recoveryCodes;
+    eq(tfaCodes.length, 10, 'ten recovery codes');
+    ok(tfaCodes.every((c: string) => RECOVERY_RE.test(c)), `xxxx-xxxx lower-case alphanumerics (${tfaCodes[0]})`);
+    eq(new Set(tfaCodes).size, 10, 'all distinct');
+    status(await other.get('/auth/me'), 401, 'the other session was signed out');
+    const me = await tfaUser.get('/auth/me');
+    status(me, 200, 'current session kept');
+    eq(me.json.user.twoFactorEnabled, true, '/auth/me flag on');
+    const st = await tfaUser.get('/auth/2fa');
+    eq(st.json.enabled, true, 'enabled');
+    ok(typeof st.json.enabledAt === 'string' && st.json.enabledAt.startsWith(today.slice(0, 4)), 'enabledAt timestamp');
+    eq(st.json.recoveryCodesLeft, 10, '10 left');
+    eq(st.json.pendingSetup, false, 'nothing pending');
+    status(await tfaUser.post('/auth/2fa/setup'), 409, 'setup while on');
+    status(await tfaUser.post('/auth/2fa/enable', { code: totp(tfaSecret) }), 409, 'enable while on');
+    const row = tfaDbRow();
+    ok(typeof row.s === 'string' && row.s.startsWith('v1:') && !row.s.includes(tfaSecret), 'secret stored encrypted (v1:iv:tag:ct)');
+    eq(row.p, null, 'pending cleared');
+    eq(recoveryRows(), 10, 'hashed recovery codes stored');
+    ok(!get<Json>(db, `SELECT GROUP_CONCAT(code_hash) AS h FROM recovery_codes WHERE user_id = ?`, [tfaUserId])!.h.includes(tfaCodes[0]!.replace('-', '')), 'codes stored hashed, not plain');
+    const asAdmin = await admin.get(`/users/${tfaUserId}`);
+    const secretKey = (o: Json) => Object.keys(o).some((k) => /totp|secret|enc$/i.test(k));
+    ok(!secretKey(asAdmin.json), 'user payload never carries the secret columns');
+    ok(!secretKey(me.json.user) && !secretKey(login.json.user), '/auth/me and login never carry the secret columns');
+    ok(!JSON.stringify(asAdmin.json).includes(row.s) && !JSON.stringify(me.json).includes(row.s), 'ciphertext never leaves the database');
+  });
+  await check('Login with 2FA on: challenge without cookie → wrong code 401 → right code sets cookie; token is single use', async () => {
+    const c = new Client(base, 'totp-login');
+    const step1 = await c.post('/auth/login', tfaLogin);
+    status(step1, 200, 'step one');
+    eq(step1.json.requiresTwoFactor, true, 'requiresTwoFactor');
+    eq(step1.json.method, 'totp', 'method');
+    ok(typeof step1.json.challengeToken === 'string' && step1.json.challengeToken.length === 64, 'challenge token');
+    ok(!step1.headers.get('set-cookie'), 'no session cookie yet');
+    eq(step1.json.user, undefined, 'no user payload yet');
+    status(await c.get('/auth/me'), 401, 'not signed in yet');
+    const token = step1.json.challengeToken;
+    status(await c.post('/auth/login/2fa', {}), 400, 'empty body → validation');
+    status(await c.post('/auth/login/2fa', { challengeToken: token }), 400, 'no code or recovery code → validation');
+    const wrong = await c.post('/auth/login/2fa', { challengeToken: token, code: wrongCode(tfaSecret) });
+    status(wrong, 401, 'wrong code');
+    eq(wrong.json.error, 'That code is not valid', 'wrong code message');
+    ok(!wrong.headers.get('set-cookie'), 'still no cookie');
+    eq(get<Json>(db, `SELECT attempts FROM two_factor_challenges WHERE token = ?`, [token])!.attempts, 1, 'attempt counted on the challenge');
+    const right = await c.post('/auth/login/2fa', { challengeToken: token, code: totp(tfaSecret) });
+    status(right, 200, 'right code');
+    ok(/lm_session=[0-9a-f]{64}/.test(right.headers.get('set-cookie') ?? ''), 'session cookie set');
+    eq(right.json.user.id, tfaUserId, 'user payload');
+    eq(right.json.user.twoFactorEnabled, true, 'flag on');
+    eq(right.json.user.employeeId, tfa.employeeId, 'own employee ID');
+    status(await c.get('/auth/me'), 200, 'signed in');
+    eq(get<Json>(db, `SELECT COUNT(*) AS n FROM two_factor_challenges WHERE token = ?`, [token])!.n, 0, 'challenge deleted after use');
+    status(await c.post('/auth/login/2fa', { challengeToken: token, code: totp(tfaSecret) }), 410, 'reused token → 410');
+    status(await c.post('/auth/login/2fa', { challengeToken: 'f'.repeat(64), code: totp(tfaSecret) }), 410, 'unknown token → 410');
+    status(await c.post('/auth/logout'), 204, 'logout');
+  });
+  await check('Recovery codes: single use at login (case/hyphen tolerant); regenerating with a code invalidates the old set', async () => {
+    const c = new Client(base, 'totp-recovery');
+    const challenge = async () => (await c.post('/auth/login', tfaLogin)).json.challengeToken as string;
+    status(await c.post('/auth/login/2fa', { challengeToken: await challenge(), recoveryCode: tfaCodes[0]!.toUpperCase() }), 200, 'recovery code signs in');
+    eq((await c.get('/auth/2fa')).json.recoveryCodesLeft, 9, '9 left');
+    status(await c.post('/auth/logout'), 204, 'logout');
+    status(await c.post('/auth/login/2fa', { challengeToken: await challenge(), recoveryCode: tfaCodes[0] }), 401, 'same code again fails');
+    status(await c.post('/auth/login/2fa', { challengeToken: await challenge(), recoveryCode: tfaCodes[1]!.replace('-', ' ') }), 200, 'another code without the hyphen');
+    eq((await c.get('/auth/2fa')).json.recoveryCodesLeft, 8, '8 left');
+    status(await c.post('/auth/logout'), 204, 'logout');
+    const bad = await tfaUser.post('/auth/2fa/recovery-codes', { code: wrongCode(tfaSecret) });
+    status(bad, 400, 'regenerate with a wrong code');
+    status(await tfaUser.post('/auth/2fa/recovery-codes', { recoveryCode: tfaCodes[2] }), 400, 'regenerate needs an authenticator code, not a recovery code');
+    const fresh = await tfaUser.post('/auth/2fa/recovery-codes', { code: totp(tfaSecret) });
+    status(fresh, 200, 'regenerate');
+    eq(fresh.json.recoveryCodes.length, 10, 'ten new codes');
+    ok(fresh.json.recoveryCodes.every((x: string) => RECOVERY_RE.test(x) && !tfaCodes.includes(x)), 'all new');
+    eq((await tfaUser.get('/auth/2fa')).json.recoveryCodesLeft, 10, '10 left again');
+    status(await c.post('/auth/login/2fa', { challengeToken: await challenge(), recoveryCode: tfaCodes[2] }), 401, 'old unused code no longer works');
+    status(await c.post('/auth/login/2fa', { challengeToken: await challenge(), recoveryCode: fresh.json.recoveryCodes[0] }), 200, 'new code works');
+    status(await c.post('/auth/logout'), 204, 'logout');
+    tfaCodes = fresh.json.recoveryCodes;
+  });
+  await check('Disable: 400 without a valid code, 204 with a recovery code (or code); login goes back to one step', async () => {
+    status(await tfaUser.post('/auth/2fa/disable', {}), 400, 'nothing supplied → validation');
+    const bad = await tfaUser.post('/auth/2fa/disable', { code: wrongCode(tfaSecret) });
+    status(bad, 400, 'wrong code');
+    eq(bad.json.error, 'That code is not valid', 'message');
+    status(await tfaUser.post('/auth/2fa/disable', { recoveryCode: 'zzzz-zzzz' }), 400, 'unknown recovery code');
+    status(await tfaUser.post('/auth/2fa/disable', { recoveryCode: tfaCodes[1] }), 204, 'disable with a recovery code');
+    const st = await tfaUser.get('/auth/2fa');
+    eq(JSON.stringify(st.json), JSON.stringify({ enabled: false, enabledAt: null, recoveryCodesLeft: 0, pendingSetup: false }), 'status off');
+    eq((await tfaUser.get('/auth/me')).json.user.twoFactorEnabled, false, 'flag off');
+    const row = tfaDbRow();
+    ok(row.s === null && row.p === null && row.e === null, 'secret columns cleared');
+    eq(recoveryRows(), 0, 'recovery codes deleted');
+    const c = new Client(base, 'totp-plain');
+    const login = await c.post('/auth/login', tfaLogin);
+    status(login, 200, 'one-step login again');
+    eq(login.json.requiresTwoFactor, undefined, 'no challenge');
+    eq(login.json.user.twoFactorEnabled, false, 'flag off on login');
+    status(await c.get('/auth/me'), 200, 'cookie set');
+    status(await c.post('/auth/logout'), 204, 'logout');
+    // disable with an authenticator code
+    const again = await enable2fa(tfaUser);
+    status(await tfaUser.post('/auth/2fa/disable', { code: totp(again.secret) }), 204, 'disable with a code');
+    eq((await tfaUser.get('/auth/2fa')).json.enabled, false, 'off again');
+  });
+  await check('Admin reset: 403 for non-admins, 400 for own account, 404 unknown, 204 clears 2FA and signs the user out everywhere', async () => {
+    const { secret } = await enable2fa(tfaUser);
+    const c = new Client(base, 'totp-second');
+    const step1 = await c.post('/auth/login', tfaLogin);
+    status(await c.post('/auth/login/2fa', { challengeToken: step1.json.challengeToken, code: totp(secret) }), 200, 'second device signed in');
+    status(await rep.post(`/users/${tfaUserId}/2fa/reset`), 403, 'rep cannot reset');
+    status(await leader.post(`/users/${tfaUserId}/2fa/reset`), 403, 'leader cannot reset');
+    status(await admin.post('/users/1/2fa/reset'), 400, 'admin cannot reset their own via this route');
+    status(await admin.post('/users/99999/2fa/reset'), 404, 'unknown user');
+    status(await admin.post(`/users/${tfaUserId}/2fa/reset`), 204, 'reset');
+    status(await tfaUser.get('/auth/me'), 401, 'signed out everywhere (1)');
+    status(await c.get('/auth/me'), 401, 'signed out everywhere (2)');
+    eq(get<Json>(db, `SELECT COUNT(*) AS n FROM sessions WHERE user_id = ?`, [tfaUserId])!.n, 0, 'no sessions left');
+    const row = tfaDbRow();
+    ok(row.s === null && row.p === null && row.e === null, 'secret columns cleared');
+    eq(recoveryRows(), 0, 'recovery codes deleted');
+    const login = await tfaUser.post('/auth/login', tfaLogin);
+    status(login, 200, 'one-step login again');
+    eq(login.json.user.twoFactorEnabled, false, 'flag off');
+    status(await admin.get('/auth/me'), 200, 'admin session intact');
+  });
+  await check('Code limiter: 6 wrong codes per user in 10 min → 429 (login step two and settings); wrong codes also count for the login limiter', async () => {
+    resetCodeFailures();
+    resetLoginFailures();
+    const { secret } = await enable2fa(tfaUser);
+    const c = new Client(base, 'totp-brute');
+    const step1 = await c.post('/auth/login', tfaLogin);
+    status(step1, 200, 'challenge');
+    const token = step1.json.challengeToken;
+    for (let i = 1; i <= 6; i++) status(await c.post('/auth/login/2fa', { challengeToken: token, code: wrongCode(secret) }), 401, `wrong code ${i}`);
+    const locked = await c.post('/auth/login/2fa', { challengeToken: token, code: totp(secret) });
+    status(locked, 429, '7th attempt, even with the right code');
+    ok(/^Too many attempts, try again in \d+ minutes?$/.test(locked.json.error), `error text (${locked.json.error})`);
+    status(await tfaUser.post('/auth/2fa/recovery-codes', { code: totp(secret) }), 429, 'settings endpoints share the per-user limiter');
+    status(await tfaUser.post('/auth/2fa/disable', { code: totp(secret) }), 429, 'disable too');
+    // the six wrong codes count as failed sign-ins for this ip+email: two more bad logins exhaust the 8 → 429 at step one
+    status(await anon.post('/auth/login', { email: tfa.email, employeeId: 'LM-9998' }), 401, 'bad credentials 7');
+    status(await anon.post('/auth/login', { email: tfa.email, employeeId: 'LM-9997' }), 401, 'bad credentials 8');
+    status(await anon.post('/auth/login', tfaLogin), 429, 'login step one locked by the combined count');
+    eq(get<Json>(db, `SELECT attempts FROM two_factor_challenges WHERE token = ?`, [token])!.attempts, 6, 'six attempts recorded on the challenge');
+    resetCodeFailures();
+    resetLoginFailures();
+    status(await c.post('/auth/login/2fa', { challengeToken: token, code: totp(secret) }), 200, 'right code once the window passes');
+    status(await c.post('/auth/logout'), 204, 'logout');
+    tfaSecret = secret;
+  });
+  await check('Expired challenge → 410 and deleted; housekeeping purges expired rows; unknown user state handled', async () => {
+    const c = new Client(base, 'totp-expired');
+    const token = (await c.post('/auth/login', tfaLogin)).json.challengeToken as string;
+    run(db, `UPDATE two_factor_challenges SET expires_at = ? WHERE token = ?`, [new Date(Date.now() - 1000).toISOString(), token]);
+    const r = await c.post('/auth/login/2fa', { challengeToken: token, code: totp(tfaSecret) });
+    status(r, 410, 'expired');
+    ok(/expired/i.test(r.json.error), `message (${r.json.error})`);
+    eq(get<Json>(db, `SELECT COUNT(*) AS n FROM two_factor_challenges WHERE token = ?`, [token])!.n, 0, 'expired challenge deleted on use');
+    const token2 = (await c.post('/auth/login', tfaLogin)).json.challengeToken as string;
+    run(db, `UPDATE two_factor_challenges SET expires_at = ? WHERE token = ?`, [new Date(Date.now() - 1000).toISOString(), token2]);
+    ok(purgeExpiredChallenges(db) >= 1, 'purge removes expired challenges');
+    eq(get<Json>(db, `SELECT COUNT(*) AS n FROM two_factor_challenges WHERE user_id = ?`, [tfaUserId])!.n, 0, 'none left for the user');
+    const live = (await c.post('/auth/login', tfaLogin)).json.challengeToken as string;
+    ok(get<Json>(db, `SELECT expires_at AS e FROM two_factor_challenges WHERE token = ?`, [live])!.e > new Date(Date.now() + 4 * 60_000).toISOString(), 'fresh challenge lives ~5 minutes');
+    status(await c.post('/auth/login/2fa', { challengeToken: live, code: totp(tfaSecret) }), 200, 'fresh challenge works');
+    status(await c.post('/auth/logout'), 204, 'logout');
+    status(await tfaUser.post('/auth/2fa/disable', { code: totp(tfaSecret) }), 204, 'leave 2FA off');
+    eq((await anon.get('/auth/demo-accounts')).json.accounts.length, 4, 'demo accounts untouched (2FA off for all four)');
+    eq(get<Json>(db, `SELECT COUNT(*) AS n FROM users WHERE totp_enabled_at IS NOT NULL`)!.n, 0, 'no user has 2FA on');
+  });
+  await check('Schema upgrade: a pre-2FA database gains the columns and tables on createSchema (idempotent, rows kept)', async () => {
+    const legacySql = SCHEMA_SQL
+      .replace(/  city TEXT,\n  totp_secret_enc TEXT,\n  totp_pending_enc TEXT,\n  totp_enabled_at TEXT\n/, '  city TEXT\n')
+      .replace(/CREATE TABLE IF NOT EXISTS (recovery_codes|two_factor_challenges) \([\s\S]*?\);\n/g, '')
+      .replace(/CREATE INDEX IF NOT EXISTS idx_recovery_codes_user[^\n]*\n/, '');
+    ok(!/totp|recovery_codes|two_factor/.test(legacySql), 'legacy DDL has no 2FA objects');
+    const legacy = openDb(path.join(dir, 'legacy.sqlite'));
+    legacy.exec(legacySql);
+    run(legacy, `INSERT INTO pay_plans (name, position) VALUES ('Legacy', 'trainee')`);
+    run(legacy, `INSERT INTO users (employee_id, email, first_name, last_name, role, position, team_id, pay_plan_id, start_date, status, phone, avatar_color, city) VALUES ('LM-0001', 'a@b.c', 'A', 'B', 'admin', 'owner', NULL, 1, ?, 'active', NULL, '#000000', NULL)`, [today]);
+    ok(!tableColumns(legacy, 'users').includes('totp_secret_enc'), 'legacy users table lacks the column');
+    const tables = () => all<{ name: string }>(legacy, `SELECT name FROM sqlite_master WHERE type = 'table'`).map((t) => t.name);
+    ok(!tables().includes('recovery_codes'), 'legacy has no recovery_codes');
+    const added = createSchema(legacy);
+    eq(added.join(','), 'users.totp_secret_enc,users.totp_pending_enc,users.totp_enabled_at', 'columns added');
+    const cols = tableColumns(legacy, 'users');
+    ok(cols.includes('totp_secret_enc') && cols.includes('totp_pending_enc') && cols.includes('totp_enabled_at'), 'columns present');
+    ok(tables().includes('recovery_codes') && tables().includes('two_factor_challenges'), 'tables created');
+    const u = get<Json>(legacy, `SELECT email, totp_secret_enc AS s, totp_enabled_at AS e FROM users WHERE id = 1`)!;
+    ok(u.email === 'a@b.c' && u.s === null && u.e === null, 'existing row kept with null 2FA columns');
+    eq(createSchema(legacy).length, 0, 'second run adds nothing');
+    legacy.close();
+  });
+
   await check('404 JSON for unknown /api route (signed in and anonymous)', async () => {
     const r = await admin.get('/nope');
     status(r, 404, 'not found');

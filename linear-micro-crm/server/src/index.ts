@@ -5,11 +5,15 @@ import { openDb } from './db/connection.ts';
 import { createSchema, isSeeded } from './db/schema.ts';
 import { materialisePayrollRuns, rollForwardEventStatuses } from './db/maintenance.ts';
 import { DEFAULT_DB_PATH, seed } from './db/seed.ts';
+import { warnIfDefaultSecret } from './lib/crypto.ts';
+import { purgeExpiredChallenges } from './lib/twofactor.ts';
 import { purgeExpiredSessions } from './middleware/auth.ts';
 
 const dbPath = process.env.DB_PATH ? path.resolve(process.env.DB_PATH) : DEFAULT_DB_PATH;
 const db = openDb(dbPath);
-createSchema(db);
+const upgraded = createSchema(db);
+if (upgraded.length) console.log(`Upgraded schema: added ${upgraded.join(', ')}`);
+warnIfDefaultSecret();
 if (!isSeeded(db)) {
   const started = performance.now();
   const stats = seed(db);
@@ -18,7 +22,12 @@ if (!isSeeded(db)) {
       `(${stats.users} users, ${stats.events} events, ${stats.gauges} gauges, ${stats.payrollRuns} payroll runs, ${stats.candidates} candidates)`,
   );
 }
-purgeExpiredSessions(db);
+/** Expired sessions and two-step login challenges: at startup and with the 15-minute sweep below. */
+function purgeExpired(): void {
+  purgeExpiredSessions(db);
+  purgeExpiredChallenges(db);
+}
+purgeExpired();
 
 /** Event statuses follow the clock (today's events go live at their start time): cheap, so every 15 minutes. */
 function rollEvents(): void {
@@ -40,6 +49,7 @@ const guarded = (fn: () => void) => () => {
 rollEvents();
 materialisePayroll();
 setInterval(guarded(rollEvents), 15 * 60_000).unref();
+setInterval(guarded(purgeExpired), 15 * 60_000).unref();
 setInterval(guarded(materialisePayroll), 86_400_000).unref();
 
 const isProduction = process.env.NODE_ENV === 'production';

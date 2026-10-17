@@ -8,6 +8,7 @@ import { mondayOf, todayISO } from '../lib/dates.ts';
 import { badRequest, conflict, notFound } from '../lib/errors.ts';
 import { punctualityFor, ratiosOf, salesPerDay, summaryRows, totalsFor, trendFor } from '../lib/metrics.ts';
 import { redactEntry, redactUser } from '../lib/scope.ts';
+import { clearTwoFactor } from '../lib/twofactor.ts';
 import { hexColor, idParam, isoDate, optionalIdQuery, optionalString, parseRange } from '../lib/validate.ts';
 import { currentUser, destroyUserSessions, requireRole } from '../middleware/auth.ts';
 
@@ -139,6 +140,21 @@ export function usersRouter(db: Db): Router {
     // Deactivation revokes access at once: every live session of that user goes (authenticate also rejects any stragglers).
     if (next.status === 'left') destroyUserSessions(db, id);
     res.json(getUser(db, id));
+  });
+
+  /**
+   * Lost-device recovery: an admin switches someone's two-step verification off without a code (active and pending
+   * secrets, recovery codes and open challenges go) and signs them out everywhere. Admins turn their own off through
+   * `POST /auth/2fa/disable`, which asks for a code, never through this route.
+   */
+  router.post('/:id/2fa/reset', requireRole('admin'), (req, res) => {
+    const me = currentUser(req);
+    const id = idParam(req);
+    if (!getUser(db, id)) throw notFound('User');
+    if (id === me.id) throw badRequest('Use Settings → Security to turn off your own two-step verification');
+    clearTwoFactor(db, id);
+    destroyUserSessions(db, id);
+    res.status(204).end();
   });
 
   return router;
