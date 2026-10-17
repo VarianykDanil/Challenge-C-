@@ -70,7 +70,7 @@ function positiveFor(c: BenchmarkComparison): Insight {
 }
 
 function volumeTip(totals: GaugeTotals, ratios: FunnelRatios): Insight {
-  if (Number.isFinite(ratios.stopsPerSale) && ratios.stopsPerSale > 0) {
+  if (ratios.stopsPerSale !== null && Number.isFinite(ratios.stopsPerSale) && ratios.stopsPerSale > 0) {
     const perSale = Math.ceil(ratios.stopsPerSale);
     return {
       tone: 'neutral',

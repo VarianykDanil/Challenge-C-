@@ -1,19 +1,24 @@
 /** Linear Hub API — bootstrap: open the SQLite database, create/seed it, run maintenance, mount the app. */
 import path from 'node:path';
-import { createApp } from './app.ts';
+import { createApp, parseTrustProxy } from './app.ts';
 import { openDb } from './db/connection.ts';
 import { createSchema, isSeeded } from './db/schema.ts';
 import { materialisePayrollRuns, rollForwardEventStatuses } from './db/maintenance.ts';
 import { DEFAULT_DB_PATH, seed } from './db/seed.ts';
-import { warnIfDefaultSecret } from './lib/crypto.ts';
-import { purgeExpiredChallenges } from './lib/twofactor.ts';
+import { announceAppSecret, configureAppSecret } from './lib/crypto.ts';
+import { purgeExpiredChallenges, reencryptLegacySecrets } from './lib/twofactor.ts';
 import { purgeExpiredSessions } from './middleware/auth.ts';
 
 const dbPath = process.env.DB_PATH ? path.resolve(process.env.DB_PATH) : DEFAULT_DB_PATH;
+// The encryption key for two-step secrets: LM_APP_SECRET, else a generated key kept next to the database
+// (server/data/app-secret by default; LM_APP_SECRET_FILE relocates it).
+configureAppSecret(process.env.LM_APP_SECRET_FILE ? path.resolve(process.env.LM_APP_SECRET_FILE) : path.join(path.dirname(dbPath), 'app-secret'));
 const db = openDb(dbPath);
 const upgraded = createSchema(db);
 if (upgraded.length) console.log(`Upgraded schema: added ${upgraded.join(', ')}`);
-warnIfDefaultSecret();
+announceAppSecret();
+const rekeyed = reencryptLegacySecrets(db);
+if (rekeyed) console.log(`Re-encrypted ${rekeyed} two-step secret(s) written under the old development key`);
 if (!isSeeded(db)) {
   const started = performance.now();
   const stats = seed(db);
@@ -34,10 +39,10 @@ function rollEvents(): void {
   const rolled = rollForwardEventStatuses(db);
   if (rolled.completed || rolled.live) console.log(`Rolled event statuses forward: ${rolled.completed} completed, ${rolled.live} live`);
 }
-/** Payroll runs for newly completed pay weeks: once a day (the finance routes also guard for it). */
+/** Payroll runs for newly completed pay weeks + a recompute of the last two weeks' unpaid runs: once a day (the finance routes also guard for it). */
 function materialisePayroll(): void {
-  const created = materialisePayrollRuns(db);
-  if (created) console.log(`Materialised ${created} pending payroll runs for completed pay weeks`);
+  const r = materialisePayrollRuns(db);
+  if (r.created || r.updated || r.deleted) console.log(`Payroll runs: ${r.created} created, ${r.updated} recomputed from late gauges, ${r.deleted} removed`);
 }
 const guarded = (fn: () => void) => () => {
   try {
@@ -55,6 +60,7 @@ setInterval(guarded(materialisePayroll), 86_400_000).unref();
 const isProduction = process.env.NODE_ENV === 'production';
 const app = createApp(db, {
   staticDir: isProduction ? path.resolve(import.meta.dirname, '../../client/dist') : undefined,
+  trustProxy: parseTrustProxy(process.env.TRUST_PROXY),
 });
 
 const port = Number(process.env.PORT ?? 4000);

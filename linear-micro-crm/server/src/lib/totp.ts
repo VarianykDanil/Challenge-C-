@@ -90,25 +90,32 @@ export function normaliseCode(code: string, digits = 6): string | null {
 }
 
 /**
- * Verifies `code` against the secret, accepting the current step and `window` steps either side (±1 by default
- * — a slow clock or a code typed just before it rolled over). Every candidate is compared in constant time and
- * every step is checked whatever the outcome, so timing says nothing about which step (if any) matched.
+ * Checks `code` against the secret for the current step and `window` steps either side (±1 by default — a slow
+ * clock or a code typed just before it rolled over) and returns the time-step counter it matched, or `null`.
+ * Callers persist the returned counter and refuse any later code whose counter is not greater (RFC 6238 §5.2:
+ * a code is accepted once). Every candidate is compared in constant time and every step is checked whatever the
+ * outcome, so timing says nothing about which step (if any) matched.
  */
-export function verifyTotp(secret: string | Uint8Array, code: string, opts: TotpOptions & { window?: number } = {}): boolean {
+export function matchTotpCounter(secret: string | Uint8Array, code: string, opts: TotpOptions & { window?: number } = {}): number | null {
   const { timeMs = Date.now(), step = 30, digits = 6, window = 1 } = opts;
   const clean = normaliseCode(code, digits);
-  if (clean === null) return false;
+  if (clean === null) return null;
   const bytes = secretBytes(secret);
   const given = Buffer.from(clean, 'utf8');
   const centre = totpCounter(timeMs, step);
-  let matched = false;
+  let matched: number | null = null;
   for (let delta = -window; delta <= window; delta++) {
     const counter = centre + delta;
     if (counter < 0) continue;
     const candidate = Buffer.from(hotp(bytes, counter, digits), 'utf8');
-    if (timingSafeEqual(candidate, given)) matched = true;
+    if (timingSafeEqual(candidate, given)) matched = counter;
   }
   return matched;
+}
+
+/** True when `code` is valid for the secret right now (±`window` steps); see `matchTotpCounter`. */
+export function verifyTotp(secret: string | Uint8Array, code: string, opts: TotpOptions & { window?: number } = {}): boolean {
+  return matchTotpCounter(secret, code, opts) !== null;
 }
 
 export interface OtpauthParams {

@@ -11,17 +11,19 @@ import { ratioTone } from '@/lib/ratios';
 import { COPY } from '@/content/copy';
 import { CoachingInsights } from './CoachingInsights';
 import { GaugeSummaryTable } from './GaugeSummaryTable';
-import { GaugeEntriesTable } from './GaugeEntriesTable';
-import { gaugeEntryCsvColumns, gaugeSummaryCsvColumns } from './csv';
+import { RecentEntriesCard } from './RecentEntriesCard';
+import { gaugeSummaryCsvColumns } from './csv';
 
-export function PerformancePanel({ data, loading, error, onRetry, showEntries = true, range }: {
+export function PerformancePanel({ data, loading, error, onRetry, showEntries = true, range, userId }: {
   data: UserPerformance | undefined;
   loading: boolean;
   error: unknown;
   onRetry?: () => void;
   showEntries?: boolean;
-  /** The range on screen — only used to name the CSV exports. */
+  /** The range on screen — names the CSV exports and scopes the paged "Recent entries" list. */
   range?: DateRange;
+  /** Whose performance this is; with `range` the entries list pages through GET /gauges. */
+  userId?: number;
 }) {
   if (error) return <ErrorState error={error} onRetry={onRetry} />;
   if (loading || !data) {
@@ -69,12 +71,7 @@ export function PerformancePanel({ data, loading, error, onRetry, showEntries = 
             <div className="p-5 pb-3"><CardHeader title="By campaign" description="Where the sales came from" className="mb-0" actions={<ExportButton filename={csvFilename(`gauges-${who}-by-campaign`, range)} rows={sortRows(byCampaign, (r) => r.sales, 'desc')} columns={gaugeSummaryCsvColumns('campaign', false)} />} /></div>
             <GaugeSummaryTable rows={byCampaign} groupBy="campaign" perRep={false} bare className="border-t border-border" />
           </Card>
-          {showEntries && (
-            <Card padded={false} className="min-w-0 overflow-hidden">
-              <div className="p-5 pb-3"><CardHeader title="Recent entries" description="Latest days logged" className="mb-0" actions={<ExportButton filename={csvFilename(`gauges-${who}-entries`, range)} rows={sortRows(recentEntries, (r) => r.date, 'desc')} columns={gaugeEntryCsvColumns()} />} /></div>
-              <GaugeEntriesTable rows={recentEntries} showPerson={false} bare className="border-t border-border" />
-            </Card>
-          )}
+          {showEntries && <RecentEntriesCard userId={userId ?? data.user?.id} range={range} fallback={recentEntries} who={who} />}
         </>
       )}
     </div>

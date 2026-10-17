@@ -111,13 +111,18 @@ export function estimateWeekPayroll(db: Db, monday: string, teamId: number | nul
   return Math.round(total * 100) / 100;
 }
 
-/** Settled/pending payroll for weeks starting in the range plus a live estimate for weeks with no run yet. */
+/**
+ * Gross of the runs whose pay week *starts* inside [from, to] plus a live estimate for weeks in that span with no
+ * run yet (the week in progress). A pay week that straddles the start of the range (its Monday is before `from`)
+ * belongs to the previous period, so a month or quarter never counts the previous period's last week and adjacent
+ * periods never report the same run twice.
+ */
 export function earningsForRange(db: Db, user: PayUser, from: string, to: string): number {
-  const runs = listPayroll(db, 'WHERE p.user_id = ? AND p.week_start >= ? AND p.week_start <= ?', [user.id, mondayOf(from), to]);
+  const runs = listPayroll(db, 'WHERE p.user_id = ? AND p.week_start >= ? AND p.week_start <= ?', [user.id, from, to]);
   let total = runs.reduce((acc, r) => acc + r.gross, 0);
   const covered = new Set(runs.map((r) => r.weekStart));
   for (const monday of eachMonday(from, to)) {
-    if (covered.has(monday)) continue;
+    if (monday < from || covered.has(monday)) continue;
     total += weekPayEstimate(db, user, monday)?.gross ?? 0;
   }
   return Math.round(total * 100) / 100;

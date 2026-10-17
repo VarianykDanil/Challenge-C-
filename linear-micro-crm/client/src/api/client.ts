@@ -11,7 +11,17 @@ export class ApiError extends Error {
   }
 }
 
-export async function api<T>(path: string, init: RequestInit & { json?: unknown } = {}): Promise<T> {
+/** A successful response with its status and headers (for `201 vs 200` and paging headers such as `X-Total-Count`). */
+export interface ApiResponse<T> {
+  data: T;
+  status: number;
+  headers: Headers;
+}
+
+export type ApiInit = RequestInit & { json?: unknown };
+
+/** Like `api()`, but keeps the response status and headers alongside the parsed body. */
+export async function apiRaw<T>(path: string, init: ApiInit = {}): Promise<ApiResponse<T>> {
   const { json, headers, ...rest } = init;
   const res = await fetch(`/api${path}`, {
     credentials: 'include',
@@ -19,7 +29,11 @@ export async function api<T>(path: string, init: RequestInit & { json?: unknown 
     body: json !== undefined ? JSON.stringify(json) : rest.body,
     ...rest,
   });
-  if (res.status === 204) return undefined as T;
+  if (res.status === 204) {
+    // Drain the (empty) body: an unread fetch body is reported by Chromium as an aborted request in DevTools.
+    await res.text().catch(() => undefined);
+    return { data: undefined as T, status: res.status, headers: res.headers };
+  }
   const body = await res.json().catch(() => null);
   if (!res.ok) {
     // A 401 on anything but the auth probes means the session ended (expired, deactivated, signed out elsewhere):
@@ -27,7 +41,19 @@ export async function api<T>(path: string, init: RequestInit & { json?: unknown 
     if (res.status === 401 && !path.startsWith('/auth/') && typeof window !== 'undefined') window.dispatchEvent(new CustomEvent(UNAUTHENTICATED_EVENT));
     throw new ApiError(res.status, body);
   }
-  return body as T;
+  return { data: body as T, status: res.status, headers: res.headers };
+}
+
+export async function api<T>(path: string, init: ApiInit = {}): Promise<T> {
+  return (await apiRaw<T>(path, init)).data;
+}
+
+/** `X-Total-Count` as a number, or null when the server did not send one (older servers do not page). */
+export function totalCount(headers: Headers): number | null {
+  const raw = headers.get('X-Total-Count');
+  if (raw == null || raw === '') return null;
+  const n = Number(raw);
+  return Number.isFinite(n) && n >= 0 ? n : null;
 }
 
 /** Window event fired when a signed-in request is answered with 401. */

@@ -1,6 +1,6 @@
 import { Router } from 'express';
 import { z } from 'zod';
-import { PIPELINE_STAGES, POSITIONS, TERMINAL_STAGES, type CandidateSource, type CandidateStage, type Position, type RecruitmentSummary } from '@lm/shared';
+import { PIPELINE_STAGES, POSITIONS, TERMINAL_STAGES, isOverdue, stageIndex, type CandidateSource, type CandidateStage, type Position, type RecruitmentSummary, type UserWithTeam } from '@lm/shared';
 import { all, get, run, transaction, type Db } from '../db/connection.ts';
 import { Where, getCandidate, getInterview, getUser, listCandidates, listInterviews, listStageChanges } from '../db/queries.ts';
 import { addDays, eachMonday, mondayOf, nowISO, todayISO } from '../lib/dates.ts';
@@ -41,6 +41,44 @@ const interviewBody = z.object({
 
 const TERMINAL_SQL = `('hired', 'rejected', 'withdrawn')`;
 
+/**
+ * The stage machine: forward moves along the pipeline (any number of steps), one step back, `rejected`/`withdrawn`
+ * from any open stage, `hired` only from `offer`. Terminal stages are immutable except that an admin may reopen a
+ * `rejected`/`withdrawn` candidate to `offer`. Anything else is a `409`.
+ */
+export function assertStageTransition(me: UserWithTeam, from: CandidateStage, to: CandidateStage): void {
+  if (from === to) throw conflict(`Candidate is already at stage ${to}`);
+  if (from === 'hired') throw conflict('Hired candidates cannot change stage');
+  if (from === 'rejected' || from === 'withdrawn') {
+    if (me.role === 'admin' && to === 'offer') return;
+    throw conflict(`A ${from} candidate can only be reopened to offer, by an administrator`);
+  }
+  if (to === 'rejected' || to === 'withdrawn') return;
+  if (to === 'hired') {
+    if (from === 'offer') return;
+    throw conflict('Candidates are hired from the offer stage');
+  }
+  const fi = stageIndex(from);
+  const ti = stageIndex(to);
+  if (ti > fi || ti === fi - 1) return;
+  throw conflict(`Cannot move a candidate from ${from} back to ${to} — only one stage back`);
+}
+
+/** Letters that have no Unicode decomposition and would otherwise vanish from a staff email address. */
+const ASCII_FOLD: Record<string, string> = { 'ł': 'l', 'ø': 'o', 'æ': 'ae', 'œ': 'oe', 'ß': 'ss', 'đ': 'd', 'þ': 'th', 'ð': 'd', 'ı': 'i', 'ŋ': 'n' };
+
+/**
+ * The local part of a hire's company address: accents stripped (NFD, combining marks removed), the few letters that
+ * do not decompose folded by hand, then ASCII letters and digits only — `Łukasz Żółć` → `lukasz.zolc`. A name part
+ * with nothing left is dropped; when nothing is left at all the address starts with `staff`.
+ */
+export function staffEmailLocalPart(firstName: string, lastName: string): string {
+  const fold = (s: string) =>
+    s.normalize('NFD').replace(/\p{M}/gu, '').toLowerCase().replace(/[^\x00-\x7f]/g, (ch) => ASCII_FOLD[ch] ?? '').replace(/[^a-z0-9]/g, '');
+  const parts = [fold(firstName), fold(lastName)].filter(Boolean);
+  return parts.length ? parts.join('.') : 'staff';
+}
+
 export function recruitmentRouter(db: Db): Router {
   const router = Router();
   router.use(requireRole('recruiter', 'leader', 'admin'));
@@ -79,12 +117,19 @@ export function recruitmentRouter(db: Db): Router {
     });
   });
 
+  /** An email may only be in the open pipeline once (closed candidates may re-apply). */
+  const assertEmailNotOpen = (email: string, exceptId = 0) => {
+    const open = get<{ id: number }>(db, `SELECT id FROM candidates WHERE lower(email) = lower(?) AND stage NOT IN ${TERMINAL_SQL} AND id <> ?`, [email, exceptId]);
+    if (open) throw conflict(`A candidate with that email is already in the pipeline (#${open.id})`);
+  };
+
   router.post('/candidates', (req, res) => {
     const me = currentUser(req);
     const body = candidateBody.parse(req.body);
     const ownerId = body.ownerId === undefined ? me.id : body.ownerId;
     if (ownerId !== null && !getUser(db, ownerId)) throw badRequest('Unknown ownerId');
     if (body.referredById && !getUser(db, body.referredById)) throw badRequest('Unknown referredById');
+    assertEmailNotOpen(body.email);
     const now = nowISO();
     const id = transaction(db, () => {
       const r = run(
@@ -110,6 +155,7 @@ export function recruitmentRouter(db: Db): Router {
     const patch = candidateBody.partial().parse(req.body);
     if (patch.ownerId && !getUser(db, patch.ownerId)) throw badRequest('Unknown ownerId');
     if (patch.referredById && !getUser(db, patch.referredById)) throw badRequest('Unknown referredById');
+    if (patch.email !== undefined && patch.email.toLowerCase() !== existing.email.toLowerCase() && !TERMINAL_STAGES.includes(existing.stage)) assertEmailNotOpen(patch.email, id);
     const next = { ...existing, ...patch };
     run(
       db,
@@ -134,9 +180,14 @@ export function recruitmentRouter(db: Db): Router {
         position: z.enum(['trainee', 'field_rep']).optional(),
       })
       .parse(req.body);
-    if (candidate.stage === stage) throw conflict(`Candidate is already at stage ${stage}`);
-    if (candidate.stage === 'hired') throw conflict('Hired candidates cannot change stage');
+    assertStageTransition(me, candidate.stage, stage);
     if (stage === 'hired' && teamId != null && !get(db, `SELECT 1 FROM teams WHERE id = ?`, [teamId])) throw badRequest('Unknown teamId');
+    if (stage === 'hired' && candidate.hiredUserId === null) {
+      // one person, one employee account
+      if (get(db, `SELECT 1 FROM users WHERE lower(email) = lower(?)`, [candidate.email])) throw conflict(`A user with the email ${candidate.email} already exists`);
+      const twin = get<{ id: number }>(db, `SELECT id FROM candidates WHERE lower(email) = lower(?) AND stage = 'hired' AND id <> ?`, [candidate.email, id]);
+      if (twin) throw conflict(`This person has already been hired (candidate #${twin.id})`);
+    }
     const now = nowISO();
     const isTerminal = TERMINAL_STAGES.includes(stage);
     transaction(db, () => {
@@ -147,7 +198,7 @@ export function recruitmentRouter(db: Db): Router {
         // the position is restricted to entry roles and the pay plan is always the server default for it,
         // whatever the body or the application said (recruiters/leaders cannot choose plans)
         const newPosition: Position = position ?? (candidate.positionApplied === 'field_rep' ? 'field_rep' : 'trainee');
-        const base = `${candidate.firstName}.${candidate.lastName}`.toLowerCase().replace(/[^a-z0-9.]/g, '');
+        const base = staffEmailLocalPart(candidate.firstName, candidate.lastName);
         let email = `${base}@linear-mcr.co.uk`;
         for (let i = 2; get(db, `SELECT 1 FROM users WHERE lower(email) = ?`, [email]); i++) email = `${base}${i}@linear-mcr.co.uk`;
         const count = get<{ n: number }>(db, `SELECT COUNT(*) AS n FROM users`)!.n;
@@ -222,6 +273,9 @@ export function recruitmentRouter(db: Db): Router {
   return router;
 }
 
+/** SQL: the Monday (`YYYY-MM-DD`) of a UTC ISO timestamp column (SQLite %w: 0 = Sunday). */
+const mondayOfTimestamp = (col: string) => `date(substr(${col}, 1, 10), '-' || ((CAST(strftime('%w', substr(${col}, 1, 10)) AS INTEGER) + 6) % 7) || ' days')`;
+
 const NEXT_ACTION: Partial<Record<CandidateStage, string>> = {
   applied: 'Phone screen',
   screening: 'Book first interview',
@@ -262,14 +316,21 @@ export function recruitmentSummary(db: Db, from: string, to: string): Recruitmen
     [fromStart, toEnd],
   ).map((r) => ({ source: r.source, applied: Number(r.applied), hired: Number(r.hired), conversion: r.applied ? Math.round((Number(r.hired) / Number(r.applied)) * 10_000) / 10_000 : 0 }));
 
-  const weekly = eachMonday(from, to).map((weekStart) => {
-    const wFrom = `${weekStart}T00:00:00.000Z`;
-    const wTo = `${addDays(weekStart, 6)}T23:59:59.999Z`;
-    const applied = get<{ n: number }>(db, `SELECT COUNT(*) AS n FROM candidates WHERE applied_at BETWEEN ? AND ?`, [wFrom, wTo])!.n;
-    const interviews = get<{ n: number }>(db, `SELECT COUNT(*) AS n FROM interviews WHERE scheduled_at BETWEEN ? AND ?`, [wFrom, wTo])!.n;
-    const hired = get<{ n: number }>(db, `SELECT COUNT(DISTINCT candidate_id) AS n FROM stage_changes WHERE to_stage = 'hired' AND changed_at BETWEEN ? AND ?`, [wFrom, wTo])!.n;
-    return { weekStart, applied: Number(applied), interviews: Number(interviews), hired: Number(hired) };
-  });
+  // Weekly buckets are clipped to [from, to] like the finance series, so the bars add up to the headline totals; the
+  // first bucket is keyed by `from` when the range starts mid-week. One GROUP BY query per series instead of three
+  // queries per week.
+  const weekKeyOf = (monday: string) => (monday < from ? from : monday);
+  const weekly = eachMonday(from, to).map((monday) => ({ weekStart: weekKeyOf(monday), applied: 0, interviews: 0, hired: 0 }));
+  const weekByKey = new Map(weekly.map((w) => [w.weekStart, w]));
+  const fill = (rows: { wk: string; n: number }[], field: 'applied' | 'interviews' | 'hired') => {
+    for (const r of rows) {
+      const w = weekByKey.get(weekKeyOf(r.wk));
+      if (w) w[field] += Number(r.n);
+    }
+  };
+  fill(all(db, `SELECT ${mondayOfTimestamp('applied_at')} AS wk, COUNT(*) AS n FROM candidates WHERE applied_at BETWEEN ? AND ? GROUP BY wk`, [fromStart, toEnd]), 'applied');
+  fill(all(db, `SELECT ${mondayOfTimestamp('scheduled_at')} AS wk, COUNT(*) AS n FROM interviews WHERE scheduled_at BETWEEN ? AND ? GROUP BY wk`, [fromStart, toEnd]), 'interviews');
+  fill(all(db, `SELECT ${mondayOfTimestamp('changed_at')} AS wk, COUNT(DISTINCT candidate_id) AS n FROM stage_changes WHERE to_stage = 'hired' AND changed_at BETWEEN ? AND ? GROUP BY wk`, [fromStart, toEnd]), 'hired');
 
   const hiredRows = all<{ appliedAt: string; hiredAt: string }>(
     db,
@@ -281,11 +342,10 @@ export function recruitmentSummary(db: Db, from: string, to: string): Recruitmen
     ? Math.round((hiredRows.reduce((a, r) => a + (Date.parse(r.hiredAt) - Date.parse(r.appliedAt)) / 86_400_000, 0) / hiredRows.length) * 10) / 10
     : 0;
   const applied = get<{ n: number }>(db, `SELECT COUNT(*) AS n FROM candidates WHERE applied_at BETWEEN ? AND ?`, [fromStart, toEnd])!.n;
-  const overdue = get<{ n: number }>(
-    db,
-    `SELECT COUNT(*) AS n FROM candidates WHERE stage NOT IN ${TERMINAL_SQL} AND next_action_at IS NOT NULL AND next_action_at < ?`,
-    [nowISO()],
-  )!.n;
+  // the shared rule, not a string compare: a date-only deadline is overdue from the next calendar day, a timestamp once now is past it
+  const now = new Date();
+  const overdue = all<{ at: string }>(db, `SELECT next_action_at AS at FROM candidates WHERE stage NOT IN ${TERMINAL_SQL} AND next_action_at IS NOT NULL`)
+    .filter((r) => isOverdue(r.at, now)).length;
 
   return {
     from,

@@ -1,13 +1,14 @@
 import { Router, type Request } from 'express';
 import { z } from 'zod';
 import { validateGaugeFunnel, type GaugeTotals, type SalesEventWithMeta, type UserWithTeam } from '@lm/shared';
-import { get, run, type Db } from '../db/connection.ts';
-import { Where, getEvent, getGauge, getUser, listGauges } from '../db/queries.ts';
-import { mondayOf, normaliseCheckIn, nowISO, todayISO } from '../lib/dates.ts';
+import { get, run, transaction, type Db } from '../db/connection.ts';
+import { assertWeekUnpaidFor, syncPayrollForEntry } from '../db/maintenance.ts';
+import { Where, getCampaign, getEvent, getGauge, getPayPlan, getUser, listGauges } from '../db/queries.ts';
+import { mondayOf, normaliseCheckIn, nowHHMM, nowISO, toBusinessISO, todayISO } from '../lib/dates.ts';
 import { badRequest, conflict, forbidden, notFound } from '../lib/errors.ts';
-import { summaryRows, type SummaryGroup } from '../lib/metrics.ts';
-import { assertCanWriteGauge, canManageTeam, isAdmin } from '../lib/scope.ts';
-import { idParam, isoDate, isoTimestamp, limitQuery, nonNegativeInt, optionalIdQuery, parseRange } from '../lib/validate.ts';
+import { GAUGE_FROM, summaryRows, type SummaryGroup } from '../lib/metrics.ts';
+import { assertCanWriteGauge, canManageTeam, isAdmin, redactEntry } from '../lib/scope.ts';
+import { gaugeCount, idParam, isoDate, isoTimestamp, limitQuery, offsetQuery, optionalIdQuery, parseRange } from '../lib/validate.ts';
 import { currentUser } from '../middleware/auth.ts';
 
 const gaugeBody = z.object({
@@ -16,12 +17,13 @@ const gaugeBody = z.object({
   eventId: z.number().int().positive(),
   userId: z.number().int().positive(),
   date: isoDate,
-  stops: nonNegativeInt,
-  table: nonNegativeInt,
-  presentations: nonNegativeInt,
-  closes: nonNegativeInt,
-  taps: nonNegativeInt,
-  sales: nonNegativeInt,
+  // strict whole numbers 0..GAUGE_MAX_PER_DAY — no coercion, no 1e308, no "true"
+  stops: gaugeCount,
+  table: gaugeCount,
+  presentations: gaugeCount,
+  closes: gaugeCount,
+  taps: gaugeCount,
+  sales: gaugeCount,
   checkedInAt: isoTimestamp.nullable().optional(),
   notes: z.string().trim().max(2000).nullable().optional(),
 });
@@ -36,15 +38,34 @@ function assertFunnel(t: GaugeTotals): void {
 /**
  * Data-integrity rules for gauge writes (checked after the role scoping in `assertCanWriteGauge`). Every aggregate —
  * leaderboards, finance, the live pay estimate — groups on the entry date, so an entry must describe the one day
- * the event actually ran: the date is the event's date, the event has happened and was not cancelled, and the person
- * logged belongs to the event's team (admins are exempt from the team rule; the owner works any team's events).
+ * the event actually ran: the date is the event's date, the event has started (today's events only once their start
+ * time has passed) and was not cancelled, and the person logged belongs to the event's team (admins are exempt from
+ * the team rule; the owner works any team's events).
  */
 function assertGaugeIntegrity(me: UserWithTeam, target: UserWithTeam, event: SalesEventWithMeta, date: string, opts: { checkUser: boolean }): void {
   if (event.status === 'cancelled') throw conflict('Gauges cannot be recorded for a cancelled event');
-  if (event.date > todayISO()) throw badRequest('Gauges cannot be recorded before the event takes place');
+  const today = todayISO();
+  if (event.date > today) throw badRequest('Gauges cannot be recorded before the event takes place');
+  if (event.date === today && event.startTime > nowHHMM()) throw badRequest(`Gauges can be recorded once the event has started (${event.startTime})`);
   if (date !== event.date) throw badRequest("Gauges are recorded against the event's date");
   if (opts.checkUser && target.status !== 'active') throw badRequest('Gauges can only be recorded for active users');
   if (!isAdmin(me) && target.teamId !== event.teamId) throw badRequest("The user is not a member of the event's team");
+}
+
+/** A check-in is naive Europe/London wall-clock time and can never lie in the future. */
+function checkInFor(value: string | null | undefined): string | null {
+  const normalised = normaliseCheckIn(value);
+  if (normalised !== null && normalised > toBusinessISO(new Date())) throw badRequest('Check-in time cannot be in the future');
+  return normalised;
+}
+
+/**
+ * Money rates captured on the entry when it is first logged (or moved to another event / person): the campaign's
+ * payout and the person's pay-plan commission at that moment. Revenue and commission aggregates read these, so a
+ * later change to a campaign payout or a promotion only affects future days.
+ */
+function rateSnapshot(db: Db, event: SalesEventWithMeta, target: UserWithTeam): { payout: number; commission: number } {
+  return { payout: getCampaign(db, event.campaignId)?.payoutPerSale ?? 0, commission: getPayPlan(db, target.payPlanId)?.commissionPerSale ?? 0 };
 }
 
 /** Common filters for GET /gauges and GET /gauges/summary. */
@@ -77,7 +98,13 @@ export function gaugesRouter(db: Db): Router {
       if (userId && userId !== me.id) throw forbidden('Reps can only view their own gauges');
       where.add('g.user_id = ?', me.id);
     }
-    res.json(listGauges(db, `${where}`, where.params, 'g.date DESC, g.submitted_at DESC', limitQuery(req.query.limit)));
+    const limit = limitQuery(req.query.limit);
+    const offset = offsetQuery(req.query.offset);
+    // X-Total-Count = rows matching the filters before limit/offset, so clients can page through long ranges
+    const total = get<{ n: number }>(db, `SELECT COUNT(*) AS n ${GAUGE_FROM} ${where}`, where.params)!.n;
+    res.setHeader('X-Total-Count', String(total));
+    // check-in times and notes of other people are stripped unless admin / that person's leader (same rule as events)
+    res.json(listGauges(db, `${where}`, where.params, 'g.date DESC, g.submitted_at DESC', limit, offset).map((e) => redactEntry(me, e)));
   });
 
   router.get('/summary', (req, res) => {
@@ -107,6 +134,7 @@ export function gaugesRouter(db: Db): Router {
     assertCanWriteGauge(me, target, event);
     assertGaugeIntegrity(me, target, event, body.date, { checkUser: true });
     assertFunnel(body);
+    assertWeekUnpaidFor(db, me, body.userId, body.date); // 409 once the week's run is paid, unless admin
     const existing = get<{ id: number; checkedInAt: string | null; notes: string | null }>(
       db,
       `SELECT id, checked_in_at AS checkedInAt, notes FROM gauge_entries WHERE event_id = ? AND user_id = ? AND date = ?`,
@@ -116,24 +144,35 @@ export function gaugesRouter(db: Db): Router {
     // /gauges/:id instead, otherwise a second entry would be created and the original left behind.
     if (body.id !== undefined && existing?.id !== body.id) throw conflict('Another entry exists for that event, user and date — edit the entry with PATCH /gauges/:id');
     const now = nowISO();
+    const today = todayISO();
+    const key = { userId: body.userId, eventId: body.eventId, date: body.date };
     if (existing) {
       // omitted key → keep the stored value; explicit null → clear it
-      const checkedInAt = body.checkedInAt === undefined ? existing.checkedInAt : normaliseCheckIn(body.checkedInAt);
+      const checkedInAt = body.checkedInAt === undefined ? existing.checkedInAt : checkInFor(body.checkedInAt);
       const notes = body.notes === undefined ? existing.notes : body.notes;
-      run(
-        db,
-        `UPDATE gauge_entries SET stops = ?, table_count = ?, presentations = ?, closes = ?, taps = ?, sales = ?, checked_in_at = ?, notes = ?, submitted_at = ? WHERE id = ?`,
-        [body.stops, body.table, body.presentations, body.closes, body.taps, body.sales, checkedInAt, notes, now, existing.id],
-      );
+      transaction(db, () => {
+        run(
+          db,
+          `UPDATE gauge_entries SET stops = ?, table_count = ?, presentations = ?, closes = ?, taps = ?, sales = ?, checked_in_at = ?, notes = ?, submitted_at = ? WHERE id = ?`,
+          [body.stops, body.table, body.presentations, body.closes, body.taps, body.sales, checkedInAt, notes, now, existing.id],
+        );
+        syncPayrollForEntry(db, key, today); // the week's unpaid run follows the gauges, in the same transaction
+      });
       return res.status(200).json(getGauge(db, existing.id));
     }
-    const r = run(
-      db,
-      `INSERT INTO gauge_entries (event_id, user_id, date, stops, table_count, presentations, closes, taps, sales, checked_in_at, notes, submitted_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-      [body.eventId, body.userId, body.date, body.stops, body.table, body.presentations, body.closes, body.taps, body.sales, normaliseCheckIn(body.checkedInAt), body.notes ?? null, now],
-    );
-    res.status(201).json(getGauge(db, r.lastInsertRowid));
+    const checkedInAt = checkInFor(body.checkedInAt);
+    const snap = rateSnapshot(db, event, target);
+    const id = transaction(db, () => {
+      const r = run(
+        db,
+        `INSERT INTO gauge_entries (event_id, user_id, date, stops, table_count, presentations, closes, taps, sales, checked_in_at, notes, submitted_at, payout_per_sale, commission_per_sale)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        [body.eventId, body.userId, body.date, body.stops, body.table, body.presentations, body.closes, body.taps, body.sales, checkedInAt, body.notes ?? null, now, snap.payout, snap.commission],
+      );
+      syncPayrollForEntry(db, key, today);
+      return r.lastInsertRowid;
+    });
+    res.status(201).json(getGauge(db, id));
   });
 
   router.patch('/:id', (req, res) => {
@@ -153,15 +192,28 @@ export function gaugesRouter(db: Db): Router {
     // the user's status is re-checked only when the entry is being re-pointed at someone else (history of leavers stays editable)
     assertGaugeIntegrity(me, target, event, next.date, { checkUser: next.userId !== existing.userId });
     assertFunnel(next);
-    if (next.eventId !== existing.eventId || next.userId !== existing.userId || next.date !== existing.date) {
+    const moved = next.eventId !== existing.eventId || next.userId !== existing.userId || next.date !== existing.date;
+    if (moved) {
       const dup = get(db, `SELECT 1 FROM gauge_entries WHERE event_id = ? AND user_id = ? AND date = ? AND id <> ?`, [next.eventId, next.userId, next.date, id]);
       if (dup) throw badRequest('Another entry already exists for that event, user and date');
     }
-    run(
-      db,
-      `UPDATE gauge_entries SET event_id = ?, user_id = ?, date = ?, stops = ?, table_count = ?, presentations = ?, closes = ?, taps = ?, sales = ?, checked_in_at = ?, notes = ?, submitted_at = ? WHERE id = ?`,
-      [next.eventId, next.userId, next.date, next.stops, next.table, next.presentations, next.closes, next.taps, next.sales, normaliseCheckIn(next.checkedInAt), next.notes ?? null, nowISO(), id],
-    );
+    // both the week the entry leaves and the week it lands in must still be unpaid (unless admin)
+    assertWeekUnpaidFor(db, me, existing.userId, existing.date);
+    if (next.userId !== existing.userId || mondayOf(next.date) !== mondayOf(existing.date)) assertWeekUnpaidFor(db, me, next.userId, next.date);
+    const checkedInAt = patch.checkedInAt === undefined ? existing.checkedInAt : checkInFor(patch.checkedInAt);
+    // the rate snapshot stays with the entry unless it is re-pointed at another event or person
+    const stored = get<{ payout: number | null; commission: number | null }>(db, `SELECT payout_per_sale AS payout, commission_per_sale AS commission FROM gauge_entries WHERE id = ?`, [id])!;
+    const snap = next.eventId !== existing.eventId || next.userId !== existing.userId || stored.payout === null ? rateSnapshot(db, event, target) : { payout: stored.payout, commission: stored.commission ?? 0 };
+    const today = todayISO();
+    transaction(db, () => {
+      run(
+        db,
+        `UPDATE gauge_entries SET event_id = ?, user_id = ?, date = ?, stops = ?, table_count = ?, presentations = ?, closes = ?, taps = ?, sales = ?, checked_in_at = ?, notes = ?, submitted_at = ?, payout_per_sale = ?, commission_per_sale = ? WHERE id = ?`,
+        [next.eventId, next.userId, next.date, next.stops, next.table, next.presentations, next.closes, next.taps, next.sales, checkedInAt, next.notes ?? null, nowISO(), snap.payout, snap.commission, id],
+      );
+      syncPayrollForEntry(db, { userId: existing.userId, eventId: existing.eventId, date: existing.date }, today);
+      if (moved) syncPayrollForEntry(db, { userId: next.userId, eventId: next.eventId, date: next.date }, today);
+    });
     res.json(getGauge(db, id));
   });
 
@@ -171,7 +223,12 @@ export function gaugesRouter(db: Db): Router {
     const existing = getGauge(db, id);
     if (!existing) throw notFound('Gauge entry');
     if (!canManageTeam(me, existing.teamId) && !(me.role === 'leader' && existing.userId === me.id)) throw forbidden('Only leaders of the team or admins can delete gauge entries');
-    run(db, `DELETE FROM gauge_entries WHERE id = ?`, [id]);
+    assertWeekUnpaidFor(db, me, existing.userId, existing.date);
+    const today = todayISO();
+    transaction(db, () => {
+      run(db, `DELETE FROM gauge_entries WHERE id = ?`, [id]);
+      syncPayrollForEntry(db, { userId: existing.userId, eventId: existing.eventId, date: existing.date }, today);
+    });
     res.status(204).end();
   });
 

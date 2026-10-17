@@ -1,11 +1,11 @@
 import { useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
-import { ArrowLeft, CalendarDays, Clock, MapPin, Pencil, PlusCircle, Trash2, Users } from 'lucide-react';
+import { ArrowLeft, Ban, CalendarDays, Clock, MapPin, Pencil, PlusCircle, Trash2, Users } from 'lucide-react';
 import type { GaugeEntryWithMeta } from '@lm/shared';
 import { funnelRatios } from '@lm/shared';
 import { Badge, Button, Card, CardHeader, PageHeader, Skeleton, useToast } from '@/components/ui';
 import { FunnelChart } from '@/components/charts';
-import { useDeleteEvent, useDeleteGauge, useEvent } from '@/api/hooks';
+import { useDeleteEvent, useDeleteGauge, useEvent, useUpdateEvent } from '@/api/hooks';
 import { useCurrentUser } from '@/auth/AuthProvider';
 import { ConfirmDialog, ErrorState, EventStatusBadge, EventTypeBadge, ExportButton, KpiSkeletons, errorMessage } from '@/features/common';
 import { EventFormModal } from '@/features/events';
@@ -31,17 +31,37 @@ export function EventDetailPage() {
   const [editEntry, setEditEntry] = useState<GaugeEntryWithMeta | null>(null);
   const [deleteEntry, setDeleteEntry] = useState<GaugeEntryWithMeta | null>(null);
   const [deleteEventOpen, setDeleteEventOpen] = useState(false);
+  const [cancelEventOpen, setCancelEventOpen] = useState(false);
   const delEvent = useDeleteEvent();
+  const updEvent = useUpdateEvent();
   const delGauge = useDeleteGauge();
 
-  const canEdit = me.role === 'admin' || (me.role === 'leader' && ev?.teamId === me.teamId);
-  const canManageGauges = me.role === 'admin' || me.role === 'leader';
-  const canLog = me.role !== 'recruiter';
+  // Mirror the API's write rules (lib/scope.ts) so the page never offers an action that ends in a 403:
+  //  - admins write anywhere;
+  //  - leaders only at their own team's events, for themselves or members of their team;
+  //  - reps only their own entry, only at their own team's events;
+  //  - deleting an entry needs the team's leader or an admin (a leader may also delete their own).
+  const isAdmin = me.role === 'admin';
+  const sameTeamEvent = !!ev && me.teamId != null && ev.teamId === me.teamId;
+  const canEdit = isAdmin || (me.role === 'leader' && sameTeamEvent);
+  const canManageGauges = isAdmin || (me.role === 'leader' && sameTeamEvent);
+  const canLog = isAdmin || ((me.role === 'leader' || me.role === 'rep') && sameTeamEvent);
+  const canEditRow = (row: GaugeEntryWithMeta): boolean => {
+    if (isAdmin) return true;
+    if (!sameTeamEvent) return false;
+    if (me.role === 'leader') return row.userId === me.id || row.teamId === me.teamId;
+    return me.role === 'rep' && row.userId === me.id;
+  };
+  const canDeleteRow = (row: GaugeEntryWithMeta): boolean => isAdmin || (me.role === 'leader' && (row.teamId === me.teamId || row.userId === me.id));
 
   if (q.isError && q.error instanceof ApiError && q.error.status === 404) return <NotFoundPage />;
 
   const ratios = ev ? ev.ratios ?? funnelRatios(ev.totals) : null;
   const myEntry = ev?.entries.find((e) => e.userId === me.id) ?? null;
+  // An event that already carries gauge entries cannot be deleted (the API answers 409): cancelling keeps the record.
+  const hasEntries = (ev?.entries.length ?? 0) > 0;
+  const canDelete = isAdmin && !hasEntries;
+  const canCancel = canEdit && hasEntries && ev?.status !== 'cancelled';
 
   return (
     <>
@@ -67,7 +87,8 @@ export function EventDetailPage() {
                 </Button>
               )}
               {canEdit && <Button variant="outline" onClick={() => setEditOpen(true)} leftIcon={<Pencil className="h-4 w-4" aria-hidden />}>Edit</Button>}
-              {me.role === 'admin' && <Button variant="ghost" className="text-danger" onClick={() => setDeleteEventOpen(true)} leftIcon={<Trash2 className="h-4 w-4" aria-hidden />} aria-label="Delete event">Delete</Button>}
+              {canCancel && <Button variant="ghost" className="text-danger" onClick={() => setCancelEventOpen(true)} leftIcon={<Ban className="h-4 w-4" aria-hidden />} aria-label="Cancel event">Cancel event</Button>}
+              {canDelete && <Button variant="ghost" className="text-danger" onClick={() => setDeleteEventOpen(true)} leftIcon={<Trash2 className="h-4 w-4" aria-hidden />} aria-label="Delete event">Delete</Button>}
             </>
           ) : undefined
         }
@@ -107,12 +128,16 @@ export function EventDetailPage() {
                 loading={q.isLoading}
                 showEvent={false}
                 showDate={false}
-                onEdit={canManageGauges || !!myEntry ? (row) => { setEditEntry(row); setLogOpen(true); } : undefined}
+                onEdit={canManageGauges || (canLog && !!myEntry) ? (row) => { setEditEntry(row); setLogOpen(true); } : undefined}
                 onDelete={canManageGauges ? (row) => setDeleteEntry(row) : undefined}
-                canEditRow={(row) => canManageGauges || row.userId === me.id}
+                canEditRow={canEditRow}
+                canDeleteRow={canDeleteRow}
                 emptyMessage="No gauges logged for this event yet"
                 bare className="border-t border-border"
               />
+              {ev && !canLog && me.role !== 'recruiter' && (
+                <p className="border-t border-border px-5 py-3 text-xs text-muted">You can only log gauges at your own team's events.</p>
+              )}
             </Card>
           </div>
         </div>
@@ -138,17 +163,32 @@ export function EventDetailPage() {
         }}
       />
       <ConfirmDialog
+        open={cancelEventOpen}
+        onClose={() => setCancelEventOpen(false)}
+        title="Cancel this event?"
+        description="The event is marked cancelled and stays in the calendar; the gauges already logged are kept. Events with gauge entries cannot be deleted."
+        confirmLabel="Cancel event"
+        tone="danger"
+        loading={updEvent.isPending}
+        onConfirm={() => {
+          updEvent.mutate({ id: eventId, status: 'cancelled' }, {
+            onSuccess: () => { toast.success('Event cancelled'); setCancelEventOpen(false); },
+            onError: (e) => toast.error('Could not cancel event', errorMessage(e)),
+          });
+        }}
+      />
+      <ConfirmDialog
         open={deleteEventOpen}
         onClose={() => setDeleteEventOpen(false)}
         title="Delete this event?"
-        description="The event and its gauge entries will be removed for everyone. Consider marking it cancelled instead."
+        description="The event will be removed for everyone. Consider marking it cancelled instead."
         confirmLabel="Delete event"
         tone="danger"
         loading={delEvent.isPending}
         onConfirm={() => {
           delEvent.mutate(eventId, {
             onSuccess: () => { toast.success('Event deleted'); navigate('/events', { replace: true }); },
-            onError: (e) => toast.error('Could not delete event', errorMessage(e)),
+            onError: (e) => { setDeleteEventOpen(false); toast.error('Could not delete event', errorMessage(e)); },
           });
         }}
       />

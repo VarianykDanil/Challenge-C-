@@ -6,3 +6,4 @@ server/data/*.sqlite
 server/data/*.sqlite-*
 .DS_Store
 /screenshots/
+server/data/app-secret

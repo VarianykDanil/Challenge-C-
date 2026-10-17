@@ -66,7 +66,13 @@ export function getCampaign(db: Db, id: number): Campaign | undefined {
 
 type EventRow = Omit<SalesEventWithMeta, 'totals'> & GaugeTotals;
 
-export const EVENT_SELECT = `
+/**
+ * Events with their gauge totals. The totals come from an aggregate subquery over `gauge_entries`; when the caller
+ * lists a date window the same window is pushed into that subquery (an entry's date always equals its event's date,
+ * see the gauge integrity rules), so a list never scans the whole gauge table. Output is identical either way.
+ */
+export function eventSelect(windowed = false): string {
+  return `
   SELECT e.id, e.campaign_id AS campaignId, e.team_id AS teamId, e.name, e.venue, e.city, e.type, e.date,
          e.start_time AS startTime, e.end_time AS endTime, e.status, e.target_sales AS targetSales, e.notes,
          c.name AS campaignName, c.code AS campaignCode, c.color AS campaignColor,
@@ -80,16 +86,26 @@ export const EVENT_SELECT = `
   LEFT JOIN (
     SELECT event_id, SUM(stops) AS stops, SUM(table_count) AS table_count, SUM(presentations) AS presentations,
            SUM(closes) AS closes, SUM(taps) AS taps, SUM(sales) AS sales, COUNT(DISTINCT user_id) AS repCount
-    FROM gauge_entries GROUP BY event_id
+    FROM gauge_entries${windowed ? ' WHERE date BETWEEN ? AND ?' : ''} GROUP BY event_id
   ) g ON g.event_id = e.id`;
+}
+
+export const EVENT_SELECT = eventSelect(false);
 
 export function mapEvent(row: EventRow): SalesEventWithMeta {
   const { stops, table, presentations, closes, taps, sales, ...rest } = row;
   return { ...rest, totals: { stops, table, presentations, closes, taps, sales } };
 }
 
-export function listEvents(db: Db, where: string, params: Param[], orderBy = 'e.date ASC, e.start_time ASC'): SalesEventWithMeta[] {
-  return all<EventRow>(db, `${EVENT_SELECT} ${where} ORDER BY ${orderBy}`, params).map(mapEvent);
+export function listEvents(
+  db: Db,
+  where: string,
+  params: Param[],
+  orderBy = 'e.date ASC, e.start_time ASC',
+  window?: { from: string; to: string },
+): SalesEventWithMeta[] {
+  const sql = `${eventSelect(Boolean(window))} ${where} ORDER BY ${orderBy}`;
+  return all<EventRow>(db, sql, window ? [window.from, window.to, ...params] : params).map(mapEvent);
 }
 
 export function getEvent(db: Db, id: number): SalesEventWithMeta | undefined {
@@ -112,9 +128,10 @@ export const GAUGE_SELECT = `
   JOIN events e ON e.id = g.event_id
   JOIN campaigns c ON c.id = e.campaign_id`;
 
-export function listGauges(db: Db, where: string, params: Param[], orderBy = 'g.date DESC, g.submitted_at DESC', limit?: number): GaugeEntryWithMeta[] {
+export function listGauges(db: Db, where: string, params: Param[], orderBy = 'g.date DESC, g.submitted_at DESC', limit?: number, offset = 0): GaugeEntryWithMeta[] {
   const lim = limit ? ` LIMIT ${Math.max(1, Math.floor(limit))}` : '';
-  return all<GaugeEntryWithMeta>(db, `${GAUGE_SELECT} ${where} ORDER BY ${orderBy}${lim}`, params);
+  const off = offset > 0 ? `${lim || ' LIMIT -1'} OFFSET ${Math.floor(offset)}` : lim;
+  return all<GaugeEntryWithMeta>(db, `${GAUGE_SELECT} ${where} ORDER BY ${orderBy}${off}`, params);
 }
 
 export function getGauge(db: Db, id: number): GaugeEntryWithMeta | undefined {
@@ -135,7 +152,7 @@ export function getPayPlan(db: Db, id: number): PayPlan | undefined {
 export const PAYROLL_SELECT = `
   SELECT p.id, p.user_id AS userId, p.week_start AS weekStart, p.week_end AS weekEnd, p.days_worked AS daysWorked,
          p.sales, p.team_sales AS teamSales, p.base_pay AS basePay, p.commission, p.bonus, p.overrides, p.deductions,
-         p.gross, p.due_date AS dueDate, p.paid_date AS paidDate, p.status, p.reference,
+         p.gross, p.due_date AS dueDate, p.paid_date AS paidDate, p.status, p.reference, p.adjusted_at AS adjustedAt,
          u.first_name || ' ' || u.last_name AS userName, u.employee_id AS employeeId, u.position, t.name AS teamName
   FROM payroll_runs p
   JOIN users u ON u.id = p.user_id

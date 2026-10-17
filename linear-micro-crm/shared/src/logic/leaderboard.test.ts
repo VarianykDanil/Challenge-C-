@@ -36,14 +36,14 @@ test('rankRows accepts an accessor, ascending order and a tie-break metric', () 
   assert.equal(asc[0].name, 'Dee');
   assert.equal(asc[0].rank, 1);
 
-  // tie on sales broken by fewer stops (more efficient) ranking higher
+  // tie on sales: the tie-break (fewer stops = more efficient) decides the ORDER, but both still share rank 2
   const tie = rankRows(rows, 'sales', { tieBreak: (r) => -r.stops });
   assert.deepEqual(
     tie.map((r) => [r.name, r.rank]),
     [
       ['Ben', 1],
       ['Cal', 2],
-      ['Ava', 3],
+      ['Ava', 2],
       ['Dee', 4],
     ],
   );

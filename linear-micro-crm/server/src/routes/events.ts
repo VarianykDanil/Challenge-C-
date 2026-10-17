@@ -4,9 +4,9 @@ import { funnelRatios } from '@lm/shared';
 import { get, run, type Db } from '../db/connection.ts';
 import { Where, getEvent, listEvents, listGauges } from '../db/queries.ts';
 import { addDays, nowHHMM, todayISO } from '../lib/dates.ts';
-import { badRequest, forbidden, notFound } from '../lib/errors.ts';
+import { badRequest, conflict, forbidden, notFound } from '../lib/errors.ts';
 import { canManageTeam, redactEntry } from '../lib/scope.ts';
-import { idParam, isoDate, nonNegativeInt, optionalIdQuery, optionalString, parseRange, timeHHMM } from '../lib/validate.ts';
+import { idParam, isoDate, optionalIdQuery, optionalString, parseRange, targetSalesCount, timeHHMM } from '../lib/validate.ts';
 import { currentUser, requireRole } from '../middleware/auth.ts';
 
 const EVENT_TYPES = ['private_site', 'event', 'b2b', 'residential', 'retail'] as const;
@@ -23,7 +23,7 @@ const eventBody = z.object({
   startTime: timeHHMM,
   endTime: timeHHMM,
   status: z.enum(EVENT_STATUSES).optional(),
-  targetSales: nonNegativeInt.default(10),
+  targetSales: targetSalesCount.default(10),
   notes: z.string().trim().max(2000).nullable().optional().default(null),
 });
 
@@ -36,6 +36,7 @@ function defaultStatus(date: string, startTime: string): (typeof EVENT_STATUSES)
 
 export function eventsRouter(db: Db): Router {
   const router = Router();
+  const hasGauges = (eventId: number) => Boolean(get(db, `SELECT 1 FROM gauge_entries WHERE event_id = ? LIMIT 1`, [eventId]));
 
   router.get('/', (req, res) => {
     const me = currentUser(req);
@@ -56,7 +57,8 @@ export function eventsRouter(db: Db): Router {
       if (!EVENT_STATUSES.includes(status as (typeof EVENT_STATUSES)[number])) throw badRequest('Invalid status');
       where.add('e.status = ?', status);
     }
-    res.json(listEvents(db, `${where}`, where.params));
+    // the date window is pushed into the gauge aggregate too, so the list never scans the whole gauge table
+    res.json(listEvents(db, `${where}`, where.params, undefined, { from, to }));
   });
 
   router.get('/:id', (req, res) => {
@@ -94,12 +96,21 @@ export function eventsRouter(db: Db): Router {
     if (patch.teamId !== undefined && !canManageTeam(me, patch.teamId)) throw forbidden('Leaders cannot move events to another team');
     if (patch.campaignId !== undefined && !get(db, `SELECT 1 FROM campaigns WHERE id = ?`, [patch.campaignId])) throw badRequest('Unknown campaignId');
     if (patch.teamId !== undefined && !get(db, `SELECT 1 FROM teams WHERE id = ?`, [patch.teamId])) throw badRequest('Unknown teamId');
+    // Once gauges are recorded the event's date, team and campaign are frozen: every entry is keyed on the event date
+    // and scoped to the team, and revenue is grouped by campaign — moving the event would orphan or double-count them.
+    if (hasGauges(id)) {
+      const frozen = (['date', 'teamId', 'campaignId'] as const).filter((k) => patch[k] !== undefined && patch[k] !== existing[k]);
+      if (frozen.length) throw conflict(`This event has recorded gauges — its ${frozen.join(', ')} cannot change; cancel it and create a new event instead`);
+    }
     const next = { ...existing, ...patch };
     if (next.endTime <= next.startTime) throw badRequest('endTime must be after startTime');
+    // a new date or start time re-derives the status (past → completed, today after start → live) unless the event is cancelled
+    const timingChanged = next.date !== existing.date || next.startTime !== existing.startTime;
+    const status = patch.status ?? (timingChanged && existing.status !== 'cancelled' ? defaultStatus(next.date, next.startTime) : existing.status);
     run(
       db,
       `UPDATE events SET campaign_id = ?, team_id = ?, name = ?, venue = ?, city = ?, type = ?, date = ?, start_time = ?, end_time = ?, status = ?, target_sales = ?, notes = ? WHERE id = ?`,
-      [next.campaignId, next.teamId, next.name, next.venue, next.city, next.type, next.date, next.startTime, next.endTime, next.status, next.targetSales, next.notes, id],
+      [next.campaignId, next.teamId, next.name, next.venue, next.city, next.type, next.date, next.startTime, next.endTime, status, next.targetSales, next.notes, id],
     );
     res.json(getEvent(db, id));
   });
@@ -107,6 +118,8 @@ export function eventsRouter(db: Db): Router {
   router.delete('/:id', requireRole('admin'), (req, res) => {
     const id = idParam(req);
     if (!getEvent(db, id)) throw notFound('Event');
+    // recorded gauges are pay and revenue history: an event that has them can only be cancelled, never deleted
+    if (hasGauges(id)) throw conflict('This event has recorded gauges and cannot be deleted — mark it cancelled instead');
     run(db, `DELETE FROM events WHERE id = ?`, [id]);
     res.status(204).end();
   });

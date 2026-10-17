@@ -10,6 +10,7 @@ import {
   BENCHMARK_DANGER_THRESHOLD,
   BENCHMARK_RATIOS,
   BENCHMARK_TOLERANCE,
+  GAUGE_MAX_PER_DAY,
   PERFORMANCE_WEIGHTS,
   RATIO_KEYS,
   RATIO_LABELS,
@@ -88,18 +89,21 @@ export function funnelRatios(t: GaugeTotals): FunnelRatios {
     closeToTap: safeRatio(t.taps, t.closes),
     tapToSale: safeRatio(t.sales, t.taps),
     overallConversion: safeRatio(t.sales, t.stops),
-    stopsPerSale: t.sales > 0 ? t.stops / t.sales : Infinity,
+    // null (not Infinity) when there are no sales: the value has to survive JSON.stringify unchanged
+    stopsPerSale: t.sales > 0 ? t.stops / t.sales : null,
   };
 }
 
 /**
- * Validate that a gauge entry is a proper funnel (each stage ≤ previous).
- * Returns a list of human-readable warnings; empty means valid.
+ * Validate that a gauge entry is a proper funnel (each stage ≤ previous) of plausible whole numbers:
+ * every gauge is an integer between 0 and `max` (default `GAUGE_MAX_PER_DAY`, one rep's day), so a typo with
+ * extra zeros or a non-finite value never reaches the aggregates. Returns human-readable warnings; empty means valid.
  */
-export function validateGaugeFunnel(t: GaugeTotals): string[] {
+export function validateGaugeFunnel(t: GaugeTotals, max: number = GAUGE_MAX_PER_DAY): string[] {
   const warnings: string[] = [];
   for (const k of GAUGE_KEYS) {
     if (!Number.isInteger(t[k]) || t[k] < 0) warnings.push(`${k} must be a whole number ≥ 0`);
+    else if (t[k] > max) warnings.push(`${k} (${t[k]}) cannot exceed ${max} in one day`);
   }
   for (let i = 1; i < GAUGE_KEYS.length; i++) {
     const prev: GaugeKey = GAUGE_KEYS[i - 1];

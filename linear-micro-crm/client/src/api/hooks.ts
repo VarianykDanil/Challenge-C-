@@ -1,6 +1,6 @@
 // Owned by the Frontend Developer. TanStack Query hooks for every endpoint in docs/API.md.
 import { useCallback } from 'react';
-import { useMutation, useQuery, useQueryClient, type UseQueryOptions } from '@tanstack/react-query';
+import { useInfiniteQuery, useMutation, useQuery, useQueryClient, type UseQueryOptions } from '@tanstack/react-query';
 import type {
   Announcement,
   Campaign,
@@ -40,7 +40,7 @@ import type {
   UserStatus,
   UserWithTeam,
 } from '@lm/shared';
-import { api, qs } from './client';
+import { api, apiRaw, qs, totalCount } from './client';
 import { useAuth } from '@/auth/AuthProvider';
 
 // ───────────────────────────── Response shapes not in shared/types ─────────────────────────────
@@ -80,6 +80,8 @@ export interface RangeParams { from?: string; to?: string }
 export interface UsersParams { teamId?: number | null; role?: Role; status?: UserStatus | 'all'; q?: string }
 export interface EventsParams extends RangeParams { teamId?: number | null; campaignId?: number | null; status?: EventStatus | '' }
 export interface GaugesParams extends RangeParams { userId?: number | null; eventId?: number | null; teamId?: number | null; campaignId?: number | null; limit?: number }
+/** One page of `GET /gauges`: `total` comes from the `X-Total-Count` header (null when the server does not send it). */
+export interface GaugesPage { rows: GaugeEntryWithMeta[]; offset: number; total: number | null }
 export interface GaugeSummaryParams extends RangeParams { groupBy: GaugeGroupBy; teamId?: number | null; campaignId?: number | null; userId?: number | null }
 export interface LeaderboardParams { period?: DashboardRange; metric?: 'sales' | 'conversion'; teamId?: number | null }
 /** `status` is one status or a comma list (e.g. `pending,failed` = everything still to pay). */
@@ -110,6 +112,7 @@ export const keys = {
   events: (p: EventsParams = {}) => ['events', 'list', p] as const,
   event: (id: number) => ['events', 'detail', id] as const,
   gauges: (p: GaugesParams = {}) => ['gauges', 'list', p] as const,
+  gaugesPaged: (p: GaugesParams, pageSize: number) => ['gauges', 'paged', p, pageSize] as const,
   gaugeSummary: (p: GaugeSummaryParams) => ['gauges', 'summary', p] as const,
   leaderboard: (p: LeaderboardParams) => ['leaderboard', p] as const,
   payroll: (p: PayrollParams = {}) => ['finance', 'payroll', 'list', p] as const,
@@ -268,6 +271,13 @@ export function useUpdateUser() {
       void qc.invalidateQueries({ queryKey: ['users'] });
       void qc.invalidateQueries({ queryKey: ['teams'] });
       qc.setQueryData(keys.user(user.id), user);
+      // Names, teams and positions are embedded in every list that shows a person: refetch them so the old name never lingers.
+      void qc.invalidateQueries({ queryKey: ['leaderboard'] });
+      void qc.invalidateQueries({ queryKey: ['gauges'] });
+      void qc.invalidateQueries({ queryKey: ['events'] });
+      void qc.invalidateQueries({ queryKey: ['finance'] });
+      void qc.invalidateQueries({ queryKey: ['dashboard'] });
+      void qc.invalidateQueries({ queryKey: ['recruitment'] });
     },
   });
 }
@@ -301,6 +311,10 @@ export function useUpdateCampaign() {
     onSuccess: () => {
       void qc.invalidateQueries({ queryKey: ['campaigns'] });
       void qc.invalidateQueries({ queryKey: ['events'] });
+      // Campaign name / colour / payout are embedded in gauge rows, finance by-campaign and the dashboard donut.
+      void qc.invalidateQueries({ queryKey: ['gauges'] });
+      void qc.invalidateQueries({ queryKey: ['finance'] });
+      void qc.invalidateQueries({ queryKey: ['dashboard'] });
     },
   });
 }
@@ -322,6 +336,7 @@ export function useEvent(id: number | null | undefined) {
   return useQuery({ queryKey: keys.event(id ?? 0), queryFn: () => api<EventDetail>(`/events/${id}`), enabled: id != null && id > 0 });
 }
 
+/** A new event changes calendars and the dashboard's upcoming list only (it carries no gauges yet). */
 function invalidateEventRelated(qc: ReturnType<typeof useQueryClient>) {
   void qc.invalidateQueries({ queryKey: ['events'] });
   void qc.invalidateQueries({ queryKey: ['dashboard'] });
@@ -335,19 +350,33 @@ export function useCreateEvent() {
   });
 }
 
+/** Editing an event can move its gauges to another date, team or campaign, so every aggregate is refetched. */
 export function useUpdateEvent() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: ({ id, ...patch }: Partial<SalesEvent> & { id: number }) => api<SalesEventWithMeta>(`/events/${id}`, { method: 'PATCH', json: patch }),
-    onSuccess: () => invalidateEventRelated(qc),
+    onSuccess: () => invalidateGaugeRelated(qc),
   });
 }
 
+/**
+ * Deleting an event takes its gauge entries with it, so leaderboard, summaries, finance and performance are
+ * refetched too. The deleted event's own detail query is only marked stale (never refetched — that would be a 404
+ * while the page is still mounted); the page navigates away and the query is garbage-collected.
+ */
 export function useDeleteEvent() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: (id: number) => api<void>(`/events/${id}`, { method: 'DELETE' }),
-    onSuccess: () => invalidateEventRelated(qc),
+    onSuccess: (_void, id) => {
+      void qc.invalidateQueries({ queryKey: keys.event(id), refetchType: 'none' });
+      void qc.invalidateQueries({ queryKey: ['events', 'list'] });
+      void qc.invalidateQueries({ queryKey: ['gauges'] });
+      void qc.invalidateQueries({ queryKey: ['dashboard'] });
+      void qc.invalidateQueries({ queryKey: ['leaderboard'] });
+      void qc.invalidateQueries({ queryKey: ['users', 'performance'] });
+      void qc.invalidateQueries({ queryKey: ['finance'] });
+    },
   });
 }
 
@@ -369,6 +398,42 @@ export function useGauges(params: GaugesParams = {}, opts: QueryOpts<GaugeEntryW
         })}`,
       ),
     ...opts,
+  });
+}
+
+export const GAUGES_PAGE_SIZE = 25;
+
+/**
+ * `GET /gauges` a page at a time (`limit` + `offset`), newest first. The total comes from the `X-Total-Count`
+ * header; a server that does not send it (and so ignores `offset`) yields a single page and no "load more".
+ */
+export function useGaugesPaged(params: Omit<GaugesParams, 'limit'>, opts: { enabled?: boolean; pageSize?: number } = {}) {
+  const pageSize = opts.pageSize ?? GAUGES_PAGE_SIZE;
+  return useInfiniteQuery({
+    queryKey: keys.gaugesPaged(params, pageSize),
+    queryFn: async ({ pageParam }): Promise<GaugesPage> => {
+      const offset = pageParam;
+      const r = await apiRaw<GaugeEntryWithMeta[]>(
+        `/gauges${qs({
+          userId: num(params.userId),
+          eventId: num(params.eventId),
+          teamId: num(params.teamId),
+          campaignId: num(params.campaignId),
+          from: params.from,
+          to: params.to,
+          limit: pageSize,
+          offset: offset > 0 ? offset : undefined,
+        })}`,
+      );
+      return { rows: r.data, offset, total: totalCount(r.headers) };
+    },
+    initialPageParam: 0,
+    getNextPageParam: (last) => {
+      if (last.total == null || last.rows.length === 0) return undefined;
+      const next = last.offset + last.rows.length;
+      return next < last.total ? next : undefined;
+    },
+    enabled: opts.enabled,
   });
 }
 
@@ -400,10 +465,16 @@ function invalidateGaugeRelated(qc: ReturnType<typeof useQueryClient>) {
   void qc.invalidateQueries({ queryKey: ['finance'] });
 }
 
+/** Result of `POST /gauges`: `created` is true for a 201 (new entry) and false for a 200 (the existing day was updated). */
+export interface GaugeUpsertResult { entry: GaugeEntryWithMeta; created: boolean }
+
 export function useUpsertGauge() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: (input: GaugeUpsertInput) => api<GaugeEntryWithMeta>('/gauges', { method: 'POST', json: input }),
+    mutationFn: async (input: GaugeUpsertInput & { id?: number }): Promise<GaugeUpsertResult> => {
+      const r = await apiRaw<GaugeEntryWithMeta>('/gauges', { method: 'POST', json: input });
+      return { entry: r.data, created: r.status === 201 };
+    },
     onSuccess: () => invalidateGaugeRelated(qc),
   });
 }

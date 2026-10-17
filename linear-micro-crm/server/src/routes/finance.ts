@@ -17,10 +17,10 @@ import { ensurePayrollMaterialised } from '../db/maintenance.ts';
 import { EXPENSE_SELECT, PAY_PLAN_SELECT, Where, getExpense, getPayPlan, getPayroll, getUser, listGauges, listPayroll } from '../db/queries.ts';
 import { addDays, eachMonday, mondayOf, sundayOf, todayISO } from '../lib/dates.ts';
 import { badRequest, conflict, forbidden, notFound } from '../lib/errors.ts';
-import { GAUGE_FROM } from '../lib/metrics.ts';
+import { GAUGE_COMMISSION_SQL, GAUGE_FROM, GAUGE_PAYOUT_SQL, MONDAY_SQL, mondayOfSql } from '../lib/metrics.ts';
 import { estimateWeekPayroll, nextPay } from '../lib/pay.ts';
 import { redactPayroll } from '../lib/scope.ts';
-import { idParam, isoDate, optionalIdQuery, optionalString, parseRange } from '../lib/validate.ts';
+import { idParam, isoDate, moneyAmount, optionalIdQuery, optionalString, parseRange } from '../lib/validate.ts';
 import { currentUser, requireRole } from '../middleware/auth.ts';
 
 const PAYROLL_STATUSES = ['pending', 'paid', 'late', 'failed'] as const;
@@ -29,7 +29,7 @@ const EXPENSE_CATEGORIES = ['venue', 'travel', 'office', 'software', 'recruitmen
 const expenseBody = z.object({
   date: isoDate,
   category: z.enum(EXPENSE_CATEGORIES),
-  amount: z.number().positive(),
+  amount: moneyAmount, // > 0 and ≤ MONEY_MAX, finite
   description: z.string().trim().min(1).max(500),
   campaignId: z.number().int().positive().nullable().optional().default(null),
   eventId: z.number().int().positive().nullable().optional().default(null),
@@ -131,6 +131,9 @@ export function financeRouter(db: Db): Router {
     const { paidDate } = z.object({ paidDate: isoDate.optional() }).parse(req.body ?? {});
     const today = todayISO();
     const date = paidDate ?? today;
+    // money cannot land before the pay week has ended, nor on a day that has not happened yet
+    if (date > today) throw badRequest('paidDate cannot be in the future');
+    if (date < existing.weekEnd) throw badRequest(`paidDate cannot be before the pay week ends (${existing.weekEnd})`);
     const status = payrollStatusFor(existing.dueDate, date, today); // 'paid' or 'late'
     run(db, `UPDATE payroll_runs SET paid_date = ?, status = ? WHERE id = ?`, [date, status, id]);
     res.json(getPayroll(db, id));
@@ -200,24 +203,33 @@ export function financeSummary(db: Db, from: string, to: string, teamId: number 
   const tp = (): (number | string)[] => (teamId ? [teamId] : []);
   const latestRunWeek = get<{ w: string | null }>(db, `SELECT MAX(week_start) AS w FROM payroll_runs`)!.w ?? '';
 
+  // One GROUP BY pay-week query per series (revenue, payroll, expenses) over the whole window, stitched per Monday in
+  // JS — the same figures as one query per week, without 3 × N round trips. Revenue uses the payout captured on each
+  // entry when it was logged, so changing a campaign's payout only affects future days.
+  const byWeek = <T extends { wk: string }>(rows: T[]) => new Map(rows.map((r) => [r.wk, r]));
+  const revenueByWeek = byWeek(all<{ wk: string; revenue: number; sales: number }>(
+    db,
+    `SELECT ${MONDAY_SQL} AS wk, COALESCE(SUM(g.sales * ${GAUGE_PAYOUT_SQL}), 0) AS revenue, COALESCE(SUM(g.sales), 0) AS sales
+     ${GAUGE_FROM} WHERE g.date BETWEEN ? AND ?${teamGauge} GROUP BY wk`,
+    [wkFrom, wkTo, ...tp()],
+  ));
+  const payrollByWeek = byWeek(all<{ wk: string; payroll: number; runs: number }>(
+    db,
+    `SELECT p.week_start AS wk, COALESCE(SUM(p.gross), 0) AS payroll, COUNT(*) AS runs
+     FROM payroll_runs p JOIN users u ON u.id = p.user_id WHERE p.week_start BETWEEN ? AND ?${teamPayroll} GROUP BY wk`,
+    [wkFrom, wkTo, ...tp()],
+  ));
+  const expensesByWeek = byWeek(all<{ wk: string; expenses: number }>(
+    db,
+    `SELECT ${mondayOfSql('x.date')} AS wk, COALESCE(SUM(x.amount), 0) AS expenses FROM expenses x WHERE x.date BETWEEN ? AND ?${teamExpense} GROUP BY wk`,
+    [wkFrom, wkTo, ...tp()],
+  ));
+
   const weeks: FinanceWeek[] = [];
   for (const monday of eachMonday(wkFrom, wkTo)) {
-    const sunday = sundayOf(monday);
-    const g = get<{ revenue: number; sales: number }>(
-      db,
-      `SELECT COALESCE(SUM(g.sales * c.payout_per_sale), 0) AS revenue, COALESCE(SUM(g.sales), 0) AS sales ${GAUGE_FROM} WHERE g.date BETWEEN ? AND ?${teamGauge}`,
-      [monday, sunday, ...tp()],
-    )!;
-    const p = get<{ payroll: number; runs: number }>(
-      db,
-      `SELECT COALESCE(SUM(p.gross), 0) AS payroll, COUNT(*) AS runs FROM payroll_runs p JOIN users u ON u.id = p.user_id WHERE p.week_start = ?${teamPayroll}`,
-      [monday, ...tp()],
-    )!;
-    const x = get<{ expenses: number }>(
-      db,
-      `SELECT COALESCE(SUM(x.amount), 0) AS expenses FROM expenses x WHERE x.date BETWEEN ? AND ?${teamExpense}`,
-      [monday, sunday, ...tp()],
-    )!;
+    const g = revenueByWeek.get(monday) ?? { wk: monday, revenue: 0, sales: 0 };
+    const p = payrollByWeek.get(monday) ?? { wk: monday, payroll: 0, runs: 0 };
+    const x = expensesByWeek.get(monday) ?? { wk: monday, expenses: 0 };
     const revenue = round2(Number(g.revenue));
     const expenses = round2(Number(x.expenses));
     const week: FinanceWeek = { weekStart: monday, revenue, payroll: round2(Number(p.payroll)), expenses, profit: 0, sales: Number(g.sales) };
@@ -240,14 +252,15 @@ export function financeSummary(db: Db, from: string, to: string, teamId: number 
     { revenue: 0, payroll: 0, expenses: 0, profit: 0, sales: 0 },
   );
 
-  // Commission is what the reps actually earn on each campaign's sales — their pay-plan rate, the same figure payroll
-  // uses — not the campaign's nominal rep_commission_per_sale rate card. Margin = revenue − that commission, in pounds.
+  // Commission is what the reps actually earn on each campaign's sales — the pay-plan rate captured on each entry when
+  // it was logged (the same figure payroll used for that week), not the campaign's nominal rep_commission_per_sale
+  // rate card. Margin = revenue − that commission, in pounds.
   const byCampaign = all<{ campaignId: number; campaignName: string; campaignColor: string; sales: number; revenue: number; commission: number }>(
     db,
     `SELECT c.id AS campaignId, c.name AS campaignName, c.color AS campaignColor,
             COALESCE(SUM(g.sales), 0) AS sales,
-            COALESCE(SUM(g.sales * c.payout_per_sale), 0) AS revenue,
-            COALESCE(SUM(g.sales * pp.commission_per_sale), 0) AS commission
+            COALESCE(SUM(g.sales * ${GAUGE_PAYOUT_SQL}), 0) AS revenue,
+            COALESCE(SUM(g.sales * ${GAUGE_COMMISSION_SQL}), 0) AS commission
      ${GAUGE_FROM}
      JOIN pay_plans pp ON pp.id = u.pay_plan_id
      WHERE g.date BETWEEN ? AND ?${teamGauge} GROUP BY c.id ORDER BY revenue DESC`,

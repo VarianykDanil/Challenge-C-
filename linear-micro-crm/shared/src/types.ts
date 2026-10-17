@@ -181,8 +181,8 @@ export interface FunnelRatios {
   tapToSale: number;
   /** sales / stops */
   overallConversion: number;
-  /** stops needed per sale (Infinity when sales = 0) */
-  stopsPerSale: number;
+  /** stops needed per sale; `null` when there are no sales yet (JSON cannot carry Infinity) */
+  stopsPerSale: number | null;
 }
 
 /** One row of an aggregated gauge summary (per user / team / campaign / day). */
@@ -234,6 +234,8 @@ export interface PayrollRun {
   paidDate: string | null;
   status: PayrollStatus;
   reference: string;
+  /** Set when an admin changed the week's gauges after the run was paid: the payslip shows "adjusted after payment". */
+  adjustedAt?: string | null;
 }
 
 export interface PayrollRunWithUser extends PayrollRun {

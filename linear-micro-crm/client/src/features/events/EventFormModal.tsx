@@ -1,8 +1,10 @@
 // Create / edit a sales event (admin, or leader for their own team).
 import { useId, useState } from 'react';
-import type { EventStatus, EventType, SalesEventWithMeta } from '@lm/shared';
+import { AlertTriangle } from 'lucide-react';
+import type { EventStatus, EventType, SalesEvent, SalesEventWithMeta } from '@lm/shared';
 import { EVENT_TYPE_LABELS } from '@lm/shared';
 import { Button, Field, Input, Modal, Select, Textarea, useToast } from '@/components/ui';
+import { ApiError } from '@/api/client';
 import { useCampaigns, useCreateEvent, useTeams, useUpdateEvent, type EventInput } from '@/api/hooks';
 import { useCurrentUser } from '@/auth/AuthProvider';
 import { errorMessage } from '@/features/common';
@@ -48,6 +50,9 @@ function EventForm({ onClose, event, onSaved }: EventFormModalProps) {
   const create = useCreateEvent();
   const update = useUpdateEvent();
   const lockTeam = me.role === 'leader' && me.teamId != null;
+  // Every aggregate groups gauges on the event's date, team and campaign: once a day has been logged those three are
+  // fixed (the API answers 409). The fields are shown locked instead of letting the save fail.
+  const hasEntries = !!event && event.repCount > 0;
 
   const [f, setF] = useState<FormState>({
     name: event?.name ?? '',
@@ -64,6 +69,7 @@ function EventForm({ onClose, event, onSaved }: EventFormModalProps) {
     notes: event?.notes ?? '',
   });
   const [errors, setErrors] = useState<Partial<Record<keyof FormState, string>>>({});
+  const [serverError, setServerError] = useState<string | null>(null);
   const set = <K extends keyof FormState>(k: K) => (v: FormState[K]) => setF((s) => ({ ...s, [k]: v }));
 
   const validate = (): boolean => {
@@ -82,6 +88,7 @@ function EventForm({ onClose, event, onSaved }: EventFormModalProps) {
 
   const submit = async () => {
     if (!validate()) return;
+    setServerError(null);
     const input: EventInput = {
       name: f.name.trim(),
       campaignId: Number(f.campaignId),
@@ -98,28 +105,48 @@ function EventForm({ onClose, event, onSaved }: EventFormModalProps) {
       ...(event ? { status: f.status } : {}),
     };
     try {
-      const saved = event ? await update.mutateAsync({ id: event.id, ...input }) : await create.mutateAsync(input);
+      let saved: SalesEventWithMeta;
+      if (event) {
+        const patch: Partial<SalesEvent> = { ...input };
+        if (hasEntries) {
+          // Locked on screen, so never sent: the server would refuse a change to any of them.
+          delete patch.date;
+          delete patch.teamId;
+          delete patch.campaignId;
+        }
+        saved = await update.mutateAsync({ id: event.id, ...patch });
+      } else {
+        saved = await create.mutateAsync(input);
+      }
       toast.success(event ? 'Event updated' : 'Event created', `${saved.name} · ${saved.date}`);
       onSaved?.(saved);
       onClose();
     } catch (err) {
-      toast.error('Could not save event', errorMessage(err));
+      // Validation / permission / conflict replies (400, 403, 409) belong in the form; anything else is a toast.
+      if (err instanceof ApiError && err.status >= 400 && err.status < 500) setServerError(errorMessage(err));
+      else toast.error('Could not save event', errorMessage(err));
     }
   };
 
   const pending = create.isPending || update.isPending;
+  const lockedHint = hasEntries ? 'Locked: gauges have been logged for this event.' : undefined;
 
   return (
     <form onSubmit={(e) => { e.preventDefault(); void submit(); }} className="space-y-4">
+      {hasEntries && (
+        <p className="rounded-lg border border-border bg-surface-2/60 px-3 py-2 text-xs text-muted">
+          {event!.repCount} rep{event!.repCount === 1 ? ' has' : 's have'} logged gauges for this event, so its date, team and campaign can no longer change. Everything else can.
+        </p>
+      )}
       <div className="grid gap-4 md:grid-cols-2">
         <Field label="Event name" required htmlFor={`${uid}-name`} error={errors.name} className="md:col-span-2">
           <Input id={`${uid}-name`} value={f.name} onChange={(e) => set('name')(e.target.value)} placeholder="e.g. Trafford Centre weekend" invalid={!!errors.name} autoFocus />
         </Field>
-        <Field label="Campaign" required htmlFor={`${uid}-campaign`} error={errors.campaignId}>
-          <Select id={`${uid}-campaign`} value={f.campaignId} onChange={(e) => set('campaignId')(e.target.value)} placeholder={campaigns.isLoading ? 'Loading…' : 'Choose a campaign'} options={(campaigns.data ?? []).map((c) => ({ value: String(c.id), label: `${c.name} (${c.code})` }))} invalid={!!errors.campaignId} />
+        <Field label="Campaign" required htmlFor={`${uid}-campaign`} error={errors.campaignId} hint={lockedHint}>
+          <Select id={`${uid}-campaign`} value={f.campaignId} onChange={(e) => set('campaignId')(e.target.value)} placeholder={campaigns.isLoading ? 'Loading…' : 'Choose a campaign'} options={(campaigns.data ?? []).map((c) => ({ value: String(c.id), label: `${c.name} (${c.code})` }))} invalid={!!errors.campaignId} disabled={hasEntries} />
         </Field>
-        <Field label="Team" required htmlFor={`${uid}-team`} error={errors.teamId} hint={lockTeam ? 'Leaders schedule events for their own team.' : undefined}>
-          <Select id={`${uid}-team`} value={f.teamId} onChange={(e) => set('teamId')(e.target.value)} placeholder={teams.isLoading ? 'Loading…' : 'Choose a team'} options={(teams.data ?? []).map((t) => ({ value: String(t.id), label: t.name }))} disabled={lockTeam} invalid={!!errors.teamId} />
+        <Field label="Team" required htmlFor={`${uid}-team`} error={errors.teamId} hint={lockedHint ?? (lockTeam ? 'Leaders schedule events for their own team.' : undefined)}>
+          <Select id={`${uid}-team`} value={f.teamId} onChange={(e) => set('teamId')(e.target.value)} placeholder={teams.isLoading ? 'Loading…' : 'Choose a team'} options={(teams.data ?? []).map((t) => ({ value: String(t.id), label: t.name }))} disabled={lockTeam || hasEntries} invalid={!!errors.teamId} />
         </Field>
         <Field label="Venue" required htmlFor={`${uid}-venue`} error={errors.venue}>
           <Input id={`${uid}-venue`} value={f.venue} onChange={(e) => set('venue')(e.target.value)} invalid={!!errors.venue} />
@@ -130,8 +157,8 @@ function EventForm({ onClose, event, onSaved }: EventFormModalProps) {
         <Field label="Type" required htmlFor={`${uid}-type`}>
           <Select id={`${uid}-type`} value={f.type} onChange={(e) => set('type')(e.target.value as EventType)} options={optionsFrom(EVENT_TYPE_LABELS)} />
         </Field>
-        <Field label="Date" required htmlFor={`${uid}-date`} error={errors.date}>
-          <Input id={`${uid}-date`} type="date" value={f.date} onChange={(e) => set('date')(e.target.value)} invalid={!!errors.date} />
+        <Field label="Date" required htmlFor={`${uid}-date`} error={errors.date} hint={lockedHint}>
+          <Input id={`${uid}-date`} type="date" value={f.date} onChange={(e) => set('date')(e.target.value)} invalid={!!errors.date} disabled={hasEntries} />
         </Field>
         <Field label="Start" required htmlFor={`${uid}-start`}>
           <Input id={`${uid}-start`} type="time" value={f.startTime} onChange={(e) => set('startTime')(e.target.value)} />
@@ -151,6 +178,12 @@ function EventForm({ onClose, event, onSaved }: EventFormModalProps) {
           <Textarea id={`${uid}-notes`} rows={2} value={f.notes} onChange={(e) => set('notes')(e.target.value)} placeholder="Parking, dress code, who to ask for on site…" />
         </Field>
       </div>
+      {serverError && (
+        <div role="alert" className="flex items-start gap-2 rounded-lg border border-danger/40 bg-danger/5 p-3 text-sm text-danger">
+          <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" aria-hidden />
+          <div><span className="font-semibold">Not saved.</span> {serverError}</div>
+        </div>
+      )}
       <div className="flex justify-end gap-2">
         <Button type="button" variant="ghost" onClick={onClose}>Cancel</Button>
         <Button type="submit" loading={pending}>{event ? 'Save changes' : 'Create event'}</Button>

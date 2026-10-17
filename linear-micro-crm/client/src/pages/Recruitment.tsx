@@ -47,8 +47,11 @@ export function RecruitmentPage() {
 
   const s = summary.data;
   const inInterview = s ? s.openByStage.interview + s.openByStage.observation : 0;
-  // `s.hired` counts hires made in the range; the rate uses the applied cohort, like the funnel and by-source chart.
+  // Two different cohorts, kept apart on screen: the Hired tile counts stage changes to Hired within the range, while
+  // the applied-cohort hire rate (candidates who applied in range and have since been hired) sits with the funnel and
+  // by-source chart that use the same cohort.
   const cohortHired = s ? (s.funnel.find((f) => f.stage === 'hired')?.count ?? 0) : 0;
+  const cohortRate = s && s.applied ? `${formatNumber(cohortHired)} of the ${formatNumber(s.applied)} who applied in range hired (${formatPct(cohortHired / s.applied)})` : null;
 
   const columns = useMemo<Column<CandidateWithMeta>[]>(
     () => [
@@ -86,7 +89,7 @@ export function RecruitmentPage() {
               <>
                 <KpiTile label="Applied" value={formatNumber(s.applied)} hint="in range" />
                 <KpiTile label="In interview" value={formatNumber(inInterview)} hint="interview + observation" />
-                <KpiTile label="Hired" value={formatNumber(s.hired)} tone="success" hint={s.applied ? `in range · ${formatPct(cohortHired / s.applied)} of ${formatNumber(s.applied)} applicants hired` : 'in range'} />
+                <KpiTile label="Hired" value={formatNumber(s.hired)} tone="success" hint="moved to Hired in range" />
                 <KpiTile label="Avg time to hire" value={`${formatDecimal(s.avgTimeToHireDays)} days`} />
                 <KpiTile label="Overdue actions" value={formatNumber(s.overdueActions)} tone={s.overdueActions > 0 ? 'danger' : 'default'} hint="open candidates past next action" />
               </>
@@ -100,7 +103,7 @@ export function RecruitmentPage() {
               ) : <EmptyState title="No activity in range" size="sm" className="border-0" />}
             </Card>
             <Card className="min-w-0">
-              <CardHeader title="Conversion by source" description="Applied → hired" />
+              <CardHeader title="Conversion by source" description={cohortRate ? `Applied → hired · ${cohortRate}` : 'Applied → hired, for candidates who applied in range'} />
               {!s ? <ChartSkeleton /> : s.bySource.length ? (
                 <BarsChart
                   data={[...s.bySource].sort((a, b) => b.applied - a.applied).map((b) => ({ label: `${SOURCE_LABELS[b.source]} · ${b.hired}/${b.applied}`, value: b.conversion }))}

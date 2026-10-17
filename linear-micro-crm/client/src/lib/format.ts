@@ -88,8 +88,8 @@ export function formatDelta(fraction: number | null | undefined, digits = 0): st
   return `${sign}${Math.abs(fraction * 100).toFixed(digits)}%`;
 }
 /** "x stops per sale" helper that handles Infinity. */
-export function formatStopsPerSale(n: number): string {
-  return Number.isFinite(n) ? formatDecimal(n) : '—';
+export function formatStopsPerSale(n: number | null | undefined): string {
+  return typeof n === 'number' && Number.isFinite(n) ? formatDecimal(n) : '—';
 }
 /** "Mon 14 – Sun 20 Oct" */
 export function formatRangeLabel(from: string, to: string): string {

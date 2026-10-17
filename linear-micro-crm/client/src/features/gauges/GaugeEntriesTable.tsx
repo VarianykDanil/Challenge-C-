@@ -7,7 +7,7 @@ import { useCurrentUser } from '@/auth/AuthProvider';
 import { ColourChip, OnTimeBadge, RatioCell, StopRowEvents } from '@/features/common';
 import { formatDate, formatNumber, formatTime } from '@/lib/format';
 
-export function GaugeEntriesTable({ rows, loading, showEvent = true, showPerson = true, showDate = true, onEdit, onDelete, canEditRow, emptyMessage = 'No gauge entries yet', className, bare }: {
+export function GaugeEntriesTable({ rows, loading, showEvent = true, showPerson = true, showDate = true, onEdit, onDelete, canEditRow, canDeleteRow, emptyMessage = 'No gauge entries yet', className, bare }: {
   rows: GaugeEntryWithMeta[];
   loading?: boolean;
   showEvent?: boolean;
@@ -15,8 +15,10 @@ export function GaugeEntriesTable({ rows, loading, showEvent = true, showPerson 
   showDate?: boolean;
   onEdit?: (row: GaugeEntryWithMeta) => void;
   onDelete?: (row: GaugeEntryWithMeta) => void;
-  /** Show Edit/Delete only on rows the viewer may change (e.g. a rep's own entry). Defaults to every row. */
+  /** Show Edit only on rows the viewer may change (e.g. a rep's own entry). Defaults to every row. */
   canEditRow?: (row: GaugeEntryWithMeta) => boolean;
+  /** Show Delete only on these rows (defaults to `canEditRow`; the API lets reps edit but not delete their own entry). */
+  canDeleteRow?: (row: GaugeEntryWithMeta) => boolean;
   emptyMessage?: string;
   className?: string;
   /** Render without the outer border (inside a Card with padded={false}). */
@@ -82,12 +84,18 @@ export function GaugeEntriesTable({ rows, loading, showEvent = true, showPerson 
       key: 'actions',
       header: <span className="sr-only">Actions</span>,
       align: 'right',
-      render: (r) => (canEditRow && !canEditRow(r) ? null : (
-        <StopRowEvents className="flex justify-end gap-1">
-          {onEdit && <Button variant="ghost" size="sm" onClick={() => onEdit(r)} aria-label={`Edit ${r.userName}'s entry`}>Edit</Button>}
-          {onDelete && <Button variant="ghost" size="sm" className="text-danger" onClick={() => onDelete(r)} aria-label={`Delete ${r.userName}'s entry`}>Delete</Button>}
-        </StopRowEvents>
-      )),
+      render: (r) => {
+        const showEdit = !!onEdit && (canEditRow ? canEditRow(r) : true);
+        const mayDelete = canDeleteRow ?? canEditRow;
+        const showDelete = !!onDelete && (mayDelete ? mayDelete(r) : true);
+        if (!showEdit && !showDelete) return null;
+        return (
+          <StopRowEvents className="flex justify-end gap-1">
+            {showEdit && <Button variant="ghost" size="sm" onClick={() => onEdit!(r)} aria-label={`Edit ${r.userName}'s entry`}>Edit</Button>}
+            {showDelete && <Button variant="ghost" size="sm" className="text-danger" onClick={() => onDelete!(r)} aria-label={`Delete ${r.userName}'s entry`}>Delete</Button>}
+          </StopRowEvents>
+        );
+      },
     });
 
   return <DataTable columns={columns} rows={rows} rowKey={(r) => r.id} loading={loading} dense emptyMessage={emptyMessage} initialSort={{ key: 'date', dir: 'desc' }} className={className} bare={bare} />;

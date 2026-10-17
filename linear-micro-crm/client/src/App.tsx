@@ -1,6 +1,6 @@
 // Owned by the Frontend Developer. Routes + auth gate + AppShell wrapper.
 // Public landing (`/` signed out, `/welcome` always) added by the Product Designer — see pages/Landing.tsx.
-import { Suspense, lazy, useEffect, useRef, type ReactNode } from 'react';
+import { Suspense, lazy, useEffect, useRef } from 'react';
 import { Navigate, Outlet, Route, Routes, useLocation, useNavigate } from 'react-router-dom';
 import { AppShell } from '@/components/layout';
 import { ToastProvider, useToast } from '@/components/ui';
@@ -29,8 +29,11 @@ const SettingsPage = lazy(() => import('@/pages/Settings').then((m) => ({ defaul
 // The public page carries the charts bundle, so it is split too: signed-in users never download it.
 const LandingPage = lazy(() => import('@/pages/Landing').then((m) => ({ default: m.LandingPage })));
 
-/** Signed-in shell. Renders `children` when given (the `/` home route), otherwise the nested route via <Outlet />. */
-function ShellLayout({ children }: { children?: ReactNode }) {
+/**
+ * Signed-in shell: one layout route for every signed-in page, the dashboard included (as the index child), so the
+ * AppShell — sidebar, topbar, drawer and the element that has focus — stays mounted across navigation.
+ */
+function ShellLayout() {
   const { user, logout } = useAuth();
   const navigate = useNavigate();
   const { pathname } = useLocation();
@@ -44,7 +47,7 @@ function ShellLayout({ children }: { children?: ReactNode }) {
       }}
     >
       <Suspense fallback={<PageFallback />}>
-        {children ?? <Outlet />}
+        <Outlet />
       </Suspense>
     </AppShell>
   );
@@ -59,15 +62,19 @@ function PublicLanding() {
   );
 }
 
-/** `/`: the public landing page when signed out, the dashboard inside the shell when signed in. */
-function HomeRoute() {
+/**
+ * Gate for the `/` tree: the public landing page when signed out at `/` exactly, otherwise the signed-in shell
+ * (RequireAuth sends a signed-out visitor of any other path to /login and brings them back afterwards).
+ */
+function HomeGate() {
   const { user, loading } = useAuth();
+  const { pathname } = useLocation();
   if (loading) return <FullPageSpinner label="Loading…" />;
-  if (!user) return <PublicLanding />;
+  if (!user && pathname === '/') return <PublicLanding />;
   return (
-    <ShellLayout>
-      <DashboardPage />
-    </ShellLayout>
+    <RequireAuth>
+      <ShellLayout />
+    </RequireAuth>
   );
 }
 
@@ -109,7 +116,6 @@ export default function App() {
       <ToastProvider>
         <SessionWatcher />
         <Routes>
-          <Route path="/" element={<HomeRoute />} />
           <Route path="/welcome" element={<PublicLanding />} />
           <Route
             path="/login"
@@ -119,13 +125,8 @@ export default function App() {
               </RedirectIfAuthed>
             }
           />
-          <Route
-            element={
-              <RequireAuth>
-                <ShellLayout />
-              </RequireAuth>
-            }
-          >
+          <Route path="/" element={<HomeGate />}>
+            <Route index element={<DashboardPage />} />
             <Route path="events" element={<EventsPage />} />
             <Route path="events/:id" element={<EventDetailPage />} />
             <Route path="gauges" element={<RequireRole roles={GAUGE_ROLES}><GaugesPage /></RequireRole>} />
@@ -145,4 +146,3 @@ export default function App() {
     </AuthProvider>
   );
 }
-

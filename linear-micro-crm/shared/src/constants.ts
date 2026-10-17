@@ -95,6 +95,16 @@ export const BENCHMARK_RATIOS = {
 /** Minutes after the event start time after which a check-in counts as late. */
 export const LATE_GRACE_MINUTES = 5;
 
+/**
+ * Plausibility ceiling for a single gauge entry (one rep, one day): no field team stops more than this many
+ * people in a day. Every gauge (stops … sales) must be a whole number between 0 and this value.
+ */
+export const GAUGE_MAX_PER_DAY = 2000;
+/** Ceiling for an event's sales target. */
+export const EVENT_MAX_TARGET_SALES = 500;
+/** Ceiling for a single money amount (an expense, a per-sale payout) in pounds. */
+export const MONEY_MAX = 1_000_000;
+
 // ───────────────────────── Added by the Logic Builder ─────────────────────────
 
 /** Keys of the five stage-to-stage ratios, in funnel order. */

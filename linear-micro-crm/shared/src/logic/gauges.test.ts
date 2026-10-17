@@ -44,7 +44,10 @@ test('funnelRatios handles zero denominators and computes every ratio', () => {
   const zero = funnelRatios(EMPTY_TOTALS);
   assert.equal(zero.stopToTable, 0);
   assert.equal(zero.overallConversion, 0);
-  assert.equal(zero.stopsPerSale, Infinity);
+  assert.equal(zero.stopsPerSale, null);
+  // the contract is `number | null`, so the value must survive JSON (Infinity would silently become null)
+  assert.deepEqual(JSON.parse(JSON.stringify(zero)), zero);
+  assert.deepEqual(JSON.parse(JSON.stringify(funnelRatios(SAMPLE))), funnelRatios(SAMPLE));
 
   const r = funnelRatios(SAMPLE);
   close(r.stopToTable, 0.4);
@@ -53,7 +56,7 @@ test('funnelRatios handles zero denominators and computes every ratio', () => {
   close(r.closeToTap, 0.625);
   close(r.tapToSale, 0.8);
   close(r.overallConversion, 0.04);
-  close(r.stopsPerSale, 25);
+  close(r.stopsPerSale ?? Number.NaN, 25);
 
   // a stage with zero volume halfway down gives 0 (not NaN) below it
   const r2 = funnelRatios({ stops: 10, table: 4, presentations: 0, closes: 0, taps: 0, sales: 0 });
@@ -69,6 +72,19 @@ test('validateGaugeFunnel flags non-integers, negatives and inverted stages', ()
   assert.ok(bad.some((w) => w.startsWith('table (6) cannot exceed stops (5)')));
   assert.ok(bad.some((w) => w.startsWith('presentations must be a whole number')));
   assert.ok(bad.some((w) => w.startsWith('closes must be a whole number')));
+});
+
+test('validateGaugeFunnel rejects implausible and non-finite values (one rep, one day)', () => {
+  assert.deepEqual(validateGaugeFunnel({ stops: 2000, table: 2000, presentations: 2000, closes: 2000, taps: 2000, sales: 2000 }), []);
+  const huge = validateGaugeFunnel({ stops: 2001, table: 0, presentations: 0, closes: 0, taps: 0, sales: 0 });
+  assert.deepEqual(huge, ['stops (2001) cannot exceed 2000 in one day']);
+  const astronomical = validateGaugeFunnel({ stops: 1e308, table: 1e12, presentations: 0, closes: 0, taps: 0, sales: 0 });
+  assert.ok(astronomical.some((w) => w.startsWith('stops (1e+308) cannot exceed 2000')));
+  assert.ok(astronomical.some((w) => w.startsWith('table (1000000000000) cannot exceed 2000')));
+  const infinite = validateGaugeFunnel({ stops: Infinity, table: Number.NaN, presentations: 0, closes: 0, taps: 0, sales: 0 });
+  assert.ok(infinite.some((w) => w === 'stops must be a whole number ≥ 0'));
+  assert.ok(infinite.some((w) => w === 'table must be a whole number ≥ 0'));
+  assert.deepEqual(validateGaugeFunnel({ stops: 60, table: 0, presentations: 0, closes: 0, taps: 0, sales: 0 }, 50), ['stops (60) cannot exceed 50 in one day']);
 });
 
 test('ratioKeys lists the five steps in funnel order with from/to gauges', () => {

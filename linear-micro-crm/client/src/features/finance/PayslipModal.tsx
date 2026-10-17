@@ -6,8 +6,21 @@ import { Badge, Button, Modal, Skeleton } from '@/components/ui';
 import { usePayslip } from '@/api/hooks';
 import { ErrorState, OnTimeBadge, PayrollStatusBadge } from '@/features/common';
 import { GaugeEntriesTable } from '@/features/gauges';
-import { formatDate, formatGBP, formatNumber, formatRangeLabel } from '@/lib/format';
+import { formatDate, formatDateTime, formatGBP, formatNumber, formatRangeLabel } from '@/lib/format';
 import { PAYROLL_STATUS_LABELS } from '@/lib/labels';
+
+/** A run the server recalculated after it was paid carries `adjustedAt` (optional in the contract; older servers omit it). */
+export type PayrollRunMaybeAdjusted = PayrollRunWithUser & { adjustedAt?: string | null };
+
+/** ISO timestamp of a post-payment adjustment, or null. */
+export function runAdjustedAt(run: PayrollRunWithUser): string | null {
+  const v = (run as PayrollRunMaybeAdjusted).adjustedAt;
+  return typeof v === 'string' && v ? v : null;
+}
+
+/** Recruiters are paid on hires: the payroll `sales` column holds their hire count (LOGIC.md §4). */
+export const payUnit = (run: Pick<PayrollRunWithUser, 'position'>): 'sale' | 'hire' => (run.position === 'recruiter' ? 'hire' : 'sale');
+export const payUnits = (run: Pick<PayrollRunWithUser, 'position'>, n: number): string => `${formatNumber(n)} ${payUnit(run)}${n === 1 ? '' : 's'}`;
 
 export function PayslipModal({ run, onClose }: { run: PayrollRunWithUser | null; onClose: () => void }) {
   return (
@@ -59,13 +72,17 @@ const PRINT_CSS = `
 function PayslipBody({ run }: { run: PayrollRunWithUser }) {
   const q = usePayslip(run.id);
   const p = q.data;
+  const unit = payUnit(run);
+  const isRecruiter = unit === 'hire';
+  const adjustedAt = runAdjustedAt(run) ?? (p ? runAdjustedAt(p) : null);
   const lines: { label: string; value: number; hint?: string }[] = [
     { label: 'Base pay', value: run.basePay, hint: p ? `${formatNumber(run.daysWorked)} day${run.daysWorked === 1 ? '' : 's'} × ${formatGBP(p.plan.basePerDay, { cents: true })}` : `${formatNumber(run.daysWorked)} days` },
-    { label: 'Commission', value: run.commission, hint: p ? `${formatNumber(run.sales)} sale${run.sales === 1 ? '' : 's'} × ${formatGBP(p.plan.commissionPerSale, { cents: true })}` : `${formatNumber(run.sales)} sales` },
-    { label: 'Bonus', value: run.bonus, hint: p && p.plan.bonusThreshold > 0 ? `${formatNumber(p.plan.bonusThreshold)}+ sales unlocks ${formatGBP(p.plan.bonusAmount)}` : undefined },
+    { label: 'Commission', value: run.commission, hint: p ? `${payUnits(run, run.sales)} × ${formatGBP(p.plan.commissionPerSale, { cents: true })}` : payUnits(run, run.sales) },
+    { label: 'Bonus', value: run.bonus, hint: p && p.plan.bonusThreshold > 0 ? `${formatNumber(p.plan.bonusThreshold)}+ ${unit}s unlocks ${formatGBP(p.plan.bonusAmount)}` : undefined },
     { label: 'Overrides', value: run.overrides, hint: p && p.plan.overridePerTeamSale > 0 ? `${formatNumber(run.teamSales)} team sales × ${formatGBP(p.plan.overridePerTeamSale, { cents: true })}` : undefined },
     { label: 'Deductions', value: -run.deductions || 0 },
-  ];
+    // A plan without commission (recruiters) has no commission line to show — the hire count sits in the plan box instead.
+  ].filter((l) => !(l.label === 'Commission' && isRecruiter && run.commission === 0 && (!p || p.plan.commissionPerSale === 0)));
   return (
     <div className="space-y-5" data-print-root>
       <style>{PRINT_CSS}</style>
@@ -88,16 +105,22 @@ function PayslipBody({ run }: { run: PayrollRunWithUser }) {
           <div className="flex justify-between gap-2 border-b border-border py-1"><dt className="text-muted">Employee</dt><dd className="font-medium text-fg">{run.userName}{run.employeeId ? ` · ${run.employeeId}` : ''}</dd></div>
           <div className="flex justify-between gap-2 border-b border-border py-1"><dt className="text-muted">Position</dt><dd className="font-medium text-fg">{POSITION_LABELS[run.position]}{run.teamName ? ` · ${run.teamName}` : ''}</dd></div>
           <div className="flex justify-between gap-2 border-b border-border py-1"><dt className="text-muted">Pay week</dt><dd className="font-medium text-fg">{formatRangeLabel(run.weekStart, run.weekEnd)}</dd></div>
-          <div className="flex justify-between gap-2 border-b border-border py-1"><dt className="text-muted">Status</dt><dd className="font-medium text-fg">{PAYROLL_STATUS_LABELS[run.status]} · due {formatDate(run.dueDate)}{run.paidDate ? `, paid ${formatDate(run.paidDate)}` : ''}</dd></div>
+          <div className="flex justify-between gap-2 border-b border-border py-1"><dt className="text-muted">Status</dt><dd className="font-medium text-fg">{PAYROLL_STATUS_LABELS[run.status]} · due {formatDate(run.dueDate)}{run.paidDate ? `, paid ${formatDate(run.paidDate)}` : ''}{adjustedAt ? ` · adjusted after payment ${formatDateTime(adjustedAt)}` : ''}</dd></div>
         </dl>
       </header>
 
       <div className="flex flex-wrap items-center gap-2 text-sm print:hidden">
         <PayrollStatusBadge status={run.status} />
         <OnTimeBadge value={run.onTime} labels={{ yes: 'Paid on time', no: 'Paid late', none: 'Not yet paid' }} />
+        {adjustedAt && <Badge tone="warning" title={`Recalculated ${formatDateTime(adjustedAt)} from gauges logged or corrected after the run was paid`}>Adjusted after payment</Badge>}
         <span className="text-muted">Due {formatDate(run.dueDate)}{run.paidDate ? ` · paid ${formatDate(run.paidDate)}` : ''}</span>
         {run.teamName && <Badge tone="neutral">{run.teamName}</Badge>}
       </div>
+      {adjustedAt && (
+        <p className="rounded-lg border border-warning/40 bg-warning/10 p-3 text-xs text-warning print:hidden" role="note">
+          This payslip was recalculated on {formatDateTime(adjustedAt)}, after it had been paid — gauges logged or corrected late changed the figures below. The difference is settled separately.
+        </p>
+      )}
       <div className="grid grid-cols-1 gap-5 md:grid-cols-5 print:grid-cols-5" data-print-keep>
         <table className="w-full min-w-0 text-sm md:col-span-3 print:col-span-3">
           <caption className="sr-only">Pay breakdown</caption>
@@ -120,8 +143,12 @@ function PayslipBody({ run }: { run: PayrollRunWithUser }) {
             <dl className="space-y-1.5">
               <div className="flex justify-between gap-2"><dt className="text-muted">Plan</dt><dd className="font-medium text-fg">{p.plan.name}</dd></div>
               <div className="flex justify-between gap-2"><dt className="text-muted">Base per day</dt><dd className="tabular-nums">{formatGBP(p.plan.basePerDay, { cents: true })}</dd></div>
-              <div className="flex justify-between gap-2"><dt className="text-muted">Commission per sale</dt><dd className="tabular-nums">{formatGBP(p.plan.commissionPerSale, { cents: true })}</dd></div>
-              <div className="flex justify-between gap-2"><dt className="text-muted">Bonus</dt><dd className="tabular-nums">{p.plan.bonusThreshold > 0 ? `${formatGBP(p.plan.bonusAmount)} at ${p.plan.bonusThreshold} sales` : '—'}</dd></div>
+              {isRecruiter ? (
+                <div className="flex justify-between gap-2"><dt className="text-muted">Hires this week</dt><dd className="tabular-nums">{formatNumber(run.sales)}</dd></div>
+              ) : (
+                <div className="flex justify-between gap-2"><dt className="text-muted">Commission per sale</dt><dd className="tabular-nums">{formatGBP(p.plan.commissionPerSale, { cents: true })}</dd></div>
+              )}
+              <div className="flex justify-between gap-2"><dt className="text-muted">Bonus</dt><dd className="tabular-nums">{p.plan.bonusThreshold > 0 ? `${formatGBP(p.plan.bonusAmount)} at ${formatNumber(p.plan.bonusThreshold)} ${unit}s` : '—'}</dd></div>
               <div className="flex justify-between gap-2"><dt className="text-muted">Override per team sale</dt><dd className="tabular-nums">{p.plan.overridePerTeamSale > 0 ? formatGBP(p.plan.overridePerTeamSale, { cents: true }) : '—'}</dd></div>
               {run.employeeId && <div className="flex justify-between gap-2 border-t border-border pt-1.5"><dt className="text-muted">Employee ID</dt><dd>{run.employeeId}</dd></div>}
             </dl>
@@ -130,7 +157,7 @@ function PayslipBody({ run }: { run: PayrollRunWithUser }) {
       </div>
       <div className="min-w-0">
         <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted">The week's gauges</div>
-        <GaugeEntriesTable rows={p?.entries ?? []} loading={q.isLoading} showPerson={false} emptyMessage="No gauge entries this week" />
+        <GaugeEntriesTable rows={p?.entries ?? []} loading={q.isLoading} showPerson={false} emptyMessage={isRecruiter ? 'Recruiters do not log gauges' : 'No gauge entries this week'} />
       </div>
     </div>
   );

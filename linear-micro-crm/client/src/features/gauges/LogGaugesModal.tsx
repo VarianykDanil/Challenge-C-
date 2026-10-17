@@ -1,7 +1,7 @@
 // Log (upsert) a day's gauges for an event. Used from Event detail, Gauges and the Dashboard.
 import { useEffect, useId, useMemo, useState } from 'react';
-import type { GaugeEntryWithMeta, GaugeKey, GaugeTotals, SalesEventWithMeta } from '@lm/shared';
-import { EMPTY_TOTALS, GAUGE_KEYS, GAUGE_LABELS, funnelRatios, validateGaugeFunnel } from '@lm/shared';
+import type { GaugeEntryWithMeta, GaugeKey, GaugeTotals, GaugeUpsertInput, SalesEventWithMeta } from '@lm/shared';
+import { EMPTY_TOTALS, GAUGE_KEYS, GAUGE_LABELS, GAUGE_MAX_PER_DAY, funnelRatios, validateGaugeFunnel } from '@lm/shared';
 import { AlertTriangle } from 'lucide-react';
 import { Button, Field, Input, Modal, Select, Stepper, Textarea, useToast } from '@/components/ui';
 import { ApiError } from '@/api/client';
@@ -9,10 +9,13 @@ import { useEvents, useGauges, useUpdateGauge, useUpsertGauge, useUsers } from '
 import { useCurrentUser } from '@/auth/AuthProvider';
 import { errorDetails, errorMessage, RatioCell } from '@/features/common';
 import { isoToLocalInput, nowLocalInput, todayISO, toISODate } from '@/lib/dates';
-import { formatDate, formatDateShort, formatStopsPerSale, fullName } from '@/lib/format';
+import { formatDate, formatDateShort, formatStopsPerSale, formatTime, fullName } from '@/lib/format';
 import { BENCHMARK_KEYS, RATIO_LABELS } from '@/lib/ratios';
 import { GAUGE_HELP } from '@/content/copy';
-import { subDays } from 'date-fns';
+import { format, subDays } from 'date-fns';
+
+/** The server caps every gauge count (shared `GAUGE_MAX_PER_DAY`; the funnel rule keeps the later stages at or below stops). */
+export const GAUGE_MAX = GAUGE_MAX_PER_DAY;
 
 export interface LogGaugesModalProps {
   open: boolean;
@@ -35,19 +38,23 @@ export function LogGaugesModal(props: LogGaugesModalProps) {
   );
 }
 
-/** Why an event cannot take gauges right now (server rejects cancelled and future events with 400/409). */
-function eventBlockReason(ev: SalesEventWithMeta | null, today: string): string | null {
+/** Why an event cannot take gauges right now (the server rejects cancelled, future and not-yet-started events with 400/409). */
+export function eventBlockReason(ev: SalesEventWithMeta | null, today: string, nowHHMM: string): string | null {
   if (!ev) return null;
   if (ev.status === 'cancelled') return 'This event was cancelled, so gauges cannot be logged for it.';
   if (ev.date > today) return `This event is on ${formatDate(ev.date)} — gauges can be logged from that day.`;
+  if (ev.date === today && ev.startTime > nowHHMM) return `This event starts at ${formatTime(ev.startTime)} — gauges can be logged from then.`;
   return null;
 }
+
+interface Baseline { checkIn: string; notes: string }
 
 function LogGaugesForm({ onClose, event, defaultUserId, entry, onSaved }: LogGaugesModalProps) {
   const me = useCurrentUser();
   const toast = useToast();
   const uid = useId();
   const today = todayISO();
+  const nowHHMM = format(new Date(), 'HH:mm');
   const canPickRep = (me.role === 'admin' || me.role === 'leader') && !entry;
 
   const [eventId, setEventId] = useState<number | null>(entry?.eventId ?? event?.id ?? null);
@@ -57,6 +64,9 @@ function LogGaugesForm({ onClose, event, defaultUserId, entry, onSaved }: LogGau
   const [checkIn, setCheckIn] = useState<string>(entry ? isoToLocalInput(entry.checkedInAt) : '');
   const [notes, setNotes] = useState<string>(entry?.notes ?? '');
   const [prefilledId, setPrefilledId] = useState<number | null>(entry?.id ?? null);
+  // What the stored entry held when it was prefilled: check-in / notes are only sent when the user changed them,
+  // so an update never clears a value the rep recorded (the API keeps omitted fields).
+  const [baseline, setBaseline] = useState<Baseline>({ checkIn: entry ? isoToLocalInput(entry.checkedInAt) : '', notes: entry?.notes ?? '' });
   const [serverError, setServerError] = useState<{ message: string; details: string[] } | null>(null);
 
   // Event picker: the last three weeks up to today (reps and leaders: own team only). Cancelled events are not offered.
@@ -69,7 +79,7 @@ function LogGaugesForm({ onClose, event, defaultUserId, entry, onSaved }: LogGau
   const selectedEvent = useMemo(() => events.find((e) => e.id === eventId) ?? event ?? null, [events, eventId, event]);
   // The gauge date is the event's date (server contract) — shown read-only, never typed.
   const date = selectedEvent?.date ?? entry?.date ?? '';
-  const blocked = eventBlockReason(selectedEvent, today);
+  const blocked = eventBlockReason(selectedEvent, today, nowHHMM);
 
   // Rep picker for leaders / admin: members of the event's team (admin: everyone when no event chosen).
   const usersQuery = useUsers({ teamId: selectedEvent?.teamId ?? (me.role === 'leader' ? me.teamId : undefined) }, { enabled: canPickRep });
@@ -79,7 +89,8 @@ function LogGaugesForm({ onClose, event, defaultUserId, entry, onSaved }: LogGau
     // Admins may log their own field day at any team's event, so keep them selectable.
     return me.role === 'admin' && list.length && !list.some((u) => u.id === me.id) ? [...list, me] : list;
   }, [canPickRep, usersQuery.data, me]);
-  const repValid = userId != null && repOptions.some((u) => u.id === userId);
+  // Editing a supplied entry: its owner is the rep, whoever the viewer is (admins and own-team leaders correct reps' days).
+  const repValid = entry ? userId === entry.userId : userId != null && repOptions.some((u) => u.id === userId);
   // Keep state and the visible option in sync: never submit a rep the dropdown is not showing. A preselected person
   // who is not in the event team's list (an admin opening a team's event) is cleared so the rep is chosen explicitly.
   useEffect(() => {
@@ -89,7 +100,11 @@ function LogGaugesForm({ onClose, event, defaultUserId, entry, onSaved }: LogGau
   }, [canPickRep, repTouched, usersQuery.data, userId]);
 
   // When the chosen (event, rep) already has an entry, prefill it so saving updates rather than duplicates.
-  const existingQuery = useGauges({ eventId, userId, from: date, to: date, limit: 5 }, { enabled: !entry && eventId != null && userId != null && !!date && repValid });
+  // Saving is blocked until this lookup has answered: posting early would silently overwrite the rep's logged day.
+  const lookupEnabled = !entry && eventId != null && userId != null && !!date && repValid;
+  const existingQuery = useGauges({ eventId, userId, from: date, to: date, limit: 5 }, { enabled: lookupEnabled });
+  const lookupPending = lookupEnabled && (existingQuery.isPending || existingQuery.isFetching);
+  const lookupFailed = lookupEnabled && existingQuery.isError && !existingQuery.isFetching;
   const existing = useMemo(() => existingQuery.data?.find((g) => g.eventId === eventId && g.userId === userId && g.date === date) ?? null, [existingQuery.data, eventId, userId, date]);
   useEffect(() => {
     if (!existing) {
@@ -98,14 +113,17 @@ function LogGaugesForm({ onClose, event, defaultUserId, entry, onSaved }: LogGau
         setGauges({ ...EMPTY_TOTALS });
         setCheckIn('');
         setNotes('');
+        setBaseline({ checkIn: '', notes: '' });
       }
       return;
     }
     if (existing.id !== prefilledId) {
+      const ci = isoToLocalInput(existing.checkedInAt);
       setPrefilledId(existing.id);
       setGauges(pick(existing));
-      setCheckIn(isoToLocalInput(existing.checkedInAt));
+      setCheckIn(ci);
       setNotes(existing.notes ?? '');
+      setBaseline({ checkIn: ci, notes: existing.notes ?? '' });
     }
   }, [existing, prefilledId, entry]);
 
@@ -120,18 +138,35 @@ function LogGaugesForm({ onClose, event, defaultUserId, entry, onSaved }: LogGau
     return set;
   }, [gauges]);
 
-  const canSubmit = eventId != null && userId != null && !!date && repValid && !blocked && warnings.length === 0 && !saving;
+  const canSubmit = eventId != null && userId != null && !!date && repValid && !blocked && warnings.length === 0 && !saving && !lookupPending && !lookupFailed;
 
   const submit = async () => {
     if (eventId == null || userId == null || !canSubmit) return;
     setServerError(null);
     try {
       // Check-in is the wall-clock value the rep typed ("YYYY-MM-DDTHH:mm"); the server stores it verbatim.
-      // Cleared check-in / notes are sent as explicit null so the server clears them too.
-      const fields = { ...gauges, eventId, userId, date, checkedInAt: checkIn || null, notes: notes.trim() || null };
-      // An entry we already know about is updated in place (PATCH) — never re-posted through the upsert.
-      const saved = prefilledId != null ? await update.mutateAsync({ id: prefilledId, ...fields }) : await upsert.mutateAsync(fields);
-      toast.success(prefilledId ? 'Gauges updated' : 'Gauges logged', `${saved.sales} sale${saved.sales === 1 ? '' : 's'} from ${saved.stops} stops · ${saved.eventName}`);
+      const fields: GaugeUpsertInput = { ...gauges, eventId, userId, date };
+      if (prefilledId == null) {
+        // A new entry carries everything typed (an empty check-in / notes is simply not recorded).
+        fields.checkedInAt = checkIn || null;
+        fields.notes = notes.trim() || null;
+      } else {
+        // An update only sends what changed: omitted keys keep the stored values, an explicit null clears them.
+        if (checkIn !== baseline.checkIn) fields.checkedInAt = checkIn || null;
+        if (notes.trim() !== baseline.notes.trim()) fields.notes = notes.trim() || null;
+      }
+      let saved: GaugeEntryWithMeta;
+      let created: boolean;
+      if (prefilledId != null) {
+        // An entry we already know about is updated in place (PATCH) — never re-posted through the upsert.
+        saved = await update.mutateAsync({ id: prefilledId, ...fields });
+        created = false;
+      } else {
+        const r = await upsert.mutateAsync(fields);
+        saved = r.entry;
+        created = r.created; // 201 = logged, 200 = the server found and updated the existing day
+      }
+      toast.success(created ? 'Gauges logged' : 'Gauges updated', `${saved.sales} sale${saved.sales === 1 ? '' : 's'} from ${saved.stops} stops · ${saved.eventName}`);
       onSaved?.(saved);
       onClose();
     } catch (e) {
@@ -143,6 +178,12 @@ function LogGaugesForm({ onClose, event, defaultUserId, entry, onSaved }: LogGau
 
   const set = (k: GaugeKey) => (v: number) => setGauges((g) => ({ ...g, [k]: v }));
   const repLabel = (u: { id: number; firstName: string; lastName: string }) => `${fullName(u)}${u.id === me.id ? ' (you)' : ''}`;
+  const dateHint = prefilledId
+    ? 'An entry already exists for this event — saving will update it.'
+    : lookupPending
+      ? 'Checking for an existing entry…'
+      : 'Gauges are logged against the event date.';
+  const submitLabel = prefilledId ? 'Update gauges' : lookupPending ? 'Checking for an existing entry…' : 'Save gauges';
 
   return (
     <form
@@ -184,7 +225,7 @@ function LogGaugesForm({ onClose, event, defaultUserId, entry, onSaved }: LogGau
             <Input id={`${uid}-user`} value={entry ? `${entry.userName}${entry.userId === me.id ? ' (you)' : ''}` : repLabel(me)} readOnly aria-readonly />
           </Field>
         )}
-        <Field label="Date" htmlFor={`${uid}-date`} className="min-w-0" hint={prefilledId ? 'An entry already exists for this event — saving will update it.' : 'Gauges are logged against the event date.'}>
+        <Field label="Date" htmlFor={`${uid}-date`} className="min-w-0" hint={dateHint}>
           <Input id={`${uid}-date`} value={date ? formatDate(date) : 'Choose an event first'} readOnly aria-readonly />
         </Field>
       </div>
@@ -193,7 +234,7 @@ function LogGaugesForm({ onClose, event, defaultUserId, entry, onSaved }: LogGau
         <legend className="mb-2 text-sm font-semibold text-fg">Gauges</legend>
         <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
           {GAUGE_KEYS.map((k) => (
-            <Stepper key={k} label={GAUGE_LABELS[k]} value={gauges[k]} onChange={set(k)} invalid={invalidKeys.has(k)} fullWidth size="md" />
+            <Stepper key={k} label={GAUGE_LABELS[k]} value={gauges[k]} onChange={set(k)} max={GAUGE_MAX} invalid={invalidKeys.has(k)} fullWidth size="md" />
           ))}
         </div>
         <details className="mt-3 rounded-lg border border-border bg-surface-2/60 px-3 py-2 text-xs text-muted">
@@ -243,6 +284,13 @@ function LogGaugesForm({ onClose, event, defaultUserId, entry, onSaved }: LogGau
         </Field>
       </div>
 
+      {lookupFailed && (
+        <div role="alert" className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-warning/40 bg-warning/10 p-3 text-sm text-warning">
+          <span className="flex items-start gap-2"><AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" aria-hidden />Could not check whether this day was already logged ({errorMessage(existingQuery.error)}). Saving is paused so nothing is overwritten.</span>
+          <Button type="button" size="sm" variant="outline" onClick={() => void existingQuery.refetch()}>Try again</Button>
+        </div>
+      )}
+
       {serverError && (
         <div role="alert" className="flex items-start gap-2 rounded-lg border border-danger/40 bg-danger/5 p-3 text-sm text-danger">
           <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" aria-hidden />
@@ -259,7 +307,7 @@ function LogGaugesForm({ onClose, event, defaultUserId, entry, onSaved }: LogGau
 
       <div className="flex justify-end gap-2">
         <Button type="button" variant="ghost" onClick={onClose}>Cancel</Button>
-        <Button type="submit" disabled={!canSubmit} loading={saving}>{prefilledId ? 'Update gauges' : 'Save gauges'}</Button>
+        <Button type="submit" disabled={!canSubmit} loading={saving} aria-busy={lookupPending || undefined}>{submitLabel}</Button>
       </div>
     </form>
   );

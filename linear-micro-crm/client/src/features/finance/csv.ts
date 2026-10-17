@@ -1,11 +1,15 @@
 // CSV column sets for the finance tables (payroll runs, campaign finance, weekly money flow, expenses).
-import type { CampaignFinance, Expense, FinanceWeek, PayrollRunWithUser } from '@lm/shared';
+import type { CampaignFinance, Expense, FinanceWeek, PayrollRunWithUser, Position } from '@lm/shared';
 import { EXPENSE_CATEGORY_LABELS, POSITION_LABELS } from '@lm/shared';
 import { csvDate, csvLabel, csvMoney, csvPct, csvYesNo, type CsvColumn } from '@/lib/csv';
 import { PAYROLL_STATUS_LABELS } from '@/lib/labels';
 
-/** Payslip rows; `showUser` adds the person columns for team and company views. */
-export function payrollRunCsvColumns(showUser = false): CsvColumn<PayrollRunWithUser>[] {
+/**
+ * Payslip rows; `showUser` adds the person columns for team and company views. `position` is the single person's
+ * position for a personal export: a recruiter's payroll `sales` figure is their hire count, so the header says so.
+ */
+export function payrollRunCsvColumns(showUser = false, position?: Position): CsvColumn<PayrollRunWithUser>[] {
+  const salesHeader = position === 'recruiter' ? 'Hires' : showUser ? 'Sales (hires for recruiters)' : 'Sales';
   const cols: CsvColumn<PayrollRunWithUser>[] = [
     { key: 'weekStart', header: 'Week start', format: csvDate },
     { key: 'weekEnd', header: 'Week end', format: csvDate },
@@ -20,7 +24,7 @@ export function payrollRunCsvColumns(showUser = false): CsvColumn<PayrollRunWith
   }
   cols.push(
     { key: 'daysWorked', header: 'Days' },
-    { key: 'sales', header: 'Sales' },
+    { key: 'sales', header: salesHeader },
     { key: 'basePay', header: 'Base', format: csvMoney },
     { key: 'commission', header: 'Commission', format: csvMoney },
     { key: 'bonus', header: 'Bonus', format: csvMoney },

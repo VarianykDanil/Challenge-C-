@@ -4,7 +4,7 @@ import { periodDeltas, type Dashboard, type GaugeTotals } from '@lm/shared';
 import { all, get, type Db } from '../db/connection.ts';
 import { Where, listAnnouncements, listEvents } from '../db/queries.ts';
 import { addDays, previousToDateRange, rangeForPeriod, todayISO } from '../lib/dates.ts';
-import { leaderboard, punctualityFor, ratiosOf, salesPerDay, totalsFor, trendFor, GAUGE_FROM } from '../lib/metrics.ts';
+import { GAUGE_FROM, GAUGE_PAYOUT_SQL, leaderboard, punctualityFor, ratiosOf, salesPerDay, totalsFor, trendFor } from '../lib/metrics.ts';
 import { earningsForRange, nextPay } from '../lib/pay.ts';
 import { currentUser } from '../middleware/auth.ts';
 
@@ -71,7 +71,8 @@ export function dashboardRouter(db: Db): Router {
     if (me.role === 'admin' || me.role === 'leader') {
       const cw = new Where().add('g.date BETWEEN ? AND ?', from, to);
       const c = totalsFor(db, cw);
-      const revenue = get<{ r: number }>(db, `SELECT COALESCE(SUM(g.sales * c.payout_per_sale), 0) AS r ${GAUGE_FROM} ${cw}`, cw.params)!.r;
+      // revenue at the payout captured when each day was logged (a later rate change does not restate the past)
+      const revenue = get<{ r: number }>(db, `SELECT COALESCE(SUM(g.sales * ${GAUGE_PAYOUT_SQL}), 0) AS r ${GAUGE_FROM} ${cw}`, cw.params)!.r;
       const activeReps = get<{ n: number }>(db, `SELECT COUNT(*) AS n FROM users WHERE status = 'active' AND role IN ('rep', 'leader')`)!.n;
       // Settled runs due in the range; when nothing was due yet (Mon–Thu of a week) fall back to the runs due in the
       // last 12 weeks up to today, and say so via payrollOnTimeWindow.
@@ -88,11 +89,16 @@ export function dashboardRouter(db: Db): Router {
         `SELECT COUNT(DISTINCT candidate_id) AS n FROM stage_changes WHERE to_stage = 'hired' AND substr(changed_at, 1, 10) BETWEEN ? AND ?`,
         [from, to],
       )!.n;
+      // one grouped pass over the range instead of a correlated subquery per campaign
       const byCampaign = all<{ campaignId: number; name: string; color: string; sales: number }>(
         db,
-        `SELECT c.id AS campaignId, c.name, c.color,
-                COALESCE((SELECT SUM(g.sales) FROM gauge_entries g JOIN events e ON e.id = g.event_id WHERE e.campaign_id = c.id AND g.date BETWEEN ? AND ?), 0) AS sales
-         FROM campaigns c WHERE c.active = 1 ORDER BY sales DESC, c.name`,
+        `SELECT c.id AS campaignId, c.name, c.color, COALESCE(s.sales, 0) AS sales
+         FROM campaigns c
+         LEFT JOIN (
+           SELECT e.campaign_id, SUM(g.sales) AS sales FROM gauge_entries g JOIN events e ON e.id = g.event_id
+           WHERE g.date BETWEEN ? AND ? GROUP BY e.campaign_id
+         ) s ON s.campaign_id = c.id
+         WHERE c.active = 1 ORDER BY sales DESC, c.name`,
         [from, to],
       );
       company = {

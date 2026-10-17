@@ -22,7 +22,7 @@ import {
   type UserStatus,
 } from '@lm/shared';
 import { openDb, run, transaction, type Db } from './connection.ts';
-import { createSchema } from './schema.ts';
+import { createSchema, backfillGaugeRates } from './schema.ts';
 import { Rng } from '../lib/prng.ts';
 import { RECRUITER_HIRES_SQL } from '../lib/pay.ts';
 import * as D from '../lib/dates.ts';
@@ -698,6 +698,8 @@ export function seed(db: Db, today: string = D.todayISO()): SeedStats {
       stats.announcements++;
     }
 
+    // money rates are captured per entry (campaign payout, the person's plan commission) — fill them for the seeded rows
+    backfillGaugeRates(db);
     run(db, `INSERT INTO meta (key, value) VALUES ('seeded_at', ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value`, [nowIso]);
     run(db, `INSERT INTO meta (key, value) VALUES ('seed_today', ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value`, [today]);
   });

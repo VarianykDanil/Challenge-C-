@@ -65,6 +65,11 @@ test('calculatePayroll handles zero and negative inputs', () => {
   assert.equal(clamped.gross, 0);
   // deductions can push gross negative (an advance larger than the week's pay) — reported, not hidden
   assert.equal(calculatePayroll(PLAN, { daysWorked: 1, sales: 0, teamSales: 0, deductions: 80 }).gross, -30);
+  // a negative deduction is clamped to 0 like every other input: it can never add money
+  const refund = calculatePayroll(PLAN, { daysWorked: 0, sales: 0, teamSales: 0, deductions: -10 });
+  assert.equal(refund.deductions, 0);
+  assert.equal(refund.gross, 0);
+  assert.equal(calculatePayroll(PLAN, { daysWorked: 1, sales: 0, teamSales: 0, deductions: -10 }).gross, 50);
 });
 
 test('calculatePayroll rounds each component to pence', () => {

@@ -52,6 +52,7 @@ export function FinancePage() {
 }
 
 function MyPay({ onOpen }: { onOpen: (r: PayrollRunWithUser) => void }) {
+  const me = useCurrentUser();
   const q = useMyFinance(12);
   const d = q.data;
   if (q.isError) return <ErrorState error={q.error} onRetry={() => void q.refetch()} />;
@@ -82,7 +83,7 @@ function MyPay({ onOpen }: { onOpen: (r: PayrollRunWithUser) => void }) {
         ) : <EmptyState title={COPY.empty.payroll.title} description={COPY.empty.payroll.description} size="sm" className="border-0" />}
       </Card>
       <Card padded={false} className="min-w-0 overflow-hidden">
-        <div className="p-5 pb-3"><CardHeader title="Payslips" description="Select a week to see the full breakdown" className="mb-0" actions={<ExportButton filename={csvFilename('payslips', payrollRunsRange(d?.runs ?? []))} rows={sortRows(d?.runs ?? [], (r) => r.weekStart, 'desc')} columns={payrollRunCsvColumns(false)} disabled={q.isLoading} />} /></div>
+        <div className="p-5 pb-3"><CardHeader title="Payslips" description="Select a week to see the full breakdown" className="mb-0" actions={<ExportButton filename={csvFilename('payslips', payrollRunsRange(d?.runs ?? []))} rows={sortRows(d?.runs ?? [], (r) => r.weekStart, 'desc')} columns={payrollRunCsvColumns(false, me.position)} disabled={q.isLoading} />} /></div>
         <PayrollRunsTable rows={d?.runs ?? []} loading={q.isLoading} onRowClick={onOpen} emptyMessage={`${COPY.empty.payroll.title} — ${COPY.empty.payroll.description}`} bare className="border-t border-border" />
       </Card>
     </div>
@@ -93,7 +94,11 @@ function TeamPay({ teamId, onOpen }: { teamId: number; onOpen: (r: PayrollRunWit
   const [range, setRange] = useRangeState('last_4_weeks');
   const q = usePayroll({ teamId, from: range.from, to: range.to });
   const rows = q.data ?? [];
-  const totals = useMemo(() => rows.reduce((a, r) => ({ gross: a.gross + r.gross, commission: a.commission + r.commission, pending: a.pending + (r.status === 'pending' ? r.gross : 0) }), { gross: 0, commission: 0, pending: 0 }), [rows]);
+  // "Awaiting payment" is everything still owed: pending runs and failed transfers (both can still be marked paid).
+  const totals = useMemo(
+    () => rows.reduce((a, r) => ({ gross: a.gross + r.gross, commission: a.commission + r.commission, pending: a.pending + (r.status === 'pending' || r.status === 'failed' ? r.gross : 0), failed: a.failed + (r.status === 'failed' ? 1 : 0) }), { gross: 0, commission: 0, pending: 0, failed: 0 }),
+    [rows],
+  );
   return (
     <div className="space-y-6">
       <div className="flex flex-wrap items-center justify-between gap-3">
@@ -107,7 +112,7 @@ function TeamPay({ teamId, onOpen }: { teamId: number; onOpen: (r: PayrollRunWit
               <>
                 <KpiTile label="Team payroll" value={formatGBP(totals.gross)} tone="primary" hint={`${formatNumber(rows.length)} runs`} />
                 <KpiTile label="Commission" value={formatGBP(totals.commission)} />
-                <KpiTile label="Awaiting payment" value={formatGBP(totals.pending)} tone={totals.pending > 0 ? 'warning' : 'default'} />
+                <KpiTile label="Awaiting payment" value={formatGBP(totals.pending)} tone={totals.pending > 0 ? 'warning' : 'default'} hint={totals.failed > 0 ? `incl. ${formatNumber(totals.failed)} failed transfer${totals.failed === 1 ? '' : 's'}` : 'pending and failed runs'} />
                 <KpiTile label="People paid" value={formatNumber(new Set(rows.map((r) => r.userId)).size)} />
               </>
             )}
@@ -137,6 +142,8 @@ function Company({ onOpen }: { onOpen: (r: PayrollRunWithUser) => void }) {
   // Everything still to pay: pending runs plus failed transfers (both can be marked paid).
   const pending = usePayroll({ status: 'pending,failed' });
   const [expenseLimit, setExpenseLimit] = useState(EXPENSE_PAGE);
+  // The expenses table is sorted here (whole range) and only then paged, so "Amount ↓" really shows the biggest costs.
+  const [expenseSort, setExpenseSort] = useState<{ key: string; dir: 'asc' | 'desc' } | null>({ key: 'date', dir: 'desc' });
   const expenses = useExpenses({ from: range.from, to: range.to });
   const campaigns = useCampaigns();
   const pay = usePayRun();
@@ -157,6 +164,13 @@ function Company({ onOpen }: { onOpen: (r: PayrollRunWithUser) => void }) {
     { key: 'amount', header: 'Amount', align: 'right', render: (e) => <span className="font-medium tabular-nums text-fg">{formatGBP(e.amount, { cents: true })}</span>, sortValue: (e) => e.amount },
     { key: 'actions', header: <span className="sr-only">Actions</span>, align: 'right', render: (e) => <StopRowEvents className="inline-flex"><Button size="sm" variant="ghost" className="text-danger" aria-label={`Delete expense ${e.description}`} onClick={() => setDeleting(e)}><Trash2 className="h-4 w-4" aria-hidden /></Button></StopRowEvents> },
   ];
+
+  // Newest first by default; a column sort reorders the full set (stable, so same-date rows keep the default order).
+  const sortedExpenses = (() => {
+    const byDate = [...(expenses.data ?? [])].sort((a, b) => b.date.localeCompare(a.date) || b.id - a.id);
+    const col = expenseSort ? expenseColumns.find((c) => c.key === expenseSort.key) : undefined;
+    return col?.sortValue && expenseSort ? sortRows(byDate, col.sortValue, expenseSort.dir) : byDate;
+  })();
 
   const markPaid = (run: PayrollRunWithUser) => {
     setMarkingId(run.id);
@@ -249,18 +263,19 @@ function Company({ onOpen }: { onOpen: (r: PayrollRunWithUser) => void }) {
           <CardHeader title="Expenses" description={expenses.data ? `${formatNumber(expenses.data.length)} items · ${formatGBP(expenses.data.reduce((a, e) => a + e.amount, 0))}` : undefined} className="mb-0" />
           <div className="flex shrink-0 items-center gap-2">
             {/* Every expense in the range, not only the page shown — the card's count/total describe the same set. */}
-            <ExportButton filename={csvFilename('expenses', range)} rows={[...(expenses.data ?? [])].sort((a, b) => b.date.localeCompare(a.date) || b.id - a.id)} columns={expenseCsvColumns((id) => campaignName(id)?.name ?? null)} disabled={expenses.isLoading} />
+            <ExportButton filename={csvFilename('expenses', range)} rows={sortedExpenses} columns={expenseCsvColumns((id) => campaignName(id)?.name ?? null)} disabled={expenses.isLoading} />
             <Button size="sm" onClick={() => setAddOpen(true)} leftIcon={<Plus className="h-4 w-4" aria-hidden />}>Add expense</Button>
           </div>
         </div>
         {expenses.isError ? <ErrorState error={expenses.error} onRetry={() => void expenses.refetch()} className="m-5" /> : (
           <DataTable
             columns={expenseColumns}
-            rows={[...(expenses.data ?? [])].sort((a, b) => b.date.localeCompare(a.date) || b.id - a.id).slice(0, expenseLimit)}
+            rows={sortedExpenses.slice(0, expenseLimit)}
             rowKey={(e) => e.id}
             loading={expenses.isLoading}
             emptyMessage="No expenses in this range"
-            initialSort={{ key: 'date', dir: 'desc' }}
+            sort={expenseSort}
+            onSortChange={setExpenseSort}
             bare className="border-t border-border"
             footer={(expenses.data?.length ?? 0) > expenseLimit ? (
               <div className="flex items-center justify-between gap-3 px-5 py-3 text-xs text-muted">

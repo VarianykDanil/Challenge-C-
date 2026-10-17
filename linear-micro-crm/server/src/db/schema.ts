@@ -1,4 +1,8 @@
+import { GAUGE_MAX_PER_DAY } from '@lm/shared';
 import type { Db } from './connection.ts';
+
+/** One gauge column: a whole number between 0 and the daily plausibility ceiling (CHECK constraints on new databases). */
+const gaugeCol = (name: string) => `${name} INTEGER NOT NULL DEFAULT 0 CHECK (${name} >= 0 AND ${name} <= ${GAUGE_MAX_PER_DAY})`;
 
 export const SCHEMA_SQL = `
 CREATE TABLE IF NOT EXISTS teams (
@@ -36,7 +40,8 @@ CREATE TABLE IF NOT EXISTS users (
   city TEXT,
   totp_secret_enc TEXT,
   totp_pending_enc TEXT,
-  totp_enabled_at TEXT
+  totp_enabled_at TEXT,
+  totp_last_counter INTEGER
 );
 CREATE INDEX IF NOT EXISTS idx_users_team ON users(team_id);
 
@@ -71,21 +76,24 @@ CREATE TABLE IF NOT EXISTS events (
 );
 CREATE INDEX IF NOT EXISTS idx_events_date ON events(date);
 CREATE INDEX IF NOT EXISTS idx_events_team_date ON events(team_id, date);
+CREATE INDEX IF NOT EXISTS idx_events_campaign ON events(campaign_id);
 
 CREATE TABLE IF NOT EXISTS gauge_entries (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   event_id INTEGER NOT NULL REFERENCES events(id) ON DELETE CASCADE,
   user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
   date TEXT NOT NULL,
-  stops INTEGER NOT NULL DEFAULT 0,
-  table_count INTEGER NOT NULL DEFAULT 0,
-  presentations INTEGER NOT NULL DEFAULT 0,
-  closes INTEGER NOT NULL DEFAULT 0,
-  taps INTEGER NOT NULL DEFAULT 0,
-  sales INTEGER NOT NULL DEFAULT 0,
+  ${gaugeCol('stops')},
+  ${gaugeCol('table_count')},
+  ${gaugeCol('presentations')},
+  ${gaugeCol('closes')},
+  ${gaugeCol('taps')},
+  ${gaugeCol('sales')},
   checked_in_at TEXT,
   notes TEXT,
   submitted_at TEXT NOT NULL,
+  payout_per_sale REAL,
+  commission_per_sale REAL,
   UNIQUE(event_id, user_id, date)
 );
 CREATE INDEX IF NOT EXISTS idx_gauges_user_date ON gauge_entries(user_id, date);
@@ -109,6 +117,7 @@ CREATE TABLE IF NOT EXISTS payroll_runs (
   paid_date TEXT,
   status TEXT NOT NULL DEFAULT 'pending',
   reference TEXT NOT NULL UNIQUE,
+  adjusted_at TEXT,
   UNIQUE(user_id, week_start)
 );
 CREATE INDEX IF NOT EXISTS idx_payroll_week ON payroll_runs(week_start);
@@ -207,24 +216,46 @@ CREATE TABLE IF NOT EXISTS meta (
 `;
 
 /**
+ * Fills the money-rate snapshot on gauge rows that have none (rows seeded or written before the columns existed) from
+ * the campaign payout and the person's current pay plan — the best available approximation of "the rate when the
+ * sale was logged". Rows written by the API carry the real snapshot. Returns the number of rows filled.
+ */
+export const BACKFILL_GAUGE_RATES_SQL = `
+  UPDATE gauge_entries SET
+    payout_per_sale = COALESCE(payout_per_sale, (SELECT c.payout_per_sale FROM events e JOIN campaigns c ON c.id = e.campaign_id WHERE e.id = gauge_entries.event_id)),
+    commission_per_sale = COALESCE(commission_per_sale, (SELECT pp.commission_per_sale FROM users u JOIN pay_plans pp ON pp.id = u.pay_plan_id WHERE u.id = gauge_entries.user_id))
+  WHERE payout_per_sale IS NULL OR commission_per_sale IS NULL`;
+
+export function backfillGaugeRates(db: Db): number {
+  return Number(db.prepare(BACKFILL_GAUGE_RATES_SQL).run().changes);
+}
+
+/**
  * Columns added after the first release. `CREATE TABLE IF NOT EXISTS` leaves an existing table alone, so a database
  * created before the column existed is upgraded here with a guarded `ALTER TABLE … ADD COLUMN` (SQLite has no
- * `ADD COLUMN IF NOT EXISTS`). Every entry must be nullable or carry a default so existing rows stay valid.
+ * `ADD COLUMN IF NOT EXISTS`) followed by the column's `backfill` statement when it has one. Every entry must be
+ * nullable or carry a default so existing rows stay valid. CHECK constraints cannot be added to an existing table,
+ * so the gauge ceilings are also enforced in code (`lib/validate.ts`, `validateGaugeFunnel`).
  */
-const COLUMN_UPGRADES: { table: string; column: string; ddl: string }[] = [
+const COLUMN_UPGRADES: { table: string; column: string; ddl: string; backfill?: string }[] = [
   { table: 'users', column: 'totp_secret_enc', ddl: 'TEXT' },
   { table: 'users', column: 'totp_pending_enc', ddl: 'TEXT' },
   { table: 'users', column: 'totp_enabled_at', ddl: 'TEXT' },
+  { table: 'users', column: 'totp_last_counter', ddl: 'INTEGER' },
+  { table: 'gauge_entries', column: 'payout_per_sale', ddl: 'REAL', backfill: BACKFILL_GAUGE_RATES_SQL },
+  { table: 'gauge_entries', column: 'commission_per_sale', ddl: 'REAL', backfill: BACKFILL_GAUGE_RATES_SQL },
+  { table: 'payroll_runs', column: 'adjusted_at', ddl: 'TEXT' },
 ];
 
 export function tableColumns(db: Db, table: string): string[] {
   return (db.prepare(`PRAGMA table_info(${table})`).all() as { name: string }[]).map((c) => c.name);
 }
 
-/** Adds the missing columns from `COLUMN_UPGRADES`; returns their names. Idempotent. */
+/** Adds the missing columns from `COLUMN_UPGRADES` (and runs their backfills); returns their names. Idempotent. */
 export function upgradeSchema(db: Db): string[] {
   const added: string[] = [];
   const known = new Map<string, Set<string>>();
+  const backfills = new Set<string>();
   for (const u of COLUMN_UPGRADES) {
     if (!known.has(u.table)) known.set(u.table, new Set(tableColumns(db, u.table)));
     const cols = known.get(u.table)!;
@@ -232,7 +263,9 @@ export function upgradeSchema(db: Db): string[] {
     db.exec(`ALTER TABLE ${u.table} ADD COLUMN ${u.column} ${u.ddl}`);
     cols.add(u.column);
     added.push(`${u.table}.${u.column}`);
+    if (u.backfill) backfills.add(u.backfill);
   }
+  for (const sql of backfills) db.prepare(sql).run();
   return added;
 }
 

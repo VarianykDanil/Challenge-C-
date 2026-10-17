@@ -31,8 +31,18 @@ const SUMS = `COALESCE(SUM(g.stops), 0) AS stops, COALESCE(SUM(g.table_count), 0
   COALESCE(SUM(g.presentations), 0) AS presentations, COALESCE(SUM(g.closes), 0) AS closes,
   COALESCE(SUM(g.taps), 0) AS taps, COALESCE(SUM(g.sales), 0) AS sales`;
 
-/** SQL expression for the Monday of g.date (SQLite %w: 0 = Sunday). */
-export const MONDAY_SQL = `date(g.date, '-' || ((CAST(strftime('%w', g.date) AS INTEGER) + 6) % 7) || ' days')`;
+/** SQL expression for the Monday of a `YYYY-MM-DD` column (SQLite %w: 0 = Sunday). */
+export const mondayOfSql = (col: string): string => `date(${col}, '-' || ((CAST(strftime('%w', ${col}) AS INTEGER) + 6) % 7) || ' days')`;
+/** SQL expression for the Monday of g.date. */
+export const MONDAY_SQL = mondayOfSql('g.date');
+/**
+ * Money rates for revenue and commission aggregates: the snapshot taken when the entry was logged
+ * (`gauge_entries.payout_per_sale` / `commission_per_sale`), falling back to the current campaign / plan rate for
+ * rows written before the snapshot columns existed. Changing a campaign payout therefore only affects future days.
+ */
+export const GAUGE_PAYOUT_SQL = 'COALESCE(g.payout_per_sale, c.payout_per_sale)';
+/** Needs `JOIN pay_plans pp ON pp.id = u.pay_plan_id` in the FROM clause. */
+export const GAUGE_COMMISSION_SQL = 'COALESCE(g.commission_per_sale, pp.commission_per_sale)';
 
 export interface TotalsWithDays extends GaugeTotals {
   /** distinct rep-days (user × date) */

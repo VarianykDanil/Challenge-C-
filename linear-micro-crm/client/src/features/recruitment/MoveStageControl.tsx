@@ -2,21 +2,26 @@
 // Hiring asks for the team and entry position the new rep account is created with.
 import { useEffect, useId, useState } from 'react';
 import type { CandidateStage, CandidateWithMeta, Position } from '@lm/shared';
-import { PIPELINE_STAGES, POSITION_LABELS, STAGE_LABELS } from '@lm/shared';
+import { POSITION_LABELS, STAGE_LABELS } from '@lm/shared';
 import { Field, Select, Textarea, useToast } from '@/components/ui';
 import { useMoveCandidateStage, useTeams, useUsers } from '@/api/hooks';
+import { useCurrentUser } from '@/auth/AuthProvider';
 import { ConfirmDialog, StageBadge, errorMessage } from '@/features/common';
 import { fullName } from '@/lib/format';
 import { ENTRY_POSITIONS, optionsFrom } from '@/lib/labels';
+import { allowedStageTargets } from './stageRules';
 
-const ALL_STAGES: CandidateStage[] = [...PIPELINE_STAGES, 'rejected', 'withdrawn'];
 const CONFIRM_STAGES: CandidateStage[] = ['hired', 'rejected'];
 /** Stages a candidate never leaves through this control (the server refuses to move hired candidates). */
 export const TERMINAL_STAGES: CandidateStage[] = ['hired', 'rejected', 'withdrawn'];
 
 export function MoveStageControl({ candidate, compact, onMoved }: { candidate: CandidateWithMeta; compact?: boolean; onMoved?: (stage: CandidateStage) => void }) {
+  const me = useCurrentUser();
   const toast = useToast();
   const id = useId();
+  // Only the moves the API accepts: forward (hire only from offer), one step back, reject or withdraw; an admin may
+  // reopen a rejected / withdrawn candidate to offer. Nothing else is offered, so no move can end in a 409.
+  const targets = allowedStageTargets(candidate.stage, me.role);
   const move = useMoveCandidateStage();
   const [pending, setPending] = useState<CandidateStage | null>(null);
   const [note, setNote] = useState('');
@@ -35,7 +40,7 @@ export function MoveStageControl({ candidate, compact, onMoved }: { candidate: C
     if (pick != null) setHireTeamId(String(pick));
   }, [hiring, hireTeamId, people.data, teams.data, candidate.ownerId]);
 
-  if (TERMINAL_STAGES.includes(candidate.stage)) return <StageBadge stage={candidate.stage} />;
+  if (targets.length === 0) return <StageBadge stage={candidate.stage} />;
 
   const doMove = (stage: CandidateStage, n?: string) => {
     move.mutate(
@@ -58,7 +63,7 @@ export function MoveStageControl({ candidate, compact, onMoved }: { candidate: C
       <Select
         id={`${id}-stage`}
         value=""
-        placeholder="Move to…"
+        placeholder={TERMINAL_STAGES.includes(candidate.stage) ? 'Reopen to…' : 'Move to…'}
         disabled={move.isPending}
         onChange={(e) => {
           const stage = e.target.value as CandidateStage | '';
@@ -66,7 +71,7 @@ export function MoveStageControl({ candidate, compact, onMoved }: { candidate: C
           if (CONFIRM_STAGES.includes(stage)) setPending(stage);
           else doMove(stage);
         }}
-        options={ALL_STAGES.filter((s) => s !== candidate.stage).map((s) => ({ value: s, label: STAGE_LABELS[s] }))}
+        options={targets.map((s) => ({ value: s, label: STAGE_LABELS[s] }))}
         size={compact ? 'sm' : 'md'}
         onClick={(e) => e.stopPropagation()}
       />

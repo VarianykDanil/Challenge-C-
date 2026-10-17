@@ -4,7 +4,7 @@ import type { Campaign } from '@lm/shared';
 import { all, run, type Db } from '../db/connection.ts';
 import { CAMPAIGN_SELECT, Where, getCampaign, mapCampaign } from '../db/queries.ts';
 import { conflict, notFound } from '../lib/errors.ts';
-import { hexColor, idParam, isoDate } from '../lib/validate.ts';
+import { hexColor, idParam, isoDate, moneyAmount, moneyRate } from '../lib/validate.ts';
 import { requireRole } from '../middleware/auth.ts';
 import { todayISO } from '../lib/dates.ts';
 
@@ -13,8 +13,9 @@ const campaignBody = z.object({
   code: z.string().trim().min(2).max(6).transform((s) => s.toUpperCase()),
   sector: z.enum(['charity', 'energy', 'telecoms', 'broadband', 'other']),
   type: z.enum(['fundraising', 'b2c', 'b2b']),
-  payoutPerSale: z.number().min(0),
-  repCommissionPerSale: z.number().min(0),
+  /** what the client pays per sale: > 0 and ≤ MONEY_MAX; changing it only affects days logged from then on */
+  payoutPerSale: moneyAmount,
+  repCommissionPerSale: moneyRate,
   color: hexColor,
   active: z.boolean().default(true),
   startDate: isoDate.default(() => todayISO()),

@@ -1,9 +1,10 @@
-import { Router } from 'express';
+import { Router, type Request } from 'express';
 import { z } from 'zod';
 import type { Role, TwoFactorChallenge, UserWithTeam } from '@lm/shared';
 import { all, get, type Db } from '../db/connection.ts';
 import { USER_SELECT } from '../db/queries.ts';
-import { badRequest, conflict, tooManyRequests, unauthorized } from '../lib/errors.ts';
+import { badRequest, conflict, unauthorized } from '../lib/errors.ts';
+import { FailureLimiter } from '../lib/limiter.ts';
 import {
   assertCodeAttemptsLeft, beginSetup, clearCodeFailures, clearTwoFactor, createChallenge, deleteChallenge, enableTwoFactor,
   isTwoFactorEnabled, issueRecoveryCodes, recordChallengeAttempt, recordCodeFailure, requireChallenge, twoFactorStatus, verifySecondFactor,
@@ -36,43 +37,55 @@ const DEMO: { employeeId: string; role: Role; label: string }[] = [
   { employeeId: 'LM-0010', role: 'rep', label: 'Field Rep' },
 ];
 
-// ── login rate limit: 8 failed attempts per (ip, email) in 15 minutes ──
+// ── login rate limit ──
+// Failed sign-ins are counted twice: per (source address, email) — 8 in 15 minutes locks that source for that email —
+// and per email from anywhere (a backstop against an attacker rotating addresses). The source is the TCP peer
+// (`req.socket.remoteAddress`), never a header the client can forge; with TRUST_PROXY set, req.ip would follow
+// X-Forwarded-For, but the limiter deliberately stays on the socket address. Both maps are bounded LRUs (10k keys)
+// swept every five minutes off the request path.
 export const LOGIN_MAX_FAILURES = 8;
+export const LOGIN_MAX_FAILURES_PER_EMAIL = 20;
 export const LOGIN_WINDOW_MS = 15 * 60_000;
-interface Failures { count: number; first: number }
-const failures = new Map<string, Failures>();
+const loginBySource = new FailureLimiter(LOGIN_MAX_FAILURES, LOGIN_WINDOW_MS);
+const loginByEmail = new FailureLimiter(LOGIN_MAX_FAILURES_PER_EMAIL, LOGIN_WINDOW_MS);
 
-function failureKey(ip: string, email: string): string {
-  return `${ip}|${email.trim().toLowerCase()}`;
+/** The TCP peer address of a request (what the limiters key on). */
+export function clientSource(req: Request): string {
+  return req.socket?.remoteAddress ?? 'unknown';
 }
 
-/** Throws 429 when the (ip, email) pair has exhausted its attempts inside the window. */
-function assertNotLocked(key: string, now: number): void {
-  const f = failures.get(key);
-  if (!f) return;
-  if (now - f.first >= LOGIN_WINDOW_MS) {
-    failures.delete(key);
-    return;
-  }
-  if (f.count >= LOGIN_MAX_FAILURES) {
-    const minutes = Math.max(1, Math.ceil((f.first + LOGIN_WINDOW_MS - now) / 60_000));
-    throw tooManyRequests(`Too many attempts, try again in ${minutes} minute${minutes === 1 ? '' : 's'}`);
-  }
+interface LoginKeys { source: string; email: string }
+
+function loginKeys(req: Request, email: string): LoginKeys {
+  const e = email.trim().toLowerCase();
+  return { source: `${clientSource(req)}|${e}`, email: e };
 }
 
-function recordFailure(key: string, now: number): void {
-  if (failures.size > 5000) for (const [k, f] of failures) if (now - f.first >= LOGIN_WINDOW_MS) failures.delete(k);
-  const f = failures.get(key);
-  if (!f || now - f.first >= LOGIN_WINDOW_MS) failures.set(key, { count: 1, first: now });
-  else f.count += 1;
+/** Throws 429 when either the (source, email) pair or the email as a whole has exhausted its attempts. */
+function assertLoginAllowed(keys: LoginKeys, now: number): void {
+  loginBySource.assertAllowed(keys.source, now);
+  loginByEmail.assertAllowed(keys.email, now);
+}
+
+function recordLoginFailure(keys: LoginKeys, now: number): void {
+  loginBySource.record(keys.source, now);
+  loginByEmail.record(keys.email, now);
+}
+
+function clearLoginFailures(keys: LoginKeys): void {
+  loginBySource.clear(keys.source);
+  loginByEmail.clear(keys.email);
 }
 
 /** Test hook: forget every recorded failure. */
 export function resetLoginFailures(): void {
-  failures.clear();
+  loginBySource.reset();
+  loginByEmail.reset();
 }
 
 const WRONG_CODE = 'That code is not valid';
+/** One message for an unknown email, a wrong ID and a deactivated account: the response never confirms a credential. */
+export const INVALID_LOGIN = 'Invalid email or employee ID';
 
 export function authRouter(db: Db): Router {
   const router = Router();
@@ -81,40 +94,40 @@ export function authRouter(db: Db): Router {
   const withFlag = (user: UserWithTeam, twoFactorEnabled: boolean): UserWithTeam => ({ ...user, twoFactorEnabled });
 
   /**
-   * Shared by every endpoint that checks a second factor for a signed-in user: the per-user limiter first, then the
-   * code; a miss is counted and answered with `status` (400 in settings, 401 at login). Never logs the code.
+   * Shared by every endpoint that checks a second factor for a signed-in user: the limiters first, then the code;
+   * a miss is counted and answered with `status` (400 in settings, 401 at login). Never logs the code.
    */
-  function checkFactor(userId: number, input: { code?: string; recoveryCode?: string }, status: 400 | 401, onFailure?: () => void): void {
-    assertCodeAttemptsLeft(userId);
+  function checkFactor(userId: number, source: string, input: { code?: string; recoveryCode?: string }, status: 400 | 401, onFailure?: () => void): void {
+    assertCodeAttemptsLeft(userId, source);
     if (verifySecondFactor(db, userId, input)) {
-      clearCodeFailures(userId);
+      clearCodeFailures(userId, source);
       return;
     }
-    recordCodeFailure(userId);
+    recordCodeFailure(userId, source);
     onFailure?.();
     throw status === 401 ? unauthorized(WRONG_CODE) : badRequest(WRONG_CODE);
   }
 
   router.post('/login', (req, res) => {
     const { email, employeeId } = loginSchema.parse(req.body);
-    const key = failureKey(req.ip ?? 'unknown', email);
+    const keys = loginKeys(req, email);
     const now = Date.now();
-    assertNotLocked(key, now);
+    assertLoginAllowed(keys, now);
     const user = get<UserWithTeam>(
       db,
       `${USER_SELECT} WHERE lower(u.email) = lower(?) AND lower(u.employee_id) = lower(?)`,
       [email, employeeId],
     );
     if (!user || user.status === 'left') {
-      recordFailure(key, now);
-      throw unauthorized(user ? 'This account has been deactivated' : 'Email and employee ID do not match');
+      recordLoginFailure(keys, now);
+      throw unauthorized(INVALID_LOGIN);
     }
     if (isTwoFactorEnabled(db, user.id)) {
-      // Step one of two: no cookie yet, and the (ip, email) counter keeps running until the code is right.
+      // Step one of two: no cookie yet, and the login counters keep running until the code is right.
       const challenge: TwoFactorChallenge = { requiresTwoFactor: true, challengeToken: createChallenge(db, user.id), method: 'totp' };
       return res.json(challenge);
     }
-    failures.delete(key); // a successful sign-in resets the counter
+    clearLoginFailures(keys); // a successful sign-in resets the counters
     const token = createSession(db, user.id);
     setSessionCookie(req, res, token);
     res.json({ user: withFlag(user, false) });
@@ -123,21 +136,21 @@ export function authRouter(db: Db): Router {
   /** Step two: the challenge token from `/login` plus a current code or an unused recovery code. */
   router.post('/login/2fa', (req, res) => {
     const body = loginTwoFactorBody.parse(req.body);
-    const challenge = requireChallenge(db, body.challengeToken); // 410 when unknown, used or expired
+    const challenge = requireChallenge(db, body.challengeToken); // 410 when unknown, used, expired or exhausted
     const user = userById(challenge.userId);
     if (!user || user.status === 'left') {
       deleteChallenge(db, challenge.token);
-      throw unauthorized('This account has been deactivated');
+      throw unauthorized(INVALID_LOGIN);
     }
-    const key = failureKey(req.ip ?? 'unknown', user.email);
+    const keys = loginKeys(req, user.email);
     const now = Date.now();
-    assertNotLocked(key, now);
-    checkFactor(user.id, body, 401, () => {
-      recordFailure(key, now); // a wrong code counts against the login limiter too
+    assertLoginAllowed(keys, now);
+    checkFactor(user.id, clientSource(req), body, 401, () => {
+      recordLoginFailure(keys, now); // a wrong code counts against the login limiter too
       recordChallengeAttempt(db, challenge.token);
     });
     deleteChallenge(db, challenge.token);
-    failures.delete(key);
+    clearLoginFailures(keys);
     const token = createSession(db, user.id);
     setSessionCookie(req, res, token);
     res.json({ user: withFlag(user, true) });
@@ -165,14 +178,15 @@ export function authRouter(db: Db): Router {
 
   router.post('/2fa/enable', requireAuth, (req, res) => {
     const me = currentUser(req);
+    const source = clientSource(req);
     const { code } = codeBody.parse(req.body);
-    assertCodeAttemptsLeft(me.id);
+    assertCodeAttemptsLeft(me.id, source);
     const recoveryCodes = enableTwoFactor(db, me.id, code, req.sessionToken); // 409 when nothing pending / already on
     if (!recoveryCodes) {
-      recordCodeFailure(me.id);
+      recordCodeFailure(me.id, source);
       throw badRequest(WRONG_CODE);
     }
-    clearCodeFailures(me.id);
+    clearCodeFailures(me.id, source);
     res.json({ recoveryCodes });
   });
 
@@ -180,7 +194,7 @@ export function authRouter(db: Db): Router {
     const me = currentUser(req);
     const body = disableBody.parse(req.body);
     if (!isTwoFactorEnabled(db, me.id)) throw conflict('Two-step verification is not on');
-    checkFactor(me.id, body, 400);
+    checkFactor(me.id, clientSource(req), body, 400);
     clearTwoFactor(db, me.id);
     res.status(204).end();
   });
@@ -189,7 +203,7 @@ export function authRouter(db: Db): Router {
     const me = currentUser(req);
     const { code } = codeBody.parse(req.body);
     if (!isTwoFactorEnabled(db, me.id)) throw conflict('Two-step verification is not on');
-    checkFactor(me.id, { code }, 400);
+    checkFactor(me.id, clientSource(req), { code }, 400);
     res.json({ recoveryCodes: issueRecoveryCodes(db, me.id) });
   });
 

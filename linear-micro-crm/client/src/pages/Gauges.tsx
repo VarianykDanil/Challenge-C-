@@ -62,7 +62,7 @@ export function GaugesPage() {
 
 function MyPerformance({ userId, range }: { userId: number; range: { from: string; to: string } }) {
   const q = useUserPerformance(userId, { from: range.from, to: range.to });
-  return <PerformancePanel data={q.data} loading={q.isLoading} error={q.error} onRetry={() => void q.refetch()} range={range} />;
+  return <PerformancePanel data={q.data} loading={q.isLoading} error={q.error} onRetry={() => void q.refetch()} range={range} userId={userId} />;
 }
 
 function SummaryView({ range, teamId, allowTeamPick, defaultGroupBy }: { range: { from: string; to: string }; teamId?: number | null; allowTeamPick: boolean; defaultGroupBy: GaugeGroupBy }) {

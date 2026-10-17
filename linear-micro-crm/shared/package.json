@@ -10,11 +10,14 @@
   },
   "scripts": {
     "typecheck": "tsc --noEmit -p tsconfig.json",
-    "test": "node --import tsx --test \"src/**/*.test.ts\""
+    "test": "NODE_NO_WARNINGS=1 node --test \"src/**/*.test.ts\""
   },
   "devDependencies": {
     "tsx": "^4.19.4",
     "typescript": "^5.8.3",
     "@types/node": "^22.15.3"
+  },
+  "engines": {
+    "node": ">=22.18"
   }
 }

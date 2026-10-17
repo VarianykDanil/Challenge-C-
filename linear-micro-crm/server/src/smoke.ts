@@ -3,21 +3,25 @@
  * account and exercises every endpoint. Prints a PASS/FAIL table and exits non-zero on any failure.
  */
 import { once } from 'node:events';
-import { mkdtempSync, rmSync } from 'node:fs';
+import { existsSync, mkdtempSync, readFileSync, rmSync, statSync } from 'node:fs';
+import http from 'node:http';
 import type { AddressInfo } from 'node:net';
 import os from 'node:os';
 import path from 'node:path';
-import { createApp } from './app.ts';
+import { round2 } from '@lm/shared';
+import { contentSecurityPolicy, createApp } from './app.ts';
 import { all, get, openDb, run } from './db/connection.ts';
+import { bumpDataVersion } from './lib/cache.ts';
 import { materialisePayrollRuns } from './db/maintenance.ts';
 import { getUser } from './db/queries.ts';
 import { SCHEMA_SQL, createSchema, tableColumns } from './db/schema.ts';
 import { seed } from './db/seed.ts';
 import { AVATAR_PALETTE } from './db/seed-data.ts';
+import { configureAppSecret, decrypt, encrypt } from './lib/crypto.ts';
 import { addDays, dayOfWeek, mondayOf, normaliseCheckIn, nowHHMM, previousToDateRange, startOfMonth, startOfQuarter, sundayOf, todayISO } from './lib/dates.ts';
-import { nextPay } from './lib/pay.ts';
-import { totp } from './lib/totp.ts';
-import { purgeExpiredChallenges, resetCodeFailures } from './lib/twofactor.ts';
+import { nextPay, weekPayFor } from './lib/pay.ts';
+import { totp, totpCounter } from './lib/totp.ts';
+import { purgeExpiredChallenges, reencryptLegacySecrets, resetCodeFailures } from './lib/twofactor.ts';
 import { resetLoginFailures } from './routes/auth.ts';
 
 /** WCAG contrast ratio of white text on a hex background. */
@@ -31,27 +35,57 @@ function contrastWithWhite(hex: string): number {
 
 type Json = any; // eslint-disable-line @typescript-eslint/no-explicit-any
 
+/**
+ * An HTTP request bound to a given local (source) address — the limiters key on the TCP peer, so "another device"
+ * is a connection whose *source* is 127.0.0.2, not one that merely targets a different loopback address.
+ */
+function requestVia(localAddress: string, method: string, url: string, headers: Record<string, string>, body?: string): Promise<{ status: number; headers: Headers; text: string }> {
+  return new Promise((resolve, reject) => {
+    const u = new URL(url);
+    const req = http.request({ host: u.hostname, port: Number(u.port), path: u.pathname + u.search, method, headers, localAddress }, (res) => {
+      let data = '';
+      res.setEncoding('utf8');
+      res.on('data', (chunk: string) => (data += chunk));
+      res.on('end', () => {
+        const h = new Headers();
+        for (const [k, v] of Object.entries(res.headers)) for (const x of Array.isArray(v) ? v : v === undefined ? [] : [v]) h.append(k, x);
+        resolve({ status: res.statusCode ?? 0, headers: h, text: data });
+      });
+    });
+    req.on('error', reject);
+    if (body !== undefined) req.write(body);
+    req.end();
+  });
+}
+
 class Client {
   private cookie = '';
-  private base: string;
+  private readonly base: string;
   readonly label: string;
-  constructor(base: string, label: string) {
+  /** when set, requests are sent from this source address (see `requestVia`) */
+  private readonly localAddress: string | undefined;
+
+  constructor(base: string, label: string, localAddress?: string) {
     this.base = base;
     this.label = label;
+    this.localAddress = localAddress;
   }
 
   async req(method: string, url: string, body?: unknown): Promise<{ status: number; json: Json; headers: Headers }> {
-    const res = await fetch(this.base + url, {
-      method,
-      headers: { 'content-type': 'application/json', ...(this.cookie ? { cookie: this.cookie } : {}) },
-      body: body === undefined ? undefined : JSON.stringify(body),
-    });
+    const headers = { 'content-type': 'application/json', ...(this.cookie ? { cookie: this.cookie } : {}) };
+    const payload = body === undefined ? undefined : JSON.stringify(body);
+    let res: { status: number; headers: Headers; text: string };
+    if (this.localAddress) res = await requestVia(this.localAddress, method, this.base + url, headers, payload);
+    else {
+      const r = await fetch(this.base + url, { method, headers, body: payload });
+      res = { status: r.status, headers: r.headers, text: await r.text() };
+    }
     const setCookie = res.headers.get('set-cookie');
     if (setCookie) {
       const m = /lm_session=([^;]*)/.exec(setCookie);
       this.cookie = m && m[1] ? `lm_session=${m[1]}` : '';
     }
-    const text = await res.text();
+    const text = res.text;
     let json: Json = null;
     if (text) {
       try {
@@ -94,6 +128,8 @@ async function check(name: string, fn: () => Promise<string | void>): Promise<vo
 
 async function main(): Promise<void> {
   const dir = mkdtempSync(path.join(os.tmpdir(), 'linear-smoke-'));
+  const secretFile = path.join(dir, 'app-secret');
+  configureAppSecret(secretFile); // never touch server/data/app-secret from the smoke run
   const db = openDb(path.join(dir, 'smoke.sqlite'));
   createSchema(db);
   const t0 = performance.now();
@@ -200,6 +236,89 @@ async function main(): Promise<void> {
       delete process.env.COOKIE_SECURE;
     }
     status(await plain.post('/auth/logout'), 204, 'logout');
+  });
+  await check('App secret: generated once into a 0600 file next to the DB, reused on restart, LM_APP_SECRET overrides, legacy rows re-encrypted', async () => {
+    const previous = process.env.LM_APP_SECRET;
+    delete process.env.LM_APP_SECRET;
+    try {
+      configureAppSecret(secretFile);
+      const ct = encrypt('hello');
+      ok(existsSync(secretFile), 'file created on first use');
+      eq(statSync(secretFile).mode & 0o777, 0o600, 'mode 0600');
+      ok(/^[0-9a-f]{64}$/.test(readFileSync(secretFile, 'utf8').trim()), '32 random bytes, hex');
+      configureAppSecret(secretFile); // simulate a restart: the key is read back, not regenerated
+      eq(decrypt(ct), 'hello', 'persisted key decrypts after a reload');
+      process.env.LM_APP_SECRET = 'operator-managed-secret';
+      let rejected = false;
+      try { decrypt(ct); } catch { rejected = true; }
+      ok(rejected, 'LM_APP_SECRET overrides the file (ciphertext under the file key no longer decrypts)');
+      // a row written by a release that ran on the old built-in development key is re-encrypted at start-up
+      process.env.LM_APP_SECRET = 'linear-hub-development-secret-not-for-production';
+      const legacy = encrypt('JBSWY3DPEHPK3PXP');
+      delete process.env.LM_APP_SECRET;
+      configureAppSecret(secretFile);
+      run(db, `UPDATE users SET totp_secret_enc = ? WHERE id = 10`, [legacy]);
+      eq(reencryptLegacySecrets(db), 1, 'one legacy column rewritten');
+      eq(decrypt(get<Json>(db, `SELECT totp_secret_enc AS s FROM users WHERE id = 10`)!.s), 'JBSWY3DPEHPK3PXP', 'now under the real key');
+      eq(reencryptLegacySecrets(db), 0, 'idempotent');
+      run(db, `UPDATE users SET totp_secret_enc = NULL WHERE id = 10`);
+    } finally {
+      if (previous === undefined) delete process.env.LM_APP_SECRET;
+      else process.env.LM_APP_SECRET = previous;
+      configureAppSecret(secretFile);
+    }
+  });
+  await check('Security headers on every response; HSTS and Secure cookies only with TRUST_PROXY (off by default)', async () => {
+    const r = await fetch(`${base}/health`);
+    eq(r.headers.get('x-content-type-options'), 'nosniff', 'nosniff');
+    eq(r.headers.get('x-frame-options'), 'DENY', 'frame options');
+    eq(r.headers.get('referrer-policy'), 'strict-origin-when-cross-origin', 'referrer policy');
+    eq(r.headers.get('permissions-policy'), 'camera=(), microphone=(), geolocation=()', 'permissions policy');
+    const csp = r.headers.get('content-security-policy') ?? '';
+    ok(csp.includes("default-src 'self'") && csp.includes("frame-ancestors 'none'") && csp.includes("connect-src 'self'"), `CSP (${csp})`);
+    eq(r.headers.get('strict-transport-security'), null, 'no HSTS over plain HTTP');
+    const dist = path.resolve(import.meta.dirname, '../../client/dist');
+    if (existsSync(path.join(dist, 'index.html'))) ok(/'sha256-[A-Za-z0-9+/=]+'/.test(contentSecurityPolicy(dist)), 'built client: inline theme script hashed into script-src');
+    // the default app ignores X-Forwarded-*: a forged "https" never yields a Secure cookie or HSTS
+    const creds = { email: 'jordan.lee@linear-mcr.co.uk', employeeId: 'LM-0010' };
+    const spoof = await fetch(`${base}/auth/login`, { method: 'POST', headers: { 'content-type': 'application/json', 'x-forwarded-proto': 'https' }, body: JSON.stringify(creds) });
+    eq(spoof.status, 200, 'login');
+    ok(!/;\s*Secure/i.test(spoof.headers.get('set-cookie') ?? '') && spoof.headers.get('strict-transport-security') === null, 'X-Forwarded-Proto ignored by default');
+    // with TRUST_PROXY=1 the terminator's X-Forwarded-Proto is honoured → Secure cookie + HSTS
+    const proxied = createApp(db, { trustProxy: 1 }).listen(0);
+    await once(proxied, 'listening');
+    try {
+      const pbase = `http://127.0.0.1:${(proxied.address() as AddressInfo).port}/api`;
+      const trusted = await fetch(`${pbase}/auth/login`, { method: 'POST', headers: { 'content-type': 'application/json', 'x-forwarded-proto': 'https' }, body: JSON.stringify(creds) });
+      eq(trusted.status, 200, 'login via trusted proxy');
+      ok(/;\s*Secure/i.test(trusted.headers.get('set-cookie') ?? ''), 'Secure cookie behind a trusted proxy');
+      ok((trusted.headers.get('strict-transport-security') ?? '').startsWith('max-age='), 'HSTS behind a trusted proxy');
+    } finally {
+      proxied.close();
+    }
+    run(db, `DELETE FROM sessions WHERE user_id = 10`);
+  });
+  await check('Login limiter keys on the socket address (X-Forwarded-For cannot bypass it) plus a per-email ceiling across addresses', async () => {
+    resetLoginFailures();
+    const email = 'spoof.me@linear-mcr.co.uk';
+    const attempt = (i: number, localAddress?: string) => {
+      const headers = { 'content-type': 'application/json', 'x-forwarded-for': `203.0.113.${i}` };
+      const payload = JSON.stringify({ email, employeeId: `LM-9${String(i).padStart(3, '0')}` });
+      return localAddress ? requestVia(localAddress, 'POST', `${base}/auth/login`, headers, payload) : fetch(`${base}/auth/login`, { method: 'POST', headers, body: payload });
+    };
+    for (let i = 1; i <= 8; i++) eq((await attempt(i)).status, 401, `attempt ${i} with a rotating X-Forwarded-For`);
+    eq((await attempt(9)).status, 429, '9th → 429 despite a fresh X-Forwarded-For (the limiter keys on the TCP peer)');
+    // a second source address (a connection bound to 127.0.0.2) starts with a clean per-source counter (8) …
+    for (let i = 9; i <= 16; i++) eq((await attempt(i, '127.0.0.2')).status, 401, `attempt ${i} from a second address`);
+    eq((await attempt(17, '127.0.0.2')).status, 429, 'the second address locks itself out after its own 8');
+    // … and a third address gets only 4 more: the email as a whole is capped at 20 failures from anywhere
+    for (let i = 17; i <= 20; i++) eq((await attempt(i, '127.0.0.3')).status, 401, `attempt ${i} from a third address`);
+    const capped = await attempt(21, '127.0.0.3');
+    eq(capped.status, 429, '21st failure for the email → 429 from any address (per-email ceiling)');
+    const otherEmail = await requestVia('127.0.0.3', 'POST', `${base}/auth/login`, { 'content-type': 'application/json' }, JSON.stringify({ email: 'jordan.lee@linear-mcr.co.uk', employeeId: 'LM-0010' }));
+    eq(otherEmail.status, 200, 'other emails from that address unaffected');
+    run(db, `DELETE FROM sessions WHERE user_id = 10`);
+    resetLoginFailures();
   });
   const logins: [Client, string, string, string][] = [
     [admin, 'DANIL@linear-mcr.co.uk', 'lm-0001', 'admin'],
@@ -414,6 +533,16 @@ async function main(): Promise<void> {
     eq(p.json.position, 'field_rep', 'patched position');
     status(await admin.patch('/users/99999', { city: 'X' }), 404, 'patch missing');
   });
+  await check('FunnelRatios.stopsPerSale is null (never Infinity) without sales and a number otherwise', async () => {
+    const perf = await admin.get(`/users/${newUserId}/performance`);
+    status(perf, 200, 'performance of a user with no gauges');
+    ok('stopsPerSale' in perf.json.ratios, 'key present in JSON');
+    eq(perf.json.ratios.stopsPerSale, null, 'null without sales');
+    const withSales = await rep.get(`/users/10/performance?from=${twelveWeeksAgo}&to=${today}`);
+    ok(typeof withSales.json.ratios.stopsPerSale === 'number' && withSales.json.ratios.stopsPerSale > 0, 'a number with sales');
+    const rows = (await admin.get(`/gauges/summary?groupBy=user&from=${twelveWeeksAgo}&to=${today}`)).json;
+    ok(rows.every((r: Json) => (r.ratios.stopsPerSale === null ? r.sales === 0 : r.sales > 0 && typeof r.ratios.stopsPerSale === 'number')), 'summary rows: null exactly when sales = 0');
+  });
   await check('PATCH status=left revokes sessions; admins cannot deactivate themselves', async () => {
     const body = {
       employeeId: 'LM-0910', email: 'smoke.leaver@linear-mcr.co.uk', firstName: 'Smoke', lastName: 'Leaver', role: 'rep', position: 'trainee',
@@ -439,6 +568,16 @@ async function main(): Promise<void> {
     status(self, 400, 'admin cannot deactivate themselves');
     eq((await admin.get('/users/1')).json.status, 'active', 'admin still active');
     status(await admin.get('/auth/me'), 200, 'admin session intact');
+  });
+  await check('Login answers one 401 message for an unknown email, a wrong ID and a deactivated account', async () => {
+    const unknown = await anon.post('/auth/login', { email: 'nobody.here@linear-mcr.co.uk', employeeId: 'LM-0910' });
+    const wrong = await anon.post('/auth/login', { email: 'smoke.leaver@linear-mcr.co.uk', employeeId: 'LM-9999' });
+    const left = await anon.post('/auth/login', { email: 'smoke.leaver@linear-mcr.co.uk', employeeId: 'LM-0910' });
+    for (const [what, r] of [['unknown', unknown], ['wrong id', wrong], ['deactivated', left]] as const) {
+      status(r, 401, what);
+      eq(r.json.error, 'Invalid email or employee ID', `${what} message`);
+    }
+    resetLoginFailures();
   });
   await check('GET /teams', async () => {
     const r = await rep.get('/teams');
@@ -539,7 +678,8 @@ async function main(): Promise<void> {
   await check('Gauge fixtures: a completed and a cancelled Northern Lights event (admin)', async () => {
     // yesterday stays inside the current pay week except on a Monday, when today's live event is used instead
     const date = dayOfWeek(today) === 1 ? today : addDays(today, -1);
-    const fixture = { campaignId: 1, teamId: 1, name: 'Smoke completed stand', venue: 'Arndale', city: 'Manchester', type: 'retail', date, startTime: '10:00', endTime: '18:00', targetSales: 12, notes: null };
+    // 00:01 so that on a Monday today's fixture has always started (gauges are refused before an event's start time)
+    const fixture = { campaignId: 1, teamId: 1, name: 'Smoke completed stand', venue: 'Arndale', city: 'Manchester', type: 'retail', date, startTime: '00:01', endTime: '23:59', targetSales: 12, notes: null };
     const r = await admin.post('/events', fixture);
     status(r, 201, 'completed event');
     const expected = date < today ? 'completed' : fixture.startTime <= nowHHMM() ? 'live' : 'scheduled';
@@ -565,23 +705,51 @@ async function main(): Promise<void> {
     const byEvent = await leader.get(`/gauges?eventId=${r.json[0].eventId}`);
     ok(byEvent.json.length > 0, 'eventId filter ignores default range');
   });
+  await check('GET /gauges strips other teams\' check-ins and notes (leader/recruiter), pages with offset and reports X-Total-Count', async () => {
+    const range = `from=${twelveWeeksAgo}&to=${today}`;
+    const stripped = (rows: Json[]) => rows.length > 0 && rows.every((g: Json) => g.checkedInAt === null && g.notes === null);
+    const foreign = await leader.get(`/gauges?teamId=2&${range}&limit=100`);
+    status(foreign, 200, 'leader reads team 2');
+    ok(stripped(foreign.json), "leader: other team's check-ins and notes are null");
+    const own = await leader.get(`/gauges?teamId=1&${range}&limit=100`);
+    ok(own.json.some((g: Json) => g.checkedInAt !== null || g.notes !== null), "leader: own team's details visible");
+    const recr = await recruiter.get(`/gauges?${range}&limit=100`);
+    ok(stripped(recr.json), 'recruiter: every entry stripped');
+    const adm = await admin.get(`/gauges?teamId=2&${range}&limit=100`);
+    ok(adm.json.some((g: Json) => g.checkedInAt !== null), 'admin sees everything');
+    const total = Number(adm.headers.get('x-total-count'));
+    ok(total >= adm.json.length && total > 100, `X-Total-Count (${total}) counts beyond the page`);
+    eq(total, get<Json>(db, `SELECT COUNT(*) AS n FROM gauge_entries g JOIN users u ON u.id = g.user_id WHERE u.team_id = 2 AND g.date BETWEEN ? AND ?`, [twelveWeeksAgo, today])!.n, 'X-Total-Count = matching rows');
+    const page1 = await admin.get(`/gauges?teamId=2&${range}&limit=5&offset=0`);
+    const page2 = await admin.get(`/gauges?teamId=2&${range}&limit=5&offset=5`);
+    eq(page1.json.length, 5, 'page 1');
+    eq(page2.json.length, 5, 'page 2');
+    ok(page1.json.every((g: Json) => !page2.json.some((h: Json) => h.id === g.id)), 'pages are disjoint');
+    eq(Number(page2.headers.get('x-total-count')), total, 'total is the same on every page');
+    const last = await admin.get(`/gauges?teamId=2&${range}&limit=5&offset=${total - 2}`);
+    eq(last.json.length, 2, 'final partial page');
+    status(await admin.get(`/gauges?${range}&offset=-1`), 400, 'negative offset');
+    status(await admin.get(`/gauges?${range}&offset=abc`), 400, 'non-numeric offset');
+    return `${total} team-2 rows in 12 weeks`;
+  });
   await check('POST /gauges upsert (201 then 200), invalid funnel 400', async () => {
     ok(pastNlEvent, 'need a completed Northern Lights event');
-    const body = { eventId: pastNlEvent.id, userId: 10, date: pastNlEvent.date, stops: 60, table: 20, presentations: 10, closes: 4, taps: 3, sales: 2, checkedInAt: `${pastNlEvent.date}T${pastNlEvent.startTime}:00Z`, notes: 'smoke' };
+    // a zoned check-in two minutes after the (00:01) start, expressed as the UTC instant of that local time
+    const body = { eventId: pastNlEvent.id, userId: 10, date: pastNlEvent.date, stops: 60, table: 20, presentations: 10, closes: 4, taps: 3, sales: 2, checkedInAt: new Date(`${pastNlEvent.date}T00:03:00`).toISOString(), notes: 'smoke' };
     const r1 = await rep.post('/gauges', body);
     status(r1, 201, 'create');
     eq(r1.json.sales, 2, 'sales');
     eq(r1.json.userName, 'Jordan Lee', 'user meta');
     ok(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}$/.test(r1.json.checkedInAt), 'zoned check-in stored as naive local time');
-    const naive = await rep.post('/gauges', { ...body, checkedInAt: `${pastNlEvent.date}T10:03` });
-    eq(naive.json.checkedInAt, `${pastNlEvent.date}T10:03:00`, 'naive check-in kept verbatim (seconds padded)');
+    const naive = await rep.post('/gauges', { ...body, checkedInAt: `${pastNlEvent.date}T00:03` });
+    eq(naive.json.checkedInAt, `${pastNlEvent.date}T00:03:00`, 'naive check-in kept verbatim (seconds padded)');
     gaugeId = r1.json.id;
     // omitted keys keep the stored values, explicit nulls clear them
     const { checkedInAt: _ci, notes: _no, ...numbersOnly } = body;
     const kept = await rep.post('/gauges', numbersOnly);
     status(kept, 200, 'omitted');
     eq(kept.json.notes, 'smoke', 'omitted notes kept');
-    eq(kept.json.checkedInAt, `${pastNlEvent.date}T10:03:00`, 'omitted check-in kept');
+    eq(kept.json.checkedInAt, `${pastNlEvent.date}T00:03:00`, 'omitted check-in kept');
     const cleared = await rep.post('/gauges', { ...body, checkedInAt: null, notes: null });
     status(cleared, 200, 'explicit nulls');
     eq(cleared.json.checkedInAt, null, 'checkedInAt cleared');
@@ -603,6 +771,35 @@ async function main(): Promise<void> {
     status(await rep.post('/gauges', { ...body, eventId: otherTeam.id, date: otherTeam.date }), 403, 'rep other-team event');
     status(await leader.post('/gauges', { ...body, userId: 9, notes: 'leader entry' }), 201, 'leader for team member');
   });
+  await check('Gauge counts are strict whole numbers 0..2000 (no coercion, no 1e308); targets ≤ 500; money amounts > 0 and ≤ 1,000,000', async () => {
+    const body = { eventId: pastNlEvent.id, userId: 10, date: pastNlEvent.date, stops: 60, table: 20, presentations: 10, closes: 4, taps: 3, sales: 2 };
+    status(await rep.post('/gauges', { ...body, stops: 2001 }), 400, 'stops above the daily ceiling');
+    status(await rep.post('/gauges', { ...body, stops: 1e308, table: 1e308, presentations: 1e308, closes: 1e308, taps: 1e308, sales: 1e308 }), 400, '1e308');
+    status(await rep.post('/gauges', { ...body, stops: 1e12 }), 400, '1e12');
+    status(await rep.post('/gauges', { ...body, stops: true }), 400, 'boolean is not coerced to 1');
+    status(await rep.post('/gauges', { ...body, table: null }), 400, 'null is not coerced to 0');
+    status(await rep.post('/gauges', { ...body, stops: '60' }), 400, 'numeric string is not coerced');
+    status(await rep.post('/gauges', { ...body, stops: 60.5 }), 400, 'non-integer');
+    const raw = await fetch(`${base}/gauges`, { method: 'POST', headers: { 'content-type': 'application/json', cookie: (rep as unknown as { cookie: string }).cookie }, body: `{"eventId":${body.eventId},"userId":10,"date":"${body.date}","stops":1e999,"table":0,"presentations":0,"closes":0,"taps":0,"sales":0}` });
+    eq(raw.status, 400, 'JSON 1e999 (Infinity) rejected as non-finite');
+    const max = await rep.post('/gauges', { ...body, stops: 2000, table: 2000, presentations: 2000, closes: 2000, taps: 2000, sales: 2000 });
+    status(max, 200, '2000 everywhere is accepted');
+    status(await rep.post('/gauges', body), 200, 'restored');
+    const ev = { campaignId: 1, teamId: 1, name: 'Target', venue: 'X', city: 'Manchester', type: 'retail', date: addDays(today, 5), startTime: '10:00', endTime: '18:00', notes: null };
+    status(await admin.post('/events', { ...ev, targetSales: 501 }), 400, 'targetSales above 500');
+    status(await admin.post('/events', { ...ev, targetSales: '12' }), 400, 'targetSales must be a number');
+    status(await admin.post('/finance/expenses', { date: today, category: 'other', amount: 1e308, description: 'x' }), 400, 'expense 1e308');
+    status(await admin.post('/finance/expenses', { date: today, category: 'other', amount: 1_000_001, description: 'x' }), 400, 'expense above £1,000,000');
+    status(await admin.post('/finance/expenses', { date: today, category: 'other', amount: 0, description: 'x' }), 400, 'expense of £0');
+    status(await admin.post('/finance/expenses', { date: today, category: 'other', amount: -5, description: 'x' }), 400, 'negative expense');
+    const okExp = await admin.post('/finance/expenses', { date: today, category: 'other', amount: 1_000_000, description: 'Smoke ceiling' });
+    status(okExp, 201, '£1,000,000 accepted');
+    status(await admin.del(`/finance/expenses/${okExp.json.id}`), 204, 'cleanup');
+    status(await admin.patch('/campaigns/1', { payoutPerSale: 0 }), 400, 'campaign payout must be > 0');
+    status(await admin.patch('/campaigns/1', { payoutPerSale: 2_000_000 }), 400, 'campaign payout above the ceiling');
+    status(await admin.patch('/campaigns/1', { repCommissionPerSale: -1 }), 400, 'negative commission');
+    eq((await admin.get('/campaigns')).json.find((c: Json) => c.id === 1).payoutPerSale, 120, 'campaign untouched');
+  });
   await check('POST/PATCH /gauges integrity: event date, cancelled, future, inactive user, other team', async () => {
     const body = { eventId: pastNlEvent.id, userId: 10, date: pastNlEvent.date, stops: 30, table: 10, presentations: 5, closes: 2, taps: 1, sales: 1 };
     const wrongDate = await rep.post('/gauges', { ...body, date: addDays(pastNlEvent.date, -1) });
@@ -620,6 +817,25 @@ async function main(): Promise<void> {
     status(await rep.patch(`/gauges/${gaugeId}`, { date: addDays(pastNlEvent.date, -1) }), 400, 'PATCH cannot move the date off the event');
     status(await rep.patch(`/gauges/${gaugeId}`, { eventId: futureNlEvent.id, date: futureNlEvent.date }), 400, 'PATCH cannot move the entry to a future event');
   });
+  await check("Today's event accepts gauges only once its start time has passed; a check-in can never be in the future", async () => {
+    const late = await admin.post('/events', { campaignId: 1, teamId: 1, name: 'Smoke late stand', venue: 'Late Hall', city: 'Manchester', type: 'retail', date: today, startTime: '23:58', endTime: '23:59', targetSales: 1, notes: null });
+    status(late, 201, 'event today starting 23:58');
+    const body = { eventId: late.json.id, userId: 10, date: today, stops: 1, table: 0, presentations: 0, closes: 0, taps: 0, sales: 0 };
+    if (nowHHMM() < '23:58') {
+      eq(late.json.status, 'scheduled', 'not started yet');
+      const early = await rep.post('/gauges', body);
+      status(early, 400, 'gauges before the start time');
+      ok(/once the event has started/.test(early.json.error), `message (${early.json.error})`);
+      status(await admin.post('/gauges', body), 400, 'admin too');
+    }
+    status(await admin.del(`/events/${late.json.id}`), 204, 'cleanup (no entries)');
+    const tomorrow = new Date(Date.now() + 86_400_000).toISOString();
+    const future = await rep.post('/gauges', { eventId: pastNlEvent.id, userId: 10, date: pastNlEvent.date, stops: 30, table: 10, presentations: 5, closes: 2, taps: 1, sales: 1, checkedInAt: tomorrow });
+    status(future, 400, 'check-in in the future');
+    eq(future.json.error, 'Check-in time cannot be in the future', 'message');
+    status(await rep.patch(`/gauges/${gaugeId}`, { checkedInAt: `${addDays(today, 1)}T09:00` }), 400, 'PATCH with a future check-in');
+    status(await rep.patch(`/gauges/${gaugeId}`, { checkedInAt: `${pastNlEvent.date}T00:05` }), 200, 'a past check-in is fine');
+  });
   await check('PATCH/DELETE /gauges', async () => {
     const p = await rep.patch(`/gauges/${gaugeId}`, { sales: 1, notes: 'patched' });
     status(p, 200, 'patch');
@@ -630,6 +846,29 @@ async function main(): Promise<void> {
     status(await rep.del(`/gauges/${gaugeId}`), 403, 'rep cannot delete');
     status(await leader.del(`/gauges/${gaugeId}`), 204, 'leader deletes');
     status(await leader.del(`/gauges/${gaugeId}`), 404, 'already gone');
+  });
+  await check('Events with recorded gauges: date/team/campaign frozen (409), delete refused (409); status follows a new date', async () => {
+    ok(get<Json>(db, `SELECT COUNT(*) AS n FROM gauge_entries WHERE event_id = ?`, [pastNlEvent.id])!.n > 0, 'fixture still has an entry (the leader\'s)');
+    const moved = await admin.patch(`/events/${pastNlEvent.id}`, { date: addDays(pastNlEvent.date, -1) });
+    status(moved, 409, 'date frozen');
+    ok(/recorded gauges/.test(moved.json.error), `message (${moved.json.error})`);
+    status(await admin.patch(`/events/${pastNlEvent.id}`, { teamId: 2 }), 409, 'team frozen');
+    status(await admin.patch(`/events/${pastNlEvent.id}`, { campaignId: 2 }), 409, 'campaign frozen');
+    status(await admin.patch(`/events/${pastNlEvent.id}`, { date: pastNlEvent.date, name: 'Smoke completed stand (renamed)' }), 200, 'same date + other fields still editable');
+    const del = await admin.del(`/events/${pastNlEvent.id}`);
+    status(del, 409, 'delete refused');
+    ok(/cancelled instead/.test(del.json.error), `message (${del.json.error})`);
+    eq(get<Json>(db, `SELECT COUNT(*) AS n FROM gauge_entries WHERE event_id = ?`, [pastNlEvent.id])!.n, 1, 'entries intact');
+    // an entry-less event: the status follows the date / start time unless it is cancelled
+    const e = await admin.post('/events', { campaignId: 1, teamId: 1, name: 'Smoke moving stand', venue: 'Y', city: 'Manchester', type: 'retail', date: addDays(today, 3), startTime: '10:00', endTime: '18:00', targetSales: 5, notes: null });
+    status(e, 201, 'scheduled event');
+    eq(e.json.status, 'scheduled', 'scheduled');
+    eq((await admin.patch(`/events/${e.json.id}`, { date: addDays(today, -10) })).json.status, 'completed', 'moved into the past → completed');
+    eq((await admin.patch(`/events/${e.json.id}`, { date: today, startTime: '00:01', endTime: '23:59' })).json.status, 'live', 'moved to today after its start → live');
+    eq((await admin.patch(`/events/${e.json.id}`, { date: addDays(today, 4) })).json.status, 'scheduled', 'moved ahead → scheduled');
+    eq((await admin.patch(`/events/${e.json.id}`, { status: 'cancelled' })).json.status, 'cancelled', 'cancel');
+    eq((await admin.patch(`/events/${e.json.id}`, { date: addDays(today, -2) })).json.status, 'cancelled', 'a cancelled event stays cancelled when moved');
+    status(await admin.del(`/events/${e.json.id}`), 204, 'entry-less event deletes');
   });
   await check('GET /gauges/summary groupBy user|team|campaign|day|week', async () => {
     const range = `from=${twelveWeeksAgo}&to=${today}`;
@@ -671,6 +910,23 @@ async function main(): Promise<void> {
     status(await admin.get('/leaderboard?period=decade'), 400, 'invalid period');
     return `#1 this month: ${month.json[0].userName} (${month.json[0].sales})`;
   });
+  await check('Aggregate response cache: MISS then HIT per user, headers replayed, any write invalidates', async () => {
+    const a = await leader.get('/me/dashboard?range=month');
+    eq(a.headers.get('x-cache'), 'MISS', 'first read is a miss');
+    const b = await leader.get('/me/dashboard?range=month');
+    eq(b.headers.get('x-cache'), 'HIT', 'second read is a hit');
+    eq(JSON.stringify(b.json), JSON.stringify(a.json), 'identical body');
+    eq((await rep.get('/me/dashboard?range=month')).headers.get('x-cache'), 'MISS', 'another user never sees the cached view');
+    const lb1 = await admin.get('/leaderboard?period=week');
+    const lb2 = await admin.get('/leaderboard?period=week');
+    eq(lb2.headers.get('x-cache'), 'HIT', 'leaderboard cached');
+    eq(lb2.headers.get('x-total-count'), lb1.headers.get('x-total-count'), 'X-Total-Count replayed on a hit');
+    status(await leader.post('/announcements', { title: 'Cache buster', body: 'Any write invalidates' }), 201, 'a write');
+    eq((await leader.get('/me/dashboard?range=month')).headers.get('x-cache'), 'MISS', 'invalidated by the write');
+    eq((await rep.get('/finance/payroll')).headers.get('x-cache'), null, 'non-aggregate endpoints are not cached');
+    status(await rep.get('/me/dashboard?range=year'), 400, 'errors pass through');
+    eq((await rep.get('/me/dashboard?range=year')).headers.get('x-cache'), 'MISS', 'errors are never cached');
+  });
 
   // ── payroll materialisation & next pay (direct calls against the same database) ──
   const lastCompletedMonday = addDays(monday, -7);
@@ -680,30 +936,33 @@ async function main(): Promise<void> {
     ok(seeded.length > 20, 'seed has runs for the last completed week');
     ok(seeded.some((r: Json) => r.teamSales > 0), 'includes leaders with overrides');
     run(db, `DELETE FROM payroll_runs WHERE week_start = ?`, [lastCompletedMonday]);
-    eq(materialisePayrollRuns(db, addDays(lastCompletedMonday, 6)), 0, 'nothing is created while the week is still in progress');
+    const early = materialisePayrollRuns(db, addDays(lastCompletedMonday, 6));
+    eq(early.created + early.updated + early.deleted, 0, 'nothing is created while the week is still in progress');
     const r = await admin.get(`/finance/payroll?from=${lastCompletedMonday}&to=${lastCompletedMonday}`);
     status(r, 200, 'list');
     eq(r.json.length, seeded.length, 'GET /finance/payroll materialised the missing week');
     ok(r.json.every((p: Json) => p.status === 'pending' && p.paidDate === null), 'new runs are pending');
     const rebuilt = all<Json>(db, `SELECT ${RUN_COLUMNS}, gross FROM payroll_runs WHERE week_start = ? ORDER BY user_id`, [lastCompletedMonday]);
     eq(JSON.stringify(rebuilt), JSON.stringify(seeded), 'same users, days, sales, team sales, gross (before deductions), due date, status and reference');
-    eq(materialisePayrollRuns(db), 0, 'idempotent');
+    const again = materialisePayrollRuns(db);
+    eq(JSON.stringify(again), JSON.stringify({ created: 0, updated: 0, deleted: 0 }), 'idempotent (the last two weeks recompute to the same figures)');
     return `${rebuilt.length} runs for w/c ${lastCompletedMonday}`;
   });
   await check('nextPay returns the earliest unpaid run even when overdue (status untouched)', async () => {
     const jordan = getUser(db, 10)!;
-    const pendingRun = get<Json>(db, `SELECT due_date AS dueDate, gross FROM payroll_runs WHERE user_id = 10 AND status = 'pending' ORDER BY due_date ASC LIMIT 1`);
-    ok(pendingRun, 'Jordan has a pending run');
+    // the earliest UNPAID run — pending or failed — is what nextPay reports (the seed gives Jordan a failed run)
+    const pendingRun = get<Json>(db, `SELECT due_date AS dueDate, gross, status FROM payroll_runs WHERE user_id = 10 AND status IN ('pending', 'failed') ORDER BY due_date ASC LIMIT 1`);
+    ok(pendingRun, 'Jordan has an unpaid run');
     const onDue = nextPay(db, jordan, pendingRun.dueDate);
     eq(onDue.nextPayday, pendingRun.dueDate, 'due today → that run');
     eq(onDue.nextPayAmount, pendingRun.gross, 'amount');
     const overdue = nextPay(db, jordan, addDays(pendingRun.dueDate, 3));
     eq(overdue.nextPayday, pendingRun.dueDate, 'overdue run is still the next pay');
     eq(overdue.nextPayAmount, pendingRun.gross, 'overdue amount');
-    eq(get<Json>(db, `SELECT status FROM payroll_runs WHERE user_id = 10 AND due_date = ?`, [pendingRun.dueDate])!.status, 'pending', 'stored status not mutated');
+    eq(get<Json>(db, `SELECT status FROM payroll_runs WHERE user_id = 10 AND due_date = ?`, [pendingRun.dueDate])!.status, pendingRun.status, 'stored status not mutated');
     run(db, `UPDATE payroll_runs SET status = 'failed' WHERE user_id = 10 AND due_date = ?`, [pendingRun.dueDate]);
     eq(nextPay(db, jordan, addDays(pendingRun.dueDate, 10)).nextPayday, pendingRun.dueDate, 'a failed run still needs paying');
-    run(db, `UPDATE payroll_runs SET status = 'pending' WHERE user_id = 10 AND due_date = ?`, [pendingRun.dueDate]);
+    run(db, `UPDATE payroll_runs SET status = ? WHERE user_id = 10 AND due_date = ?`, [pendingRun.status, pendingRun.dueDate]);
     return `${pendingRun.dueDate} £${pendingRun.gross}`;
   });
 
@@ -836,6 +1095,162 @@ async function main(): Promise<void> {
     status(await admin.del(`/finance/expenses/${c.json.id}`), 404, 'gone');
   });
 
+  // ── payroll follows gauge changes ──
+  let syncEventId = 0;
+  const syncDate = addDays(lastCompletedMonday, 2);
+  await check('Gauge writes recompute the week\'s unpaid runs (owner + leader override) in the same transaction; a complete week without a run gets one', async () => {
+    const ev = await admin.post('/events', { campaignId: 1, teamId: 1, name: 'Smoke late entry', venue: 'Smoke Hall', city: 'Manchester', type: 'retail', date: syncDate, startTime: '10:00', endTime: '18:00', targetSales: 5, notes: null });
+    status(ev, 201, 'event in the last completed week');
+    eq(ev.json.status, 'completed', 'completed');
+    syncEventId = ev.json.id;
+    const runOf = (userId: number) => get<Json>(db, `SELECT id, sales, gross, days_worked AS days, overrides, status, adjusted_at AS adjustedAt FROM payroll_runs WHERE user_id = ? AND week_start = ?`, [userId, lastCompletedMonday]);
+    const jordanBefore = runOf(10);
+    const ameliaBefore = runOf(2);
+    ok(jordanBefore && jordanBefore.status === 'pending', 'Jordan has a pending run for that week');
+    ok(ameliaBefore && ameliaBefore.status === 'pending', 'Amelia (leader) has a pending run');
+    const r = await rep.post('/gauges', { eventId: syncEventId, userId: 10, date: syncDate, stops: 30, table: 10, presentations: 5, closes: 3, taps: 3, sales: 3 });
+    status(r, 201, 'rep logs a forgotten day');
+    const jordanAfter = runOf(10);
+    eq(jordanAfter.id, jordanBefore.id, 'same run, updated in place');
+    eq(jordanAfter.sales, jordanBefore.sales + 3, 'sales follow the gauges');
+    eq(jordanAfter.gross, weekPayFor(db, getUser(db, 10)!, lastCompletedMonday)!.pay.gross, 'gross recomputed by weekPayFor');
+    ok(jordanAfter.gross > jordanBefore.gross, 'pay went up');
+    eq(jordanAfter.status, 'pending', 'still pending');
+    const ameliaAfter = runOf(2);
+    const override = get<Json>(db, `SELECT pp.override_per_team_sale AS o FROM users u JOIN pay_plans pp ON pp.id = u.pay_plan_id WHERE u.id = 2`)!.o;
+    eq(round2(ameliaAfter.overrides - ameliaBefore.overrides), round2(3 * override), `leader override follows the team's sales (+3 × £${override})`);
+    const slip = await admin.get(`/finance/payroll/${jordanBefore.id}`);
+    eq(slip.json.entries.reduce((a: number, e: Json) => a + e.sales, 0), jordanAfter.sales, 'payslip entries add up to the run');
+    const summary = await admin.get(`/finance/summary?from=${lastCompletedMonday}&to=${addDays(lastCompletedMonday, 6)}`);
+    eq(summary.json.weeks[0].payroll, round2(Number(get<Json>(db, `SELECT SUM(gross) AS g FROM payroll_runs WHERE week_start = ?`, [lastCompletedMonday])!.g)), 'finance week payroll moved with the runs');
+    // a complete week with work but no run yet → a pending run is created; removing the work removes it again
+    const starter = await admin.post('/users', { employeeId: 'LM-0930', email: 'smoke.starter@linear-mcr.co.uk', firstName: 'Smoke', lastName: 'Starter', role: 'rep', position: 'trainee', teamId: 1, startDate: lastCompletedMonday, status: 'active', phone: null, city: 'Manchester' });
+    status(starter, 201, 'new starter');
+    eq(runOf(starter.json.id), undefined, 'no run yet');
+    const g = await admin.post('/gauges', { eventId: syncEventId, userId: starter.json.id, date: syncDate, stops: 20, table: 8, presentations: 4, closes: 2, taps: 2, sales: 2 });
+    status(g, 201, 'admin logs the starter');
+    const created = runOf(starter.json.id);
+    ok(created && created.status === 'pending', 'pending run created for the complete week');
+    eq(created.gross, 80 + 2 * 25, 'trainee plan: £80/day + £25/sale');
+    ok(/^PAY-\d{6}-LM-0930$/.test(get<Json>(db, `SELECT reference FROM payroll_runs WHERE id = ?`, [created.id])!.reference), 'reference');
+    status(await admin.del(`/gauges/${g.json.id}`), 204, 'entry removed');
+    eq(runOf(starter.json.id), undefined, 'run removed with its only entry');
+    const p = await rep.patch(`/gauges/${r.json.id}`, { sales: 2, taps: 2 });
+    status(p, 200, 'rep patches the entry');
+    eq(runOf(10).sales, jordanBefore.sales + 2, 'run follows the patch');
+    return `Jordan ${jordanBefore.sales} → ${jordanAfter.sales} sales, £${jordanBefore.gross} → £${jordanAfter.gross}`;
+  });
+  await check('Paid week: gauge writes refused with 409 unless admin; an admin change flags the run adjusted_at (figures frozen) and the payslip shows it', async () => {
+    const runRow = () => get<Json>(db, `SELECT id, sales, gross, status, adjusted_at AS adjustedAt FROM payroll_runs WHERE user_id = 10 AND week_start = ?`, [lastCompletedMonday])!;
+    const before = runRow();
+    const paid = await admin.post(`/finance/payroll/${before.id}/pay`, {});
+    status(paid, 200, 'pay the run');
+    const entry = get<Json>(db, `SELECT id FROM gauge_entries WHERE event_id = ? AND user_id = 10`, [syncEventId])!;
+    const body = { eventId: syncEventId, userId: 10, date: syncDate, stops: 30, table: 10, presentations: 5, closes: 3, taps: 3, sales: 3 };
+    const refused = await rep.post('/gauges', body);
+    status(refused, 409, 'rep cannot change a paid week');
+    eq(refused.json.error, 'This week has already been paid — ask an administrator to adjust', 'message');
+    status(await rep.patch(`/gauges/${entry.id}`, { sales: 1, taps: 1 }), 409, 'rep PATCH refused');
+    status(await leader.del(`/gauges/${entry.id}`), 409, 'leader DELETE refused');
+    status(await leader.post('/gauges', body), 409, 'leader upsert refused');
+    eq(runRow().adjustedAt, null, 'refused writes do not flag the run');
+    const adjusted = await admin.patch(`/gauges/${entry.id}`, { sales: 1, taps: 1 });
+    status(adjusted, 200, 'admin may adjust');
+    const after = runRow();
+    ok(typeof after.adjustedAt === 'string', 'run flagged adjusted_at');
+    eq(after.gross, before.gross, 'paid figures are frozen');
+    eq(after.sales, before.sales, 'paid sales frozen');
+    eq(after.status, paid.json.status, 'status unchanged');
+    ok(typeof (await rep.get(`/finance/payroll/${before.id}`)).json.adjustedAt === 'string', 'payslip carries adjustedAt');
+    ok((await admin.get(`/finance/payroll?userId=10&from=${lastCompletedMonday}&to=${lastCompletedMonday}`)).json[0].adjustedAt !== null, 'payroll list carries adjustedAt');
+    eq(get<Json>(db, `SELECT adjusted_at AS a FROM payroll_runs WHERE user_id = 2 AND week_start = ?`, [lastCompletedMonday])!.a, null, "the leader's still-unpaid run is recomputed, not flagged");
+  });
+  await check('POST /finance/payroll/:id/pay: paidDate must be between the week end and today', async () => {
+    const pending = all<Json>(db, `SELECT id, week_end AS weekEnd FROM payroll_runs WHERE status = 'pending' AND week_start = ? ORDER BY id`, [lastCompletedMonday]);
+    ok(pending.length >= 2, 'pending runs to pay');
+    const [a, b] = pending;
+    status(await admin.post(`/finance/payroll/${a.id}/pay`, { paidDate: '2031-01-01' }), 400, 'future paidDate');
+    status(await admin.post(`/finance/payroll/${a.id}/pay`, { paidDate: addDays(a.weekEnd, -1) }), 400, 'before the week ends');
+    status(await admin.post(`/finance/payroll/${a.id}/pay`, { paidDate: '2020-01-01' }), 400, 'years before the week');
+    const onSunday = await admin.post(`/finance/payroll/${a.id}/pay`, { paidDate: a.weekEnd });
+    status(onSunday, 200, 'on the week end');
+    eq(onSunday.json.status, 'paid', 'paid before the due date');
+    const now = await admin.post(`/finance/payroll/${b.id}/pay`, { paidDate: today });
+    status(now, 200, 'today');
+    eq(now.json.paidDate, today, 'paidDate today');
+  });
+  await check('materialisePayrollRuns recomputes the unpaid runs of the last two completed weeks (tampered figures restored); paid runs untouched', async () => {
+    const unpaid = get<Json>(db, `SELECT id, sales, gross, status FROM payroll_runs WHERE week_start = ? AND status IN ('pending', 'failed') ORDER BY id LIMIT 1`, [lastCompletedMonday]);
+    const paidRun = get<Json>(db, `SELECT id, sales, gross FROM payroll_runs WHERE week_start = ? AND status IN ('paid', 'late') AND adjusted_at IS NULL ORDER BY id LIMIT 1`, [lastCompletedMonday]);
+    ok(unpaid && paidRun, 'an unpaid and a paid run in the last completed week');
+    run(db, `UPDATE payroll_runs SET sales = sales + 100, gross = gross + 999 WHERE id IN (?, ?)`, [unpaid.id, paidRun.id]);
+    const r = materialisePayrollRuns(db);
+    ok(r.updated >= 1, `recomputed ${r.updated} run(s)`);
+    const fixed = get<Json>(db, `SELECT sales, gross, status FROM payroll_runs WHERE id = ?`, [unpaid.id])!;
+    eq(fixed.sales, unpaid.sales, 'unpaid sales restored from the gauges');
+    eq(fixed.gross, unpaid.gross, 'unpaid gross restored');
+    eq(fixed.status, unpaid.status, 'status kept');
+    const frozen = get<Json>(db, `SELECT sales, gross FROM payroll_runs WHERE id = ?`, [paidRun.id])!;
+    eq(frozen.sales, paidRun.sales + 100, 'paid run not recomputed');
+    run(db, `UPDATE payroll_runs SET sales = ?, gross = ? WHERE id = ?`, [paidRun.sales, paidRun.gross, paidRun.id]);
+    bumpDataVersion();
+    eq(JSON.stringify(materialisePayrollRuns(db)), JSON.stringify({ created: 0, updated: 0, deleted: 0 }), 'idempotent afterwards');
+  });
+  await check('Dashboard earningsToDate counts only runs whose pay week starts in the range (+ live estimate for weeks without a run)', async () => {
+    const jordan = getUser(db, 10)!;
+    for (const range of ['month', 'quarter'] as const) {
+      const d = await rep.get(`/me/dashboard?range=${range}`);
+      status(d, 200, range);
+      const runs = all<Json>(db, `SELECT week_start AS weekStart, gross FROM payroll_runs WHERE user_id = 10 AND week_start BETWEEN ? AND ?`, [d.json.from, d.json.to]);
+      let expected = runs.reduce((a: number, r: Json) => a + r.gross, 0);
+      const covered = new Set(runs.map((r: Json) => r.weekStart));
+      for (let m = mondayOf(d.json.from); m <= d.json.to; m = addDays(m, 7)) if (m >= d.json.from && !covered.has(m)) expected += weekPayFor(db, jordan, m)?.pay.gross ?? 0;
+      eq(d.json.personal.earningsToDate, round2(expected), `${range}: runs starting in the range + estimate`);
+      const firstMonday = mondayOf(d.json.from);
+      if (firstMonday < d.json.from) {
+        const straddling = get<Json>(db, `SELECT gross FROM payroll_runs WHERE user_id = 10 AND week_start = ?`, [firstMonday]);
+        if (straddling && straddling.gross > 0) ok(Math.abs(d.json.personal.earningsToDate - (expected + straddling.gross)) > 0.001, `${range}: the week straddling the period start is not counted`);
+      }
+    }
+  });
+  await check('Money rates are snapshotted per entry: changing a campaign payout leaves past revenue alone and only applies to new entries', async () => {
+    const range = `from=${lastCompletedMonday}&to=${addDays(lastCompletedMonday, 6)}`;
+    const before = (await admin.get(`/finance/summary?${range}`)).json;
+    const dashBefore = (await admin.get('/me/dashboard?range=quarter')).json.company.revenue;
+    status(await admin.patch('/campaigns/1', { payoutPerSale: 130 }), 200, 'raise BCN payout 120 → 130');
+    const after = (await admin.get(`/finance/summary?${range}`)).json;
+    eq(after.totals.revenue, before.totals.revenue, 'past revenue unchanged');
+    eq(JSON.stringify(after.byCampaign), JSON.stringify(before.byCampaign), 'by-campaign revenue/commission/margin unchanged');
+    eq((await admin.get('/me/dashboard?range=quarter')).json.company.revenue, dashBefore, 'dashboard revenue unchanged');
+    const g = await leader.post('/gauges', { eventId: syncEventId, userId: 9, date: syncDate, stops: 20, table: 8, presentations: 4, closes: 2, taps: 2, sales: 2 });
+    status(g, 201, 'a new entry under the new rate');
+    const snap = get<Json>(db, `SELECT payout_per_sale AS p, commission_per_sale AS c FROM gauge_entries WHERE id = ?`, [g.json.id])!;
+    eq(snap.p, 130, 'payout snapshot');
+    eq(snap.c, get<Json>(db, `SELECT pp.commission_per_sale AS c FROM users u JOIN pay_plans pp ON pp.id = u.pay_plan_id WHERE u.id = 9`)!.c, "commission snapshot from the person's plan");
+    const withNew = (await admin.get(`/finance/summary?${range}`)).json;
+    eq(withNew.totals.revenue, round2(after.totals.revenue + 2 * 130), 'the new sales count at £130');
+    status(await admin.patch('/campaigns/1', { payoutPerSale: 120 }), 200, 'restore the rate');
+    eq((await admin.get(`/finance/summary?${range}`)).json.totals.revenue, withNew.totals.revenue, 'restoring the rate does not restate the new entry either');
+    eq(get<Json>(db, `SELECT COUNT(*) AS n FROM gauge_entries WHERE payout_per_sale IS NULL OR commission_per_sale IS NULL`)!.n, 0, 'every seeded row carries a snapshot');
+    status(await leader.del(`/gauges/${g.json.id}`), 204, 'cleanup');
+  });
+  await check('FinanceSummary weeks (one GROUP BY per series) equal the per-week reference queries', async () => {
+    const r = (await admin.get('/finance/summary')).json;
+    for (const w of r.weeks) {
+      const sunday = addDays(w.weekStart, 6);
+      const g = get<Json>(db, `SELECT COALESCE(SUM(g.sales * COALESCE(g.payout_per_sale, c.payout_per_sale)), 0) AS revenue, COALESCE(SUM(g.sales), 0) AS sales FROM gauge_entries g JOIN events e ON e.id = g.event_id JOIN campaigns c ON c.id = e.campaign_id WHERE g.date BETWEEN ? AND ?`, [w.weekStart, sunday])!;
+      const x = get<Json>(db, `SELECT COALESCE(SUM(amount), 0) AS expenses FROM expenses WHERE date BETWEEN ? AND ?`, [w.weekStart, sunday])!;
+      eq(w.revenue, round2(Number(g.revenue)), `${w.weekStart} revenue`);
+      eq(w.sales, Number(g.sales), `${w.weekStart} sales`);
+      eq(w.expenses, round2(Number(x.expenses)), `${w.weekStart} expenses`);
+      if (!w.estimated) eq(w.payroll, round2(Number(get<Json>(db, `SELECT COALESCE(SUM(gross), 0) AS p FROM payroll_runs WHERE week_start = ?`, [w.weekStart])!.p)), `${w.weekStart} payroll`);
+    }
+    const lw = (await leader.get('/finance/summary')).json.weeks[0];
+    const lg = get<Json>(db, `SELECT COALESCE(SUM(g.sales * COALESCE(g.payout_per_sale, c.payout_per_sale)), 0) AS revenue FROM gauge_entries g JOIN users u ON u.id = g.user_id JOIN events e ON e.id = g.event_id JOIN campaigns c ON c.id = e.campaign_id WHERE u.team_id = 1 AND g.date BETWEEN ? AND ?`, [lw.weekStart, addDays(lw.weekStart, 6)])!;
+    eq(lw.revenue, round2(Number(lg.revenue)), 'team-scoped week revenue');
+    return `${r.weeks.length} weeks identical`;
+  });
+
   // ── recruitment ──
   let candidateId = 0;
   await check('GET /recruitment/candidates (roles, filters)', async () => {
@@ -882,6 +1297,8 @@ async function main(): Promise<void> {
     status(s1, 200, 'leader moves stage');
     eq(s1.json.stage, 'screening', 'stage screening');
     status(await leader.post(`/recruitment/candidates/${candidateId}/stage`, { stage: 'screening' }), 409, 'same stage');
+    status(await recruiter.post(`/recruitment/candidates/${candidateId}/stage`, { stage: 'hired' }), 409, 'hired only from offer');
+    status(await recruiter.post(`/recruitment/candidates/${candidateId}/stage`, { stage: 'offer' }), 200, 'screening → offer (forward moves may skip stages)');
     const hiredRes = await recruiter.post(`/recruitment/candidates/${candidateId}/stage`, { stage: 'hired' });
     status(hiredRes, 200, 'hire');
     ok(hiredRes.json.hiredUserId > 0, 'hiredUserId set');
@@ -896,6 +1313,7 @@ async function main(): Promise<void> {
     // hire with an explicit team and entry position; the pay plan is always the server default for the position
     const c2 = await recruiter.post('/recruitment/candidates', { firstName: 'Smoke', lastName: 'Placed', email: 'smoke.placed@example.com', positionApplied: 'team_leader' });
     status(c2, 201, 'second candidate');
+    status(await recruiter.post(`/recruitment/candidates/${c2.json.id}/stage`, { stage: 'offer' }), 200, 'second candidate to offer');
     status(await recruiter.post(`/recruitment/candidates/${c2.json.id}/stage`, { stage: 'hired', position: 'owner', teamId: 2 }), 400, 'position restricted to trainee/field_rep');
     status(await recruiter.post(`/recruitment/candidates/${c2.json.id}/stage`, { stage: 'hired', teamId: 999 }), 400, 'unknown team');
     const h2 = await recruiter.post(`/recruitment/candidates/${c2.json.id}/stage`, { stage: 'hired', teamId: 2, position: 'field_rep', payPlanId: 6 });
@@ -942,6 +1360,117 @@ async function main(): Promise<void> {
     ok(Object.keys(r.json.openByStage).length === 8, 'openByStage has all stages');
     return `${r.json.applied} applied, ${r.json.hired} hired, ${r.json.avgTimeToHireDays}d to hire, ${r.json.overdueActions} overdue`;
   });
+  await check('Candidate stage machine: forward, one step back, reject/withdraw from open stages, hired only from offer, admin-only reopen to offer', async () => {
+    const c = await recruiter.post('/recruitment/candidates', { firstName: 'Stage', lastName: 'Machine', email: 'stage.machine@example.com' });
+    status(c, 201, 'candidate');
+    const move = (client: Client, stage: string) => client.post(`/recruitment/candidates/${c.json.id}/stage`, { stage });
+    const refused = await move(recruiter, 'hired');
+    status(refused, 409, 'applied → hired refused');
+    eq(refused.json.error, 'Candidates are hired from the offer stage', 'message');
+    status(await move(recruiter, 'interview'), 200, 'applied → interview (two steps forward)');
+    status(await move(recruiter, 'applied'), 409, 'two steps back refused');
+    status(await move(recruiter, 'screening'), 200, 'one step back');
+    status(await move(recruiter, 'offer'), 200, 'screening → offer');
+    status(await move(recruiter, 'withdrawn'), 200, 'withdrawn from an open stage');
+    status(await move(recruiter, 'offer'), 409, 'recruiter cannot reopen');
+    status(await move(leader, 'applied'), 409, 'leader cannot reopen');
+    status(await move(admin, 'applied'), 409, 'admin can only reopen to offer');
+    status(await move(admin, 'offer'), 200, 'admin reopens to offer');
+    status(await move(leader, 'rejected'), 200, 'rejected');
+    status(await move(leader, 'rejected'), 409, 'same stage');
+    status(await move(admin, 'offer'), 200, 'reopened again');
+    status(await move(recruiter, 'hired'), 200, 'hired from offer');
+    status(await move(admin, 'offer'), 409, 'hired is final');
+    eq((await recruiter.get(`/recruitment/candidates/${c.json.id}`)).json.history.length, 9, 'applied + eight moves recorded');
+  });
+  await check('Duplicate candidates: same email refused while open (409), allowed again once closed; hire refused when a user with that email exists or the person was hired already', async () => {
+    const dup = { firstName: 'Dupe', lastName: 'Person', email: 'dupe.person@example.com' };
+    const first = await recruiter.post('/recruitment/candidates', dup);
+    status(first, 201, 'first');
+    const second = await recruiter.post('/recruitment/candidates', { ...dup, firstName: 'Dupe2' });
+    status(second, 409, 'same email while open');
+    ok(/already in the pipeline/.test(second.json.error), `message (${second.json.error})`);
+    status(await recruiter.post('/recruitment/candidates', { ...dup, email: 'DUPE.PERSON@example.com' }), 409, 'case-insensitive');
+    const other = await recruiter.post('/recruitment/candidates', { firstName: 'Other', lastName: 'Person', email: 'other.person@example.com' });
+    status(other, 201, 'another candidate');
+    status(await recruiter.patch(`/recruitment/candidates/${other.json.id}`, { email: dup.email }), 409, 'PATCH onto an open email refused');
+    status(await recruiter.post(`/recruitment/candidates/${first.json.id}/stage`, { stage: 'rejected' }), 200, 'close the first');
+    const again = await recruiter.post('/recruitment/candidates', dup);
+    status(again, 201, 'may re-apply once closed');
+    const twin = await recruiter.post('/recruitment/candidates', { firstName: 'Jordan', lastName: 'Twin', email: 'jordan.lee@linear-mcr.co.uk' });
+    status(twin, 201, 'candidate with an existing user\'s email');
+    status(await recruiter.post(`/recruitment/candidates/${twin.json.id}/stage`, { stage: 'offer' }), 200, 'to offer');
+    const hire = await recruiter.post(`/recruitment/candidates/${twin.json.id}/stage`, { stage: 'hired' });
+    status(hire, 409, 'hire refused: a user with that email exists');
+    ok(/already exists/.test(hire.json.error), `message (${hire.json.error})`);
+    eq((await recruiter.get(`/recruitment/candidates/${twin.json.id}`)).json.stage, 'offer', 'stage unchanged');
+    status(await recruiter.post(`/recruitment/candidates/${again.json.id}/stage`, { stage: 'offer' }), 200, 'to offer');
+    status(await recruiter.post(`/recruitment/candidates/${again.json.id}/stage`, { stage: 'hired' }), 200, 'hired once');
+    const third = await recruiter.post('/recruitment/candidates', dup);
+    status(third, 201, 'a new record once the previous one is closed');
+    status(await recruiter.post(`/recruitment/candidates/${third.json.id}/stage`, { stage: 'offer' }), 200, 'to offer');
+    const rehire = await recruiter.post(`/recruitment/candidates/${third.json.id}/stage`, { stage: 'hired' });
+    status(rehire, 409, 'cannot be hired twice');
+    ok(/already been hired/.test(rehire.json.error), `message (${rehire.json.error})`);
+  });
+  await check('Hire emails transliterate accents, never produce empty parts, and are numbered when taken', async () => {
+    const hire = async (firstName: string, lastName: string, email: string): Promise<string> => {
+      const c = await recruiter.post('/recruitment/candidates', { firstName, lastName, email });
+      status(c, 201, `candidate ${email}`);
+      status(await recruiter.post(`/recruitment/candidates/${c.json.id}/stage`, { stage: 'offer' }), 200, 'offer');
+      const h = await recruiter.post(`/recruitment/candidates/${c.json.id}/stage`, { stage: 'hired' });
+      status(h, 200, 'hired');
+      return (await admin.get(`/users/${h.json.hiredUserId}`)).json.email as string;
+    };
+    eq(await hire('Łukasz', 'Żółć', 'lukasz1@example.com'), 'lukasz.zolc@linear-mcr.co.uk', 'Polish letters transliterated');
+    eq(await hire('Łukasz', 'Żółć', 'lukasz2@example.com'), 'lukasz.zolc2@linear-mcr.co.uk', 'numbered when taken');
+    eq(await hire('Zoë', "O'Brien-Søren", 'zoe@example.com'), 'zoe.obriensoren@linear-mcr.co.uk', 'diaeresis, apostrophe, hyphen, ø');
+    eq(await hire('李', '明', 'li@example.com'), 'staff@linear-mcr.co.uk', 'nothing transliterable → staff');
+    eq(await hire('李', '华', 'li2@example.com'), 'staff2@linear-mcr.co.uk', 'staff, numbered');
+    eq(await hire('Anne-Marie', '李', 'am@example.com'), 'annemarie@linear-mcr.co.uk', 'an empty part is dropped, never a trailing dot');
+  });
+  await check('overdueActions follows the shared isOverdue rule (date-only due today is not overdue; a future timestamp is not)', async () => {
+    const c = await recruiter.post('/recruitment/candidates', { firstName: 'Over', lastName: 'Due', email: 'over.due@example.com' });
+    status(c, 201, 'candidate');
+    const setDue = async (nextActionAt: string | null) => status(await recruiter.patch(`/recruitment/candidates/${c.json.id}`, { nextActionAt }), 200, `set ${nextActionAt}`);
+    const count = async () => (await recruiter.get('/recruitment/summary')).json.overdueActions as number;
+    await setDue(null);
+    const base0 = await count();
+    await setDue(today);
+    eq(await count(), base0, 'date-only due today is not overdue');
+    await setDue(addDays(today, -1));
+    eq(await count(), base0 + 1, 'date-only due yesterday is overdue');
+    const future = new Date(Date.now() + 3 * 3600_000);
+    await setDue(`${new Date(future.getTime() - 5 * 3600_000).toISOString().slice(0, 19)}-05:00`);
+    eq(await count(), base0, 'a future instant written with a negative offset is not overdue');
+    await setDue(new Date(Date.now() - 3600_000).toISOString());
+    eq(await count(), base0 + 1, 'a past timestamp is overdue');
+    status(await recruiter.post(`/recruitment/candidates/${c.json.id}/stage`, { stage: 'withdrawn' }), 200, 'close');
+    eq(await count(), base0, 'closed candidates are never overdue');
+  });
+  await check('RecruitmentSummary.weekly buckets are clipped to the range (first bucket keyed by `from`) and equal the per-week reference', async () => {
+    const sum = (rows: Json[], k: string) => rows.reduce((a: number, w: Json) => a + w[k], 0);
+    const verify = async (from: string, to: string) => {
+      const r = (await recruiter.get(`/recruitment/summary?from=${from}&to=${to}`)).json;
+      eq(r.weekly[0].weekStart, from < mondayOf(from) ? from : from === mondayOf(from) ? from : from, 'first bucket keyed by from');
+      for (const w of r.weekly) {
+        const end = addDays(mondayOf(w.weekStart), 6) < to ? addDays(mondayOf(w.weekStart), 6) : to;
+        const wFrom = `${w.weekStart}T00:00:00.000Z`;
+        const wTo = `${end}T23:59:59.999Z`;
+        eq(w.applied, get<Json>(db, `SELECT COUNT(*) AS n FROM candidates WHERE applied_at BETWEEN ? AND ?`, [wFrom, wTo])!.n, `${w.weekStart} applied`);
+        eq(w.interviews, get<Json>(db, `SELECT COUNT(*) AS n FROM interviews WHERE scheduled_at BETWEEN ? AND ?`, [wFrom, wTo])!.n, `${w.weekStart} interviews`);
+        eq(w.hired, get<Json>(db, `SELECT COUNT(DISTINCT candidate_id) AS n FROM stage_changes WHERE to_stage = 'hired' AND changed_at BETWEEN ? AND ?`, [wFrom, wTo])!.n, `${w.weekStart} hired`);
+      }
+      eq(sum(r.weekly, 'applied'), r.applied, 'weekly applied adds up to the headline');
+      eq(sum(r.weekly, 'hired'), r.hired, 'weekly hired adds up to the headline');
+      return r.weekly.length as number;
+    };
+    const n1 = await verify(twelveWeeksAgo, today);
+    const midWeekFrom = addDays(monday, -5); // the previous Wednesday
+    const n2 = await verify(midWeekFrom, today);
+    eq((await recruiter.get(`/recruitment/summary?from=${midWeekFrom}&to=${today}`)).json.weekly[0].weekStart, midWeekFrom, 'mid-week start labels the first bucket');
+    return `${n1} + ${n2} buckets identical`;
+  });
 
   // ── announcements & misc ──
   await check('GET/POST /announcements', async () => {
@@ -980,6 +1509,15 @@ async function main(): Promise<void> {
   const tfaDbRow = () => get<Json>(db, `SELECT totp_secret_enc AS s, totp_pending_enc AS p, totp_enabled_at AS e FROM users WHERE id = ?`, [tfaUserId])!;
   const recoveryRows = () => get<Json>(db, `SELECT COUNT(*) AS n FROM recovery_codes WHERE user_id = ?`, [tfaUserId])!.n as number;
   const tfaUser = new Client(base, 'totp');
+  /**
+   * Authenticator codes are single use (the last accepted time step is stored per user). The flow below reuses a
+   * secret's code inside one 30-second step for brevity, so it forgets that marker first; the dedicated replay check
+   * verifies the rule itself.
+   */
+  const code = (secret: string): string => {
+    run(db, `UPDATE users SET totp_last_counter = NULL WHERE id = ?`, [tfaUserId]);
+    return totp(secret);
+  };
   let tfaSecret = '';
   let tfaCodes: string[] = [];
 
@@ -1062,7 +1600,7 @@ async function main(): Promise<void> {
     eq(wrong.json.error, 'That code is not valid', 'wrong code message');
     ok(!wrong.headers.get('set-cookie'), 'still no cookie');
     eq(get<Json>(db, `SELECT attempts FROM two_factor_challenges WHERE token = ?`, [token])!.attempts, 1, 'attempt counted on the challenge');
-    const right = await c.post('/auth/login/2fa', { challengeToken: token, code: totp(tfaSecret) });
+    const right = await c.post('/auth/login/2fa', { challengeToken: token, code: code(tfaSecret) });
     status(right, 200, 'right code');
     ok(/lm_session=[0-9a-f]{64}/.test(right.headers.get('set-cookie') ?? ''), 'session cookie set');
     eq(right.json.user.id, tfaUserId, 'user payload');
@@ -1073,6 +1611,27 @@ async function main(): Promise<void> {
     status(await c.post('/auth/login/2fa', { challengeToken: token, code: totp(tfaSecret) }), 410, 'reused token → 410');
     status(await c.post('/auth/login/2fa', { challengeToken: 'f'.repeat(64), code: totp(tfaSecret) }), 410, 'unknown token → 410');
     status(await c.post('/auth/logout'), 204, 'logout');
+  });
+  await check('Authenticator codes are single use: a replayed code is refused at login and in settings; the next time step works', async () => {
+    const c = new Client(base, 'totp-replay');
+    const challenge = async () => (await c.post('/auth/login', tfaLogin)).json.challengeToken as string;
+    const used = code(tfaSecret);
+    status(await c.post('/auth/login/2fa', { challengeToken: await challenge(), code: used }), 200, 'first use signs in');
+    const stored = get<Json>(db, `SELECT totp_last_counter AS n FROM users WHERE id = ?`, [tfaUserId])!.n;
+    ok(Math.abs(stored - totpCounter(Date.now())) <= 1, `the accepted time step is stored (${stored})`);
+    status(await c.post('/auth/logout'), 204, 'logout');
+    const token = await challenge();
+    const replay = await c.post('/auth/login/2fa', { challengeToken: token, code: used });
+    status(replay, 401, 'the same code is refused at login');
+    eq(replay.json.error, 'That code is not valid', 'message');
+    status(await tfaUser.post('/auth/2fa/recovery-codes', { code: used }), 400, 'and in settings');
+    status(await tfaUser.post('/auth/2fa/disable', { code: used }), 400, 'and for disabling');
+    eq(get<Json>(db, `SELECT totp_last_counter AS n FROM users WHERE id = ?`, [tfaUserId])!.n, stored, 'marker unchanged by refused replays');
+    // the following 30-second step (still inside the ±1 window) is a new code and is accepted
+    status(await c.post('/auth/login/2fa', { challengeToken: token, code: totp(tfaSecret, { timeMs: Date.now() + 30_000 }) }), 200, 'the next code works');
+    ok(get<Json>(db, `SELECT totp_last_counter AS n FROM users WHERE id = ?`, [tfaUserId])!.n > stored, 'marker moved forward');
+    status(await c.post('/auth/logout'), 204, 'logout');
+    resetCodeFailures();
   });
   await check('Recovery codes: single use at login (case/hyphen tolerant); regenerating with a code invalidates the old set', async () => {
     const c = new Client(base, 'totp-recovery');
@@ -1087,7 +1646,7 @@ async function main(): Promise<void> {
     const bad = await tfaUser.post('/auth/2fa/recovery-codes', { code: wrongCode(tfaSecret) });
     status(bad, 400, 'regenerate with a wrong code');
     status(await tfaUser.post('/auth/2fa/recovery-codes', { recoveryCode: tfaCodes[2] }), 400, 'regenerate needs an authenticator code, not a recovery code');
-    const fresh = await tfaUser.post('/auth/2fa/recovery-codes', { code: totp(tfaSecret) });
+    const fresh = await tfaUser.post('/auth/2fa/recovery-codes', { code: code(tfaSecret) });
     status(fresh, 200, 'regenerate');
     eq(fresh.json.recoveryCodes.length, 10, 'ten new codes');
     ok(fresh.json.recoveryCodes.every((x: string) => RECOVERY_RE.test(x) && !tfaCodes.includes(x)), 'all new');
@@ -1119,14 +1678,14 @@ async function main(): Promise<void> {
     status(await c.post('/auth/logout'), 204, 'logout');
     // disable with an authenticator code
     const again = await enable2fa(tfaUser);
-    status(await tfaUser.post('/auth/2fa/disable', { code: totp(again.secret) }), 204, 'disable with a code');
+    status(await tfaUser.post('/auth/2fa/disable', { code: code(again.secret) }), 204, 'disable with a code');
     eq((await tfaUser.get('/auth/2fa')).json.enabled, false, 'off again');
   });
   await check('Admin reset: 403 for non-admins, 400 for own account, 404 unknown, 204 clears 2FA and signs the user out everywhere', async () => {
     const { secret } = await enable2fa(tfaUser);
     const c = new Client(base, 'totp-second');
     const step1 = await c.post('/auth/login', tfaLogin);
-    status(await c.post('/auth/login/2fa', { challengeToken: step1.json.challengeToken, code: totp(secret) }), 200, 'second device signed in');
+    status(await c.post('/auth/login/2fa', { challengeToken: step1.json.challengeToken, code: code(secret) }), 200, 'second device signed in');
     status(await rep.post(`/users/${tfaUserId}/2fa/reset`), 403, 'rep cannot reset');
     status(await leader.post(`/users/${tfaUserId}/2fa/reset`), 403, 'leader cannot reset');
     status(await admin.post('/users/1/2fa/reset'), 400, 'admin cannot reset their own via this route');
@@ -1143,7 +1702,7 @@ async function main(): Promise<void> {
     eq(login.json.user.twoFactorEnabled, false, 'flag off');
     status(await admin.get('/auth/me'), 200, 'admin session intact');
   });
-  await check('Code limiter: 6 wrong codes per user in 10 min → 429 (login step two and settings); wrong codes also count for the login limiter', async () => {
+  await check('Code limiters: 6 wrong codes exhaust the challenge (410) and lock the source (429); another address is unaffected; wrong codes count for the login limiter', async () => {
     resetCodeFailures();
     resetLoginFailures();
     const { secret } = await enable2fa(tfaUser);
@@ -1152,19 +1711,29 @@ async function main(): Promise<void> {
     status(step1, 200, 'challenge');
     const token = step1.json.challengeToken;
     for (let i = 1; i <= 6; i++) status(await c.post('/auth/login/2fa', { challengeToken: token, code: wrongCode(secret) }), 401, `wrong code ${i}`);
-    const locked = await c.post('/auth/login/2fa', { challengeToken: token, code: totp(secret) });
-    status(locked, 429, '7th attempt, even with the right code');
+    eq(get<Json>(db, `SELECT attempts FROM two_factor_challenges WHERE token = ?`, [token])!.attempts, 6, 'six attempts recorded on the challenge');
+    const exhausted = await c.post('/auth/login/2fa', { challengeToken: token, code: wrongCode(secret) });
+    status(exhausted, 410, '7th attempt on the same challenge → 410 (challenge consumed)');
+    ok(/start again/.test(exhausted.json.error), `message (${exhausted.json.error})`);
+    eq(get<Json>(db, `SELECT COUNT(*) AS n FROM two_factor_challenges WHERE token = ?`, [token])!.n, 0, 'exhausted challenge deleted');
+    const token2 = (await c.post('/auth/login', tfaLogin)).json.challengeToken as string;
+    const locked = await c.post('/auth/login/2fa', { challengeToken: token2, code: code(secret) });
+    status(locked, 429, 'fresh challenge, right code: this source is locked after 6 failures');
     ok(/^Too many attempts, try again in \d+ minutes?$/.test(locked.json.error), `error text (${locked.json.error})`);
-    status(await tfaUser.post('/auth/2fa/recovery-codes', { code: totp(secret) }), 429, 'settings endpoints share the per-user limiter');
-    status(await tfaUser.post('/auth/2fa/disable', { code: totp(secret) }), 429, 'disable too');
-    // the six wrong codes count as failed sign-ins for this ip+email: two more bad logins exhaust the 8 → 429 at step one
+    status(await tfaUser.post('/auth/2fa/recovery-codes', { code: code(secret) }), 429, 'settings endpoints share the per-source limiter');
+    status(await tfaUser.post('/auth/2fa/disable', { code: code(secret) }), 429, 'disable too');
+    // the real person on another device (another source address) is not locked out by a stranger's guesses
+    const other = new Client(base, 'totp-other-device', '127.0.0.2');
+    const token3 = (await other.post('/auth/login', tfaLogin)).json.challengeToken as string;
+    status(await other.post('/auth/login/2fa', { challengeToken: token3, code: code(secret) }), 200, 'another address signs in with the right code');
+    status(await other.post('/auth/logout'), 204, 'logout');
+    // the six wrong codes count as failed sign-ins for this source+email: two more bad logins exhaust the 8 → 429 at step one
     status(await anon.post('/auth/login', { email: tfa.email, employeeId: 'LM-9998' }), 401, 'bad credentials 7');
     status(await anon.post('/auth/login', { email: tfa.email, employeeId: 'LM-9997' }), 401, 'bad credentials 8');
     status(await anon.post('/auth/login', tfaLogin), 429, 'login step one locked by the combined count');
-    eq(get<Json>(db, `SELECT attempts FROM two_factor_challenges WHERE token = ?`, [token])!.attempts, 6, 'six attempts recorded on the challenge');
     resetCodeFailures();
     resetLoginFailures();
-    status(await c.post('/auth/login/2fa', { challengeToken: token, code: totp(secret) }), 200, 'right code once the window passes');
+    status(await c.post('/auth/login/2fa', { challengeToken: token2, code: code(secret) }), 200, 'right code once the window passes');
     status(await c.post('/auth/logout'), 204, 'logout');
     tfaSecret = secret;
   });
@@ -1182,32 +1751,48 @@ async function main(): Promise<void> {
     eq(get<Json>(db, `SELECT COUNT(*) AS n FROM two_factor_challenges WHERE user_id = ?`, [tfaUserId])!.n, 0, 'none left for the user');
     const live = (await c.post('/auth/login', tfaLogin)).json.challengeToken as string;
     ok(get<Json>(db, `SELECT expires_at AS e FROM two_factor_challenges WHERE token = ?`, [live])!.e > new Date(Date.now() + 4 * 60_000).toISOString(), 'fresh challenge lives ~5 minutes');
-    status(await c.post('/auth/login/2fa', { challengeToken: live, code: totp(tfaSecret) }), 200, 'fresh challenge works');
+    status(await c.post('/auth/login/2fa', { challengeToken: live, code: code(tfaSecret) }), 200, 'fresh challenge works');
     status(await c.post('/auth/logout'), 204, 'logout');
-    status(await tfaUser.post('/auth/2fa/disable', { code: totp(tfaSecret) }), 204, 'leave 2FA off');
+    status(await tfaUser.post('/auth/2fa/disable', { code: code(tfaSecret) }), 204, 'leave 2FA off');
     eq((await anon.get('/auth/demo-accounts')).json.accounts.length, 4, 'demo accounts untouched (2FA off for all four)');
     eq(get<Json>(db, `SELECT COUNT(*) AS n FROM users WHERE totp_enabled_at IS NOT NULL`)!.n, 0, 'no user has 2FA on');
   });
-  await check('Schema upgrade: a pre-2FA database gains the columns and tables on createSchema (idempotent, rows kept)', async () => {
+  await check('Schema upgrade: a first-release database gains every later column, index and the rate backfill on createSchema (idempotent, rows kept)', async () => {
     const legacySql = SCHEMA_SQL
-      .replace(/  city TEXT,\n  totp_secret_enc TEXT,\n  totp_pending_enc TEXT,\n  totp_enabled_at TEXT\n/, '  city TEXT\n')
+      .replace(/  city TEXT,\n  totp_secret_enc TEXT,\n  totp_pending_enc TEXT,\n  totp_enabled_at TEXT,\n  totp_last_counter INTEGER\n/, '  city TEXT\n')
       .replace(/CREATE TABLE IF NOT EXISTS (recovery_codes|two_factor_challenges) \([\s\S]*?\);\n/g, '')
-      .replace(/CREATE INDEX IF NOT EXISTS idx_recovery_codes_user[^\n]*\n/, '');
-    ok(!/totp|recovery_codes|two_factor/.test(legacySql), 'legacy DDL has no 2FA objects');
+      .replace(/CREATE INDEX IF NOT EXISTS idx_recovery_codes_user[^\n]*\n/, '')
+      .replace(/ CHECK \([^)]*\)/g, '') // the first release had no CHECK constraints on the gauges
+      .replace(/  payout_per_sale REAL,\n  commission_per_sale REAL,\n/, '')
+      .replace(/  reference TEXT NOT NULL UNIQUE,\n  adjusted_at TEXT,\n/, '  reference TEXT NOT NULL UNIQUE,\n')
+      .replace(/CREATE INDEX IF NOT EXISTS idx_events_campaign[^\n]*\n/, '');
+    const gaugeDdl = /CREATE TABLE IF NOT EXISTS gauge_entries \(([\s\S]*?)\);/.exec(legacySql)![1]!;
+    ok(!/totp|recovery_codes|two_factor|adjusted_at|CHECK|idx_events_campaign/.test(legacySql) && !/per_sale/.test(gaugeDdl), 'legacy DDL has none of the later objects');
     const legacy = openDb(path.join(dir, 'legacy.sqlite'));
     legacy.exec(legacySql);
-    run(legacy, `INSERT INTO pay_plans (name, position) VALUES ('Legacy', 'trainee')`);
+    run(legacy, `INSERT INTO pay_plans (name, position, base_per_day, commission_per_sale) VALUES ('Legacy', 'trainee', 80, 25)`);
     run(legacy, `INSERT INTO users (employee_id, email, first_name, last_name, role, position, team_id, pay_plan_id, start_date, status, phone, avatar_color, city) VALUES ('LM-0001', 'a@b.c', 'A', 'B', 'admin', 'owner', NULL, 1, ?, 'active', NULL, '#000000', NULL)`, [today]);
-    ok(!tableColumns(legacy, 'users').includes('totp_secret_enc'), 'legacy users table lacks the column');
+    run(legacy, `INSERT INTO teams (name, leader_id, color) VALUES ('T', NULL, '#111111')`);
+    run(legacy, `INSERT INTO campaigns (name, code, sector, type, payout_per_sale, rep_commission_per_sale, color, active, start_date) VALUES ('C', 'CC', 'charity', 'fundraising', 120, 45, '#222222', 1, ?)`, [today]);
+    run(legacy, `INSERT INTO events (campaign_id, team_id, name, venue, city, type, date, start_time, end_time, status) VALUES (1, 1, 'E', 'V', 'M', 'retail', ?, '09:00', '17:00', 'completed')`, [addDays(today, -1)]);
+    run(legacy, `INSERT INTO gauge_entries (event_id, user_id, date, stops, table_count, presentations, closes, taps, sales, submitted_at) VALUES (1, 1, ?, 50, 20, 10, 4, 3, 3, ?)`, [addDays(today, -1), new Date().toISOString()]);
+    run(legacy, `INSERT INTO payroll_runs (user_id, week_start, week_end, days_worked, sales, gross, due_date, status, reference) VALUES (1, ?, ?, 1, 3, 155, ?, 'pending', 'PAY-LEGACY')`, [mondayOf(today), sundayOf(today), addDays(sundayOf(today), 5)]);
+    ok(!tableColumns(legacy, 'users').includes('totp_secret_enc') && !tableColumns(legacy, 'gauge_entries').includes('payout_per_sale') && !tableColumns(legacy, 'payroll_runs').includes('adjusted_at'), 'legacy tables lack the columns');
     const tables = () => all<{ name: string }>(legacy, `SELECT name FROM sqlite_master WHERE type = 'table'`).map((t) => t.name);
-    ok(!tables().includes('recovery_codes'), 'legacy has no recovery_codes');
+    const indexes = () => all<{ name: string }>(legacy, `SELECT name FROM sqlite_master WHERE type = 'index'`).map((t) => t.name);
+    ok(!tables().includes('recovery_codes') && !indexes().includes('idx_events_campaign'), 'legacy has no recovery_codes table and no campaign index');
     const added = createSchema(legacy);
-    eq(added.join(','), 'users.totp_secret_enc,users.totp_pending_enc,users.totp_enabled_at', 'columns added');
-    const cols = tableColumns(legacy, 'users');
-    ok(cols.includes('totp_secret_enc') && cols.includes('totp_pending_enc') && cols.includes('totp_enabled_at'), 'columns present');
+    eq(added.join(','), 'users.totp_secret_enc,users.totp_pending_enc,users.totp_enabled_at,users.totp_last_counter,gauge_entries.payout_per_sale,gauge_entries.commission_per_sale,payroll_runs.adjusted_at', 'columns added');
+    ok(tableColumns(legacy, 'users').includes('totp_last_counter') && tableColumns(legacy, 'payroll_runs').includes('adjusted_at'), 'columns present');
     ok(tables().includes('recovery_codes') && tables().includes('two_factor_challenges'), 'tables created');
-    const u = get<Json>(legacy, `SELECT email, totp_secret_enc AS s, totp_enabled_at AS e FROM users WHERE id = 1`)!;
-    ok(u.email === 'a@b.c' && u.s === null && u.e === null, 'existing row kept with null 2FA columns');
+    ok(indexes().includes('idx_events_campaign'), 'idx_events_campaign created');
+    const u = get<Json>(legacy, `SELECT email, totp_secret_enc AS s, totp_enabled_at AS e, totp_last_counter AS c FROM users WHERE id = 1`)!;
+    ok(u.email === 'a@b.c' && u.s === null && u.e === null && u.c === null, 'existing user row kept with null 2FA columns');
+    const g = get<Json>(legacy, `SELECT payout_per_sale AS p, commission_per_sale AS c, stops FROM gauge_entries WHERE id = 1`)!;
+    eq(g.p, 120, 'gauge payout backfilled from the campaign');
+    eq(g.c, 25, "gauge commission backfilled from the person's plan");
+    eq(g.stops, 50, 'gauge row kept');
+    eq(get<Json>(legacy, `SELECT adjusted_at AS a, gross FROM payroll_runs WHERE id = 1`)!.a, null, 'payroll row kept, adjusted_at null');
     eq(createSchema(legacy).length, 0, 'second run adds nothing');
     legacy.close();
   });

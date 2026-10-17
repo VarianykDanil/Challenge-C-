@@ -8,7 +8,10 @@ export type Metric<T> = keyof T | ((row: T) => number);
 export interface RankOptions<T> {
   /** `desc` (default) ranks the biggest value first. */
   direction?: 'asc' | 'desc';
-  /** Secondary metric used to break ties before falling back to input order. */
+  /**
+   * Secondary metric that decides the *order* of rows tied on `metric` (bigger secondary first), before falling
+   * back to input order. It never splits the rank: rows with the same primary value always share one rank.
+   */
   tieBreak?: Metric<T>;
 }
 
@@ -21,9 +24,10 @@ function read<T>(row: T, metric: Metric<T>): number {
 }
 
 /**
- * Sort rows by `metric` and assign competition ranks ("1, 2, 2, 4"): equal values share a rank and the
- * next distinct value skips ahead. The sort is stable — rows that tie on every criterion keep their
- * input order. Returns new objects; the input is not mutated.
+ * Sort rows by `metric` and assign competition ranks ("1, 2, 2, 4"): equal primary values share a rank and the
+ * next distinct value skips ahead, whatever the tie-break says — `tieBreak` only orders the rows inside a tie.
+ * The sort is stable — rows that tie on every criterion keep their input order. Returns new objects; the input
+ * is not mutated.
  */
 export function rankRows<T extends object>(
   rows: ReadonlyArray<T>,
@@ -47,7 +51,7 @@ export function rankRows<T extends object>(
   for (let i = 0; i < indexed.length; i++) {
     const cur = indexed[i];
     const prev = indexed[i - 1];
-    if (i === 0 || cur.primary !== prev.primary || cur.secondary !== prev.secondary) rank = i + 1;
+    if (i === 0 || cur.primary !== prev.primary) rank = i + 1;
     out.push({ ...cur.row, rank });
   }
   return out;

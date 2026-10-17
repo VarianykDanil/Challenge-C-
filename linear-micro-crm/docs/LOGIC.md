@@ -35,8 +35,10 @@ stops ≥ table ≥ presentations ≥ closes ≥ taps ≥ sales
 | `sales` | confirmed sales |
 
 * `sumGauges(rows)` adds any gauge-shaped rows (missing keys count as 0) into one `GaugeTotals`.
-* `validateGaugeFunnel(totals)` returns human-readable warnings for non-integers, negatives and any
-  stage larger than the one before it. An empty array means valid.
+* `validateGaugeFunnel(totals, max = GAUGE_MAX_PER_DAY)` returns human-readable warnings for non-integers
+  (including `NaN`/`Infinity`), negatives, any gauge above the daily plausibility ceiling (**2000** — one rep cannot
+  stop more people than that in a day) and any stage larger than the one before it. An empty array means valid. The
+  server applies the same ceiling in its validators and as `CHECK` constraints on new databases.
 * `EMPTY_TOTALS` is the all-zero record (always copy it, never mutate it).
 
 ## 2. Ratios — the "law of averages"
@@ -52,7 +54,7 @@ is `next / previous`; **a zero denominator yields 0, never `NaN`**.
 | `closeToTap` | taps / closes | 0.60 |
 | `tapToSale` | sales / taps | 0.90 |
 | `overallConversion` | sales / stops | (product of the five ≈ 0.0378) |
-| `stopsPerSale` | stops / sales | `Infinity` when sales = 0 |
+| `stopsPerSale` | stops / sales | **`null`** when sales = 0 (typed `number \| null`; JSON cannot carry `Infinity`) |
 
 `ratioKeys` is the ordered list `{ key, from, to, label }` (e.g. `stopToTable` goes from `stops` to
 `table`, label "Stop → table"). `RATIO_KEYS`, `RATIO_LABELS` and `RATIO_SHORT_LABELS` are the matching
@@ -131,8 +133,8 @@ overrides  = overridePerTeamSale × teamSales        (leaders only; team sales e
 gross      = basePay + commission + bonus + overrides − deductions
 ```
 
-Negative inputs are clamped to 0; deductions larger than the week's pay produce a negative gross
-rather than being hidden.
+Negative inputs — `daysWorked`, `sales`, `teamSales` **and `deductions`** — are clamped to 0 (a negative deduction
+can never add money); deductions larger than the week's pay produce a negative gross rather than being hidden.
 
 **Worked example.** Plan: £50/day, £25 per sale, £100 bonus at 10 sales, £5 per team sale.
 Week: 5 days, 12 sales, team made 30 sales, £20 advance to recover.
@@ -223,8 +225,10 @@ Pipeline: `applied → screening → interview → observation → offer → hir
 ## 8. Leaderboard
 
 * `rankRows(rows, metric, { direction = 'desc', tieBreak? })` sorts by a property name or accessor and
-  assigns **competition ranks**: equal values share a rank and the next distinct value skips ahead
-  (1, 2, 2, 4). The sort is stable; input order breaks remaining ties. Returns new objects.
+  assigns **competition ranks**: equal values of `metric` share a rank and the next distinct value skips ahead
+  (1, 2, 2, 4) — *whatever the tie-break says*. `tieBreak` only decides the **order** of the rows inside a tie
+  (bigger secondary first; the leaderboard uses the other metric), it never splits the shared rank. The sort is
+  stable; input order breaks remaining ties. Returns new objects.
 * `movement(prevRank, currentRank)` = `prevRank − currentRank` (positive = moved up, 5 → 2 gives +3);
   `null` for a new entrant.
 * `topN(rows, n)`, `rankOf(rows, predicate)` are small conveniences.
@@ -294,7 +298,9 @@ with Node's `crypto` only — no third-party OTP library:
 * **Code**: `HOTP(secret, T)` where `T = floor(unixSeconds / 30)`; HMAC-SHA1, dynamic truncation
   (`offset = last nibble`, 31-bit big-endian word), `mod 10^6`, zero-padded to 6 digits.
 * **Verification** accepts `T−1`, `T` and `T+1` (±30 s of clock drift or a code typed just before
-  roll-over), compares every candidate in constant time and always checks all three.
+  roll-over), compares every candidate in constant time and always checks all three. `matchTotpCounter` returns the
+  step that matched; the server stores it (`users.totp_last_counter`) and refuses any code whose step is not greater,
+  so **a code is accepted once** (RFC 6238 §5.2) — a replay inside the window is treated as a wrong code.
 * **Recovery codes**: 10 × `xxxx-xxxx`, lower-case `a–z0–9` drawn uniformly from `crypto.randomBytes`
   (rejection sampling), stored as SHA-256 hashes, single use; typed codes are lower-cased and the
   hyphen/spaces are optional.

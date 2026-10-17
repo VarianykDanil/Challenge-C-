@@ -21,12 +21,23 @@ const EOL = '\r\n';
 const ISO_DATE = /^\d{4}-\d{2}-\d{2}$/;
 
 /**
+ * A plain numeric literal as the money/percent formatters emit it (`-12.50`, `3`, `12.3%`): never a formula, so it
+ * keeps its sign. A leading `+` is not exempt — no numeric column produces one, while phone numbers (`+44…`) do.
+ */
+const NUMERIC_LITERAL = /^-?\d+(\.\d+)?%?$/;
+/** First characters a spreadsheet treats as the start of a formula (or that splice a cell): `=`, `+`, `-`, `@`, TAB, CR. */
+const FORMULA_START = /^[=+\-@\t\r]/;
+
+/**
  * Quote a field when it holds a comma, quote, CR/LF or leading/trailing whitespace; double any quotes.
- * Text starting with `=` or `@` is prefixed with an apostrophe so a spreadsheet never runs it as a formula
- * (`+`/`-` are left alone: phone numbers and negative amounts start with them).
+ * Text starting with `=`, `+`, `-`, `@`, a tab or a carriage return is prefixed with an apostrophe so a spreadsheet
+ * never runs it as a formula (`+HYPERLINK(...)` and `-2+3+cmd|...` are live formulas in Excel, LibreOffice and
+ * Sheets even when CSV-quoted). Phone numbers such as `+44…` get the guard too — they stay readable as text.
+ * A cell that is a plain number (`-12.50`, `3`, `12.3%`) is left alone: a numeric literal cannot be a formula,
+ * and the guard would turn money columns into text.
  */
 export function csvEscape(field: string): string {
-  const safe = /^[=@]/.test(field) ? `'${field}` : field;
+  const safe = FORMULA_START.test(field) && !NUMERIC_LITERAL.test(field) ? `'${field}` : field;
   return /[",\r\n]/.test(safe) || /^\s|\s$/.test(safe) ? `"${safe.replace(/"/g, '""')}"` : safe;
 }
 

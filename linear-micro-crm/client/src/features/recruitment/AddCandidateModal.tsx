@@ -2,6 +2,7 @@ import { useId, useState } from 'react';
 import type { CandidateSource, Position } from '@lm/shared';
 import { POSITION_LABELS, SOURCE_LABELS } from '@lm/shared';
 import { Button, Field, Input, Modal, Select, Textarea, useToast } from '@/components/ui';
+import { ApiError } from '@/api/client';
 import { useCreateCandidate, useUsers } from '@/api/hooks';
 import { useCurrentUser } from '@/auth/AuthProvider';
 import { errorMessage } from '@/features/common';
@@ -50,6 +51,11 @@ function AddCandidateForm({ onClose, onCreated }: { onClose: () => void; onCreat
       onCreated?.(c.id);
       onClose();
     } catch (err) {
+      // A duplicate (same email already in the pipeline) is a 409: show it on the field so the recruiter can fix or look them up.
+      if (err instanceof ApiError && err.status === 409) {
+        setErrors({ email: err.message || 'A candidate with this email already exists' });
+        return;
+      }
       toast.error('Could not add candidate', errorMessage(err));
     }
   };

@@ -47,7 +47,7 @@ export function calculatePayroll(plan: PayPlan, input: PayrollInput): PayrollBre
   const commission = round2(plan.commissionPerSale * sales);
   const bonus = plan.bonusThreshold > 0 && sales >= plan.bonusThreshold ? round2(plan.bonusAmount) : 0;
   const overrides = round2(plan.overridePerTeamSale * teamSales);
-  const deductions = round2(input.deductions ?? 0);
+  const deductions = round2(Math.max(0, input.deductions ?? 0)); // a negative deduction would add money
   const gross = round2(basePay + commission + bonus + overrides - deductions);
   return { basePay, commission, bonus, overrides, deductions, gross };
 }
