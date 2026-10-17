@@ -8,7 +8,14 @@
     "skipLibCheck": true,
     "esModuleInterop": true,
     "allowImportingTsExtensions": true,
-    "types": ["node"]
+    "types": [
+      "node"
+    ],
+    "erasableSyntaxOnly": true,
+    "verbatimModuleSyntax": true
   },
-  "include": ["src", "../shared/src"]
+  "include": [
+    "src",
+    "../shared/src"
+  ]
 }

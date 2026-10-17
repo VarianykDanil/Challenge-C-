@@ -4,12 +4,14 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "dev": "TZ=Europe/London NODE_NO_WARNINGS=1 tsx watch src/index.ts",
-    "start": "TZ=Europe/London NODE_ENV=production NODE_NO_WARNINGS=1 tsx src/index.ts",
-    "seed": "NODE_NO_WARNINGS=1 tsx src/db/seed.ts",
-    "smoke": "TZ=Europe/London NODE_NO_WARNINGS=1 tsx src/smoke.ts",
+    "dev": "TZ=Europe/London NODE_NO_WARNINGS=1 node --watch src/index.ts",
+    "dev:tsx": "TZ=Europe/London NODE_NO_WARNINGS=1 tsx watch src/index.ts",
+    "start": "TZ=Europe/London NODE_ENV=production NODE_NO_WARNINGS=1 node src/index.ts",
+    "start:tsx": "TZ=Europe/London NODE_ENV=production NODE_NO_WARNINGS=1 tsx src/index.ts",
+    "seed": "NODE_NO_WARNINGS=1 node src/db/seed.ts",
+    "smoke": "TZ=Europe/London NODE_NO_WARNINGS=1 node src/smoke.ts",
     "typecheck": "tsc --noEmit -p tsconfig.json",
-    "test": "NODE_NO_WARNINGS=1 node --import tsx --test \"src/**/*.test.ts\""
+    "test": "NODE_NO_WARNINGS=1 node --test \"src/**/*.test.ts\""
   },
   "dependencies": {
     "@lm/shared": "*",
@@ -27,5 +29,8 @@
     "@types/node": "^22.15.3",
     "@types/qrcode": "^1.5.6",
     "typescript": "^5.8.3"
+  },
+  "engines": {
+    "node": ">=22.18"
   }
 }

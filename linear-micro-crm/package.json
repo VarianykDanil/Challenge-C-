@@ -2,8 +2,12 @@
   "name": "linear-micro-crm",
   "version": "1.0.0",
   "private": true,
-  "description": "Linear Micro CRM — field sales gauges, recruitment pipeline and finance in one platform.",
-  "workspaces": ["shared", "server", "client"],
+  "description": "Linear Micro CRM \u2014 field sales gauges, recruitment pipeline and finance in one platform.",
+  "workspaces": [
+    "shared",
+    "server",
+    "client"
+  ],
   "scripts": {
     "dev": "concurrently -k -n server,client -c cyan,magenta \"npm run dev -w server\" \"npm run dev -w client\"",
     "build": "npm run build -w client",
@@ -15,5 +19,7 @@
   "devDependencies": {
     "concurrently": "^9.1.2"
   },
-  "engines": { "node": ">=22.13" }
+  "engines": {
+    "node": ">=22.18"
+  }
 }

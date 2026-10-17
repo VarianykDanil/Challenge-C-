@@ -33,7 +33,12 @@ type Json = any; // eslint-disable-line @typescript-eslint/no-explicit-any
 
 class Client {
   private cookie = '';
-  constructor(private base: string, readonly label: string) {}
+  private base: string;
+  readonly label: string;
+  constructor(base: string, label: string) {
+    this.base = base;
+    this.label = label;
+  }
 
   async req(method: string, url: string, body?: unknown): Promise<{ status: number; json: Json; headers: Headers }> {
     const res = await fetch(this.base + url, {
