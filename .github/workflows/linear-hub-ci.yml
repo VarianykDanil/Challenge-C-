@@ -93,3 +93,20 @@ jobs:
           test "$CODE" -ne 0 || { echo "::error::npm start exited 0 although port 4124 was taken"; exit 1; }
           grep -q "Port 4124 is already in use" busy.log
           ! grep -q "listening on" busy.log
+      - name: a second npm start recognises the running copy, and npm run stop ends it
+        shell: bash
+        run: |
+          PORT=4125 npm start > first.log 2>&1 &
+          for i in $(seq 1 40); do grep -q "listening on" first.log && break; sleep 0.5; done
+          set +e
+          PORT=4125 npm start > second.log 2>&1
+          CODE=$?
+          set -e
+          cat second.log
+          test "$CODE" -ne 0
+          grep -q "earlier copy of Linear Hub" second.log
+          PORT=4125 npm run stop | tee stop.log
+          grep -q "Port 4125 is free" stop.log
+          sleep 1
+          cat first.log
+          grep -q "Received SIGTERM: shutting down" first.log

@@ -85,6 +85,7 @@ Every command below exists in `package.json` (root) or `server/package.json`.
 | `npm run dev` | Server (`node --watch`, `TZ=Europe/London`) and client (Vite) together |
 | `npm run build` | Typecheck and build the client into `client/dist` |
 | `npm start` | Serve the API **and** the built client on <http://localhost:4000> (`NODE_ENV=production`) |
+| `npm run stop` | Stop an earlier copy of Linear Hub that is still holding port 4000 (`PORT=…` for another port). Anything else on the port is reported and left alone |
 | `npm run doctor` | Check this machine can run Linear Hub: Node version, built client, data folder, database, port, and a real boot on a temporary database. Run it whenever `npm start` misbehaves |
 | `npm run seed` | Delete and rebuild the database with fresh sample data |
 | `npm run typecheck` | Typecheck `shared`, `server` and `client` |
@@ -107,8 +108,8 @@ Every command below exists in `package.json` (root) or `server/package.json`.
 
 | Symptom | What to do |
 |---|---|
-| `npm start` printed "listening" and the shell prompt came straight back (exit code 0) | Port 4000 was already taken, usually by an earlier copy of this server that never stopped. Older builds printed "listening" anyway because Express 5 hands a failed bind to the listen callback instead of throwing. The server now refuses to start, names the process holding the port and exits with code 1; it also reports any other reason it stops (a signal, a crash, a drained event loop). Run `npm run doctor` and paste its report when asking for help |
-| The browser shows a blank page that never finishes loading on <http://localhost:4000> | Something else is answering on that port (that earlier server, a Docker container, another project). Find it with `lsof -nP -iTCP:4000 -sTCP:LISTEN`, stop it with `kill <PID>`, then `npm start` again, or use `PORT=4001 npm start` |
+| `npm start` says port 4000 is already in use, or an older build printed "listening" and the shell prompt came straight back | An earlier copy of this server is still running (another terminal tab or window; older builds printed "listening" anyway because Express 5 hands a failed bind to the listen callback instead of throwing). Run `npm run stop`, then `npm start`. The server now refuses to start behind another process, names it and exits with code 1, and reports any other reason it stops (a signal, a crash, a drained event loop). `npm run doctor` checks everything else; paste its report when asking for help |
+| The browser shows a blank page that never finishes loading on <http://localhost:4000> | Something else is answering on that port. If it is an old Linear Hub, `npm run stop` ends it; otherwise find it with `lsof -nP -iTCP:4000 -sTCP:LISTEN` and `kill <PID>`, or use `PORT=4001 npm start` |
 | `Cannot find module 'qrcode'` or similar after a `git pull` | Dependencies changed: run `npm install`, then `npm run build`, then `npm start` |
 | `npm start` serves the API but the page is empty or stale | Rebuild the client: `npm run build` (the server serves `client/dist`) |
 

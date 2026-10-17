@@ -22,6 +22,8 @@ export interface PortHolder {
   host: string;
   /** `lsof`/`ss` output for the listener, when the OS could tell us. */
   details: string | null;
+  /** True when the listener answered /api/health like this app: an earlier copy of Linear Hub still running. */
+  linearHub: boolean;
 }
 
 /** Try to connect to `host:port`; resolves true if something accepted the connection. */
@@ -64,10 +66,41 @@ export function describePortHolder(port: number): string | null {
   return null;
 }
 
+/** Process ids listening on the port, from `lsof`/`ss` output (empty when unknown). */
+export function listeningPids(port: number): number[] {
+  const details = describePortHolder(port);
+  if (!details) return [];
+  const pids = new Set<number>();
+  for (const line of details.split('\n')) {
+    if (/^COMMAND\b/.test(line)) continue;
+    const lsof = line.match(/^\S+\s+(\d+)\s/);
+    const ss = line.match(/pid=(\d+)/);
+    const win = line.match(/\s(\d+)\s*$/);
+    const pid = Number(lsof?.[1] ?? ss?.[1] ?? (process.platform === 'win32' ? win?.[1] : undefined));
+    if (Number.isFinite(pid) && pid > 0) pids.add(pid);
+  }
+  return [...pids];
+}
+
+/** Does the process answering on host:port look like this app (GET /api/health → {ok:true, version})? */
+export async function isLinearHub(host: string, port: number, timeoutMs = 1500): Promise<boolean> {
+  try {
+    const url = `http://${host.includes(':') ? `[${host}]` : host}:${port}/api/health`;
+    const res = await fetch(url, { signal: AbortSignal.timeout(timeoutMs) });
+    if (!res.ok) return false;
+    const body = (await res.json()) as { ok?: boolean; version?: string };
+    return body?.ok === true && typeof body.version === 'string';
+  } catch {
+    return false;
+  }
+}
+
 /** Something already answers on the port (checked on 127.0.0.1 and ::1), or null when it is free. */
 export async function findPortHolder(port: number, timeoutMs = 600): Promise<PortHolder | null> {
   for (const host of ['127.0.0.1', '::1']) {
-    if (await accepts(host, port, timeoutMs)) return { host, details: describePortHolder(port) };
+    if (await accepts(host, port, timeoutMs)) {
+      return { host, details: describePortHolder(port), linearHub: await isLinearHub(host, port) };
+    }
   }
   return null;
 }
@@ -78,10 +111,22 @@ export function portBusyMessage(port: number, holder: PortHolder): string {
     process.platform === 'win32'
       ? `  netstat -ano | findstr :${port}      (then: taskkill /PID <pid> /F)`
       : `  lsof -nP -iTCP:${port} -sTCP:LISTEN   (then: kill <PID>)`;
+  const who = holder.details ? `Listening right now:\n${holder.details.replace(/^/gm, '  ')}` : 'The OS did not report which process holds it.';
+  if (holder.linearHub) {
+    return [
+      `Port ${port} is already in use by an earlier copy of Linear Hub that is still running (started from another terminal or window).`,
+      `That is why the browser shows a blank or stale page on http://localhost:${port}: it is talking to that old process, not to this one.`,
+      who,
+      'Stop it and start again:',
+      '  npm run stop',
+      '  npm start',
+      `Or start this one on another port:  PORT=${port + 1} npm start   (then open http://localhost:${port + 1})`,
+    ].join('\n');
+  }
   return [
     `Port ${port} is already in use: something on ${holder.host}:${port} accepted a connection before this server started.`,
     `That is why the browser shows a blank or stale page on http://localhost:${port}: it is talking to that other process, not to this one.`,
-    holder.details ? `Listening right now:\n${holder.details.replace(/^/gm, '  ')}` : 'The OS did not report which process holds it.',
+    who,
     'Stop that process, then run npm start again:',
     freeIt,
     `Or start Linear Hub on another port:  PORT=${port + 1} npm start   (then open http://localhost:${port + 1})`,
