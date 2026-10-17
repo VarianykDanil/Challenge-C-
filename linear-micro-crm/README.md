@@ -60,7 +60,7 @@ Linear Hub fixes those four things without asking the business to change how it 
 
 ## Quick start
 
-Requires **Node.js ≥ 22.13** (`.nvmrc` says `22`). The server uses the built-in `node:sqlite`, so there is nothing else to install.
+Requires **Node.js ≥ 22.18** (`.nvmrc` says `22`; 24 and 26 work too). The server runs TypeScript directly with Node's type stripping and uses the built-in `node:sqlite`, so there is nothing else to install.
 
 ```bash
 npm install
@@ -82,9 +82,10 @@ Every command below exists in `package.json` (root) or `server/package.json`.
 
 | Command | What it does |
 |---|---|
-| `npm run dev` | Server (`tsx watch`, `TZ=Europe/London`) and client (Vite) together |
+| `npm run dev` | Server (`node --watch`, `TZ=Europe/London`) and client (Vite) together |
 | `npm run build` | Typecheck and build the client into `client/dist` |
 | `npm start` | Serve the API **and** the built client on <http://localhost:4000> (`NODE_ENV=production`) |
+| `npm run doctor` | Check this machine can run Linear Hub: Node version, built client, data folder, database, port, and a real boot on a temporary database. Run it whenever `npm start` misbehaves |
 | `npm run seed` | Delete and rebuild the database with fresh sample data |
 | `npm run typecheck` | Typecheck `shared`, `server` and `client` |
 | `npm test` | Run the shared domain-logic tests (`node:test`) |
@@ -97,10 +98,19 @@ Every command below exists in `package.json` (root) or `server/package.json`.
 | `PORT` | `4000` | Port the API (and, in production, the client) listens on |
 | `DB_PATH` | `server/data/linear.sqlite` | Where the SQLite file lives; the directory is created if needed |
 | `LM_DEMO_ACCOUNTS` | unset | Set to `0` on any deployment with real users: the sign-in page then shows no demo accounts and the API never publishes a login |
-| `LM_APP_SECRET` | unset (development key) | Key material for encrypting two-step verification secrets at rest (AES-256-GCM, key = SHA-256 of the value). Set a long random string on every real deployment; in `NODE_ENV=production` the server warns once at start-up when it is unset |
+| `LM_APP_SECRET` | unset (generated key file) | Key material for encrypting two-step verification secrets at rest (AES-256-GCM, key = SHA-256 of the value). When unset, a random key is generated on first start into `server/data/app-secret` (mode 600, next to the database; `LM_APP_SECRET_FILE` relocates it). Back that file up with the database, or set the variable to manage the key yourself |
 | `COOKIE_SECURE` | unset | Set to `1` to force the `Secure` flag on the session cookie; it is set automatically when the request arrived over HTTPS (`X-Forwarded-Proto: https`, `trust proxy` is on) |
 | `TZ` | `Europe/London` | The business time zone — "today" for events and pay weeks. The npm scripts and the Dockerfile pin it; keep it if you run the server another way |
 | `NODE_ENV` | — | `production` makes the server serve `client/dist`; `npm start` sets it |
+
+### Troubleshooting
+
+| Symptom | What to do |
+|---|---|
+| `npm start` prints "listening" and the shell prompt comes straight back | The server now reports *why* it stopped (a signal, a crash, a drained event loop). Read the line after "listening", then run `npm run doctor` and paste its report when asking for help |
+| The browser shows a blank page that never finishes loading on <http://localhost:4000> | Something else is answering on that port (an earlier server that never stopped, a Docker container, another project). `npm start` now refuses to start in that case and names the process; stop it with `kill <PID>`, or use `PORT=4001 npm start` |
+| `Cannot find module 'qrcode'` or similar after a `git pull` | Dependencies changed: run `npm install`, then `npm run build`, then `npm start` |
+| `npm start` serves the API but the page is empty or stale | Rebuild the client: `npm run build` (the server serves `client/dist`) |
 
 ### Docker
 

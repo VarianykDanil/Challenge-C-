@@ -1,0 +1,169 @@
+/**
+ * Boot diagnostics: say *why* the process stops, and refuse to start on a port something else already answers on.
+ *
+ * A server that prints "listening" and then silently returns to the shell prompt is impossible to debug from the
+ * outside, so every way the process can end is reported here: a signal (which one), a drained event loop (nothing left
+ * to keep the server alive), an uncaught error, or an explicit `process.exit` (with the stack of whoever called it).
+ *
+ * The port probe matters because macOS, unlike Linux, lets `listen()` on the dual-stack wildcard succeed while another
+ * process already holds `0.0.0.0:<port>`: the new server reports "listening" but the browser keeps talking to the
+ * old one. A TCP connect to both loopback addresses before binding catches that on every OS.
+ */
+import { execFileSync } from 'node:child_process';
+import type { Server } from 'node:http';
+import net from 'node:net';
+
+export interface PortHolder {
+  /** Loopback address that accepted the probe connection. */
+  host: string;
+  /** `lsof`/`ss` output for the listener, when the OS could tell us. */
+  details: string | null;
+}
+
+/** Try to connect to `host:port`; resolves true if something accepted the connection. */
+function accepts(host: string, port: number, timeoutMs: number): Promise<boolean> {
+  return new Promise((resolve) => {
+    const socket = net.connect({ host, port });
+    const done = (value: boolean) => {
+      socket.removeAllListeners();
+      socket.destroy();
+      resolve(value);
+    };
+    socket.setTimeout(timeoutMs, () => done(false));
+    socket.once('connect', () => done(true));
+    socket.once('error', () => done(false));
+  });
+}
+
+/** Which process is listening on the port, as the OS reports it (macOS/Linux `lsof`, Linux `ss`), or null. */
+export function describePortHolder(port: number): string | null {
+  const attempts: Array<[string, string[]]> =
+    process.platform === 'win32'
+      ? [['netstat', ['-ano', '-p', 'tcp']]]
+      : [
+          ['lsof', ['-nP', `-iTCP:${port}`, '-sTCP:LISTEN']],
+          ['ss', ['-Hltnp', `sport = :${port}`]],
+        ];
+  for (const [cmd, args] of attempts) {
+    try {
+      const out = execFileSync(cmd, args, { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'], timeout: 3000 });
+      const lines = out.split('\n').filter((l) => l.trim());
+      const rows =
+        cmd === 'netstat'
+          ? lines.filter((l) => l.includes(`:${port} `) && /LISTEN/i.test(l))
+          : lines.filter((l) => !/^(COMMAND|State)\b/.test(l));
+      if (rows.length) return (cmd === 'lsof' ? lines : rows).join('\n');
+    } catch {
+      // tool missing, or it found nothing: try the next one
+    }
+  }
+  return null;
+}
+
+/** Something already answers on the port (checked on 127.0.0.1 and ::1), or null when it is free. */
+export async function findPortHolder(port: number, timeoutMs = 600): Promise<PortHolder | null> {
+  for (const host of ['127.0.0.1', '::1']) {
+    if (await accepts(host, port, timeoutMs)) return { host, details: describePortHolder(port) };
+  }
+  return null;
+}
+
+/** The message printed when the port is taken: who has it, how to free it, how to use another port. */
+export function portBusyMessage(port: number, holder: PortHolder): string {
+  const freeIt =
+    process.platform === 'win32'
+      ? `  netstat -ano | findstr :${port}      (then: taskkill /PID <pid> /F)`
+      : `  lsof -nP -iTCP:${port} -sTCP:LISTEN   (then: kill <PID>)`;
+  return [
+    `Port ${port} is already in use: something on ${holder.host}:${port} accepted a connection before this server started.`,
+    `That is why the browser shows a blank or stale page on http://localhost:${port}: it is talking to that other process, not to this one.`,
+    holder.details ? `Listening right now:\n${holder.details.replace(/^/gm, '  ')}` : 'The OS did not report which process holds it.',
+    'Stop that process, then run npm start again:',
+    freeIt,
+    `Or start Linear Hub on another port:  PORT=${port + 1} npm start   (then open http://localhost:${port + 1})`,
+  ].join('\n');
+}
+
+export interface ExitDiagnosticsOptions {
+  server: Server;
+  /** Graceful shutdown, called once on SIGINT/SIGTERM/SIGHUP. */
+  shutdown: (signal: NodeJS.Signals) => void;
+  log?: (line: string) => void;
+}
+
+/**
+ * Report every way the process can end. Returns a function that marks a shutdown as intentional, so a planned stop
+ * is not reported as a mystery exit.
+ */
+export function installExitDiagnostics({ server, shutdown, log = console.error }: ExitDiagnosticsOptions): () => void {
+  let intentional = false;
+  const markIntentional = () => {
+    intentional = true;
+  };
+
+  for (const signal of ['SIGINT', 'SIGTERM', 'SIGHUP'] as const) {
+    process.on(signal, () => {
+      log(`Received ${signal}: shutting down.`);
+      markIntentional();
+      shutdown(signal);
+    });
+  }
+
+  server.on('error', (err: NodeJS.ErrnoException) => {
+    if (err.code === 'EADDRINUSE') {
+      const address = server.address();
+      const port = typeof address === 'object' && address ? address.port : Number(err.message.match(/:(\d+)$/)?.[1] ?? NaN);
+      log(`Cannot listen: ${err.message}`);
+      if (Number.isFinite(port)) {
+        const details = describePortHolder(port);
+        if (details) log(`Listening right now:\n${details.replace(/^/gm, '  ')}`);
+        log(`Free the port or start on another one:  PORT=${port + 1} npm start`);
+      }
+    } else if (err.code === 'EACCES') {
+      log(`Cannot listen: permission denied (${err.message}). Ports below 1024 need elevated rights; use PORT=4000 or higher.`);
+    } else {
+      log(`Server error: ${err.stack ?? err.message}`);
+    }
+    process.exitCode = 1;
+  });
+
+  server.on('close', () => {
+    if (!intentional) log('The HTTP server closed although no shutdown was requested.');
+  });
+
+  process.on('beforeExit', (code) => {
+    if (intentional) return;
+    const resources = typeof process.getActiveResourcesInfo === 'function' ? process.getActiveResourcesInfo() : [];
+    log(
+      `Nothing is keeping the server alive any more (the event loop drained, exit code ${code}). ` +
+        `Active resources: ${resources.length ? resources.join(', ') : 'none'}. ` +
+        'The listening socket should keep the process alive; if you see this, please report it with your Node version and OS.',
+    );
+  });
+
+  process.on('exit', (code) => {
+    if (intentional) return;
+    const where = new Error('exit called here').stack?.split('\n').slice(2, 7).join('\n') ?? '';
+    log(`Linear Hub API exiting with code ${code} without a shutdown request.${where ? `\n${where}` : ''}`);
+  });
+
+  process.on('uncaughtException', (err) => {
+    log(`Crashed on an uncaught exception:\n${err instanceof Error ? err.stack ?? err.message : String(err)}`);
+    markIntentional();
+    process.exit(1);
+  });
+  process.on('unhandledRejection', (reason) => {
+    log(`Crashed on an unhandled promise rejection:\n${reason instanceof Error ? reason.stack ?? reason.message : String(reason)}`);
+    markIntentional();
+    process.exit(1);
+  });
+
+  return markIntentional;
+}
+
+/** Human-readable bound address of a listening server (`http://localhost:4000`). */
+export function listeningUrl(server: Server, fallbackPort: number): string {
+  const address = server.address();
+  const port = typeof address === 'object' && address ? address.port : fallbackPort;
+  return `http://localhost:${port}`;
+}

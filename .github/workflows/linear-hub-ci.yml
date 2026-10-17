@@ -34,3 +34,47 @@ jobs:
         run: npm run build
       - name: Docker image builds
         run: docker build -t linear-hub:ci .
+
+  boot:
+    name: boot (${{ matrix.os }}, node ${{ matrix.node }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+        node: ['22', '26']
+    defaults:
+      run:
+        working-directory: linear-micro-crm
+    env:
+      TZ: Europe/London
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node }}
+          cache: npm
+          cache-dependency-path: linear-micro-crm/package-lock.json
+      - name: Install
+        run: npm ci --no-audit --no-fund
+      - name: Build client
+        run: npm run build
+      - name: Doctor (boots the server on a temporary database and checks it stays up)
+        run: npm run doctor
+      - name: npm start stays up for 8 seconds and serves the landing page
+        shell: bash
+        run: |
+          PORT=4123 npm start > start.log 2>&1 &
+          for i in $(seq 1 40); do grep -q "listening on" start.log && break; sleep 0.5; done
+          sleep 8
+          cat start.log
+          grep -q "listening on http://localhost:4123" start.log
+          if ! kill -0 $! 2>/dev/null; then echo "::error::server exited after listening"; exit 1; fi
+          curl -sf -o /dev/null -w "landing %{http_code}\n" http://localhost:4123/
+          curl -sf http://localhost:4123/api/health
+          pkill -TERM -f "node src/index.ts"
+          wait $! || true
+          sleep 1
+          cat start.log
+          grep -q "Received SIGTERM: shutting down" start.log

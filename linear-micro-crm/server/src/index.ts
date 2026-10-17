@@ -5,6 +5,7 @@ import { openDb } from './db/connection.ts';
 import { createSchema, isSeeded } from './db/schema.ts';
 import { materialisePayrollRuns, rollForwardEventStatuses } from './db/maintenance.ts';
 import { DEFAULT_DB_PATH, seed } from './db/seed.ts';
+import { findPortHolder, installExitDiagnostics, listeningUrl, portBusyMessage } from './lib/boot.ts';
 import { announceAppSecret, configureAppSecret } from './lib/crypto.ts';
 import { purgeExpiredChallenges, reencryptLegacySecrets } from './lib/twofactor.ts';
 import { purgeExpiredSessions } from './middleware/auth.ts';
@@ -64,16 +65,30 @@ const app = createApp(db, {
 });
 
 const port = Number(process.env.PORT ?? 4000);
+// Refuse to start behind something that already answers on the port: macOS lets a second listener bind the
+// dual-stack wildcard next to an IPv4 one, so "listening" would be printed while the browser talks to the old process.
+const holder = await findPortHolder(port);
+if (holder) {
+  console.error(portBusyMessage(port, holder));
+  db.close();
+  process.exit(1);
+}
 const server = app.listen(port, () => {
-  console.log(`Linear Hub API listening on http://localhost:${port}${isProduction ? ' (serving client/dist)' : ''}`);
+  console.log(
+    `Linear Hub API listening on ${listeningUrl(server, port)}${isProduction ? ' (serving client/dist)' : ''}. Press Ctrl+C to stop.`,
+  );
 });
 
+let stopping = false;
 function shutdown(): void {
+  if (stopping) return;
+  stopping = true;
   server.close(() => {
     db.close();
     process.exit(0);
   });
-  setTimeout(() => process.exit(0), 2000).unref();
+  setTimeout(() => process.exit(0), 2000);
 }
-process.on('SIGINT', shutdown);
-process.on('SIGTERM', shutdown);
+// Every way the process can end is reported (signal, drained event loop, crash, stray process.exit), so a server
+// that "stops for no reason" says why on the terminal.
+installExitDiagnostics({ server, shutdown });
