@@ -60,6 +60,8 @@ export interface User {
 export interface UserWithTeam extends User {
   teamName: string | null;
   payPlanName: string;
+  /** Present on /auth/me and login responses: whether two-step verification is switched on. */
+  twoFactorEnabled?: boolean;
 }
 
 export interface Team {
@@ -500,6 +502,32 @@ export interface LoginInput {
 
 export interface AuthResponse {
   user: UserWithTeam;
+}
+
+/** Returned by POST /auth/login instead of AuthResponse when the account has two-step verification on. */
+export interface TwoFactorChallenge {
+  requiresTwoFactor: true;
+  challengeToken: string;
+  method: 'totp';
+}
+
+export interface TwoFactorStatus {
+  enabled: boolean;
+  enabledAt: string | null;
+  recoveryCodesLeft: number;
+  pendingSetup: boolean;
+}
+
+export interface TwoFactorSetup {
+  /** Base32 secret for manual entry. */
+  secret: string;
+  otpauthUrl: string;
+  /** Inline SVG markup of the QR code. */
+  qrSvg: string;
+}
+
+export interface TwoFactorEnabled {
+  recoveryCodes: string[];
 }
 
 export interface ApiError {

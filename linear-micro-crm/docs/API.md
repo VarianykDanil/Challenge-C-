@@ -126,3 +126,28 @@ Behaviour that the contract above leaves open, as implemented in `server/`:
 - **Errors.** Zod failures → `400 { error: 'Validation failed', details: [{ path, message }] }`; invalid funnels → `400 { error: 'Invalid funnel', details: string[] }`; SQLite unique-constraint violations → `409`.
 - **Event statuses.** `rollForwardEventStatuses` (`db/maintenance.ts`) runs at startup and every 15 minutes: past `scheduled`/`live` events become `completed`, and today's `scheduled` events become `live` only once `start_time` has passed, matching the seed and `POST /events` defaults.
 - **Database.** `node:sqlite` (`server/data/linear.sqlite`, WAL, foreign keys on). Override the location with `DB_PATH`. The server seeds on first start when the `meta.seeded_at` row is missing; `npm run seed -w server` deletes and rebuilds the file. Seeding is deterministic (mulberry32) but anchored to the real current date, so demo data stays "this week" whenever it is regenerated. `npm run smoke -w server` boots the API on a temporary seeded database and exercises every endpoint.
+
+## Two-step verification (TOTP, authenticator apps) — contract v1
+
+Optional second factor using RFC 6238 TOTP (6 digits, 30-second step, SHA-1, ±1 step tolerance) compatible with
+Google Authenticator, Microsoft Authenticator, 1Password, Authy. Secrets are stored encrypted at rest
+(AES-256-GCM with a key derived from env `LM_APP_SECRET`; a development default is used with a startup warning
+when the variable is unset). Recovery codes are stored as SHA-256 hashes and are single use.
+
+### Status & setup (signed in)
+- `GET /auth/2fa` → `TwoFactorStatus { enabled: boolean; enabledAt: string | null; recoveryCodesLeft: number; pendingSetup: boolean }`.
+- `POST /auth/2fa/setup` → `TwoFactorSetup { secret: string; otpauthUrl: string; qrSvg: string }` (201). Creates a *pending* secret (not active); calling it again replaces the pending secret. `qrSvg` is an inline SVG string of the otpauth URL (issuer "Linear Hub", label `Linear Hub:<email>`). 409 if 2FA is already enabled.
+- `POST /auth/2fa/enable` body `{ code: string }` → `TwoFactorEnabled { recoveryCodes: string[] }` (10 codes, format `xxxx-xxxx`, shown once). Verifies the code against the pending secret, activates it, and signs out every *other* session of the user. 400 `{error:'That code is not valid'}` on mismatch; 409 if nothing pending.
+- `POST /auth/2fa/disable` body `{ code?: string; recoveryCode?: string }` → `204`. Requires a valid current code or an unused recovery code. Admin may disable another user's 2FA with `POST /users/:id/2fa/reset` (no code; for lost devices) → `204`, which also signs that user out everywhere.
+- `POST /auth/2fa/recovery-codes` body `{ code: string }` → `{ recoveryCodes: string[] }` regenerates a fresh set (invalidates old ones).
+- 2FA verification endpoints are rate limited: 6 failed codes per 10 minutes per user → `429`.
+
+### Login flow
+- `POST /auth/login` → when the user has 2FA enabled the response is `200 { requiresTwoFactor: true, challengeToken: string, method: 'totp' }` and **no session cookie is set**. The challenge token is single purpose, bound to the user, expires after 5 minutes and is deleted after use.
+- `POST /auth/login/2fa` body `{ challengeToken: string; code?: string; recoveryCode?: string }` → `AuthResponse` with the session cookie set. 401 `{error:'That code is not valid'}` on a wrong code, 410 when the challenge expired (client returns to step one), 429 after 6 failures.
+- `GET /auth/demo-accounts` is unchanged; the seeded demo accounts have 2FA **off** so the demo sign-in keeps working.
+- `AuthResponse.user` gains optional `twoFactorEnabled?: boolean`.
+
+### Client (Settings → Security)
+- Card "Two-step verification" with status (On since <date> · N recovery codes left / Off). "Set up" opens a modal: step 1 QR code (the SVG) with the manual key and the otpauth link, step 2 six-digit input (auto-advance, paste-friendly) → "Turn on", step 3 recovery codes with Copy and Download (.txt) and a "I have saved these" confirmation. "Turn off" asks for a current code (or a recovery code). "New recovery codes" asks for a code. Admin view of a person (Team → person → Edit) gets "Reset two-step verification" with confirmation.
+- Login page: after email + ID, if `requiresTwoFactor` show step two: "Enter the 6-digit code from your authenticator app", with "Use a recovery code instead", and "Back" to step one; handle 401/410/429 messages.
