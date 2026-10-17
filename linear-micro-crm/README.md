@@ -107,8 +107,8 @@ Every command below exists in `package.json` (root) or `server/package.json`.
 
 | Symptom | What to do |
 |---|---|
-| `npm start` prints "listening" and the shell prompt comes straight back | The server now reports *why* it stopped (a signal, a crash, a drained event loop). Read the line after "listening", then run `npm run doctor` and paste its report when asking for help |
-| The browser shows a blank page that never finishes loading on <http://localhost:4000> | Something else is answering on that port (an earlier server that never stopped, a Docker container, another project). `npm start` now refuses to start in that case and names the process; stop it with `kill <PID>`, or use `PORT=4001 npm start` |
+| `npm start` printed "listening" and the shell prompt came straight back (exit code 0) | Port 4000 was already taken, usually by an earlier copy of this server that never stopped. Older builds printed "listening" anyway because Express 5 hands a failed bind to the listen callback instead of throwing. The server now refuses to start, names the process holding the port and exits with code 1; it also reports any other reason it stops (a signal, a crash, a drained event loop). Run `npm run doctor` and paste its report when asking for help |
+| The browser shows a blank page that never finishes loading on <http://localhost:4000> | Something else is answering on that port (that earlier server, a Docker container, another project). Find it with `lsof -nP -iTCP:4000 -sTCP:LISTEN`, stop it with `kill <PID>`, then `npm start` again, or use `PORT=4001 npm start` |
 | `Cannot find module 'qrcode'` or similar after a `git pull` | Dependencies changed: run `npm install`, then `npm run build`, then `npm start` |
 | `npm start` serves the API but the page is empty or stale | Rebuild the client: `npm run build` (the server serves `client/dist`) |
 

@@ -78,3 +78,18 @@ jobs:
           sleep 1
           cat start.log
           grep -q "Received SIGTERM: shutting down" start.log
+      - name: npm start refuses a port something else already holds (exit 1, names the holder)
+        shell: bash
+        run: |
+          node -e "require('net').createServer(()=>{}).listen(4124,'0.0.0.0',()=>setTimeout(()=>{},60000))" &
+          HOLDER=$!
+          sleep 1
+          set +e
+          PORT=4124 npm start > busy.log 2>&1
+          CODE=$?
+          set -e
+          kill $HOLDER || true
+          cat busy.log
+          test "$CODE" -ne 0 || { echo "::error::npm start exited 0 although port 4124 was taken"; exit 1; }
+          grep -q "Port 4124 is already in use" busy.log
+          ! grep -q "listening on" busy.log

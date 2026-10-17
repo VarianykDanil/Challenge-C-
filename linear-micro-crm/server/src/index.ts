@@ -1,4 +1,5 @@
 /** Linear Hub API — bootstrap: open the SQLite database, create/seed it, run maintenance, mount the app. */
+import http from 'node:http';
 import path from 'node:path';
 import { createApp, parseTrustProxy } from './app.ts';
 import { openDb } from './db/connection.ts';
@@ -73,11 +74,12 @@ if (holder) {
   db.close();
   process.exit(1);
 }
-const server = app.listen(port, () => {
-  console.log(
-    `Linear Hub API listening on ${listeningUrl(server, port)}${isProduction ? ' (serving client/dist)' : ''}. Press Ctrl+C to stop.`,
-  );
-});
+
+// Plain node:http rather than app.listen(port, cb): Express 5 registers that callback as the server's 'error'
+// listener too, so a failed bind (EADDRINUSE) would call it with the error, print "listening", swallow the error and
+// let the process end with exit code 0 and nothing on the terminal. Here the server's 'error' event is reported
+// by installExitDiagnostics and the callback only ever runs on 'listening'.
+const server = http.createServer(app);
 
 let stopping = false;
 function shutdown(): void {
@@ -89,6 +91,12 @@ function shutdown(): void {
   });
   setTimeout(() => process.exit(0), 2000);
 }
-// Every way the process can end is reported (signal, drained event loop, crash, stray process.exit), so a server
-// that "stops for no reason" says why on the terminal.
+// Every way the process can end is reported (signal, bind failure, drained event loop, crash, stray process.exit),
+// so a server that "stops for no reason" says why on the terminal.
 installExitDiagnostics({ server, shutdown });
+
+server.listen(port, () => {
+  console.log(
+    `Linear Hub API listening on ${listeningUrl(server, port)}${isProduction ? ' (serving client/dist)' : ''}. Press Ctrl+C to stop.`,
+  );
+});

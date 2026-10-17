@@ -1,6 +1,10 @@
 /**
  * Boot diagnostics: say *why* the process stops, and refuse to start on a port something else already answers on.
  *
+ * Background: Express 5's `app.listen(port, cb)` also registers `cb` as the server's 'error' listener, so a failed bind
+ * called our callback with the error, we printed "listening", the error counted as handled and the process ended with
+ * exit code 0. The entry point now uses node:http directly and the 'error' handler below ends the process loudly.
+ *
  * A server that prints "listening" and then silently returns to the shell prompt is impossible to debug from the
  * outside, so every way the process can end is reported here: a signal (which one), a drained event loop (nothing left
  * to keep the server alive), an uncaught error, or an explicit `process.exit` (with the stack of whoever called it).
@@ -110,21 +114,27 @@ export function installExitDiagnostics({ server, shutdown, log = console.error }
   }
 
   server.on('error', (err: NodeJS.ErrnoException) => {
+    // Without a listener Node would throw this; with one we must end the process ourselves, or a failed bind
+    // leaves nothing alive and the process ends with exit code 0 as if nothing had happened.
     if (err.code === 'EADDRINUSE') {
-      const address = server.address();
-      const port = typeof address === 'object' && address ? address.port : Number(err.message.match(/:(\d+)$/)?.[1] ?? NaN);
-      log(`Cannot listen: ${err.message}`);
+      const port = Number(err.message.match(/:(\d+)$/)?.[1] ?? NaN);
+      log(`Cannot listen: ${err.message}. Another process already has this port, so this server did not start.`);
       if (Number.isFinite(port)) {
         const details = describePortHolder(port);
         if (details) log(`Listening right now:\n${details.replace(/^/gm, '  ')}`);
-        log(`Free the port or start on another one:  PORT=${port + 1} npm start`);
+        log(
+          process.platform === 'win32'
+            ? `Find it with:  netstat -ano | findstr :${port}   or start on another port:  PORT=${port + 1} npm start`
+            : `Find it with:  lsof -nP -iTCP:${port} -sTCP:LISTEN   (then kill <PID>), or start on another port:  PORT=${port + 1} npm start`,
+        );
       }
     } else if (err.code === 'EACCES') {
       log(`Cannot listen: permission denied (${err.message}). Ports below 1024 need elevated rights; use PORT=4000 or higher.`);
     } else {
       log(`Server error: ${err.stack ?? err.message}`);
     }
-    process.exitCode = 1;
+    markIntentional();
+    process.exit(1);
   });
 
   server.on('close', () => {
