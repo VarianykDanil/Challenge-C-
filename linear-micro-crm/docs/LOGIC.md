@@ -13,6 +13,8 @@ no I/O, no React) and is unit-tested with `node:test` (`npm run test -w shared`)
 | `logic/leaderboard.ts` | stable ranking with ties, rank movement |
 | `logic/dates.ts` | DST-safe `YYYY-MM-DD` arithmetic, dashboard ranges, ISO weeks |
 | `logic/insights.ts` | coaching messages |
+| `logic/stats.ts` | 1.1: mean, sample SD, z-scores, binomial and two-proportion z, Poisson tail, quantiles, weekly series |
+| `logic/baseline.ts` · `streaks.ts` · `payForecast.ts` · `payrollFlags.ts` · `signals.ts` · `attention.ts` · `eventForecast.ts` · `outbox.ts` · `digest.ts` | 1.1 smart release modules — see section 14 |
 
 ---
 
@@ -311,3 +313,96 @@ with Node's `crypto` only — no third-party OTP library:
 Reference vectors (RFC 6238 appendix B, secret `12345678901234567890`): T = 59 → `94287082` (8 digits) /
 `287082` (6); 1111111109 → `081804`; 1234567890 → `005924`; 2000000000 → `279037` — all covered by
 `npm test -w server`.
+
+## 14. Smart release (1.1)
+
+Rule-based "smart" features: no model, no API key, deterministic (the same data always gives the same sentence).
+Every builder is switched off by `LM_SMART=0` (`server/src/lib/smart/enabled.ts`): it then returns null, `[]` or an
+empty Map, routes attach nothing, and the dashboard looks exactly as it did in 1.0. Every payload is built from data
+the caller may already see; nobody ever sees another person's alerts, pace, forecast or check-in reasons.
+
+### 14.0 Copy style guide (every generated sentence)
+
+* **British English** ("colour", "organise", "programme"); dates like "Thu 15 Oct"; weeks "w/c 12 Oct".
+* **Money is GBP via en-GB** (`Intl.NumberFormat('en-GB', { style: 'currency', currency: 'GBP' })`): "£1,050",
+  "£412.50". Never "GBP 1050" or "1,050£".
+* **Specific numbers.** "41 stops a day against your usual 62", not "fewer stops than usual". Stops per day are whole
+  numbers; conversion has one decimal place ("2.1%").
+* **Every warning names exactly one lever** — the one thing to do next: "your conversion is holding, so volume is the
+  lever: every extra 26 stops is about one sale". Never a list of five things.
+* **Forecasts are estimates and show a range**: "This week (estimate): about £1,050 · £930–£1,140". The word
+  "estimate" (or "about" plus a range) is always there; Friday's payslip is the official figure.
+* **Kind, never judgemental about people.** Never "at risk", "underperforming", "failing", "struggling" or "poor"
+  about a person. Check-in reasons are conversation starters, not verdicts. Events (never people) may be "behind
+  target".
+* **Positive states only for streaks**: "12-day sales streak · best 26", "Personal best week so far" — never
+  "streak broken".
+* **Private stays private.** Shareable text (the WhatsApp digest) never contains colleague names from check-in lists
+  or anyone's pay; names appear only where the leaderboard already shows them.
+* **Deterministic.** No randomness, no "now" in the wording except through the business date passed in; ties sort by
+  name.
+
+### 14.1 Foundation: statistics, weekly history and the kill switch (p1)
+
+`logic/stats.ts` (pure):
+
+| Function | Rule |
+|---|---|
+| `mean(xs)` | arithmetic mean; `[]` → 0 |
+| `sampleSd(xs)` | √(Σ(x − μ)² ÷ (n − 1)); 0 when n < 2. `[2,4,4,4,5,5,7,9]` → 2.1381 |
+| `zScore(x, μ, σ)` | (x − μ) ÷ σ; null when σ ≤ 0 or the result is not finite |
+| `binomialZ(k, n, p0)` | (k − n·p0) ÷ √(n·p0·(1 − p0)); null when n = 0 or p0 ∉ (0, 1). (30, 1000, 0.04) → −1.6137 |
+| `twoProportionZ(k1, n1, k2, n2)` | pooled p = (k1 + k2) ÷ (n1 + n2); z = (k1/n1 − k2/n2) ÷ √(p(1 − p)(1/n1 + 1/n2)); null when n1 or n2 is 0 or p ∈ {0, 1}. (20, 1000, 40, 1000) → −2.6216 |
+| `poissonTailAtLeast(k, λ)` | P(X ≥ k) = 1 − Σ_{i<k} e^−λ λ^i / i!, summed iteratively in log space; k ≤ 0 → 1; λ ≤ 0 with k > 0 → 0. (1, 2) → 0.8647, (3, 2) → 0.3233 |
+| `quantile(xs, q)` | linear interpolation between order statistics (type 7); `[]` → 0. ([1,2,3,4], 0.9) → 3.7 |
+| `weekSeriesStats(weeks)` | over weeks with days > 0 only (a week off is not a slow week): count, mean and sample SD of each week's stops ÷ days, pooled conversion Σ sales ÷ Σ stops, totals |
+| `conversionTrend(weeks, { minStops = 400, z = 2 })` | oldest half v newest half (16 weeks → 8 v 8; an odd middle week is left out); null when either half has < 400 stops; z = twoProportionZ(recent, earlier); `improving` z ≥ 2, `declining` z ≤ −2, else `steady` (also when nobody sold anything) |
+
+`WeekStat` = `GaugeTotals & { weekStart; days }` (days = distinct worked dates).
+
+`server/src/lib/history.ts` — `weeklyHistory(db, scope, weeks, today)` → `Map<userId, { weeks, current }>`:
+`weeks` are the N completed Mon–Sun weeks before `mondayOf(today)`, oldest first and zero-filled; `current` is
+Monday ≤ date < today. Rows dated today or later and rows on an event still `live` never count; rows on cancelled
+events do. Scope is `{ userIds }` (every id present, zero-filled), `{ teamId }` (the user's current team) or
+`{ all: true }` (people with rows only). One grouped SQL statement per call; the caller decides visibility.
+
+Client slots: every component another package fills or edits is mounted inside its own `ErrorBoundary`
+(`features/common/ErrorBoundary.tsx`) at the mount site, so a throw replaces only that slot with **This card hit a
+problem · Try again** and the page (and the **Log gauges** button) keeps working. Slots too small for that box pass
+`fallback` (a node, or `({ error, reset }) => node`; `null` hides the slot): the topbar bell becomes a 40 px
+crossed-out bell that retries, the Gauges **Tally** button becomes **Tally · try again**. A plain function used inside
+props (the Sales tile's `streakHint()`) is called through `safeStreakHint()`, which logs a throw and drops the
+fragment. The tally is reachable from the dashboard through p7's `TodayTallyLink({ events })` slot at the top of the
+**Upcoming events** card (gauge roles only).
+
+### 14.2 Personal pace and streaks (p2)
+
+<!-- p2-personal-pace-streaks: filled from docs/smart/p2-personal-pace-streaks.md -->
+
+### 14.3 Pay forecast and payroll checks (p3)
+
+<!-- p3-money-forecast-payroll-checks: filled from docs/smart/p3-money-forecast-payroll-checks.md -->
+
+### 14.4 Check-ins and team coaching (p4)
+
+<!-- p4-leader-check-ins-coaching: filled from docs/smart/p4-leader-check-ins-coaching.md -->
+
+### 14.5 Needs attention (p5)
+
+<!-- p5-needs-attention-feed: filled from docs/smart/p5-needs-attention-feed.md -->
+
+### 14.6 Event forecasts and roster gaps (p6)
+
+<!-- p6-event-forecasts-roster: filled from docs/smart/p6-event-forecasts-roster.md -->
+
+### 14.7 Logging when the signal drops (p7)
+
+<!-- p7-signal-proof-logging: filled from docs/smart/p7-signal-proof-logging.md -->
+
+### 14.8 Recruitment SLAs (p8)
+
+<!-- p8-recruitment-slas: filled from docs/smart/p8-recruitment-slas.md -->
+
+### 14.9 Week in review (p9)
+
+<!-- p9-week-in-review-digest: filled from docs/smart/p9-week-in-review-digest.md -->

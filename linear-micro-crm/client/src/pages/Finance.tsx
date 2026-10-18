@@ -1,4 +1,5 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
+import { useLocation } from 'react-router-dom';
 import { Plus, Trash2 } from 'lucide-react';
 import type { Expense, PayrollRunWithUser } from '@lm/shared';
 import { EXPENSE_CATEGORY_LABELS } from '@lm/shared';
@@ -12,6 +13,7 @@ import { csvFilename, sortRows } from '@/lib/csv';
 import { todayISO } from '@/lib/dates';
 import { formatDate, formatDateShort, formatDecimal, formatGBP, formatNumber, formatPct, formatRangeLabel, formatRelative } from '@/lib/format';
 import { usePageTitle } from '@/lib/usePageTitle';
+import { useActionParam } from '@/lib/useActionParam';
 import { COPY } from '@/content/copy';
 
 type Tab = 'me' | 'team' | 'company';
@@ -36,7 +38,21 @@ export function FinancePage() {
     if (me.role === 'admin') t.push({ value: 'company', label: 'Company' });
     return t;
   }, [me.role, me.teamId]);
-  const [tab, setTab] = useState<Tab>('me');
+  // Deep links (p1): /finance?tab=me|team|company picks a tab this person has; #runs (admin) lands on Runs to pay.
+  const location = useLocation();
+  const linkTab = (tabParam: string | null, hash: string): Tab | null => {
+    if (hash === '#runs' && me.role === 'admin' && (tabParam === null || tabParam === 'company')) return 'company';
+    return tabs.find((t) => t.value === tabParam)?.value ?? null;
+  };
+  const [tab, setTab] = useState<Tab>(() => linkTab(new URLSearchParams(location.search).get('tab'), location.hash) ?? 'me');
+  // Only a link that resolves to Company scrolls (?tab=me#runs opens My pay and must not jump later when Company is
+  // opened by hand). On the first render `tab` is the resolved link tab.
+  const [scrollToRuns, setScrollToRuns] = useState(() => location.hash === '#runs' && me.role === 'admin' && tab === 'company');
+  useActionParam(['tab'], (p, hash) => {
+    const next = linkTab(p.tab, hash);
+    if (next) setTab(next);
+    setScrollToRuns(hash === '#runs' && me.role === 'admin' && next === 'company');
+  }, { hashes: ['#runs'] });
   const [payslip, setPayslip] = useState<PayrollRunWithUser | null>(null);
 
   return (
@@ -45,7 +61,7 @@ export function FinancePage() {
       {tabs.length > 1 && <Tabs items={tabs} value={tab} onChange={(v) => setTab(v as Tab)} className="mb-6" />}
       {tab === 'me' && <MyPay onOpen={setPayslip} />}
       {tab === 'team' && me.teamId != null && <TeamPay teamId={me.teamId} onOpen={setPayslip} />}
-      {tab === 'company' && <Company onOpen={setPayslip} />}
+      {tab === 'company' && <Company onOpen={setPayslip} scrollToRuns={scrollToRuns} onScrolled={() => setScrollToRuns(false)} />}
       <PayslipModal run={payslip} onClose={() => setPayslip(null)} />
     </>
   );
@@ -135,7 +151,7 @@ function groupByWeek(rows: PayrollRunWithUser[]): [string, PayrollRunWithUser[]]
   return [...m.entries()];
 }
 
-function Company({ onOpen }: { onOpen: (r: PayrollRunWithUser) => void }) {
+function Company({ onOpen, scrollToRuns = false, onScrolled }: { onOpen: (r: PayrollRunWithUser) => void; scrollToRuns?: boolean; onScrolled?: () => void }) {
   const toast = useToast();
   const [range, setRange] = useRangeState('last_12_weeks');
   const summary = useFinanceSummary({ from: range.from, to: range.to });
@@ -155,6 +171,17 @@ function Company({ onOpen }: { onOpen: (r: PayrollRunWithUser) => void }) {
   // The week in progress has no runs yet; the server marks it `estimated` and uses the live pay estimate.
   const hasEstimate = (s?.weeks ?? []).some((w) => w.estimated === true);
   const campaignName = (id: number | null) => (id == null ? null : campaigns.data?.find((c) => c.id === id) ?? null);
+
+  // #runs deep link: once the cards above have their data (so nothing shifts afterwards), bring Runs to pay into view.
+  const settled = !summary.isLoading && !pending.isLoading && !expenses.isLoading;
+  useEffect(() => {
+    if (!scrollToRuns || !settled) return;
+    const raf = requestAnimationFrame(() => {
+      document.getElementById('runs')?.scrollIntoView({ block: 'start' });
+      onScrolled?.();
+    });
+    return () => cancelAnimationFrame(raf);
+  }, [scrollToRuns, settled, onScrolled]);
 
   const expenseColumns: Column<Expense>[] = [
     { key: 'date', header: 'Date', render: (e) => <span className="whitespace-nowrap">{formatDate(e.date)}</span>, sortValue: (e) => e.date },
@@ -239,7 +266,7 @@ function Company({ onOpen }: { onOpen: (r: PayrollRunWithUser) => void }) {
         </>
       )}
 
-      <Card padded={false} className="min-w-0 overflow-hidden">
+      <Card id="runs" padded={false} className="min-w-0 scroll-mt-20 overflow-hidden">
         <div className="p-5 pb-3"><CardHeader title="Runs to pay" description={`Pending and failed runs — mark them paid once the transfer has gone${pending.data?.some((r) => r.status === 'failed') ? ' · failed transfers are flagged' : ''}`} className="mb-0" actions={<ExportButton filename={csvFilename('runs-to-pay')} rows={sortRows(pending.data ?? [], (r) => r.weekStart, 'desc')} columns={payrollRunCsvColumns(true)} disabled={pending.isLoading} />} /></div>
         {pending.isError ? <ErrorState error={pending.error} onRetry={() => void pending.refetch()} className="m-5" /> : (pending.data?.length ?? 0) > GROUP_RUNS_ABOVE ? (
           <div className="divide-y divide-border border-t border-border">

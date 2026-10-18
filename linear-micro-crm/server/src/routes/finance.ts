@@ -11,6 +11,8 @@ import {
   type FinanceSummary,
   type FinanceWeek,
   type PayPlan,
+  type PayrollRunWithUser,
+  type UserWithTeam,
 } from '@lm/shared';
 import { all, get, placeholders, run, type Db } from '../db/connection.ts';
 import { ensurePayrollMaterialised } from '../db/maintenance.ts';
@@ -20,6 +22,9 @@ import { badRequest, conflict, forbidden, notFound } from '../lib/errors.ts';
 import { GAUGE_COMMISSION_SQL, GAUGE_FROM, GAUGE_PAYOUT_SQL, MONDAY_SQL, mondayOfSql } from '../lib/metrics.ts';
 import { estimateWeekPayroll, nextPay } from '../lib/pay.ts';
 import { redactPayroll } from '../lib/scope.ts';
+import { smartEnabled } from '../lib/smart/enabled.ts';
+import { weekPayForecast } from '../lib/smart/payForecast.ts';
+import { payrollFlagsFor } from '../lib/smart/payrollFlags.ts';
 import { idParam, isoDate, moneyAmount, optionalIdQuery, optionalString, parseRange } from '../lib/validate.ts';
 import { currentUser, requireRole } from '../middleware/auth.ts';
 
@@ -37,6 +42,19 @@ const expenseBody = z.object({
 
 function last12Weeks(today: string): { from: string; to: string } {
   return { from: addDays(mondayOf(today), -12 * 7), to: today };
+}
+
+/**
+ * Smart release 1.1 (p3): advisory `flags` on unpaid (pending / failed) runs, for admins only. Nothing is attached —
+ * not even the key — for other roles, other statuses, runs without flags, or when the kill switch is off.
+ */
+function withPayrollFlags<T extends PayrollRunWithUser>(db: Db, rows: T[], me: UserWithTeam): T[] {
+  if (me.role !== 'admin' || !smartEnabled()) return rows;
+  const unpaid = rows.filter((r) => r.status === 'pending' || r.status === 'failed');
+  if (!unpaid.length) return rows;
+  const flags = payrollFlagsFor(db, unpaid, me);
+  if (!flags.size) return rows;
+  return rows.map((r) => ((r.status === 'pending' || r.status === 'failed') && flags.has(r.id) ? { ...r, flags: flags.get(r.id)! } : r));
 }
 
 export function financeRouter(db: Db): Router {
@@ -75,7 +93,7 @@ export function financeRouter(db: Db): Router {
       if (userId) where.add('p.user_id = ?', userId);
       if (teamId) where.add('u.team_id = ?', teamId);
     }
-    res.json(listPayroll(db, `${where}`, where.params).map((r) => redactPayroll(me, r)));
+    res.json(withPayrollFlags(db, listPayroll(db, `${where}`, where.params).map((r) => redactPayroll(me, r)), me));
   });
 
   // ── my earnings ── (declared before /payroll/:id so the literal path wins)
@@ -98,6 +116,8 @@ export function financeRouter(db: Db): Router {
       },
       nextPayday: pay.nextPayday,
       nextPayAmount: pay.nextPayAmount,
+      // Smart release 1.1 (p3): an estimate only — never written to payroll_runs; nextPayAmount stays official.
+      forecast: smartEnabled() ? weekPayForecast(db, me, today) : null,
     });
   });
 
@@ -119,7 +139,8 @@ export function financeRouter(db: Db): Router {
     if (!allowed) throw forbidden('You cannot view this payslip');
     const plan = getPayPlan(db, target.payPlanId);
     const entries = listGauges(db, 'WHERE g.user_id = ? AND g.date BETWEEN ? AND ?', [run_.userId, run_.weekStart, run_.weekEnd], 'g.date ASC');
-    res.json({ ...redactPayroll(me, run_), plan, entries });
+    const [shown] = withPayrollFlags(db, [redactPayroll(me, run_)], me);
+    res.json({ ...shown!, plan, entries });
   });
 
   router.post('/payroll/:id/pay', requireRole('admin'), (req, res) => {

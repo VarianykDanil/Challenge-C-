@@ -9,3 +9,4 @@ export * from './ViewToggle';
 export * from './Stat';
 export * from './StopRowEvents';
 export * from './ExportButton';
+export * from './ErrorBoundary';

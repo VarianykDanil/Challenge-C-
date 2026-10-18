@@ -3,6 +3,8 @@ import { z } from 'zod';
 import type { Db } from '../db/connection.ts';
 import { previousToDateRange, rangeForPeriod, todayISO } from '../lib/dates.ts';
 import { rankedBoard } from '../lib/metrics.ts';
+import { smartEnabled } from '../lib/smart/enabled.ts';
+import { streaksForUsers } from '../lib/smart/streaks.ts';
 import { optionalIdQuery } from '../lib/validate.ts';
 import { currentUser } from '../middleware/auth.ts';
 
@@ -27,11 +29,14 @@ export function leaderboardRouter(db: Db): Router {
       }
       teamId = me.teamId;
     }
-    const { from, to } = rangeForPeriod(period, todayISO());
+    const today = todayISO();
+    const { from, to } = rangeForPeriod(period, today);
     // movement compares with the same to-date span of the previous week / month / quarter
     const { rows, total } = rankedBoard(db, { from, to, previous: previousToDateRange(period, { from, to }), teamId, metric, limit: MAX_ROWS });
     res.setHeader('X-Total-Count', String(total));
-    res.json(rows);
+    // Smart release 1.1 (p2): `streak` on every row whose user is in the Map; no key at all otherwise.
+    const streaks = rows.length && smartEnabled() ? streaksForUsers(db, rows.map((r) => r.userId), today) : null;
+    res.json(streaks?.size ? rows.map((r) => (streaks.has(r.userId) ? { ...r, streak: streaks.get(r.userId)! } : r)) : rows);
   });
   return router;
 }

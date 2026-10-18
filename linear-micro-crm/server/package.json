@@ -15,7 +15,7 @@
     "seed": "NODE_NO_WARNINGS=1 node src/db/seed.ts",
     "smoke": "TZ=Europe/London NODE_NO_WARNINGS=1 node src/smoke.ts",
     "typecheck": "tsc --noEmit -p tsconfig.json",
-    "test": "NODE_NO_WARNINGS=1 node --test \"src/**/*.test.ts\""
+    "test": "TZ=Europe/London NODE_NO_WARNINGS=1 node --test \"src/**/*.test.ts\""
   },
   "dependencies": {
     "@lm/shared": "*",

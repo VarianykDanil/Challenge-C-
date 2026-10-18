@@ -1,12 +1,14 @@
 import { Router } from 'express';
 import { z } from 'zod';
-import { funnelRatios } from '@lm/shared';
+import { EVENT_MAX_TARGET_SALES, funnelRatios, type EventForecastResponse, type SalesEventWithMeta } from '@lm/shared';
 import { get, run, type Db } from '../db/connection.ts';
 import { Where, getEvent, listEvents, listGauges } from '../db/queries.ts';
 import { addDays, nowHHMM, todayISO } from '../lib/dates.ts';
 import { badRequest, conflict, forbidden, notFound } from '../lib/errors.ts';
 import { canManageTeam, redactEntry } from '../lib/scope.ts';
-import { idParam, isoDate, optionalIdQuery, optionalString, parseRange, targetSalesCount, timeHHMM } from '../lib/validate.ts';
+import { smartEnabled } from '../lib/smart/enabled.ts';
+import { eventForecasts, forecastFor } from '../lib/smart/eventForecast.ts';
+import { idParam, isoDate, optionalIdQuery, optionalString, parseRange, positiveInt, targetSalesCount, timeHHMM } from '../lib/validate.ts';
 import { currentUser, requireRole } from '../middleware/auth.ts';
 
 const EVENT_TYPES = ['private_site', 'event', 'b2b', 'residential', 'retail'] as const;
@@ -26,6 +28,25 @@ const eventBody = z.object({
   targetSales: targetSalesCount.default(10),
   notes: z.string().trim().max(2000).nullable().optional().default(null),
 });
+
+/** GET /events/forecast query (p1 wiring for p6): what a new event would look like. */
+const forecastQuery = z.object({
+  campaignId: positiveInt,
+  teamId: positiveInt,
+  type: z.enum(EVENT_TYPES),
+  targetSales: z.coerce.number().int().min(0).max(EVENT_MAX_TARGET_SALES).optional(),
+});
+
+/**
+ * Smart release 1.1: attach `forecast` (p6) to the events that have one. Nothing is attached — not even the key —
+ * when the kill switch is off or the builder has no forecast for an event, so existing payloads stay byte-identical.
+ */
+function withForecasts<T extends SalesEventWithMeta>(db: Db, events: T[], today: string): T[] {
+  if (!events.length || !smartEnabled()) return events;
+  const forecasts = eventForecasts(db, events, today);
+  if (!forecasts.size) return events;
+  return events.map((e) => (forecasts.has(e.id) ? { ...e, forecast: forecasts.get(e.id)! } : e));
+}
 
 /** Past → completed; today → live only once the start time has passed; otherwise scheduled. */
 function defaultStatus(date: string, startTime: string): (typeof EVENT_STATUSES)[number] {
@@ -58,16 +79,28 @@ export function eventsRouter(db: Db): Router {
       where.add('e.status = ?', status);
     }
     // the date window is pushed into the gauge aggregate too, so the list never scans the whole gauge table
-    res.json(listEvents(db, `${where}`, where.params, undefined, { from, to }));
+    res.json(withForecasts(db, listEvents(db, `${where}`, where.params, undefined, { from, to }), today));
+  });
+
+  // Smart release 1.1 (p6 fills forecastFor): admin / leader only; declared before /:id so the literal path wins.
+  router.get('/forecast', requireRole('admin', 'leader'), (req, res) => {
+    const me = currentUser(req);
+    const q = forecastQuery.parse(req.query);
+    if (!canManageTeam(me, q.teamId)) throw forbidden('Leaders can only forecast events for their own team');
+    const body: EventForecastResponse = {
+      forecast: smartEnabled() ? forecastFor(db, { campaignId: q.campaignId, teamId: q.teamId, type: q.type, targetSales: q.targetSales }, todayISO()) : null,
+    };
+    res.json(body);
   });
 
   router.get('/:id', (req, res) => {
     const me = currentUser(req);
-    const event = getEvent(db, idParam(req));
-    if (!event) throw notFound('Event');
+    const found = getEvent(db, idParam(req));
+    if (!found) throw notFound('Event');
+    const [event] = withForecasts(db, [found], todayISO());
     // read-only for every role; check-in times and notes of other people are stripped unless admin / that team's leader
-    const entries = listGauges(db, 'WHERE g.event_id = ?', [event.id], 'g.sales DESC, u.last_name ASC').map((e) => redactEntry(me, e));
-    res.json({ ...event, entries, ratios: funnelRatios(event.totals) });
+    const entries = listGauges(db, 'WHERE g.event_id = ?', [event!.id], 'g.sales DESC, u.last_name ASC').map((e) => redactEntry(me, e));
+    res.json({ ...event!, entries, ratios: funnelRatios(event!.totals) });
   });
 
   router.post('/', requireRole('admin', 'leader'), (req, res) => {

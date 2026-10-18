@@ -1,11 +1,20 @@
 // Admin / leader company overview on the dashboard.
-import type { Dashboard } from '@lm/shared';
+import type { CheckInPerson, Dashboard } from '@lm/shared';
 import { Card, CardHeader, EmptyState, KpiTile } from '@/components/ui';
 import { DonutChart, TrendChart } from '@/components/charts';
 import { formatDateShort, formatGBP, formatNumber, formatPct } from '@/lib/format';
 import { ratioTone } from '@/lib/ratios';
+import { ErrorBoundary } from '@/features/common/ErrorBoundary';
+import { CheckInList } from '@/features/smart/CheckInList';
 
-export function CompanySection({ company, rangeLabel }: { company: NonNullable<Dashboard['company']>; rangeLabel: string }) {
+export interface CompanySectionProps {
+  company: NonNullable<Dashboard['company']>;
+  rangeLabel: string;
+  /** Smart release 1.1 (p4): insights.company?.checkIns — admin only; null / undefined renders nothing. */
+  checkIns?: CheckInPerson[] | null;
+}
+
+export function CompanySection({ company, rangeLabel, checkIns }: CompanySectionProps) {
   return (
     <section aria-labelledby="company-heading" className="space-y-4">
       <div>
@@ -39,6 +48,7 @@ export function CompanySection({ company, rangeLabel }: { company: NonNullable<D
           <p className="mt-3 text-xs text-muted">Overall conversion is <span className={`font-semibold ${ratioTone('overallConversion', company.ratios.overallConversion) === 'success' ? 'text-success' : 'text-warning'}`}>{formatPct(company.ratios.overallConversion, 1)}</span>.</p>
         </Card>
       </div>
+      <ErrorBoundary name="company-check-ins"><CheckInList people={checkIns} showTeam /></ErrorBoundary>
     </section>
   );
 }

@@ -1,9 +1,18 @@
 import { Link } from 'react-router-dom';
-import type { LeaderboardRow } from '@lm/shared';
+import type { BoardStreak, LeaderboardRow } from '@lm/shared';
 import { Avatar, EmptyState } from '@/components/ui';
 import { formatNumber, formatPct } from '@/lib/format';
 
-export function MiniLeaderboard({ rows, highlightUserId, limit = 5 }: { rows: LeaderboardRow[]; highlightUserId?: number; limit?: number }) {
+export interface MiniLeaderboardProps {
+  rows: LeaderboardRow[];
+  highlightUserId?: number;
+  limit?: number;
+  /** Smart release 1.1 (p2): insights.boardStreaks — a Flame on rows whose streak is ≥ 5 (row.streak also counts). */
+  streaks?: readonly BoardStreak[];
+}
+
+export function MiniLeaderboard({ rows, highlightUserId, limit = 5, streaks }: MiniLeaderboardProps) {
+  void streaks; // p2 renders the flames
   const top = rows.slice(0, limit);
   if (!top.length) return <EmptyState title="No sales yet this period" size="sm" className="border-0" />;
   return (

@@ -1,12 +1,14 @@
 // Topbar — owned by the Product Designer.
 import { useEffect, useId, useMemo, useRef, useState, type KeyboardEvent as ReactKeyboardEvent, type ReactNode, type RefObject } from 'react';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
-import { Bell, ChevronDown, ChevronRight, Circle, Globe, Inbox, Info, LogOut, Menu as MenuIcon, Moon, Search, Settings, Sun, SunMoon } from 'lucide-react';
+import { BellOff, ChevronDown, ChevronRight, Circle, Globe, Info, LogOut, Menu as MenuIcon, Moon, Search, Settings, Sun, SunMoon } from 'lucide-react';
 import clsx from 'clsx';
 import { BRAND, POSITION_LABELS, ROLE_LABELS, type UserWithTeam } from '@lm/shared';
 import { Avatar } from '../ui/Avatar';
 import { Badge } from '../ui/Badge';
 import { Dropdown } from '../ui/Dropdown';
+import { ErrorBoundary } from '@/features/common/ErrorBoundary';
+import { NotificationsBell } from './NotificationsBell';
 import { ThemeToggle, useTheme } from './theme';
 import { NAV_ICONS } from './Sidebar';
 import type { NavItem } from './nav';
@@ -262,36 +264,25 @@ export function Topbar({ user, items, onLogout, onOpenMenu, menuButtonRef, title
         </div>
         <ThemeToggle />
 
-        <Dropdown
-          align="end"
-          width={272}
-          onOpenChange={(o) => { if (o) onNotifications?.(); }}
-          header={
-            <div>
-              <div className="text-sm font-semibold text-fg">Notifications</div>
-              <div className="mt-0.5 text-xs text-muted">{hasNotifications ? 'You have new activity.' : 'You’re all caught up.'}</div>
-            </div>
-          }
-          items={[
-            { label: hasNotifications ? 'New notifications' : 'No new notifications', icon: <Inbox />, disabled: !hasNotifications },
-            { label: 'Settings', icon: <Settings />, onSelect: () => navigate('/settings'), separatorBefore: true },
-          ]}
-          trigger={
+        {/* The bell (p5) sits above the page boundary: if it throws, only the bell is swapped for a 40 px retry button. */}
+        <ErrorBoundary
+          name="bell"
+          resetKeys={[pathname]}
+          fallback={({ reset }) => (
             <button
               type="button"
-              aria-label={hasNotifications ? 'Notifications (new)' : 'Notifications'}
-              className="focus-ring relative inline-flex h-10 w-10 items-center justify-center rounded-lg text-muted transition-colors hover:bg-surface-2 hover:text-fg"
+              onClick={reset}
+              data-error-boundary="bell"
+              aria-label="Notifications could not load. Try again"
+              title="Notifications could not load. Tap to try again."
+              className="focus-ring inline-flex h-10 w-10 items-center justify-center rounded-lg text-muted transition-colors hover:bg-surface-2 hover:text-fg"
             >
-              <Bell className="h-[18px] w-[18px]" aria-hidden />
-              {hasNotifications && (
-                <span className="absolute right-2.5 top-2.5 flex h-2 w-2" aria-hidden>
-                  <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-accent opacity-60 motion-reduce:hidden" />
-                  <span className="relative inline-flex h-2 w-2 rounded-full bg-accent ring-2 ring-topbar" />
-                </span>
-              )}
+              <BellOff className="h-[18px] w-[18px]" aria-hidden />
             </button>
-          }
-        />
+          )}
+        >
+          <NotificationsBell hasNotifications={hasNotifications} onNotifications={onNotifications} />
+        </ErrorBoundary>
 
         <div className="mx-1 hidden h-6 w-px bg-border sm:block" aria-hidden />
 

@@ -22,8 +22,8 @@ the built `index.html`; styles inline or Google Fonts; fonts gstatic; `frame-anc
 `Strict-Transport-Security` whenever the request arrived over HTTPS. `GET /assets/*` (hashed Vite bundles) is served
 with `Cache-Control: public, max-age=31536000, immutable`; `index.html` with `no-cache`.
 
-**Response cache.** `GET /me/dashboard`, `/finance/summary`, `/recruitment/summary`, `/leaderboard` and
-`/gauges/summary` are cached for 20 s per (user, URL) and invalidated by **every** write (`POST`/`PATCH`/`DELETE`
+**Response cache.** `GET /me/dashboard`, `/finance/summary`, `/recruitment/summary`, `/leaderboard`,
+`/gauges/summary` and (1.1) `/me/insights`, `/me/attention`, `/me/digest` and `/events/forecast` are cached for 20 s per (user, URL) and invalidated by **every** write (`POST`/`PATCH`/`DELETE`
 on `/api/*`) and by the maintenance jobs. The header `X-Cache: HIT | MISS` (exposed through CORS) says which it was.
 
 Query params for ranges: `from=YYYY-MM-DD&to=YYYY-MM-DD` (inclusive). Defaults: `from` = Monday
@@ -105,6 +105,82 @@ unless the requester is an `admin` or the row is the requester themselves. `GET 
 ## Misc
 - `GET /announcements` → `Announcement[]` (pinned first, newest first). `POST /announcements` (admin, leader) → `Announcement` (201).
 - `GET /health` → `{ ok: true, version: string, seededAt: string }`.
+
+## Smart endpoints
+
+Release 1.1 ("smart release"). Every change is **additive**: no response field was renamed or removed, and every new
+field on an existing payload is optional. Role scoping is unchanged and every smart payload is built from data the
+caller may already see. **Kill switch:** with `LM_SMART=0` every smart part below is null / empty, and the optional
+keys on existing payloads are absent (the 1.0 shapes exactly). Types are in `shared/src/types.ts`
+("Smart release 1.1").
+
+| Endpoint | Who | Answer | Cached |
+|---|---|---|---|
+| `GET /me/insights` | every signed-in role | `SmartInsights` | yes |
+| `GET /me/attention` | every signed-in role | `AttentionFeed` | yes |
+| `GET /me/digest?week=YYYY-MM-DD` | every signed-in role | `WeekDigest` | yes |
+| `GET /events/forecast?campaignId&teamId&type&targetSales` | admin, leader (own team) | `{ forecast: EventForecast \| null }` | yes |
+
+- `GET /me/insights` → `SmartInsights { generatedFor, personal: { baseline, direction, streaks, payForecast }, boardStreaks, team, company }`.
+  `personal` is always the caller's own (each part null when it does not apply). `boardStreaks` (`{ userId, streak }[]`,
+  streaks ≥ 5 only): rep and leader — their own team; admin — every active rep and leader; recruiter — `[]`.
+  `team` = `{ checkIns: CheckInPerson[] }` **only for a leader with a team** (own team, never the leader); `company` =
+  `{ checkIns }` **only for an admin** (every team, never the admin). Reps and recruiters always get `team: null` and
+  `company: null`.
+- `GET /me/attention` → `AttentionFeed { items: AttentionItem[], generatedAt }`, sorted danger → warning → info, then
+  newest first, at most 20. Keys are deterministic, so a resolved item disappears by itself.
+- `GET /me/digest?week=YYYY-MM-DD` → `WeekDigest { weekStart, weekEnd, role, title, bullets, text }`. Any date
+  normalises to its Monday; the default is the last completed week; a week that has not finished yet, or one before
+  2020, → `400`. `text` holds only the shareable bullets (plain text, no markdown or HTML).
+- `GET /events/forecast?campaignId&teamId&type&targetSales` (admin; leader for their own team, otherwise `403`; rep and
+  recruiter `403`) → `{ forecast: EventForecast | null }`. `campaignId`, `teamId` and `type` are required (`400`
+  otherwise); `targetSales` is optional, a whole number 0–500. `null` when there is not enough comparable history.
+
+Optional fields on existing payloads (absent when not computed, and always absent with `LM_SMART=0`):
+
+| Field | On | Rule |
+|---|---|---|
+| `forecast?: EventForecast \| null` | `GET /events`, `GET /events/:id` (`SalesEventWithMeta`) | scheduled and live events with enough history only |
+| `streak?: number` | `GET /leaderboard` rows (`LeaderboardRow`) | the person's current sales streak in worked days |
+| `flags?: PayrollFlag[]` | `GET /finance/payroll`, `GET /finance/payroll/:id` (`PayrollRunWithUser`) | **admins only**, pending / failed runs only; advisory, never blocks paying |
+| `forecast: PayForecast \| null` | `GET /finance/me` | always present (null for recruiters, admins and `LM_SMART=0`); an estimate — `nextPayAmount` stays the official figure |
+| `backup?: BackupStatus` | `GET /health` | admins only |
+
+### Pace and streaks (p2)
+
+<!-- p2-personal-pace-streaks: filled from docs/smart/p2-personal-pace-streaks.md -->
+
+### Pay forecast and payroll checks (p3)
+
+<!-- p3-money-forecast-payroll-checks: filled from docs/smart/p3-money-forecast-payroll-checks.md -->
+
+### Check-ins (p4)
+
+<!-- p4-leader-check-ins-coaching: filled from docs/smart/p4-leader-check-ins-coaching.md -->
+
+### Needs attention (p5)
+
+<!-- p5-needs-attention-feed: filled from docs/smart/p5-needs-attention-feed.md -->
+
+### Event forecasts (p6)
+
+<!-- p6-event-forecasts-roster: filled from docs/smart/p6-event-forecasts-roster.md -->
+
+### Logging when the signal drops (p7)
+
+<!-- p7-signal-proof-logging: filled from docs/smart/p7-signal-proof-logging.md -->
+
+### Recruitment SLAs (p8)
+
+<!-- p8-recruitment-slas: filled from docs/smart/p8-recruitment-slas.md -->
+
+### Week in review (p9)
+
+<!-- p9-week-in-review-digest: filled from docs/smart/p9-week-in-review-digest.md -->
+
+### Backups and health (p10)
+
+<!-- p10-backups-autostart: filled from docs/smart/p10-backups-autostart.md -->
 
 ## Seed & demo accounts
 The server seeds `server/data/linear.sqlite` on first start (or `npm run seed` to reset) with deterministic

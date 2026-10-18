@@ -2,11 +2,68 @@
 
 Step-by-step for everyone at Linear MCR, by role. Start with **Everyone**, then jump to your section. Buttons, tabs and fields are named exactly as they appear in the app, in **bold**.
 
+- [What's new in 1.1](#whats-new-in-11) — the smart release
 - [Everyone](#everyone) — signing in, what your role can do, your dashboard, the six gauges, logging a day, ratios and benchmarks, the Gauges page, pay and punctuality, the leaderboard, events, the team directory, settings
 - [Leaders](#leaders) — scheduling events, logging for your team, the team view, announcements
 - [Recruiters](#recruiters) — your dashboard, the pipeline, adding and moving candidates, interviews, hiring, your pay
 - [Administrators](#administrators) — campaigns, people, gauges and events for anyone, payroll, expenses, company finance
 - [If something goes wrong](#if-something-goes-wrong)
+
+---
+
+## What's new in 1.1
+
+<!-- p9-week-in-review-digest writes the introduction here. -->
+
+### Links that open the right screen
+
+Some links now take you straight to the action, not just the page. A link to **Log gauges** for an event opens the
+**Log gauges** window with that event already chosen (a leader's or administrator's link can also pick the person);
+after it opens, the address goes back to plain **Gauges**, so pressing Back never opens the window again. An
+administrator's link to **Runs to pay** opens **Finance → Company** and scrolls to the **Runs to pay** card.
+
+### If a card hits a problem
+
+If one card on a page fails to draw, only that card is replaced by **This card hit a problem** with a **Try again**
+button; the rest of the page keeps working. The bell at the top works the same way: if it fails it turns into a
+crossed-out bell, and tapping it tries again. If a whole page fails you see **This page hit a problem** instead — try
+again, or open another page from the menu.
+
+### Your pace and streaks (p2)
+
+<!-- p2-personal-pace-streaks: filled from docs/smart/p2-personal-pace-streaks.md -->
+
+### This week's pay estimate and payroll checks (p3)
+
+<!-- p3-money-forecast-payroll-checks: filled from docs/smart/p3-money-forecast-payroll-checks.md -->
+
+### Check in with… (leaders and the owner) (p4)
+
+<!-- p4-leader-check-ins-coaching: filled from docs/smart/p4-leader-check-ins-coaching.md -->
+
+### Needs attention (p5)
+
+<!-- p5-needs-attention-feed: filled from docs/smart/p5-needs-attention-feed.md -->
+
+### Event forecasts and who has not logged yet (p6)
+
+<!-- p6-event-forecasts-roster: filled from docs/smart/p6-event-forecasts-roster.md -->
+
+### If the signal drops (p7)
+
+<!-- p7-signal-proof-logging: filled from docs/smart/p7-signal-proof-logging.md -->
+
+### Recruitment deadlines (p8)
+
+<!-- p8-recruitment-slas: filled from docs/smart/p8-recruitment-slas.md -->
+
+### Your week in review (p9)
+
+<!-- p9-week-in-review-digest: filled from docs/smart/p9-week-in-review-digest.md -->
+
+### Backups and running in the background (administrators) (p10)
+
+<!-- p10-backups-autostart: filled from docs/smart/p10-backups-autostart.md -->
 
 ---
 

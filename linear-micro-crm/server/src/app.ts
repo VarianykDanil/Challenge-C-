@@ -16,7 +16,10 @@ import { dashboardRouter } from './routes/dashboard.ts';
 import { eventsRouter } from './routes/events.ts';
 import { financeRouter } from './routes/finance.ts';
 import { gaugesRouter } from './routes/gauges.ts';
+import { attentionRouter } from './routes/attention.ts';
+import { digestRouter } from './routes/digest.ts';
 import { healthRouter } from './routes/health.ts';
+import { insightsRouter } from './routes/insights.ts';
 import { leaderboardRouter } from './routes/leaderboard.ts';
 import { recruitmentRouter } from './routes/recruitment.ts';
 import { teamsRouter } from './routes/teams.ts';
@@ -86,7 +89,18 @@ export function securityHeaders(csp: string): RequestHandler {
 }
 
 /** Read-mostly aggregates served from the short-TTL cache (`lib/cache.ts`); every write invalidates them. */
-const CACHED_PATHS = ['/me/dashboard', '/finance/summary', '/recruitment/summary', '/leaderboard', '/gauges/summary'];
+const CACHED_PATHS = [
+  '/me/dashboard',
+  '/finance/summary',
+  '/recruitment/summary',
+  '/leaderboard',
+  '/gauges/summary',
+  // Smart release 1.1
+  '/me/insights',
+  '/me/attention',
+  '/me/digest',
+  '/events/forecast',
+];
 
 export function createApp(db: Db, opts: AppOptions = {}): Express {
   const app = express();
@@ -115,6 +129,10 @@ export function createApp(db: Db, opts: AppOptions = {}): Express {
   api.use(CACHED_PATHS, requireAuth, responseCache());
   // requireAuth is attached per router (not globally) so unknown /api paths always get the JSON 404 below.
   api.use('/me', requireAuth, dashboardRouter(db));
+  // Smart release 1.1: GET /me/insights (p1 composes), /me/attention (p5), /me/digest (p9).
+  api.use('/me', requireAuth, insightsRouter(db));
+  api.use('/me', requireAuth, attentionRouter(db));
+  api.use('/me', requireAuth, digestRouter(db));
   api.use('/users', requireAuth, usersRouter(db));
   api.use('/teams', requireAuth, teamsRouter(db));
   api.use('/campaigns', requireAuth, campaignsRouter(db));

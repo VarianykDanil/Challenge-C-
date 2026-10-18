@@ -928,6 +928,37 @@ async function main(): Promise<void> {
     status(await rep.get('/me/dashboard?range=year'), 400, 'errors pass through');
     eq((await rep.get('/me/dashboard?range=year')).headers.get('x-cache'), 'MISS', 'errors are never cached');
   });
+  await check('Smart 1.1 GETs: /me/insights, /me/attention, /me/digest (all roles, MISS then HIT), /events/forecast (admin/leader 200, rep/recruiter 403)', async () => {
+    const roles: [Client, string][] = [[admin, 'admin'], [leader, 'leader'], [recruiter, 'recruiter'], [rep, 'rep']];
+    for (const path of ['/me/insights', '/me/attention', '/me/digest']) {
+      for (const [c, role] of roles) {
+        const first = await c.get(path);
+        status(first, 200, `${path} as ${role}`);
+        eq(first.headers.get('x-cache'), 'MISS', `${path} as ${role}: first read`);
+        const second = await c.get(path);
+        eq(second.headers.get('x-cache'), 'HIT', `${path} as ${role}: second read`);
+        eq(JSON.stringify(second.json), JSON.stringify(first.json), `${path} as ${role}: same body`);
+      }
+    }
+    for (const [c, role] of roles) {
+      const insights = (await c.get('/me/insights')).json;
+      ok(Array.isArray(insights.boardStreaks) && 'personal' in insights, `insights shape (${role})`);
+      if (role === 'rep' || role === 'recruiter') ok(insights.team === null && insights.company === null, `${role}: no check-in lists`);
+      ok(Array.isArray((await c.get('/me/attention')).json.items), `attention items (${role})`);
+    }
+    ok(Array.isArray((await leader.get('/me/insights')).json.team?.checkIns), 'leader: team.checkIns');
+    ok(Array.isArray((await admin.get('/me/insights')).json.company?.checkIns), 'admin: company.checkIns');
+    const campaignId = (await admin.get('/campaigns')).json[0].id;
+    const teamId = (await leader.get('/auth/me')).json.user.teamId;
+    const q = `/events/forecast?campaignId=${campaignId}&teamId=${teamId}&type=private_site&targetSales=12`;
+    for (const [c, role] of roles) {
+      const r = await c.get(q);
+      status(r, role === 'admin' || role === 'leader' ? 200 : 403, `/events/forecast as ${role}`);
+      if (r.status === 200) ok('forecast' in r.json, `forecast key (${role})`);
+    }
+    status(await rep.get(`/me/digest?week=${today}`), 400, 'digest of the unfinished week');
+    return `insights · attention · digest cached for 4 roles; forecast 200/200/403/403`;
+  });
 
   // ── payroll materialisation & next pay (direct calls against the same database) ──
   const lastCompletedMonday = addDays(monday, -7);

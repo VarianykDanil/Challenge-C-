@@ -127,6 +127,11 @@ export interface SalesEventWithMeta extends SalesEvent {
   /** Aggregated gauges for the event (all reps). */
   totals: GaugeTotals;
   repCount: number;
+  /**
+   * Smart release 1.1 (p6): expected-sales estimate, attached by GET /events and GET /events/:id to scheduled and
+   * live events that have enough history. The key is absent otherwise (and always absent with LM_SMART=0).
+   */
+  forecast?: EventForecast | null;
 }
 
 // ───────────────────────────── Gauges ─────────────────────────────
@@ -245,6 +250,11 @@ export interface PayrollRunWithUser extends PayrollRun {
   teamName: string | null;
   /** true when paidDate is set and <= dueDate */
   onTime: boolean | null;
+  /**
+   * Smart release 1.1 (p3): advisory checks before paying, attached by GET /finance/payroll and
+   * GET /finance/payroll/:id for admins only and only on pending / failed runs. Absent for every other role.
+   */
+  flags?: PayrollFlag[];
 }
 
 export type ExpenseCategory =
@@ -435,6 +445,11 @@ export interface LeaderboardRow {
   conversion: number;
   /** change in rank vs previous period (positive = moved up), null if new */
   movement: number | null;
+  /**
+   * Smart release 1.1 (p2): the person's current sales streak in worked days (see `Streaks.current`), attached by
+   * GET /leaderboard. Absent when not computed (stub, or LM_SMART=0).
+   */
+  streak?: number;
 }
 
 export type DashboardRange = 'week' | 'month' | 'quarter';
@@ -535,4 +550,255 @@ export interface TwoFactorEnabled {
 export interface ApiError {
   error: string;
   details?: unknown;
+}
+
+// ───────────────────── Smart release 1.1 (additive) ─────────────────────
+//
+// Contracts for the rule-based "smart" features. Every payload below is built from data the caller may already see
+// (role scoping is unchanged) and every field is null / empty when the kill switch is off (LM_SMART=0).
+// Owners: p2 pace & streaks, p3 pay forecast & payroll checks, p4 check-ins, p5 attention feed, p6 event forecasts,
+// p9 weekly digest, p10 backups. `WeekStat` (the weekly history row) lives in logic/stats.ts.
+
+/** p2 — this week's pace against the person's OWN last 8 completed weeks. Never returned for anyone but the caller. */
+export interface PersonalBaseline {
+  /** Completed weeks with at least one worked day inside the 8-week window (≥ 4, or the baseline is null). */
+  weeks: number;
+  /** Mean of the per-week stops per worked day over those weeks (μ). */
+  stopsPerDayMean: number;
+  /** Sample standard deviation of the per-week stops per worked day (σ, n − 1; 0 with fewer than 2 weeks). */
+  stopsPerDaySd: number;
+  /** Pooled conversion (Σ sales ÷ Σ stops, 0..1) over those weeks — the p0 of the conversion test. */
+  conversion: number;
+  /** This week so far: Monday up to yesterday (today and live events excluded). */
+  current: { days: number; stops: number; sales: number; stopsPerDay: number; conversion: number };
+  /** At most 2, deterministic copy (British English). Empty when this week is in the usual range. */
+  alerts: BaselineAlert[];
+}
+
+export interface BaselineAlert {
+  metric: 'stopsPerDay' | 'conversion';
+  tone: 'positive' | 'warning';
+  /** The z-score that fired the alert. */
+  z: number;
+  /** This week's value: stops per day, or conversion as a 0..1 fraction. */
+  current: number;
+  /** The usual value in the same unit (μ, or the pooled conversion p0). */
+  usual: number;
+  title: string;
+  body: string;
+}
+
+/** p2 — conversion direction: the oldest 8 of 16 completed weeks against the newest 8 (two-proportion z-test). */
+export interface TrendDirection {
+  label: 'improving' | 'declining' | 'steady';
+  z: number;
+  /** Pooled conversion of the newest half (0..1). */
+  recentConversion: number;
+  /** Pooled conversion of the oldest half (0..1). */
+  earlierConversion: number;
+  recentStops: number;
+  earlierStops: number;
+}
+
+/** p2 — sales streaks counted in worked days (calendar days without gauges never break a run). */
+export interface Streaks {
+  /** The run of worked days with ≥ 1 sale ending at the last worked day before today. */
+  current: number;
+  /** The longest such run ever. */
+  best: number;
+  /** True when this week's sales beat every previous week with ≥ 3 worked days (and ≥ 4 such weeks exist). */
+  personalBestWeek: boolean;
+  /** Sales this week so far (Monday up to yesterday). */
+  weekSales: number;
+  /** The best previous week's sales (weeks with ≥ 3 worked days); 0 when there is none. */
+  bestPreviousWeekSales: number;
+}
+
+/** p2 — one row of `SmartInsights.boardStreaks`: a visible colleague's current streak (only streaks ≥ 5 are listed). */
+export interface BoardStreak {
+  userId: number;
+  streak: number;
+}
+
+export type BonusLikelihood = 'reached' | 'likely' | 'possible' | 'unlikely' | 'none';
+
+/**
+ * p3 — this pay week's estimated gross, as a low / likely / high range. An estimate only: never written to
+ * payroll_runs; Friday's payslip (`nextPayAmount`) stays the official figure. Money is GBP gross.
+ */
+export interface PayForecast {
+  /** Monday of the pay week. */
+  weekStart: string;
+  /** The Friday after the week ends (shared `paydayForWeek`). */
+  payday: string;
+  estimate: true;
+  /** Logged so far this week (Monday up to and including today's logged rows); `gross` = estimateWeekPay of these. */
+  soFar: { days: number; sales: number; gross: number };
+  /** Team event days still to come this week (today counts while unlogged and scheduled / live). */
+  remainingDays: number;
+  /** Estimated gross for the whole week, clamped so low ≤ likely ≤ high. */
+  low: number;
+  likely: number;
+  high: number;
+  bonusThreshold: number;
+  bonusAmount: number;
+  /** max(0, threshold − soFar.sales); 0 when the plan has no bonus. */
+  bonusGap: number;
+  /** P(reaching the threshold this week), 0..1; 1 when the gap is 0. */
+  bonusProbability: number;
+  bonusLikelihood: BonusLikelihood;
+  /** Stops needed for the missing sales at the person's own ratios; null with too little history or a dead funnel. */
+  stopsForBonus: number | null;
+  /** What the estimate is based on: completed weeks used, worked days in them, and λ (sales per worked day). */
+  basis: { weeks: number; workedDays: number; salesPerDay: number };
+  /** Optional extra: the projected week's sales behind low / likely / high. */
+  sales?: { low: number; likely: number; high: number };
+}
+
+export type PayrollFlagCode =
+  | 'first_payslip'
+  | 'high_gross'
+  | 'bonus_single_day'
+  | 'sales_without_days'
+  | 'high_deductions'
+  | 'stale_amount'
+  | 'override_no_days';
+
+/** p3 — one advisory check on an unpaid payroll run (admin only). Advisory: it never blocks paying. */
+export interface PayrollFlag {
+  code: PayrollFlagCode;
+  severity: 'info' | 'warning';
+  text: string;
+}
+
+export type CheckInReasonCode =
+  | 'sustained_decline'
+  | 'conversion_drop'
+  | 'stops_drop'
+  | 'attendance_drop'
+  | 'zero_week'
+  | 'earnings_drop'
+  | 'trainee_slow'
+  | 'late_often';
+
+/** p4 — one reason to check in with someone, written out as a conversation starter (never a verdict). */
+export interface CheckInReason {
+  code: CheckInReasonCode;
+  weight: number;
+  text: string;
+}
+
+/** p4 — a person on the private "Check in with…" list (leader: own team; admin: company). */
+export interface CheckInPerson {
+  userId: number;
+  userName: string;
+  position: Position;
+  avatarColor: string;
+  teamId: number | null;
+  teamName: string | null;
+  /** Sum of the reason weights; the list keeps scores ≥ 2, highest first, at most 5 people. */
+  score: number;
+  reasons: CheckInReason[];
+}
+
+export type AttentionKind = 'gauges' | 'pay' | 'payroll' | 'events' | 'recruitment' | 'security';
+export type AttentionSeverity = 'info' | 'warning' | 'danger';
+
+/** p5 — one item in the role-scoped "Needs attention" feed (no table: derived on every request). */
+export interface AttentionItem {
+  /** Deterministic, e.g. `gauges:event:42:user:10`, so a resolved item disappears by itself and seen-state sticks. */
+  key: string;
+  kind: AttentionKind;
+  severity: AttentionSeverity;
+  title: string;
+  body: string;
+  /** In-app link, e.g. `/gauges?log=1&eventId=42`. */
+  href: string;
+  actionLabel?: string;
+  /** ISO timestamp (or date) the item is about; sorts newest first within a severity. */
+  at?: string;
+}
+
+/** p5 — GET /me/attention. Sorted danger → warning → info, then newest first; at most 20 items. */
+export interface AttentionFeed {
+  items: AttentionItem[];
+  /** ISO timestamp of when the feed was built. */
+  generatedAt: string;
+}
+
+/** p6 — expected sales for a scheduled or live event, from comparable completed days. */
+export interface EventForecast {
+  /** E = expectedReps × perRepRate. */
+  expectedSales: number;
+  /** max(0, E − 1.64√E), 1 decimal place. */
+  low: number;
+  /** E + 1.64√E, 1 decimal place. */
+  high: number;
+  /** Mean distinct reps over the team's recent completed events. */
+  expectedReps: number;
+  /** Sales per rep-day in the chosen bucket. */
+  perRepRate: number;
+  /** ceil(targetSales ÷ perRepRate); null when there is no rate to divide by. */
+  repsNeeded: number | null;
+  /** Rep-days (or event days) behind the rate. */
+  basisDays: number;
+  /** Which comparison bucket supplied the rate: same team + campaign + type, company-wide, or the campaign alone. */
+  basis: 'team' | 'company' | 'campaign';
+  /** 'stretch' (scheduled: target > 1.3E) or 'at_risk' (live: projected < 0.7 × target); events may be "behind target". */
+  flag: 'stretch' | 'at_risk' | null;
+  /** A data-driven target for a new event; a suggestion only, never applied automatically. */
+  suggestedTarget: number | null;
+}
+
+/** p6 — GET /events/forecast. */
+export interface EventForecastResponse {
+  forecast: EventForecast | null;
+}
+
+/** p9 — one line of the weekly digest. Private lines (pay, check-in counts) are never part of `WeekDigest.text`. */
+export interface DigestBullet {
+  text: string;
+  private: boolean;
+}
+
+/** p9 — GET /me/digest?week=YYYY-MM-DD: a deterministic "Your week in review" for one completed Mon–Sun week. */
+export interface WeekDigest {
+  weekStart: string;
+  weekEnd: string;
+  role: Role;
+  title: string;
+  bullets: DigestBullet[];
+  /** Plain text of the title plus the shareable bullets only (WhatsApp-ready: no markdown, no HTML). */
+  text: string;
+}
+
+/** GET /me/insights — everything smart about the caller's dashboard in one cached payload. */
+export interface SmartInsights {
+  /** The business date (YYYY-MM-DD, Europe/London) the insights were computed for. */
+  generatedFor: string;
+  /** Always the caller's own data. Each part is null when it does not apply (new starter, recruiter, LM_SMART=0). */
+  personal: {
+    baseline: PersonalBaseline | null;
+    direction: TrendDirection | null;
+    streaks: Streaks | null;
+    payForecast: PayForecast | null;
+  };
+  /** Streaks ≥ 5 for the board the caller sees: rep / leader own team; admin all active reps and leaders; recruiter []. */
+  boardStreaks: BoardStreak[];
+  /** Leader with a team only (own team, never the leader themself); null for everyone else. */
+  team: { checkIns: CheckInPerson[] } | null;
+  /** Admin only (every team, never the admin themself); null for everyone else. */
+  company: { checkIns: CheckInPerson[] } | null;
+}
+
+/** p10 — GET /api/health adds `backup` for admins only. */
+export interface BackupStatus {
+  /** ISO timestamp of the last successful backup, null when there has been none. */
+  lastAt: string | null;
+  /** File name of the last backup, null when there has been none. */
+  file: string | null;
+  /** Backup files currently kept in `dir`. */
+  count: number;
+  /** Absolute path of the backup folder. */
+  dir: string;
 }

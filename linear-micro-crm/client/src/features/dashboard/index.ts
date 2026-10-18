@@ -4,3 +4,6 @@ export * from './Announcements';
 export * from './CompanySection';
 export * from './NewAnnouncementModal';
 export * from './RecruiterSection';
+export * from './PersonalKpis';
+export * from './PersonalCharts';
+export * from './TeamCard';

@@ -3,18 +3,17 @@ import { Link } from 'react-router-dom';
 import { ArrowRight, Megaphone, PlusCircle, Quote } from 'lucide-react';
 import type { DashboardRange } from '@lm/shared';
 import { DASHBOARD_RANGE_LABELS, POSITION_LABELS } from '@lm/shared';
-import { Button, Card, CardHeader, EmptyState, KpiTile, PageHeader, SegmentedControl, Skeleton } from '@/components/ui';
-import { FunnelChart, TrendChart } from '@/components/charts';
-import { useDashboard, useLeaderboard } from '@/api/hooks';
+import { Button, Card, CardHeader, PageHeader, SegmentedControl, Skeleton } from '@/components/ui';
+import { useDashboard, useInsights, useLeaderboard } from '@/api/hooks';
 import { useCurrentUser } from '@/auth/AuthProvider';
 import { GAUGE_ROLES, hasRole } from '@/auth/RequireRole';
-import { Announcements, CompanySection, MiniLeaderboard, NewAnnouncementModal, RecruiterSection, UpcomingEvents } from '@/features/dashboard';
-import { ChartSkeleton, ErrorState, KpiSkeletons } from '@/features/common';
-import { CoachingInsights, LogGaugesModal } from '@/features/gauges';
+import { Announcements, CompanySection, NewAnnouncementModal, PersonalCharts, PersonalKpis, RecruiterSection, TeamCard, UpcomingEvents } from '@/features/dashboard';
+import { ErrorBoundary, ErrorState } from '@/features/common';
+import { LogGaugesModal } from '@/features/gauges';
+import { TodayTallyLink } from '@/features/gauges/TallyMode';
+import { AttentionCard, WeekInReview, WeekPayStrip } from '@/features/smart';
 import { COPY, greetingFor, motivationForDate } from '@/content/copy';
-import { todayISO } from '@/lib/dates';
-import { formatDate, formatDateShort, formatGBP, formatNumber, formatPct, formatRangeLabel, formatRelative } from '@/lib/format';
-import { ratioTone } from '@/lib/ratios';
+import { formatDate, formatDateShort, formatRangeLabel } from '@/lib/format';
 import { usePageTitle } from '@/lib/usePageTitle';
 
 const RANGE_ITEMS: { value: DashboardRange; label: string }[] = (['week', 'month', 'quarter'] as DashboardRange[]).map((value) => ({ value, label: DASHBOARD_RANGE_LABELS[value] }));
@@ -38,6 +37,9 @@ export function DashboardPage() {
   const companyFirst = me.role === 'admin';
   // People without a team (owner, office, recruiters) see the company-wide top performers instead of a team card.
   const companyBoard = useLeaderboard({ period: range, metric: 'sales' });
+  // Smart release 1.1: one cached payload feeds every smart slot (each slot renders nothing until its owner fills it).
+  const insights = useInsights().data;
+  const showPayStrip = me.role === 'rep' || me.role === 'leader';
 
   return (
     <>
@@ -62,7 +64,10 @@ export function DashboardPage() {
         <ErrorState error={q.error} onRetry={() => void q.refetch()} title="Could not load your dashboard" />
       ) : (
         <div className="space-y-8">
-          {companyFirst && d?.company && <CompanySection company={d.company} rangeLabel={`${formatDate(d.from)} – ${formatDate(d.to)}`} />}
+          <ErrorBoundary name="attention"><AttentionCard /></ErrorBoundary>
+
+          {/* Sections and cards another package edits (CompanySection: p4, RecruiterSection: p8, UpcomingEvents: p6) each sit in their own boundary. */}
+          {companyFirst && d?.company && <ErrorBoundary name="company"><CompanySection company={d.company} rangeLabel={`${formatDate(d.from)} – ${formatDate(d.to)}`} checkIns={insights?.company?.checkIns} /></ErrorBoundary>}
 
           {companyFirst && (
             <div>
@@ -71,67 +76,31 @@ export function DashboardPage() {
             </div>
           )}
 
-          {recruiterFirst && <RecruiterSection range={range} />}
+          {recruiterFirst && <ErrorBoundary name="recruiter"><RecruiterSection range={range} /></ErrorBoundary>}
 
-          {/* KPI tiles */}
-          {!recruiterFirst && <div className="grid grid-cols-2 gap-3 md:grid-cols-3 xl:grid-cols-6">
-            {!d ? (
-              <KpiSkeletons count={6} />
-            ) : (
-              <>
-                <KpiTile label="Sales" value={formatNumber(d.personal.totals.sales)} delta={d.personal.deltas.sales} deltaLabel={deltaLabel} tone="primary" hint={d.personal.rank ? `Ranked #${d.personal.rank} of ${d.personal.rankOutOf} ${me.role === 'rep' ? 'in your team' : 'company-wide'}` : `${formatNumber(d.personal.days)} days worked`} />
-                <KpiTile label="Conversion" value={formatPct(d.personal.ratios.overallConversion, 1)} delta={d.personal.deltas.conversion} deltaLabel={deltaLabel} tone={ratioTone('overallConversion', d.personal.ratios.overallConversion)} hint="sales ÷ stops" />
-                <KpiTile label="Stops" value={formatNumber(d.personal.totals.stops)} delta={d.personal.deltas.stops} deltaLabel={deltaLabel} hint={`${formatNumber(d.personal.totals.presentations)} presentations`} />
-                <KpiTile label="Earnings to date" value={formatGBP(d.personal.earningsToDate)} hint="gross, this period" />
-                <KpiTile label="Next payday" value={d.personal.nextPayday ? formatDateShort(d.personal.nextPayday) : '—'} tone={d.personal.nextPayday && d.personal.nextPayday < todayISO() ? 'danger' : 'default'} hint={d.personal.nextPayday ? `${d.personal.nextPayAmount != null ? formatGBP(d.personal.nextPayAmount, { cents: true }) : 'amount pending'} · ${d.personal.nextPayday < todayISO() ? 'overdue · ' : ''}${formatRelative(d.personal.nextPayday)}` : 'No pending run'} />
-                <KpiTile label="Punctuality" value={d.personal.punctualityRate == null ? '—' : formatPct(d.personal.punctualityRate)} tone={d.personal.punctualityRate == null ? 'default' : d.personal.punctualityRate >= 0.9 ? 'success' : d.personal.punctualityRate >= 0.75 ? 'warning' : 'danger'} hint="check-ins on time" />
-              </>
-            )}
-          </div>}
+          {/* KPI tiles, with the week's pay estimate (p3) right under them */}
+          {!recruiterFirst && (
+            <div>
+              <PersonalKpis dashboard={d} role={me.role} deltaLabel={deltaLabel} streaks={insights?.personal.streaks} />
+              {showPayStrip && <ErrorBoundary name="week-pay" className="mt-3"><WeekPayStrip forecast={insights?.personal.payForecast} /></ErrorBoundary>}
+            </div>
+          )}
 
           {/* Personal charts */}
-          {!recruiterFirst && <div className="grid grid-cols-1 gap-6 lg:grid-cols-5">
-            <Card className="min-w-0 lg:col-span-3">
-              <CardHeader title="Your trend" description="Sales and stops per day" />
-              {!d ? <ChartSkeleton /> : d.personal.trend.length ? (
-                <TrendChart data={d.personal.trend.map((t) => ({ date: t.date, sales: t.sales, stops: t.stops }))} xKey="date" series={[{ key: 'sales', label: 'Sales' }, { key: 'stops', label: 'Stops' }]} kind="area" xFormatter={formatDateShort} height={240} />
-              ) : (
-                <EmptyState title="No days logged yet" description="Log your gauges after a shift and your trend will build up here." size="sm" className="border-0" action={canLog ? <Button size="sm" onClick={() => setLogOpen(true)}>Log gauges</Button> : undefined} />
-              )}
-            </Card>
-            <Card className="min-w-0 lg:col-span-2">
-              <CardHeader title="Your funnel" description="Against the law of averages" />
-              {!d ? <ChartSkeleton /> : (
-                <>
-                  <FunnelChart totals={d.personal.totals} ratios={d.personal.ratios} showBenchmarks compact />
-                  <CoachingInsights totals={d.personal.totals} ratios={d.personal.ratios} className="mt-3" />
-                </>
-              )}
-            </Card>
-          </div>}
+          {!recruiterFirst && <PersonalCharts dashboard={d} canLog={canLog} onLog={() => setLogOpen(true)} baseline={insights?.personal.baseline} direction={insights?.personal.direction} />}
 
           {/* Team, events, announcements */}
           <div className="grid grid-cols-1 gap-6 lg:grid-cols-3 lg:items-start">
-            <Card className="min-w-0">
-              <CardHeader title={d?.team ? d.team.teamName : 'Top performers'} description={d?.team ? `${formatNumber(d.team.members)} members · ${formatNumber(d.team.totals.sales)} sales` : d ? 'Across every team this period' : undefined} actions={<Link to="/leaderboard" className="flex items-center gap-1 text-xs text-primary hover:underline">Leaderboard <ArrowRight className="h-3 w-3" aria-hidden /></Link>} />
-              {!d ? (
-                <div className="space-y-2"><Skeleton className="h-10" /><Skeleton className="h-10" /><Skeleton className="h-10" /></div>
-              ) : !d.team ? (
-                companyBoard.data ? <MiniLeaderboard rows={companyBoard.data} highlightUserId={me.id} /> : companyBoard.isError ? <EmptyState title="Leaderboard unavailable" size="sm" className="border-0" /> : <div className="space-y-2"><Skeleton className="h-10" /><Skeleton className="h-10" /><Skeleton className="h-10" /></div>
-              ) : (
-                <>
-                  <dl className="mb-3 grid grid-cols-3 gap-2 text-center">
-                    <div className="rounded-lg bg-surface-2 p-2"><dt className="text-[11px] text-muted">Stops</dt><dd className="text-sm font-semibold tabular-nums text-fg">{formatNumber(d.team.totals.stops)}</dd></div>
-                    <div className="rounded-lg bg-surface-2 p-2"><dt className="text-[11px] text-muted">Sales</dt><dd className="text-sm font-semibold tabular-nums text-fg">{formatNumber(d.team.totals.sales)}</dd></div>
-                    <div className="rounded-lg bg-surface-2 p-2"><dt className="text-[11px] text-muted">Conv.</dt><dd className="text-sm font-semibold tabular-nums text-fg">{formatPct(d.team.ratios.overallConversion, 1)}</dd></div>
-                  </dl>
-                  <MiniLeaderboard rows={d.team.leaderboard} highlightUserId={me.id} />
-                </>
-              )}
-            </Card>
+            <TeamCard dashboard={d} meId={me.id} role={me.role} companyBoard={companyBoard} streaks={insights?.boardStreaks} checkIns={insights?.team?.checkIns} />
             <Card className="min-w-0">
               <CardHeader title="Upcoming events" actions={<Link to="/events" className="flex items-center gap-1 text-xs text-primary hover:underline">All events <ArrowRight className="h-3 w-3" aria-hidden /></Link>} />
-              {!d ? <div className="space-y-2"><Skeleton className="h-12" /><Skeleton className="h-12" /><Skeleton className="h-12" /></div> : <UpcomingEvents events={d.upcomingEvents} />}
+              {!d ? <div className="space-y-2"><Skeleton className="h-12" /><Skeleton className="h-12" /><Skeleton className="h-12" /></div> : (
+                <>
+                  {/* p7: the tally entry point for today's event ("reachable from the dashboard's today event"). */}
+                  {canLog && <ErrorBoundary name="today-tally" className="mb-3"><TodayTallyLink events={d.upcomingEvents} /></ErrorBoundary>}
+                  <ErrorBoundary name="upcoming-events"><UpcomingEvents events={d.upcomingEvents} /></ErrorBoundary>
+                </>
+              )}
             </Card>
             <Card className="min-w-0">
               <CardHeader title="Announcements" actions={canAnnounce ? <Button size="sm" variant="outline" onClick={() => setAnnounceOpen(true)} leftIcon={<Megaphone className="h-3.5 w-3.5" aria-hidden />}>New announcement</Button> : undefined} />
@@ -140,7 +109,9 @@ export function DashboardPage() {
             </Card>
           </div>
 
-          {!companyFirst && d?.company && <CompanySection company={d.company} rangeLabel={`${formatDate(d.from)} – ${formatDate(d.to)}`} />}
+          <ErrorBoundary name="week-in-review"><WeekInReview /></ErrorBoundary>
+
+          {!companyFirst && d?.company && <ErrorBoundary name="company"><CompanySection company={d.company} rangeLabel={`${formatDate(d.from)} – ${formatDate(d.to)}`} checkIns={insights?.company?.checkIns} /></ErrorBoundary>}
         </div>
       )}
 

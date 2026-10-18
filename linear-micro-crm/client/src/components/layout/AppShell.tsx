@@ -3,6 +3,7 @@ import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react'
 import { useLocation } from 'react-router-dom';
 import type { UserWithTeam } from '@lm/shared';
 import clsx from 'clsx';
+import { ErrorBoundary } from '@/features/common/ErrorBoundary';
 import { FOCUSABLE } from '../ui/Modal';
 import { NAV_ITEMS } from './nav';
 import { Sidebar, SIDEBAR_COLLAPSED_WIDTH, SIDEBAR_WIDTH } from './Sidebar';
@@ -143,7 +144,9 @@ export function AppShell({ user, onLogout, children, title, fluid }: AppShellPro
           tabIndex={-1}
           className={clsx('mx-auto w-full flex-1 px-4 py-6 outline-none sm:px-6 lg:px-8 lg:py-8', !fluid && 'max-w-[1440px]')}
         >
-          <div key={pathname} className="animate-fade-in">{children}</div>
+          <div key={pathname} className="animate-fade-in">
+            <ErrorBoundary name="page" title="This page hit a problem" resetKeys={[pathname]}>{children}</ErrorBoundary>
+          </div>
         </main>
       </div>
     </div>

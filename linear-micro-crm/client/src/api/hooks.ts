@@ -2,7 +2,9 @@
 import { useCallback } from 'react';
 import { useInfiniteQuery, useMutation, useQuery, useQueryClient, type UseQueryOptions } from '@tanstack/react-query';
 import type {
+  AttentionFeed,
   Announcement,
+  BackupStatus,
   Campaign,
   Candidate,
   CandidateSource,
@@ -10,7 +12,9 @@ import type {
   CandidateWithMeta,
   Dashboard,
   DashboardRange,
+  EventForecastResponse,
   EventStatus,
+  EventType,
   Expense,
   ExpenseCategory,
   FinanceSummary,
@@ -22,6 +26,7 @@ import type {
   GaugeUpsertInput,
   Interview,
   LeaderboardRow,
+  PayForecast,
   PayPlan,
   PayrollRunWithUser,
   PayrollStatus,
@@ -30,6 +35,7 @@ import type {
   Role,
   SalesEvent,
   SalesEventWithMeta,
+  SmartInsights,
   StageChange,
   Team,
   TrendPoint,
@@ -39,6 +45,7 @@ import type {
   User,
   UserStatus,
   UserWithTeam,
+  WeekDigest,
 } from '@lm/shared';
 import { api, apiRaw, qs, totalCount } from './client';
 import { useAuth } from '@/auth/AuthProvider';
@@ -68,11 +75,19 @@ export interface MyFinance {
   totals: { gross: number; commission: number; onTimeRate: number | null };
   nextPayday: string | null;
   nextPayAmount: number | null;
+  /** Smart release 1.1 (p3): this week's estimate; null for recruiters / admins / LM_SMART=0. Never the official figure. */
+  forecast?: PayForecast | null;
 }
 
 export type CandidateDetail = CandidateWithMeta & { history: StageChange[]; interviews: Interview[] };
 
-export interface HealthInfo { ok: boolean; version: string; seededAt: string }
+export interface HealthInfo {
+  ok: boolean;
+  version: string;
+  seededAt: string;
+  /** Smart release 1.1 (p10): present for admins only. */
+  backup?: BackupStatus;
+}
 
 // ───────────────────────────── Query params ─────────────────────────────
 
@@ -89,6 +104,8 @@ export interface PayrollParams extends RangeParams { userId?: number | null; tea
 export interface ExpensesParams extends RangeParams { category?: ExpenseCategory | ''; campaignId?: number | null }
 export interface CandidatesParams { stage?: CandidateStage | ''; ownerId?: number | null; source?: CandidateSource | ''; q?: string; open?: boolean }
 export interface InterviewsParams extends RangeParams { candidateId?: number | null }
+/** GET /events/forecast: the event being planned (the query only runs once campaign, team and type are all chosen). */
+export interface EventForecastParams { campaignId?: number | null; teamId?: number | null; type?: EventType | '' | null; targetSales?: number | null }
 
 export type EventInput = Omit<SalesEvent, 'id' | 'status'> & { status?: EventStatus };
 export type CampaignInput = Omit<Campaign, 'id'>;
@@ -127,6 +144,11 @@ export const keys = {
   recruitmentSummary: (p: RangeParams) => ['recruitment', 'summary', p] as const,
   announcements: ['announcements'] as const,
   health: ['health'] as const,
+  // Smart release 1.1 — every key starts with 'dashboard', so the existing ['dashboard'] invalidations refresh them.
+  insights: ['dashboard', 'insights'] as const,
+  attention: ['dashboard', 'attention'] as const,
+  digest: (week?: string) => ['dashboard', 'digest', week ?? 'last'] as const,
+  eventForecast: (p: EventForecastParams) => ['dashboard', 'event-forecast', p] as const,
 };
 
 type QueryOpts<T> = Omit<UseQueryOptions<T, Error, T, readonly unknown[]>, 'queryKey' | 'queryFn'>;
@@ -228,6 +250,49 @@ export function useResetUserTwoFactor(userId: number) {
 
 export function useDashboard(range: DashboardRange) {
   return useQuery({ queryKey: keys.dashboard(range), queryFn: () => api<Dashboard>(`/me/dashboard${qs({ range })}`) });
+}
+
+// ───────────────────────────── Smart release 1.1 ─────────────────────────────
+
+/** GET /me/insights — the caller's pace, streaks, pay forecast, board streaks and (leader / admin) check-in list. */
+export function useInsights(opts: QueryOpts<SmartInsights> = {}) {
+  return useQuery({ queryKey: keys.insights, queryFn: () => api<SmartInsights>('/me/insights'), ...opts });
+}
+
+/** Re-poll the attention feed this often while the tab is visible. */
+export const ATTENTION_POLL_MS = 60_000;
+
+/**
+ * GET /me/attention — the Needs-attention feed. With `poll`, it refetches every 60 s, but only while the page is
+ * visible (`document.visibilityState === 'visible'`), plus on reconnect and when the window regains focus.
+ */
+export function useAttention({ poll = false }: { poll?: boolean } = {}) {
+  return useQuery({
+    queryKey: keys.attention,
+    queryFn: () => api<AttentionFeed>('/me/attention'),
+    refetchInterval: poll ? () => (typeof document === 'undefined' || document.visibilityState === 'visible' ? ATTENTION_POLL_MS : false) : false,
+    refetchIntervalInBackground: false,
+    refetchOnReconnect: true,
+    refetchOnWindowFocus: true,
+  });
+}
+
+/** GET /me/digest — "Your week in review"; `week` is any date in the week (default: the last completed week). */
+export function useDigest(week?: string) {
+  return useQuery({ queryKey: keys.digest(week), queryFn: () => api<WeekDigest>(`/me/digest${qs({ week })}`) });
+}
+
+/** GET /events/forecast (admin / leader) — enabled only once campaign, team and type are all set. */
+export function useEventForecast(params: EventForecastParams, { enabled = true }: { enabled?: boolean } = {}) {
+  const ready = params.campaignId != null && params.teamId != null && !!params.type;
+  return useQuery({
+    queryKey: keys.eventForecast(params),
+    queryFn: () =>
+      api<EventForecastResponse>(
+        `/events/forecast${qs({ campaignId: num(params.campaignId), teamId: num(params.teamId), type: params.type || undefined, targetSales: num(params.targetSales) })}`,
+      ),
+    enabled: enabled && ready,
+  });
 }
 
 // ───────────────────────────── People ─────────────────────────────
