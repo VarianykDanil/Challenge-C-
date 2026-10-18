@@ -73,6 +73,8 @@ jobs:
           if ! kill -0 $! 2>/dev/null; then echo "::error::server exited after listening"; exit 1; fi
           curl -sf -o /dev/null -w "landing %{http_code}\n" http://localhost:4123/
           curl -sf http://localhost:4123/api/health
+          PORT=4123 npm run share | tee share.log
+          grep -Eq "http://[0-9.]+:4123" share.log
           pkill -TERM -f "node src/index.ts"
           wait $! || true
           sleep 1

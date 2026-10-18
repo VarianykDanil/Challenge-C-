@@ -86,6 +86,8 @@ Every command below exists in `package.json` (root) or `server/package.json`.
 | `npm run build` | Typecheck and build the client into `client/dist` |
 | `npm start` | Serve the API **and** the built client on <http://localhost:4000> (`NODE_ENV=production`) |
 | `npm run stop` | Stop an earlier copy of Linear Hub that is still holding port 4000 (`PORT=…` for another port). Anything else on the port is reported and left alone |
+| `npm run restart` | `npm run stop` followed by `npm start` |
+| `npm run share` | While the server runs: the addresses phones and laptops on the same Wi-Fi or hotspot can use, with a QR code to scan |
 | `npm run doctor` | Check this machine can run Linear Hub: Node version, built client, data folder, database, port, and a real boot on a temporary database. Run it whenever `npm start` misbehaves |
 | `npm run seed` | Delete and rebuild the database with fresh sample data |
 | `npm run typecheck` | Typecheck `shared`, `server` and `client` |
@@ -97,6 +99,7 @@ Every command below exists in `package.json` (root) or `server/package.json`.
 | Variable | Default | Meaning |
 |---|---|---|
 | `PORT` | `4000` | Port the API (and, in production, the client) listens on |
+| `HOST` | unset (every interface) | Set to `127.0.0.1` to make the server reachable from this machine only; unset so phones and laptops on the same network can open it |
 | `DB_PATH` | `server/data/linear.sqlite` | Where the SQLite file lives; the directory is created if needed |
 | `LM_DEMO_ACCOUNTS` | unset | Set to `0` on any deployment with real users: the sign-in page then shows no demo accounts and the API never publishes a login |
 | `LM_APP_SECRET` | unset (generated key file) | Key material for encrypting two-step verification secrets at rest (AES-256-GCM, key = SHA-256 of the value). When unset, a random key is generated on first start into `server/data/app-secret` (mode 600, next to the database; `LM_APP_SECRET_FILE` relocates it). Back that file up with the database, or set the variable to manage the key yourself |
@@ -104,12 +107,29 @@ Every command below exists in `package.json` (root) or `server/package.json`.
 | `TZ` | `Europe/London` | The business time zone — "today" for events and pay weeks. The npm scripts and the Dockerfile pin it; keep it if you run the server another way |
 | `NODE_ENV` | — | `production` makes the server serve `client/dist`; `npm start` sets it |
 
+### Use it from a phone or another laptop (Wi-Fi or hotspot)
+
+The server listens on every network interface, so any device on the same Wi-Fi or hotspot can open it: when it starts
+it prints the addresses (`On your network: http://192.168.x.x:4000  http://your-mac.local:4000`), and `npm run share`
+in a second terminal prints them again with a QR code to scan. Personal Hotspot works the same way: the phone that
+provides the hotspot, and any other device joined to it, can open the printed address. Notes:
+
+- macOS asks once whether `node` may accept incoming connections: click **Allow**. If you clicked Deny, fix it in
+  **System Settings → Network → Firewall → Options**, or turn off "Block all incoming connections".
+- The IP address changes from network to network; the `.local` name stays the same. Run `npm run share` after
+  switching networks.
+- Sign-in works over plain `http` on a private network (the session cookie is only marked `Secure` over HTTPS). Do not
+  expose the port to the public internet without a reverse proxy and HTTPS.
+- `HOST=127.0.0.1 npm start` keeps it private to this machine, for example on public Wi-Fi.
+
 ### Troubleshooting
 
 | Symptom | What to do |
 |---|---|
 | `npm start` says port 4000 is already in use, or an older build printed "listening" and the shell prompt came straight back | An earlier copy of this server is still running (another terminal tab or window; older builds printed "listening" anyway because Express 5 hands a failed bind to the listen callback instead of throwing). Run `npm run stop`, then `npm start`. The server now refuses to start behind another process, names it and exits with code 1, and reports any other reason it stops (a signal, a crash, a drained event loop). `npm run doctor` checks everything else; paste its report when asking for help |
 | The browser shows a blank page that never finishes loading on <http://localhost:4000> | Something else is answering on that port. If it is an old Linear Hub, `npm run stop` ends it; otherwise find it with `lsof -nP -iTCP:4000 -sTCP:LISTEN` and `kill <PID>`, or use `PORT=4001 npm start` |
+| An old copy keeps appearing on port 4000 | Stop the server with **Ctrl+C** in the terminal where it runs, not Ctrl+Z (which only pauses it and keeps the port) and not by closing the window. The current build stops within two seconds of Ctrl+C and treats Ctrl+Z as a stop request; an older copy that is still around is ended by `npm run stop` |
+| A phone on the same Wi-Fi or hotspot cannot open the address | Allow incoming connections for `node` in **System Settings → Network → Firewall**, check both devices are on the same network, re-run `npm run share` for the current address, and make sure `HOST` is not set |
 | `Cannot find module 'qrcode'` or similar after a `git pull` | Dependencies changed: run `npm install`, then `npm run build`, then `npm start` |
 | `npm start` serves the API but the page is empty or stale | Rebuild the client: `npm run build` (the server serves `client/dist`) |
 

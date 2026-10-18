@@ -16,6 +16,7 @@
 import { execFileSync } from 'node:child_process';
 import type { Server } from 'node:http';
 import net from 'node:net';
+import os from 'node:os';
 
 export interface PortHolder {
   /** Loopback address that accepted the probe connection. */
@@ -107,7 +108,8 @@ export async function isLinearHub(host: string, port: number, timeoutMs = 1500):
     if (!res.ok) return false;
     const body = (await res.json()) as { ok?: boolean; version?: string };
     return body?.ok === true && typeof body.version === 'string';
-  } catch {
+  } catch (err) {
+    if (process.env.LM_DEBUG) console.error(`health probe ${host}:${port} failed: ${err instanceof Error ? `${err.message}${err.cause instanceof Error ? ` (${err.cause.message})` : ''}` : String(err)}`);
     return false;
   }
 }
@@ -178,6 +180,13 @@ export function installExitDiagnostics({ server, shutdown, log = console.error }
       shutdown(signal);
     });
   }
+  // Ctrl+Z would only suspend the process: it keeps the port, answers nothing and ignores a plain kill, which is
+  // exactly the "stuck old copy" that blocks the next npm start. Stop cleanly instead and say so.
+  process.on('SIGTSTP', () => {
+    log('Ctrl+Z received: Linear Hub stops instead of pausing, so the port stays free. Use Ctrl+C to stop it next time.');
+    markIntentional();
+    shutdown('SIGTSTP');
+  });
 
   server.on('error', (err: NodeJS.ErrnoException) => {
     // Without a listener Node would throw this; with one we must end the process ourselves, or a failed bind
@@ -235,6 +244,33 @@ export function installExitDiagnostics({ server, shutdown, log = console.error }
   });
 
   return markIntentional;
+}
+
+export interface NetworkUrl {
+  /** Interface name (`en0`) or `hostname` for the Bonjour/mDNS name. */
+  via: string;
+  url: string;
+}
+
+/**
+ * Addresses other devices on the same Wi-Fi or hotspot can use: every non-internal IPv4 address plus the
+ * machine's `.local` name (Bonjour/mDNS, which phones and Macs resolve without knowing the IP).
+ */
+export function networkUrls(port: number, host?: string): NetworkUrl[] {
+  if (host && !['0.0.0.0', '::', ''].includes(host)) return [];
+  const urls: NetworkUrl[] = [];
+  for (const [name, addresses] of Object.entries(os.networkInterfaces())) {
+    for (const a of addresses ?? []) {
+      if (a.internal || a.family !== 'IPv4') continue;
+      urls.push({ via: name, url: `http://${a.address}:${port}` });
+    }
+  }
+  const hostname = os.hostname();
+  if (urls.length && hostname && hostname !== 'localhost') {
+    const local = hostname.endsWith('.local') ? hostname : `${hostname}.local`;
+    urls.push({ via: 'hostname', url: `http://${local.toLowerCase()}:${port}` });
+  }
+  return urls;
 }
 
 /** Human-readable bound address of a listening server (`http://localhost:4000`). */

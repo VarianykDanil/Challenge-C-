@@ -14,6 +14,8 @@
     "start": "npm run start -w server",
     "doctor": "npm run doctor -w server",
     "stop": "npm run stop -w server",
+    "restart": "npm run stop -w server; npm run start -w server",
+    "share": "npm run share -w server",
     "seed": "npm run seed -w server",
     "typecheck": "npm run typecheck -w shared && npm run typecheck -w server && npm run typecheck -w client",
     "test": "npm run test -w shared"

@@ -6,7 +6,7 @@ import { openDb } from './db/connection.ts';
 import { createSchema, isSeeded } from './db/schema.ts';
 import { materialisePayrollRuns, rollForwardEventStatuses } from './db/maintenance.ts';
 import { DEFAULT_DB_PATH, seed } from './db/seed.ts';
-import { findPortHolder, installExitDiagnostics, listeningUrl, portBusyMessage } from './lib/boot.ts';
+import { findPortHolder, installExitDiagnostics, listeningUrl, networkUrls, portBusyMessage } from './lib/boot.ts';
 import { announceAppSecret, configureAppSecret } from './lib/crypto.ts';
 import { purgeExpiredChallenges, reencryptLegacySecrets } from './lib/twofactor.ts';
 import { purgeExpiredSessions } from './middleware/auth.ts';
@@ -95,8 +95,18 @@ function shutdown(): void {
 // so a server that "stops for no reason" says why on the terminal.
 installExitDiagnostics({ server, shutdown });
 
-server.listen(port, () => {
+// HOST limits where the server is reachable: unset = every interface (phones and laptops on the same Wi-Fi or hotspot
+// can open it); HOST=127.0.0.1 keeps it to this machine only.
+const host = process.env.HOST?.trim() || undefined;
+server.listen(port, host, () => {
   console.log(
     `Linear Hub API listening on ${listeningUrl(server, port)}${isProduction ? ' (serving client/dist)' : ''}. Press Ctrl+C to stop.`,
   );
+  const urls = networkUrls(port, host);
+  if (urls.length) {
+    console.log(`On your network (same Wi-Fi or hotspot): ${urls.map((u) => u.url).join('  ')}`);
+    console.log('Run  npm run share  in another terminal for a QR code to open it on a phone.');
+  } else if (host) {
+    console.log(`Bound to ${host} only: other devices cannot reach it (unset HOST to allow them).`);
+  }
 });
