@@ -3,7 +3,7 @@ import { z } from 'zod';
 import { PIPELINE_STAGES, POSITIONS, TERMINAL_STAGES, isOverdue, stageIndex, type CandidateSource, type CandidateStage, type Position, type RecruitmentSummary, type UserWithTeam } from '@lm/shared';
 import { all, get, run, transaction, type Db } from '../db/connection.ts';
 import { Where, getCandidate, getInterview, getUser, listCandidates, listInterviews, listStageChanges } from '../db/queries.ts';
-import { addDays, eachMonday, mondayOf, nowISO, todayISO } from '../lib/dates.ts';
+import { addDays, businessNow, eachMonday, mondayOf, nowISO, todayISO } from '../lib/dates.ts';
 import { badRequest, conflict, notFound } from '../lib/errors.ts';
 import { idParam, isoTimestamp, optionalIdQuery, optionalString, parseRange } from '../lib/validate.ts';
 import { currentUser, requireRole } from '../middleware/auth.ts';
@@ -343,7 +343,7 @@ export function recruitmentSummary(db: Db, from: string, to: string): Recruitmen
     : 0;
   const applied = get<{ n: number }>(db, `SELECT COUNT(*) AS n FROM candidates WHERE applied_at BETWEEN ? AND ?`, [fromStart, toEnd])!.n;
   // the shared rule, not a string compare: a date-only deadline is overdue from the next calendar day, a timestamp once now is past it
-  const now = new Date();
+  const now = businessNow();
   const overdue = all<{ at: string }>(db, `SELECT next_action_at AS at FROM candidates WHERE stage NOT IN ${TERMINAL_SQL} AND next_action_at IS NOT NULL`)
     .filter((r) => isOverdue(r.at, now)).length;
 

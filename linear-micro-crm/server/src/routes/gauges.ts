@@ -4,7 +4,7 @@ import { validateGaugeFunnel, type GaugeTotals, type SalesEventWithMeta, type Us
 import { get, run, transaction, type Db } from '../db/connection.ts';
 import { assertWeekUnpaidFor, syncPayrollForEntry } from '../db/maintenance.ts';
 import { Where, getCampaign, getEvent, getGauge, getPayPlan, getUser, listGauges } from '../db/queries.ts';
-import { mondayOf, normaliseCheckIn, nowHHMM, nowISO, toBusinessISO, todayISO } from '../lib/dates.ts';
+import { businessNow, mondayOf, normaliseCheckIn, nowHHMM, nowISO, toBusinessISO, todayISO } from '../lib/dates.ts';
 import { badRequest, conflict, forbidden, notFound } from '../lib/errors.ts';
 import { GAUGE_FROM, summaryRows, type SummaryGroup } from '../lib/metrics.ts';
 import { assertCanWriteGauge, canManageTeam, isAdmin, redactEntry } from '../lib/scope.ts';
@@ -55,7 +55,7 @@ function assertGaugeIntegrity(me: UserWithTeam, target: UserWithTeam, event: Sal
 /** A check-in is naive Europe/London wall-clock time and can never lie in the future. */
 function checkInFor(value: string | null | undefined): string | null {
   const normalised = normaliseCheckIn(value);
-  if (normalised !== null && normalised > toBusinessISO(new Date())) throw badRequest('Check-in time cannot be in the future');
+  if (normalised !== null && normalised > toBusinessISO(businessNow())) throw badRequest('Check-in time cannot be in the future');
   return normalised;
 }
 

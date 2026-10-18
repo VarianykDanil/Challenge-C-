@@ -8,6 +8,7 @@ import { materialisePayrollRuns, rollForwardEventStatuses } from './db/maintenan
 import { DEFAULT_DB_PATH, seed } from './db/seed.ts';
 import { findPortHolder, installExitDiagnostics, listeningUrl, networkUrls, portBusyMessage } from './lib/boot.ts';
 import { announceAppSecret, configureAppSecret } from './lib/crypto.ts';
+import { businessClockPinned, businessNow } from './lib/dates.ts';
 import { purgeExpiredChallenges, reencryptLegacySecrets } from './lib/twofactor.ts';
 import { purgeExpiredSessions } from './middleware/auth.ts';
 
@@ -15,6 +16,9 @@ const dbPath = process.env.DB_PATH ? path.resolve(process.env.DB_PATH) : DEFAULT
 // The encryption key for two-step secrets: LM_APP_SECRET, else a generated key kept next to the database
 // (server/data/app-secret by default; LM_APP_SECRET_FILE relocates it).
 configureAppSecret(process.env.LM_APP_SECRET_FILE ? path.resolve(process.env.LM_APP_SECRET_FILE) : path.join(path.dirname(dbPath), 'app-secret'));
+if (businessClockPinned()) {
+  console.warn(`LM_BUSINESS_NOW is set: "today" for events, gauges and pay is ${businessNow().toString()}, not the real date. Unset it for real use.`);
+}
 const db = openDb(dbPath);
 const upgraded = createSchema(db);
 if (upgraded.length) console.log(`Upgraded schema: added ${upgraded.join(', ')}`);

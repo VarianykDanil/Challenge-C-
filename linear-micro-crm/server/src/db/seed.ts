@@ -87,8 +87,8 @@ const HOUR = 3_600_000;
 
 export function seed(db: Db, today: string = D.todayISO()): SeedStats {
   const rng = new Rng(20240227);
-  const nowIso = new Date().toISOString();
-  const nowMs = Date.now();
+  const nowIso = D.nowISO();
+  const nowMs = D.businessNow().getTime();
   const stats: SeedStats = {
     teams: 0, users: 0, campaigns: 0, events: 0, gauges: 0, payrollRuns: 0, expenses: 0,
     candidates: 0, stageChanges: 0, interviews: 0, announcements: 0,

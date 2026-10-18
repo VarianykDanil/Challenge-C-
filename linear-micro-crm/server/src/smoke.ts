@@ -18,7 +18,7 @@ import { SCHEMA_SQL, createSchema, tableColumns } from './db/schema.ts';
 import { seed } from './db/seed.ts';
 import { AVATAR_PALETTE } from './db/seed-data.ts';
 import { configureAppSecret, decrypt, encrypt } from './lib/crypto.ts';
-import { addDays, dayOfWeek, mondayOf, normaliseCheckIn, nowHHMM, previousToDateRange, startOfMonth, startOfQuarter, sundayOf, todayISO } from './lib/dates.ts';
+import { addDays, dayOfWeek, mondayOf, businessNow, normaliseCheckIn, nowHHMM, previousToDateRange, setBusinessClock, startOfMonth, startOfQuarter, sundayOf, todayISO } from './lib/dates.ts';
 import { nextPay, weekPayFor } from './lib/pay.ts';
 import { totp, totpCounter } from './lib/totp.ts';
 import { purgeExpiredChallenges, reencryptLegacySecrets, resetCodeFailures } from './lib/twofactor.ts';
@@ -126,7 +126,23 @@ async function check(name: string, fn: () => Promise<string | void>): Promise<vo
   }
 }
 
+/**
+ * The checks assume a working afternoon: today's demo events have started and the week has gauges. Pin the business
+ * clock to 15:00 London on the most recent weekday (Monday to Friday) so the run gives the same result at 00:30 on a
+ * Monday or on a Sunday evening. SMOKE_REAL_CLOCK=1 runs against the real clock instead.
+ */
+function pinSmokeClock(): string | null {
+  if (process.env.SMOKE_REAL_CLOCK === '1') return null;
+  const d = new Date();
+  while (d.getDay() === 0 || d.getDay() === 6) d.setDate(d.getDate() - 1);
+  d.setHours(15, 0, 0, 0); // local time; the smoke script pins TZ=Europe/London
+  setBusinessClock(d);
+  return d.toString();
+}
+
 async function main(): Promise<void> {
+  const pinned = pinSmokeClock();
+  if (pinned) console.log(`Business clock pinned to ${pinned} (SMOKE_REAL_CLOCK=1 for the real clock)`);
   const dir = mkdtempSync(path.join(os.tmpdir(), 'linear-smoke-'));
   const secretFile = path.join(dir, 'app-secret');
   configureAppSecret(secretFile); // never touch server/data/app-secret from the smoke run
@@ -416,9 +432,9 @@ async function main(): Promise<void> {
     eq(get<Json>(db, `SELECT COUNT(*) AS n FROM (SELECT date, venue FROM events WHERE status <> 'cancelled' GROUP BY date, venue HAVING COUNT(*) > 1)`)!.n, 0, 'no two crews at one venue on the same day');
     eq(get<Json>(db, `SELECT COUNT(*) AS n FROM events WHERE type = 'b2b' AND strftime('%w', date) IN ('0', '6')`)!.n, 0, 'B2B events are Mon–Fri');
     eq(get<Json>(db, `SELECT COUNT(*) AS n FROM (SELECT user_id, date FROM gauge_entries GROUP BY user_id, date HAVING COUNT(*) > 1)`)!.n, 0, 'nobody is logged at two events on one day');
-    eq(get<Json>(db, `SELECT COUNT(*) AS n FROM candidates WHERE stage = 'offer' AND stage_updated_at < ?`, [new Date(Date.now() - 21 * 86_400_000).toISOString()])!.n, 0, 'no offer older than 21 days');
+    eq(get<Json>(db, `SELECT COUNT(*) AS n FROM candidates WHERE stage = 'offer' AND stage_updated_at < ?`, [new Date(businessNow().getTime() - 21 * 86_400_000).toISOString()])!.n, 0, 'no offer older than 21 days');
     eq(get<Json>(db, `SELECT COUNT(*) AS n FROM interviews i JOIN candidates c ON c.id = i.candidate_id WHERE i.outcome = 'pending' AND c.stage IN ('hired', 'rejected', 'withdrawn')`)!.n, 0, 'no pending interviews for closed candidates');
-    eq(get<Json>(db, `SELECT COUNT(*) AS n FROM interviews WHERE outcome = 'pending' AND scheduled_at < ?`, [new Date().toISOString()])!.n, 0, 'pending interviews are in the future');
+    eq(get<Json>(db, `SELECT COUNT(*) AS n FROM interviews WHERE outcome = 'pending' AND scheduled_at < ?`, [businessNow().toISOString()])!.n, 0, 'pending interviews are in the future');
     const slots = all<Json>(db, `SELECT scheduled_at AS at FROM interviews`).map((r) => new Date(r.at));
     ok(slots.every((d) => d.getDay() >= 1 && d.getDay() <= 5 && d.getHours() >= 9 && (d.getHours() < 17 || (d.getHours() === 17 && d.getMinutes() <= 30))), 'interviews Mon–Fri 09:00–17:30');
     ok(AVATAR_PALETTE.every((c) => contrastWithWhite(c) >= 4.5), 'avatar palette ≥ 4.5:1 against white initials');
@@ -830,7 +846,7 @@ async function main(): Promise<void> {
       status(await admin.post('/gauges', body), 400, 'admin too');
     }
     status(await admin.del(`/events/${late.json.id}`), 204, 'cleanup (no entries)');
-    const tomorrow = new Date(Date.now() + 86_400_000).toISOString();
+    const tomorrow = new Date(businessNow().getTime() + 86_400_000).toISOString();
     const future = await rep.post('/gauges', { eventId: pastNlEvent.id, userId: 10, date: pastNlEvent.date, stops: 30, table: 10, presentations: 5, closes: 2, taps: 1, sales: 1, checkedInAt: tomorrow });
     status(future, 400, 'check-in in the future');
     eq(future.json.error, 'Check-in time cannot be in the future', 'message');
@@ -1321,7 +1337,7 @@ async function main(): Promise<void> {
     const detail = await recruiter.get(`/recruitment/candidates/${candidateId}`);
     eq(detail.json.history.length, 1, 'applied stage change recorded');
     status(await recruiter.post('/recruitment/candidates', { firstName: 'X' }), 400, 'validation');
-    const p = await recruiter.patch(`/recruitment/candidates/${candidateId}`, { rating: 4, notes: 'Strong phone screen', nextAction: 'Book interview', nextActionAt: new Date().toISOString() });
+    const p = await recruiter.patch(`/recruitment/candidates/${candidateId}`, { rating: 4, notes: 'Strong phone screen', nextAction: 'Book interview', nextActionAt: businessNow().toISOString() });
     status(p, 200, 'patch');
     eq(p.json.rating, 4, 'rating');
     status(await recruiter.patch(`/recruitment/candidates/${candidateId}`, { stage: 'offer' }), 400, 'stage via PATCH rejected');
@@ -1363,9 +1379,9 @@ async function main(): Promise<void> {
     status(r, 200, 'list');
     ok(r.json.length > 0, 'upcoming interviews in default window');
     ok(r.json.every((i: Json) => 'interviewerName' in i), 'interviewer joined');
-    const future = r.json.filter((i: Json) => i.scheduledAt > new Date().toISOString());
+    const future = r.json.filter((i: Json) => i.scheduledAt > businessNow().toISOString());
     ok(future.length > 0, 'some interviews scheduled ahead');
-    const at = new Date(Date.now() + 3 * 86_400_000).toISOString();
+    const at = new Date(businessNow().getTime() + 3 * 86_400_000).toISOString();
     const c = await recruiter.post('/recruitment/interviews', { candidateId, type: 'first', scheduledAt: at, interviewerId: 2 });
     status(c, 201, 'create');
     eq(c.json.outcome, 'pending', 'default outcome');
@@ -1472,10 +1488,10 @@ async function main(): Promise<void> {
     eq(await count(), base0, 'date-only due today is not overdue');
     await setDue(addDays(today, -1));
     eq(await count(), base0 + 1, 'date-only due yesterday is overdue');
-    const future = new Date(Date.now() + 3 * 3600_000);
+    const future = new Date(businessNow().getTime() + 3 * 3600_000);
     await setDue(`${new Date(future.getTime() - 5 * 3600_000).toISOString().slice(0, 19)}-05:00`);
     eq(await count(), base0, 'a future instant written with a negative offset is not overdue');
-    await setDue(new Date(Date.now() - 3600_000).toISOString());
+    await setDue(new Date(businessNow().getTime() - 3600_000).toISOString());
     eq(await count(), base0 + 1, 'a past timestamp is overdue');
     status(await recruiter.post(`/recruitment/candidates/${c.json.id}/stage`, { stage: 'withdrawn' }), 200, 'close');
     eq(await count(), base0, 'closed candidates are never overdue');

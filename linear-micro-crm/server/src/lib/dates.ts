@@ -19,16 +19,42 @@ export function toISODate(d: Date): string {
   return `${y}-${m}-${day}`;
 }
 
+/**
+ * The business clock: what "today" and "now" mean for events, gauges, pay weeks and the demo seed. It is real time
+ * unless pinned, by a test (`setBusinessClock`) or by `LM_BUSINESS_NOW` for screenshots and demos at night; a pinned
+ * clock keeps ticking from the pinned instant. Security clocks (sessions, rate limits, two-step codes) never use it.
+ */
+let businessOffsetMs = 0;
+
+export function businessNow(): Date {
+  return new Date(Date.now() + businessOffsetMs);
+}
+
+/** Pin the business clock to `at` (it keeps ticking from there); `null` returns it to real time. */
+export function setBusinessClock(at: Date | null): void {
+  businessOffsetMs = at ? at.getTime() - Date.now() : 0;
+}
+
+export function businessClockPinned(): boolean {
+  return businessOffsetMs !== 0;
+}
+
+if (process.env.LM_BUSINESS_NOW) {
+  const at = new Date(process.env.LM_BUSINESS_NOW);
+  if (Number.isNaN(at.getTime())) throw new Error(`LM_BUSINESS_NOW is not a date: ${process.env.LM_BUSINESS_NOW}`);
+  setBusinessClock(at);
+}
+
 export function todayISO(): string {
-  return toISODate(new Date());
+  return toISODate(businessNow());
 }
 
 export function nowISO(): string {
-  return new Date().toISOString();
+  return businessNow().toISOString();
 }
 
 /** Local wall-clock `HH:MM` (the business zone when TZ is pinned). */
-export function nowHHMM(d = new Date()): string {
+export function nowHHMM(d = businessNow()): string {
   return toLocalISO(d).slice(11, 16);
 }
 
