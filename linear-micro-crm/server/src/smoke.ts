@@ -625,7 +625,8 @@ async function main(): Promise<void> {
     const repList = await rep.get(`/events?from=${weekAgo}&to=${addDays(today, 21)}&teamId=2`);
     ok(repList.json.length > 0 && repList.json.every((e: Json) => e.teamId === 1), 'rep only sees own team');
     const todays = await admin.get(`/events?from=${today}&to=${today}`);
-    ok(todays.json.length > 0, 'events today');
+    // the seed schedules events Monday to Saturday only (Sunday is the gauges deadline, not an event day)
+    ok(todays.json.length > 0 || dayOfWeek(today) === 0, 'events today (none on Sundays)');
     ok(todays.json.every((e: Json) => e.status === 'cancelled' || (e.status === 'live' ? e.startTime <= nowHHMM() : e.status === 'scheduled' && e.startTime > seedTime)), 'today: live only once the start time has passed, scheduled before');
     status(await admin.get('/events?from=2026-13-01'), 400, 'bad date');
     return `${r.json.length} events in default window`;
