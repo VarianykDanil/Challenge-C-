@@ -63,7 +63,7 @@ function ActionLink({ item, compact, onNavigate }: { item: NavItem; compact: boo
         ))}
     </NavLink>
   );
-  return compact ? <Tooltip content={stops != null ? `${item.label} · ${stops} stops today` : item.label} side="right" delay={0}>{link}</Tooltip> : link;
+  return compact ? <Tooltip content={stops != null ? `${item.label} · ${stops} stops today` : item.label} side="right" delay={0} portal>{link}</Tooltip> : link;
 }
 
 const SECTION_LABELS: Record<NonNullable<NavItem['section']>, string> = {
@@ -111,8 +111,8 @@ export function Sidebar({ items, collapsed, onToggleCollapsed, drawer, onClose, 
         )}
       </div>
 
-      {/* Action buttons (Quick gauges): pinned above the scrolling list, so they never scroll away and the collapsed
-          sidebar's tooltip is not clipped by the list's overflow. */}
+      {/* Action buttons (Quick gauges): pinned above the scrolling list, so they never scroll away. Collapsed-sidebar
+          tooltips use Tooltip's portal mode, so the list's overflow never clips them. */}
       {actions.length > 0 && (
         <ul className={clsx('flex shrink-0 flex-col gap-2 px-3 pt-4', compact && 'items-center')} aria-label="Quick actions">
           {actions.map((item) => (
@@ -159,7 +159,7 @@ export function Sidebar({ items, collapsed, onToggleCollapsed, drawer, onClose, 
                 );
                 return (
                   <li key={item.to} className={compact ? 'flex justify-center' : undefined}>
-                    {compact ? <Tooltip content={item.label} side="right" delay={0}>{link}</Tooltip> : link}
+                    {compact ? <Tooltip content={item.label} side="right" delay={0} portal>{link}</Tooltip> : link}
                   </li>
                 );
               })}
@@ -177,7 +177,7 @@ export function Sidebar({ items, collapsed, onToggleCollapsed, drawer, onClose, 
           </div>
         )}
         {!drawer && (
-          <Tooltip content={collapsed ? 'Expand sidebar' : 'Collapse sidebar'} side="right" delay={0}>
+          <Tooltip content={collapsed ? 'Expand sidebar' : 'Collapse sidebar'} side="right" delay={0} portal>
             <button
               type="button"
               onClick={onToggleCollapsed}

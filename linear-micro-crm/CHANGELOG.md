@@ -7,7 +7,13 @@ response field is renamed or removed, and new fields are optional.
 
 ## [Unreleased]
 
-Nothing yet. What comes next is in [docs/ROADMAP.md](docs/ROADMAP.md).
+### Fixed
+
+- Collapsed sidebar: the page names that pop out beside the icons were cut off by the scrolling link list, so only a
+  sliver showed. They now draw above the page and show in full. They appear on mouse hover and keyboard focus only (a
+  click or tap no longer leaves one stuck open), and Escape or scrolling hides them.
+
+What comes next is in [docs/ROADMAP.md](docs/ROADMAP.md).
 
 ## [1.1.0] - 2026-10-19
 
