@@ -29,7 +29,7 @@ also on the screen already, or one tap away (open the event, the run or the pers
 
 | You are | What is new for you |
 |---|---|
-| **Rep** | A note when your week is off (or ahead of) your usual pace; your sales streak on the **Sales** tile; **This week (estimate)** of your pay with how far you are from the bonus; the bell and **Needs attention** card (unlogged days, tomorrow's event, your pay); event forecasts; saves that wait on your phone when the signal drops; the **Tally** counter; **Your week in review** of the last finished week. |
+| **Rep** | A note when your week is off (or ahead of) your usual pace; your sales streak on the **Sales** tile; **This week (estimate)** of your pay with how far you are from the bonus; the bell and **Needs attention** card (unlogged days, tomorrow's event, your pay); event forecasts; saves that wait on your phone when the signal drops; the **Tally** counter and **Quick gauges**, the same tally as six big buttons for the field; **Your week in review** of the last finished week. |
 | **Leader** | All of the rep's, plus **Check in with…** (a private list for your team), **Team coaching**, **Focus** chips, who has not logged an event yet with **Log for …**, suggested targets when you create an event, and team lines in the bell. |
 | **Recruiter** | Deadlines that set themselves when you move a candidate, **Idle** badges and **Longest idle first**, **Record the outcome** prompts, an **Idle beyond target** tile, the bell, and your week in review. |
 | **Owner / administrator** | Company-wide **Check in with…** and **Company coaching**, payroll checks before you pay, **Mark week paid** and paying many runs at once, **Runs to pay** in the bell, the **Backups** card in Settings, and the company review of the last finished week. |
@@ -273,6 +273,41 @@ link. It opens Google Maps (the Maps app on a phone) at the venue.
   (without signal it is kept on the phone like any other save). The tally then clears.
 
 **Recruiters** see the same amber strip when Linear Hub can't be reached, without the line about gauges.
+
+### Quick gauges in the field
+
+**For reps, leaders and administrators.** **Quick gauges** is the tally as six big buttons, made for a phone in your
+hand or an iPad on the stand.
+
+* **Opening it.** Tap **Quick gauges** at the top of the side menu. On a phone, or an iPad held upright, it is the
+  tally-marks button next to the bell, one tap from any screen. From the **Tally** card on the Gauges page, **Full
+  screen** opens the same event there. While you are counting, the side menu button shows today's stops so far.
+* **Your event is picked for you** the same way as the Tally card: the one you are already counting today, otherwise
+  the one under way, otherwise your only event. If there are several, tap **Change** to pick another.
+* **Counting.** Tap anywhere on a tile to add one: Stops, To table, Presentations, Closes, Taps, Sales. The small
+  **−** in the corner of each tile takes one off, and never adds. A grey **+1** means that stage can't go higher yet.
+* **Count it through.** If you tap **Sales** before the tap that led to it, Linear Hub says why ("Sales can't go
+  above taps (2).") and offers **Count it through: +1 tap and sale**. One tap adds the sale and raises the earlier
+  stages that need it, so the funnel stays in order.
+* **Same counts as the Tally card.** Start on the Gauges page and carry on here, or the other way round. The numbers
+  stay on your phone through reloads and lost signal until you finish.
+* **Finish shift** at the bottom opens Log gauges with your counts filled in: check them, add your check-in or notes,
+  and save (without signal it is kept on the phone). The tally then clears. **Reset** asks before it clears anything.
+* **Leaders and administrators** count their own shift here, just as on the Tally card. To log for someone else, use
+  **Log gauges** as usual.
+
+**Phone and iPad tips**
+
+* **Hold it either way.** Upright, the tiles are two across and three down; sideways, or on an iPad, three across and
+  two down. The six tiles fill the screen, with **Finish shift** always in reach at the bottom.
+* **Add it to your Home Screen.** In Safari, open Linear Hub, tap **Share**, then **Add to Home Screen**. You get a
+  Linear Hub icon that opens full screen, without the browser bars, like an app. On Android, in Chrome, use the **⋮**
+  menu, then **Add to Home screen**.
+* **The screen stays on** while Quick gauges is open, on phones and browsers that allow it. That needs the secure
+  (https) address. Over a plain hotspot address it follows your phone's own auto-lock setting, so set auto-lock to a
+  few minutes for the shift.
+* **Taps you can feel.** On phones that support it, each tap gives a short buzz, and a tap that can't count gives a
+  double buzz.
 
 ### Recruitment deadlines
 

@@ -60,6 +60,7 @@ its range; pay, pace notes and the check-in list are only ever shown to the pers
 | **Needs attention** | everyone, scoped to their role | the bell, pop-up notes, dashboard card |
 | **Event forecasts**, suggested targets, **N / M logged** | everyone (forecasts and the **N / M logged** counts); leaders and administrators (targets, and the names of who has not logged) | Events, event page, **New event** |
 | **Signal-proof logging** and the **Tally** | anyone who logs gauges | **Log gauges**, an offline strip under the top bar |
+| **Quick gauges**: the tally as six big buttons for the field | anyone who logs gauges | top of the sidebar, the topbar on phones, **Full screen** on the Tally card |
 | **Recruitment deadlines**, **Idle** badges, **Record the outcome** | recruiters, leaders, the owner | Recruitment, candidate page |
 | **Your week in review**, ready for WhatsApp | everyone | bottom of the dashboard (always the last finished week, Monday to Sunday) |
 

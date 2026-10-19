@@ -24,6 +24,8 @@ const CampaignsPage = lazy(() => import('@/pages/Campaigns').then((m) => ({ defa
 const TeamPage = lazy(() => import('@/pages/Team').then((m) => ({ default: m.TeamPage })));
 const UserDetailPage = lazy(() => import('@/pages/UserDetail').then((m) => ({ default: m.UserDetailPage })));
 const SettingsPage = lazy(() => import('@/pages/Settings').then((m) => ({ default: m.SettingsPage })));
+// The field screen for the shift tally (sidebar's Quick gauges button); its own chunk, like every page.
+const QuickGaugesPage = lazy(() => import('@/pages/QuickGauges').then((m) => ({ default: m.QuickGaugesPage })));
 // The public page carries the charts bundle, so it is split too: signed-in users never download it.
 const LandingPage = lazy(() => import('@/pages/Landing').then((m) => ({ default: m.LandingPage })));
 // Sign-in and About are split as well (lead decision on the bundle: the main chunk back under 460 kB): someone who is
@@ -135,6 +137,7 @@ export default function App() {
             <Route path="events" element={<EventsPage />} />
             <Route path="events/:id" element={<EventDetailPage />} />
             <Route path="gauges" element={<RequireRole roles={GAUGE_ROLES}><GaugesPage /></RequireRole>} />
+            <Route path="quick" element={<RequireRole roles={GAUGE_ROLES}><QuickGaugesPage /></RequireRole>} />
             <Route path="leaderboard" element={<LeaderboardPage />} />
             <Route path="recruitment" element={<RequireRole roles={RECRUITMENT_ROLES}><RecruitmentPage /></RequireRole>} />
             <Route path="recruitment/:id" element={<RequireRole roles={RECRUITMENT_ROLES}><CandidateDetailPage /></RequireRole>} />

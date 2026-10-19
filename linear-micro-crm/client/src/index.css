@@ -6,6 +6,8 @@
 @import "tailwindcss";
 
 @custom-variant dark (&:where(.dark, .dark *));
+/* A short viewport: a phone held sideways (Quick gauges packs its six tiles onto one screen). */
+@custom-variant short (@media (max-height: 480px));
 
 /* ──────────────────────────── Light theme ──────────────────────────── */
 :root {

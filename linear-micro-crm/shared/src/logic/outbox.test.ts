@@ -2,7 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import type { GaugeTotals, GaugeUpsertInput } from '../types.ts';
 import { GAUGE_KEYS } from '../types.ts';
-import { firstMemberWithoutEntry, inCheckInWindow, normaliseTally, preselectTodayEvent, replayDecision, replayOutcome, sameGaugeDay, tallyStep } from './outbox.ts';
+import { firstMemberWithoutEntry, inCheckInWindow, normaliseTally, preselectTodayEvent, replayDecision, replayOutcome, sameGaugeDay, tallyStep, tallyStepThrough, tallyThroughOffer } from './outbox.ts';
 
 const QUEUED = '2026-10-19T10:00:00.000Z';
 
@@ -154,6 +154,77 @@ test('tallyStep: every accepted sequence keeps the funnel valid', () => {
     for (let i = 1; i < GAUGE_KEYS.length; i++) assert.ok(counts[GAUGE_KEYS[i]!] <= counts[GAUGE_KEYS[i - 1]!], JSON.stringify(counts));
   }
   assert.deepEqual(counts, { stops: 1, table: 1, presentations: 1, closes: 1, taps: 1, sales: 1 });
+});
+
+test('tallyStepThrough: from all zeros, a sale counts every stage once', () => {
+  const r = tallyStepThrough(ZERO, 'sales');
+  assert.equal(r.ok, true);
+  assert.deepEqual(r.counts, { stops: 1, table: 1, presentations: 1, closes: 1, taps: 1, sales: 1 });
+});
+
+test('tallyStepThrough: raises only the stages that would otherwise be lower', () => {
+  const counts = { stops: 40, table: 10, presentations: 5, closes: 3, taps: 2, sales: 2 };
+  const r = tallyStepThrough(counts, 'sales');
+  assert.deepEqual(r.counts, { stops: 40, table: 10, presentations: 5, closes: 3, taps: 3, sales: 3 });
+  // The input is never mutated.
+  assert.deepEqual(counts, { stops: 40, table: 10, presentations: 5, closes: 3, taps: 2, sales: 2 });
+  // A stage in the middle leaves the later stages alone.
+  assert.deepEqual(tallyStepThrough({ stops: 2, table: 2, presentations: 2, closes: 1, taps: 0, sales: 0 }, 'presentations').counts, { stops: 3, table: 3, presentations: 3, closes: 1, taps: 0, sales: 0 });
+  // Stops has nothing above it: the same as a plain +1.
+  assert.deepEqual(tallyStepThrough({ ...ZERO, stops: 7 }, 'stops').counts, { ...ZERO, stops: 8 });
+  // A +1 the funnel already allows changes only its own row.
+  assert.deepEqual(tallyStepThrough({ ...ZERO, stops: 4, table: 1 }, 'table').counts, { ...ZERO, stops: 4, table: 2 });
+});
+
+test('tallyStepThrough: refused with a hint at the daily maximum, counts unchanged', () => {
+  const counts = { stops: 5, table: 5, presentations: 5, closes: 5, taps: 5, sales: 5 };
+  const r = tallyStepThrough(counts, 'sales', 5);
+  assert.equal(r.ok, false);
+  assert.equal(r.counts, counts);
+  assert.ok(!r.ok && r.hint === 'Sales is at the daily maximum of 5.');
+  // Below the maximum the earlier stages may reach it, never pass it.
+  assert.deepEqual(tallyStepThrough({ stops: 4, table: 4, presentations: 4, closes: 4, taps: 4, sales: 4 }, 'sales', 5).counts, { stops: 5, table: 5, presentations: 5, closes: 5, taps: 5, sales: 5 });
+});
+
+test('tallyStepThrough: deterministic, and the funnel stays valid for every stage from many valid funnels', () => {
+  // A fixed pseudo-random sequence (no Math.random), so the test is repeatable.
+  let seed = 7;
+  const next = () => (seed = (seed * 16807) % 2147483647) / 2147483647;
+  for (let n = 0; n < 300; n++) {
+    let ceiling = Math.floor(next() * 30);
+    const counts = {} as GaugeTotals;
+    for (const k of GAUGE_KEYS) {
+      counts[k] = Math.floor(next() * (ceiling + 1));
+      ceiling = counts[k];
+    }
+    for (const key of GAUGE_KEYS) {
+      const r = tallyStepThrough(counts, key);
+      assert.deepEqual(tallyStepThrough(counts, key), r);
+      assert.equal(r.counts[key], counts[key] + 1);
+      for (let i = 1; i < GAUGE_KEYS.length; i++) assert.ok(r.counts[GAUGE_KEYS[i]!] <= r.counts[GAUGE_KEYS[i - 1]!], JSON.stringify({ counts, key, after: r.counts }));
+      for (const k of GAUGE_KEYS) assert.ok(r.counts[k] - counts[k] === 0 || r.counts[k] - counts[k] === 1, `${k} moves by 0 or 1`);
+      for (const k of GAUGE_KEYS.slice(GAUGE_KEYS.indexOf(key) + 1)) assert.equal(r.counts[k], counts[k], `${k} after ${key} never moves`);
+    }
+  }
+});
+
+test('tallyThroughOffer: the reason and a button naming every stage that goes up', () => {
+  const counts = { stops: 40, table: 10, presentations: 5, closes: 3, taps: 2, sales: 2 };
+  assert.deepEqual(tallyThroughOffer(counts, 'sales'), {
+    hint: "Sales can't go above taps (2).",
+    label: 'Count it through: +1 tap and sale',
+    counts: { stops: 40, table: 10, presentations: 5, closes: 3, taps: 3, sales: 3 },
+  });
+  assert.equal(tallyThroughOffer(ZERO, 'sales')?.label, 'Count it through: +1 stop, table, presentation, close, tap and sale');
+  assert.equal(tallyThroughOffer(ZERO, 'table')?.hint, "To table can't go above stops (0).");
+  assert.equal(tallyThroughOffer(ZERO, 'table')?.label, 'Count it through: +1 stop and table');
+});
+
+test('tallyThroughOffer: nothing to offer when the +1 is allowed, on stops, or at the daily maximum', () => {
+  assert.equal(tallyThroughOffer({ ...ZERO, stops: 3 }, 'table'), null);
+  assert.equal(tallyThroughOffer(ZERO, 'stops'), null);
+  assert.equal(tallyThroughOffer({ ...ZERO, stops: 5 }, 'stops', 5), null);
+  assert.equal(tallyThroughOffer({ stops: 5, table: 5, presentations: 5, closes: 5, taps: 5, sales: 5 }, 'sales', 5), null);
 });
 
 test('normaliseTally: junk becomes zeros, values are whole, clamped and made a valid funnel', () => {

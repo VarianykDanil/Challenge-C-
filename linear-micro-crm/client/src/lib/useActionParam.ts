@@ -54,6 +54,8 @@ export const actionHref = {
   logGauges: (p: { eventId?: number | null; userId?: number | null } = {}) => `/gauges${qs({ log: 1, eventId: p.eventId, userId: p.userId })}`,
   /** Open the live tally counter (p7), optionally for an event. */
   tally: (p: { eventId?: number | null } = {}) => `/gauges${qs({ tally: 1, eventId: p.eventId })}`,
+  /** The full-screen Quick gauges page, optionally preselecting an event (the same tally store as the card). */
+  quick: (p: { eventId?: number | null } = {}) => `/quick${qs({ eventId: p.eventId })}`,
   /** A Finance tab; `runs` (admin) lands on Runs to pay. */
   finance: (tab: 'me' | 'team' | 'company', opts: { runs?: boolean } = {}) => `/finance${qs({ tab })}${opts.runs ? '#runs' : ''}`,
 };

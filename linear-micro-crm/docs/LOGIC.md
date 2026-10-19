@@ -812,6 +812,8 @@ rule, the funnel check, the paid-week lock and the check-in rules still apply to
 | `preselectTodayEvent(events, today, teamId)` | The one own-team event dated today whose status is `live` or `completed`; null when there are none or several, or no team. |
 | `firstMemberWithoutEntry(members, loggedIds)` | The first member in list order who is active, not a recruiter and has no entry for the event. |
 | `tallyStep(counts, key, ±1)` | A +1 changes only its own row and is refused when the row already equals the stage above it, or is at the daily maximum (2,000). A −1 is refused at 0, or when the row already equals the stage below it. A refused tap returns the counts unchanged and one hint, e.g. "Sales can't go above taps (0) — add one to Taps first." |
+| `tallyStepThrough(counts, key)` | **Count it through** (Quick gauges): +1 on `key`, and each earlier stage raised to at least the new value — only the stages that would otherwise be lower. Given a valid funnel, every stage that moves goes up by exactly 1 and the later stages never move, so the funnel stays valid. Refused, counts unchanged, when `key` is at the daily maximum (2,000): "Sales is at the daily maximum of 2000." Examples: all 0, Sales → every stage 1; stops 40, table 10, presentations 5, closes 3, taps 2, sales 2, Sales → taps 3 and sales 3, the rest unchanged. |
+| `tallyThroughOffer(counts, key)` | What Quick gauges offers after a +1 the funnel refused: the reason and a button naming every stage that would go up, in funnel order, e.g. "Sales can't go above taps (2)." with **Count it through: +1 tap and sale** (from all zeros: "+1 stop, table, presentation, close, tap and sale"). Null when the +1 is allowed, on Stops, or at the daily maximum. Pure and deterministic. |
 | `normaliseTally(raw)` | Stored counts → whole numbers 0…2,000, then each stage lowered to the one above if needed. Never throws. |
 
 **The outbox** (`client/src/features/gauges/outbox.ts`; one localStorage key per signed-in person,
@@ -884,6 +886,46 @@ or an entry it behaves exactly as in 1.0.
   the hint for 5 seconds.
 * **Loading.** The full-screen counter loads the first time the tally opens (`LazyTallyMode`, §14.11); the Gauges
   header's **Tally** button and the dashboard's **Count your shift** link are light pieces in `TallyLinks.tsx`.
+* **Shared code.** The counting lives in `useTallyCounter(event)` (`features/gauges/useTallyCounter.ts`: counts,
+  `tap(key, ±1)`, `tapThrough(key)`, reset with a confirm, the finish handlers, the persisted flag and the hint),
+  with `useTallyEvents` and `defaultEvent`; the event list is `TallyEventPicker.tsx`. The Tally card and Quick gauges
+  both use them, so they count, refuse and finish the same way. The card also has **Full screen** (an icon on a phone),
+  a link to `/quick?eventId=<id>`.
+
+**Quick gauges** (`pages/QuickGauges.tsx`, route `/quick`, its own lazy chunk; admin, leader and rep only):
+
+* **Same tally.** It reads and writes the same store as the Tally card, per (signed-in person, event, date). A tally
+  started on the Gauges page shows the same numbers on `/quick`, and the other way round. Leaders and administrators
+  count their own shift (`defaultUserId` = themselves), exactly as on the card.
+* **Which event.** The same rule as the card (`defaultEvent`). **Change** shows when there is more than one; the same
+  event list, empty line and no-signal line when none is picked. `/quick?eventId=<id>` preselects that event (read on
+  the first render, then stripped by `useActionParam`); an event the person can't count today shows **That event isn't
+  one you can count today.** above the list.
+* **Tiles.** Six, in funnel order. The whole tile is the +1 button (label, the count in tabular figures, a stripe in
+  the campaign's colour). The −1 is its own 44 px button in the top-right corner, a sibling of the tile (not nested),
+  so it never adds. Both are labelled with the current count ("Add one to Sales (now 2)"), reachable with Tab, and
+  work with Enter or Space. A +1 the funnel would refuse shows a grey **+1** chip. Taps buzz briefly where the phone
+  supports vibration (`navigator.vibrate`), and `touch-action: manipulation` stops quick double taps zooming the page.
+* **Layout.** 2 columns × 3 rows on a phone held upright, with the rows sharing the height under the header (tiles
+  ≥ 96 px). 3 × 2 from 640 px wide or held sideways. When the screen is under 481 px tall (a phone held sideways),
+  the tiles go down to 80 px and the header and bar get tighter, so all six fit without scrolling. There is never a
+  horizontal scroll. The count is sized to its tile (container units; at least two digits' width, so 0–99 keep one
+  size). Checked at 375×667, 390×844, 844×390, 768×1024, 1024×768, 1024×1366 and 1440×900, light and dark.
+* **Refused taps.** The hint replaces the bottom bar for 8 seconds, in the same box, so the tiles never move under a
+  thumb. A +1 the funnel blocks adds **Count it through: +1 …** (`tallyThroughOffer`; one tap applies
+  `tallyStepThrough`). The hint is also announced to screen readers, and × dismisses it. Any accepted tap clears it.
+* **Bottom bar** (sticky, above the iPhone home indicator via `env(safe-area-inset-bottom)`): "N sales from M stops ·
+  1 in X", **Reset** (asks first) and a large **Finish shift**. Finish shift opens Log gauges prefilled exactly as on the
+  card: same validation, same outbox, and the tally clears once it is saved or kept on the phone.
+* **Screen awake.** While the page is open it asks for a Screen Wake Lock where the browser has one (secure contexts
+  only), takes it again when the tab comes back into view, and releases it on leaving. Without one (plain http over a
+  hotspot) nothing happens and nothing is said. Errors are swallowed.
+* **Entry points.** A primary **Quick gauges** button pinned at the top of the sidebar, above **Workspace** (an icon
+  button with a tooltip when collapsed, the same button at the top of the phone drawer). A nav item with
+  `variant: 'action'` in `nav.ts` places it there and keeps it in ⌘K quick navigation. While a tally is under way today
+  it shows the running stop count (`useStoredTallies`). Below `lg` the topbar has an icon button next to the bell
+  (40 px, "Quick gauges"), hidden on `/quick` itself. Recruiters see none of it, and `/quick` gives them the usual
+  not-allowed page.
 
 **Edge cases and limits.**
 
@@ -1257,6 +1299,10 @@ with `npm run build` (minified, before gzip):
   **My pay** never downloads it.
 - **The tally**: the full-screen counter (`features/gauges/TallyMode.tsx`) loads the first time it opens, through
   `LazyTallyMode`; the light entry points (`TallyButton`, `TodayTallyLink`) live in `TallyLinks.tsx`.
+- **Quick gauges** (`pages/QuickGauges.tsx`) is its own page chunk. It shares a small `useTallyCounter` chunk with
+  `TallyMode`. The sidebar's stop-count pill puts `tallyStore.ts` in the main chunk (imported by file path). Its day is
+  worked out with `localDayISO()`, not `lib/dates`, so date-fns stays out of the shell. Cost: main chunk 432.8 →
+  438.8 kB (134.5 → 136.2 kB gzip).
 - `EventForecastChip` is 2.3 kB and renders inside every event row, so it stays where it is.
 - Lazy-loading the smart components alone brought the main chunk to 481.6 kB, still over the 460 kB target, so the
   **sign-in page** and **About** are split too: someone already signed in, the usual case on a phone, never downloads

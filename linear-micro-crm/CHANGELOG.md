@@ -38,6 +38,11 @@ numbers you can already see (no outside service, no AI). Every forecast is label
 - **Signal-proof logging**: an offline banner; gauge saves kept on the phone and replayed safely, with a review sheet
   when someone else changed the same day; today's event preselected; a **Checking in? Use now** button around the
   start time; a full-screen **Tally** counter for the shift.
+- **Quick gauges** (`/quick`): the shift tally as six big buttons for a phone or an iPad in the field (each tile is the
+  +1, with a −1 in its corner), the same counts as the Tally card, **Count it through** when a sale comes before its
+  tap, a sticky **Finish shift**, and the screen kept awake where the browser allows. One tap from a **Quick gauges**
+  button at the top of the sidebar (with today's stops), from the topbar on phones, and from **Full screen** on the
+  Tally card. Also in ⌘K. Not shown to recruiters. No server change.
 - **Recruitment deadlines**: each stage has a target (3 / 5 / 7 / 7 / 7 days) that sets the next-action date on create
   and on every move; **Idle** badges and **Longest idle first**; an **Idle beyond target** tile; **Record the outcome**
   on the candidate page and in **Needs attention**.

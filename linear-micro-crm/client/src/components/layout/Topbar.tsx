@@ -176,6 +176,10 @@ export function Topbar({ user, items, onLogout, onOpenMenu, menuButtonRef, title
   const { theme, setTheme } = useTheme();
   const current = matchNavItem(items, pathname);
   const fullName = `${user.firstName} ${user.lastName}`;
+  // Quick gauges (nav item with variant 'action', GAUGE_ROLES only): one tap from the topbar below lg, where the
+  // sidebar is a drawer — phones, and iPads held upright. Not shown on the page itself.
+  const quick = items.find((i) => i.variant === 'action');
+  const QuickIcon = quick ? NAV_ICONS[quick.icon] ?? Circle : null;
 
   // Below `lg` the quick nav collapses to an icon button that opens a small popover.
   const inlineSearchRef = useRef<HTMLInputElement>(null);
@@ -263,6 +267,18 @@ export function Topbar({ user, items, onLogout, onOpenMenu, menuButtonRef, title
           )}
         </div>
         <ThemeToggle />
+
+        {quick && QuickIcon && pathname !== quick.to && (
+          <Link
+            to={quick.to}
+            aria-label={quick.label}
+            title={quick.label}
+            data-topbar-quick
+            className="focus-ring inline-flex h-10 w-10 items-center justify-center rounded-lg bg-primary-soft text-primary transition-colors hover:bg-primary/15 active:bg-primary/20 lg:hidden"
+          >
+            <QuickIcon className="h-[18px] w-[18px]" strokeWidth={2.25} aria-hidden />
+          </Link>
+        )}
 
         {/* The bell (p5) sits above the page boundary: if it throws, only the bell is swapped for a 40 px retry button. */}
         <ErrorBoundary

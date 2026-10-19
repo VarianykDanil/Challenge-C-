@@ -1,19 +1,70 @@
 // Sidebar — owned by the Product Designer.
 import { NavLink } from 'react-router-dom';
 import {
-  CalendarDays, Circle, Gauge, Info, LayoutDashboard, Megaphone, PanelLeftClose, PanelLeftOpen, Settings, Trophy, UserPlus, Users, Wallet, X,
+  CalendarDays, Circle, Gauge, Info, LayoutDashboard, Megaphone, PanelLeftClose, PanelLeftOpen, Settings, Tally5, Trophy, UserPlus, Users, Wallet, X,
   type LucideIcon,
 } from 'lucide-react';
 import clsx from 'clsx';
 import { BRAND } from '@lm/shared';
+import { useAuth } from '@/auth/AuthProvider';
+// By file path (not the gauges barrel), and without lib/dates (date-fns): only the small tally store joins the shell.
+import { localDayISO, useStoredTallies } from '@/features/gauges/tallyStore';
 import { Logo, LogoMark } from '../brand/Logo';
 import { Tooltip } from '../ui/Tooltip';
 import type { NavItem } from './nav';
 
 /** lucide icons keyed by the `icon` string in nav.ts. Add here when adding a nav item. */
 export const NAV_ICONS: Record<string, LucideIcon> = {
-  LayoutDashboard, CalendarDays, Gauge, Trophy, UserPlus, Wallet, Megaphone, Users, Settings, Info,
+  LayoutDashboard, CalendarDays, Gauge, Tally5, Trophy, UserPlus, Wallet, Megaphone, Users, Settings, Info,
 };
+
+/** Today's running stop count across this person's unfinished tallies on this phone, or null when none is under way. */
+function useTodayStops(): number | null {
+  const { user } = useAuth();
+  const today = localDayISO();
+  const running = useStoredTallies(user?.id).filter((t) => t.date === today);
+  return running.length ? running.reduce((n, t) => n + t.counts.stops, 0) : null;
+}
+
+/**
+ * A nav item with `variant: 'action'` (Quick gauges): a primary button above the sections, an icon button with a
+ * tooltip when the sidebar is collapsed, the same button at the top of the mobile drawer. A pill shows today's stops
+ * while a tally is under way.
+ */
+function ActionLink({ item, compact, onNavigate }: { item: NavItem; compact: boolean; onNavigate?: () => void }) {
+  const Icon = NAV_ICONS[item.icon] ?? Circle;
+  const stops = useTodayStops();
+  const name = stops != null ? `${item.label}: ${stops} stops counted today` : item.label;
+  const link = (
+    <NavLink
+      to={item.to}
+      onClick={onNavigate}
+      aria-label={name}
+      data-nav-action={item.to}
+      className={({ isActive }) =>
+        clsx(
+          'focus-ring relative flex h-11 items-center gap-3 rounded-xl text-sm font-semibold text-primary-fg shadow-card transition-[background-color,box-shadow,transform] duration-150 active:scale-[0.985]',
+          compact ? 'w-11 justify-center px-0' : 'w-full px-3.5',
+          isActive ? 'bg-primary-hover ring-2 ring-primary/35 ring-offset-2 ring-offset-sidebar' : 'bg-primary hover:bg-primary-hover',
+        )
+      }
+    >
+      <Icon className="h-5 w-5 shrink-0" strokeWidth={2.25} aria-hidden />
+      {!compact && <span className="min-w-0 flex-1 truncate">{item.label}</span>}
+      {stops != null &&
+        (compact ? (
+          <span className="absolute -right-1.5 -top-1.5 inline-flex h-5 min-w-5 items-center justify-center rounded-full border-2 border-sidebar bg-accent px-1 text-[10px] font-bold tabular-nums leading-none text-accent-fg" aria-hidden>
+            {stops > 999 ? '999+' : stops}
+          </span>
+        ) : (
+          <span className="shrink-0 rounded-full bg-primary-fg/20 px-2 py-0.5 text-xs font-semibold tabular-nums" aria-hidden>
+            {stops} stops
+          </span>
+        ))}
+    </NavLink>
+  );
+  return compact ? <Tooltip content={stops != null ? `${item.label} · ${stops} stops today` : item.label} side="right" delay={0}>{link}</Tooltip> : link;
+}
 
 const SECTION_LABELS: Record<NonNullable<NavItem['section']>, string> = {
   main: 'Workspace',
@@ -37,8 +88,9 @@ export interface SidebarProps {
 
 export function Sidebar({ items, collapsed, onToggleCollapsed, drawer, onClose, className }: SidebarProps) {
   const compact = collapsed && !drawer;
+  const actions = items.filter((i) => i.variant === 'action');
   const groups = SECTION_ORDER
-    .map((s) => ({ section: s, items: items.filter((i) => (i.section ?? 'main') === s) }))
+    .map((s) => ({ section: s, items: items.filter((i) => i.variant !== 'action' && (i.section ?? 'main') === s) }))
     .filter((g) => g.items.length > 0);
 
   return (
@@ -59,8 +111,20 @@ export function Sidebar({ items, collapsed, onToggleCollapsed, drawer, onClose, 
         )}
       </div>
 
+      {/* Action buttons (Quick gauges): pinned above the scrolling list, so they never scroll away and the collapsed
+          sidebar's tooltip is not clipped by the list's overflow. */}
+      {actions.length > 0 && (
+        <ul className={clsx('flex shrink-0 flex-col gap-2 px-3 pt-4', compact && 'items-center')} aria-label="Quick actions">
+          {actions.map((item) => (
+            <li key={item.to} className={compact ? 'flex justify-center' : undefined}>
+              <ActionLink item={item} compact={compact} onNavigate={drawer ? onClose : undefined} />
+            </li>
+          ))}
+        </ul>
+      )}
+
       {/* Navigation */}
-      <nav className={clsx('scrollbar-thin flex-1 overflow-y-auto py-4', compact ? 'px-3' : 'px-3')} aria-label="Main navigation">
+      <nav className={clsx('scrollbar-thin flex-1 overflow-y-auto py-4', compact ? 'px-3' : 'px-3', actions.length > 0 && 'pt-5')} aria-label="Main navigation">
         {groups.map((g, gi) => (
           <div key={g.section} className={clsx(gi > 0 && 'mt-5')}>
             {!compact ? (

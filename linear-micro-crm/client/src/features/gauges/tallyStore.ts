@@ -64,10 +64,15 @@ function subscribe(listener: () => void): () => void {
   };
 }
 
+/** A local calendar day as YYYY-MM-DD (the same day lib/dates' todayISO gives, without date-fns in the shell). */
+export function localDayISO(d: Date = new Date()): string {
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+}
+
 function cutoffISO(): string {
   const d = new Date();
   d.setDate(d.getDate() - KEEP_DAYS);
-  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+  return localDayISO(d);
 }
 
 function scan(userId: number): StoredTally[] {

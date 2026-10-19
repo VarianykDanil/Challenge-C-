@@ -9,6 +9,7 @@
  *  - replayOutcome     what a POST /gauges status means for the queued item
  *  - inCheckInWindow, preselectTodayEvent, firstMemberWithoutEntry   Log gauges' smart defaults
  *  - tallyStep        one +1 / −1 on the tally, refusing a tap that would break the funnel
+ *  - tallyStepThrough, tallyThroughOffer   "Count it through": a +1 that raises the earlier stages with it
  *  - normaliseTally    stored tally counts → whole numbers that respect the funnel
  */
 import type { GaugeKey, GaugeTotals, GaugeUpsertInput } from '../types.ts';
@@ -190,6 +191,72 @@ export function tallyStep(counts: GaugeTotals, key: GaugeKey, delta: 1 | -1, max
     return { ok: false, counts, hint: `${GAUGE_LABELS[key]} can't go below ${STAGE[below]} (${counts[below]}) — take one off ${GAUGE_LABELS[below]} first.` };
   }
   return { ok: true, counts: { ...counts, [key]: value - 1 } };
+}
+
+/**
+ * "Count it through": +1 on `key`, raising each earlier stage to at least the new value (only the stages that would
+ * otherwise be lower), so a sale tapped before its tap still counts and the funnel stays valid. Given a valid funnel,
+ * every stage that changes goes up by exactly 1 and the later stages never move. Refused, with the counts unchanged,
+ * when `key` is already at the daily maximum (the earlier stages are at or above it, so nothing else can pass it).
+ * Pure and deterministic.
+ * Example: stops 40, table 10, presentations 5, closes 3, taps 2, sales 2 → through on sales → taps 3, sales 3.
+ */
+export function tallyStepThrough(counts: GaugeTotals, key: GaugeKey, max: number = GAUGE_MAX_PER_DAY): TallyStepResult {
+  const value = counts[key];
+  if (value >= max) return { ok: false, counts, hint: `${GAUGE_LABELS[key]} is at the daily maximum of ${max}.` };
+  const next: GaugeTotals = { ...counts, [key]: value + 1 };
+  // Walk up from the stage above `key`: each one is raised to the stage below it when lower (never lowered).
+  for (let i = GAUGE_KEYS.indexOf(key) - 1; i >= 0; i--) {
+    const k = GAUGE_KEYS[i]!;
+    const below = next[GAUGE_KEYS[i + 1]!];
+    if (next[k] < below) next[k] = below;
+  }
+  return { ok: true, counts: next };
+}
+
+/** One of each stage, for "+1 tap and sale". */
+const ONE: Record<GaugeKey, string> = {
+  stops: 'stop',
+  table: 'table',
+  presentations: 'presentation',
+  closes: 'close',
+  taps: 'tap',
+  sales: 'sale',
+};
+
+/** "a", "a and b", "a, b and c" (no serial comma). */
+function listOf(words: string[]): string {
+  return words.length <= 1 ? (words[0] ?? '') : `${words.slice(0, -1).join(', ')} and ${words[words.length - 1]}`;
+}
+
+/** What the quick-gauges screen offers when a +1 is refused by the funnel. */
+export interface TallyThroughOffer {
+  /** Why the +1 was refused, e.g. "Sales can't go above taps (2)." */
+  hint: string;
+  /** The button, e.g. "Count it through: +1 tap and sale". */
+  label: string;
+  /** The counts after counting it through (what tallyStepThrough returns). */
+  counts: GaugeTotals;
+}
+
+/**
+ * When a +1 on `key` is refused because the stage above is not high enough, the one-tap way to count it anyway: the
+ * reason, a button label naming every stage that would go up (in funnel order), and the resulting counts. Null when
+ * the +1 is allowed as it is, or is refused for another reason (the daily maximum), so there is nothing to offer.
+ */
+export function tallyThroughOffer(counts: GaugeTotals, key: GaugeKey, max: number = GAUGE_MAX_PER_DAY): TallyThroughOffer | null {
+  if (tallyStep(counts, key, 1, max).ok) return null;
+  const i = GAUGE_KEYS.indexOf(key);
+  const above = i > 0 ? GAUGE_KEYS[i - 1] : undefined;
+  if (!above || counts[key] < counts[above]) return null;
+  const through = tallyStepThrough(counts, key, max);
+  if (!through.ok) return null;
+  const raised = GAUGE_KEYS.filter((k) => through.counts[k] > counts[k]).map((k) => ONE[k]);
+  return {
+    hint: `${GAUGE_LABELS[key]} can't go above ${STAGE[above]} (${counts[above]}).`,
+    label: `Count it through: +1 ${listOf(raised)}`,
+    counts: through.counts,
+  };
 }
 
 /**
