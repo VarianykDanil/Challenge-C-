@@ -97,6 +97,10 @@ personal tiles use 16 px padding instead of 20 px (the whole grid, so the number
 clamped. "0 days worked" is left out beside a streak, so a Monday never reads "0 days worked · 21-day sales streak ·
 best 21".
 
+**Loading.** The pace note (`BaselineNote`) loads on demand with the other dashboard smart slots (`LazyBaselineNote` in
+`features/smart/lazy.tsx`); it shows nothing while it loads, as it often does anyway. The Sales tile hint and the
+flames are not lazy. See docs/smart/README.md, "Bundle".
+
 ## User guide
 
 ### Your pace and streaks

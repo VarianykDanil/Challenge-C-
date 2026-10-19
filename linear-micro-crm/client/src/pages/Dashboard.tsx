@@ -10,8 +10,8 @@ import { GAUGE_ROLES, hasRole } from '@/auth/RequireRole';
 import { Announcements, CompanySection, NewAnnouncementModal, PersonalCharts, PersonalKpis, RecruiterSection, TeamCard, UpcomingEvents } from '@/features/dashboard';
 import { ErrorBoundary, ErrorState } from '@/features/common';
 import { LogGaugesModal } from '@/features/gauges';
-import { TodayTallyLink } from '@/features/gauges/TallyMode';
-import { AttentionCard, WeekInReview, WeekPayStrip } from '@/features/smart';
+import { TodayTallyLink } from '@/features/gauges/TallyLinks';
+import { LazyAttentionCard, LazyWeekInReview, LazyWeekPayStrip } from '@/features/smart';
 import { COPY, greetingFor, motivationForDate } from '@/content/copy';
 import { formatDate, formatDateShort, formatRangeLabel } from '@/lib/format';
 import { usePageTitle } from '@/lib/usePageTitle';
@@ -64,7 +64,7 @@ export function DashboardPage() {
         <ErrorState error={q.error} onRetry={() => void q.refetch()} title="Could not load your dashboard" />
       ) : (
         <div className="space-y-8">
-          <ErrorBoundary name="attention"><AttentionCard /></ErrorBoundary>
+          <ErrorBoundary name="attention"><LazyAttentionCard /></ErrorBoundary>
 
           {/* Sections and cards another package edits (CompanySection: p4, RecruiterSection: p8, UpcomingEvents: p6) each sit in their own boundary. */}
           {companyFirst && d?.company && <ErrorBoundary name="company"><CompanySection company={d.company} rangeLabel={`${formatDate(d.from)} – ${formatDate(d.to)}`} checkIns={insights?.company?.checkIns} /></ErrorBoundary>}
@@ -82,7 +82,7 @@ export function DashboardPage() {
           {!recruiterFirst && (
             <div>
               <PersonalKpis dashboard={d} role={me.role} deltaLabel={deltaLabel} streaks={insights?.personal.streaks} />
-              {showPayStrip && <ErrorBoundary name="week-pay" className="mt-3"><WeekPayStrip forecast={insights?.personal.payForecast} /></ErrorBoundary>}
+              {showPayStrip && <ErrorBoundary name="week-pay" className="mt-3"><LazyWeekPayStrip forecast={insights?.personal.payForecast} /></ErrorBoundary>}
             </div>
           )}
 
@@ -109,7 +109,7 @@ export function DashboardPage() {
             </Card>
           </div>
 
-          <ErrorBoundary name="week-in-review"><WeekInReview /></ErrorBoundary>
+          <ErrorBoundary name="week-in-review"><LazyWeekInReview /></ErrorBoundary>
 
           {!companyFirst && d?.company && <ErrorBoundary name="company"><CompanySection company={d.company} rangeLabel={`${formatDate(d.from)} – ${formatDate(d.to)}`} checkIns={insights?.company?.checkIns} /></ErrorBoundary>}
         </div>

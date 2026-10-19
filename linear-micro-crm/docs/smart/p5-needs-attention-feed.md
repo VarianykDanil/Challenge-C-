@@ -105,6 +105,10 @@ against "usually works their team's days".
 - A plan with no daily base drops the money sentence. Nobody else's pay is ever estimated.
 
 **Client rules** (`client/src/lib/attentionSeen.ts`, `NotificationsBell.tsx`):
+- **What loads when.** The bell is global (main chunk), and so are the item pieces it shares with the card
+  (`features/smart/AttentionRow.tsx`: `AttentionRow`, `AttentionIcon`, `attentionLook`, `attentionCheckedAt`). The
+  dashboard card (`AttentionCard.tsx`) loads on demand with the other dashboard smart slots (`LazyAttentionCard`), with
+  its own h-14 loading line as the placeholder. See docs/smart/README.md, "Bundle".
 - **Unread** = items this device's seen set (`lm-attention-seen:<userId>` in localStorage) does not account for. The
   token is the key, plus `!` while the item is a danger, plus `#<count>` on a summary item: `gauges:gap:522#3`,
   `payroll:to-pay!#31`. An item that escalates (Runs to pay turning overdue) counts as new once more, and so does a

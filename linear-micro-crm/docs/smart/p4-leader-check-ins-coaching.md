@@ -113,6 +113,10 @@ Team and company insights are written in the third person: no "you" or "your" in
 chip only shows when that stage is **below** benchmark (more than 10% under), so nobody gets a chip while every stage
 is on track. Its tooltip shows the stage's rate against the benchmark.
 
+**Loading.** `CheckInList` and `TeamCoaching` load on demand with the other dashboard smart slots (`LazyCheckInList`,
+`LazyTeamCoaching` in `features/smart/lazy.tsx`), with a two-line placeholder; the check-in list shows nothing until
+its data is known. See docs/smart/README.md, "Bundle".
+
 ## User guide
 
 **Check in with… (leaders and the owner).** This is a short, private list of people it may be worth a word with this

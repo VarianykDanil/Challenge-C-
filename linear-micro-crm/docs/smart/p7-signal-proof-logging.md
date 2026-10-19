@@ -117,6 +117,11 @@ or an entry it behaves exactly as in 1.0.
 
 **The tally** (`features/gauges/TallyMode.tsx`, `tallyStore.ts`):
 
+* **Loading.** The full-screen counter loads the first time the tally opens (`LazyTallyMode`, with a card-shaped
+  placeholder); the Gauges header's **Tally** button and the dashboard's **Count your shift** link are light pieces in
+  `TallyLinks.tsx`. The outbox banner stays in the main chunk and formats its own dates (no date-fns there), with the
+  same text as before. See docs/smart/README.md, "Bundle".
+
 * **Counts.** They are kept per (person, event, date), survive reloads and dropped signal, and never leave the phone
   until **Finish shift**. Unfinished tallies older than 14 days are dropped.
 * **Which event.** The tally offers today's events (own team for reps and leaders; any team for admins) plus any

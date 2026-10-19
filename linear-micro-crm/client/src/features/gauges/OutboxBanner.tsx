@@ -8,12 +8,10 @@
 import { Suspense, lazy, useCallback, useEffect, useRef, useState } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 import { ChevronRight, CloudUpload, Send } from 'lucide-react';
-import { format } from 'date-fns';
 import type { UserWithTeam } from '@lm/shared';
 import { Badge, Button, Modal, useToast } from '@/components/ui';
 import { NETWORK_EVENT, type NetworkEventDetail } from '@/api/client';
 import { useEvent } from '@/api/hooks';
-import { formatDateShort } from '@/lib/format';
 import { discardOutboxItem, entriesLabel, getOutbox, replayAll, sendAnyway, useOutbox, useReplaying, type OutboxItem, type ReplayReport, type SentOutcome } from './outbox';
 
 // The modal is only needed when someone taps "Open": keep it out of the shell's first download.
@@ -25,12 +23,27 @@ const OUTCOME_LABEL: Record<SentOutcome, string> = {
   already: 'it was already on Linear Hub',
 };
 
-/** "14:02" today, "Mon 14:02" otherwise. */
+// The banner is part of the always-loaded shell, so it formats its few dates itself instead of pulling date-fns (and
+// lib/format) into the main chunk. Same output as lib/format's formatDateShort ('d MMM') and date-fns' 'HH:mm' /
+// 'EEE d MMM, HH:mm' in the device's local time.
+const DOW = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+const two = (n: number) => String(n).padStart(2, '0');
+
+/** "14 Oct" from a "YYYY-MM-DD" gauge date ("—" when unreadable). */
+function dayMonth(iso: string): string {
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(iso);
+  const month = m ? MONTHS[Number(m[2]) - 1] : undefined;
+  return m && month && Number(m[3]) >= 1 ? `${Number(m[3])} ${month}` : '—';
+}
+
+/** "14:02" today, "Mon 14 Oct, 14:02" otherwise. */
 function whenLabel(iso: string | undefined): string {
   if (!iso) return '';
   const d = new Date(iso);
   if (Number.isNaN(d.getTime())) return '';
-  return d.toDateString() === new Date().toDateString() ? format(d, 'HH:mm') : format(d, 'EEE d MMM, HH:mm');
+  const time = `${two(d.getHours())}:${two(d.getMinutes())}`;
+  return d.toDateString() === new Date().toDateString() ? time : `${DOW[d.getDay()]} ${d.getDate()} ${MONTHS[d.getMonth()]}, ${time}`;
 }
 
 /** The one-line reason under "N entries need a look before sending". */
@@ -66,7 +79,7 @@ export function OutboxBanner({ user }: OutboxBannerProps) {
       if (r.sent.length) {
         // Everything that shows gauges is refetched (same set as a save from the form).
         for (const key of [['gauges'], ['events'], ['dashboard'], ['leaderboard'], ['users', 'performance'], ['finance']]) void qc.invalidateQueries({ queryKey: key });
-        const describe = (i: OutboxItem) => `${i.eventName} · ${formatDateShort(i.input.date)}${i.input.userId !== user.id ? ` · ${i.userName}` : ''}`;
+        const describe = (i: OutboxItem) => `${i.eventName} · ${dayMonth(i.input.date)}${i.input.userId !== user.id ? ` · ${i.userName}` : ''}`;
         if (r.sent.length === 1) {
           const s = r.sent[0]!;
           toast.success(`Sent from this phone — ${OUTCOME_LABEL[s.outcome]}`, describe(s.item));
@@ -183,7 +196,7 @@ export function OutboxBanner({ user }: OutboxBannerProps) {
                 }}
                 onDiscard={() => {
                   discardOutboxItem(user.id, item.id);
-                  toast.info('Discarded', `${item.eventName} · ${formatDateShort(item.input.date)} was removed from this phone.`);
+                  toast.info('Discarded', `${item.eventName} · ${dayMonth(item.input.date)} was removed from this phone.`);
                 }}
               />
             ))}
@@ -235,7 +248,7 @@ function OutboxRow({ item, meId, busy, onSend, onOpen, onDiscard }: OutboxRowPro
         <div className="min-w-0">
           <p className="truncate text-sm font-semibold text-fg">{item.eventName}</p>
           <p className="text-xs text-muted">
-            {formatDateShort(input.date)}
+            {dayMonth(input.date)}
             {input.userId !== meId && <> · for {item.userName}</>} · saved {whenLabel(item.queuedAt)}
           </p>
         </div>

@@ -9,7 +9,7 @@ import { useEvent, useGaugeSummary, useTeams, useUserPerformance } from '@/api/h
 import { useCurrentUser } from '@/auth/AuthProvider';
 import { ChartSkeleton, ErrorBoundary, ErrorState, ExportButton, RangePicker, useRangeState } from '@/features/common';
 import { GaugeSummaryTable, LogGaugesModal, PerformancePanel, gaugeSummaryCsvColumns } from '@/features/gauges';
-import { TallyButton, TallyMode, type TallyRequest } from '@/features/gauges/TallyMode';
+import { LazyTallyMode, TallyButton, type TallyRequest } from '@/features/gauges/TallyLinks';
 import { idFromParam, useActionParam } from '@/lib/useActionParam';
 import { csvFilename, sortRows } from '@/lib/csv';
 import { formatDateShort } from '@/lib/format';
@@ -76,7 +76,7 @@ export function GaugesPage() {
         }
       />
       <ErrorBoundary name="tally" title="The tally hit a problem" className="mb-5" resetKeys={[tally]}>
-        <TallyMode request={tally} onClose={() => setTally(null)} />
+        <LazyTallyMode request={tally} onClose={() => setTally(null)} />
       </ErrorBoundary>
       <div className="mb-5 flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
         {tabs.length > 1 ? <Tabs items={tabs} value={scope} onChange={(v) => setScope(v as Scope)} /> : <span />}

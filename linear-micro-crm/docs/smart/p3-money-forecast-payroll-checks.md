@@ -59,6 +59,11 @@ once, after the last run. While a batch runs, the single **Mark paid** buttons a
 cannot race a run that is later in the batch. The server still validates every date (`weekEnd ≤ paidDate ≤ today`,
 else `400`).
 
+The sticky bar itself (`features/finance/BulkPayBar.tsx`) is admin-only, so it loads on demand the first time a run is
+selected (`LazyBulkPayBar` in `bulkPay.tsx`, which also holds `useBulkMarkPaid`, the helpers and `FlaggedRunsList`); a
+bar-shaped placeholder shows for the moment it takes. The week's pay strip on the dashboard (`WeekPayStrip`) loads with
+the other dashboard smart slots (`features/smart/lazy.tsx`). See docs/smart/README.md, "Bundle".
+
 ## Logic
 
 ### Pay forecast — `shared/src/logic/payForecast.ts` (`payForecastFrom`) and `server/src/lib/smart/payForecast.ts` (`weekPayForecast`)

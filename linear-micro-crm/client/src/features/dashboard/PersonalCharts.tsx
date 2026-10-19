@@ -5,7 +5,7 @@ import { Button, Card, CardHeader, EmptyState } from '@/components/ui';
 import { FunnelChart, TrendChart } from '@/components/charts';
 import { ChartSkeleton, ErrorBoundary } from '@/features/common';
 import { CoachingInsights } from '@/features/gauges';
-import { BaselineNote } from '@/features/smart';
+import { LazyBaselineNote } from '@/features/smart';
 import { formatDateShort } from '@/lib/format';
 
 export interface PersonalChartsProps {
@@ -35,7 +35,7 @@ export function PersonalCharts({ dashboard: d, canLog, onLog, baseline, directio
           <>
             <FunnelChart totals={d.personal.totals} ratios={d.personal.ratios} showBenchmarks compact />
             <ErrorBoundary name="coaching" className="mt-3"><CoachingInsights totals={d.personal.totals} ratios={d.personal.ratios} className="mt-3" /></ErrorBoundary>
-            <ErrorBoundary name="baseline" className="mt-3"><BaselineNote baseline={baseline} direction={direction} className="mt-3" /></ErrorBoundary>
+            <ErrorBoundary name="baseline" className="mt-3"><LazyBaselineNote baseline={baseline} direction={direction} className="mt-3" /></ErrorBoundary>
           </>
         )}
       </Card>

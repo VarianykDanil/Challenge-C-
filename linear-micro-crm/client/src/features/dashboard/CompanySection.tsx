@@ -10,7 +10,7 @@ import { ratioTone } from '@/lib/ratios';
 import { useAuth } from '@/auth/AuthProvider';
 import { ErrorBoundary } from '@/features/common/ErrorBoundary';
 import { CoachingInsights } from '@/features/gauges/CoachingInsights';
-import { CheckInList } from '@/features/smart/CheckInList';
+import { LazyCheckInList } from '@/features/smart/lazy';
 
 export interface CompanySectionProps {
   company: NonNullable<Dashboard['company']>;
@@ -65,7 +65,7 @@ export function CompanySection({ company, rangeLabel, checkIns }: CompanySection
           )}
           {checkIns && (
             <Card className="min-w-0">
-              <ErrorBoundary name="company-check-ins"><CheckInList people={checkIns} showTeam /></ErrorBoundary>
+              <ErrorBoundary name="company-check-ins"><LazyCheckInList people={checkIns} showTeam /></ErrorBoundary>
             </Card>
           )}
         </div>

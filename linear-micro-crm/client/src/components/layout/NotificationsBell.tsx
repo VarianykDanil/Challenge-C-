@@ -19,7 +19,7 @@ import { useAttention } from '@/api/hooks';
 import { useAuth } from '@/auth/AuthProvider';
 import { Skeleton } from '../ui/Skeleton';
 import { useToast } from '../ui/Toast';
-import { AttentionRow, attentionCheckedAt } from '@/features/smart/AttentionCard';
+import { AttentionRow, attentionCheckedAt } from '@/features/smart/AttentionRow';
 import {
   ATTENTION_TOASTS_FIRST,
   ATTENTION_TOASTS_LATER,

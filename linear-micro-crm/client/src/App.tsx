@@ -8,8 +8,6 @@ import { UNAUTHENTICATED_EVENT } from '@/api/client';
 import { AuthProvider, useAuth } from '@/auth/AuthProvider';
 import { RedirectIfAuthed, RequireAuth } from '@/auth/RequireAuth';
 import { CAMPAIGN_ROLES, GAUGE_ROLES, RECRUITMENT_ROLES, RequireRole } from '@/auth/RequireRole';
-import { LoginPage } from '@/pages/Login';
-import { AboutPage } from '@/pages/About';
 import { NotFoundPage } from '@/pages/NotFound';
 import { FullPageSpinner } from '@/features/common/FullPageSpinner';
 
@@ -28,6 +26,11 @@ const UserDetailPage = lazy(() => import('@/pages/UserDetail').then((m) => ({ de
 const SettingsPage = lazy(() => import('@/pages/Settings').then((m) => ({ default: m.SettingsPage })));
 // The public page carries the charts bundle, so it is split too: signed-in users never download it.
 const LandingPage = lazy(() => import('@/pages/Landing').then((m) => ({ default: m.LandingPage })));
+// Sign-in and About are split as well (lead decision on the bundle: the main chunk back under 460 kB): someone who is
+// already signed in, the usual case on a phone, never downloads the sign-in page, and About is rarely opened. The
+// sign-in page loads behind the same full-page spinner the session check shows, so it reads as one wait.
+const LoginPage = lazy(() => import('@/pages/Login').then((m) => ({ default: m.LoginPage })));
+const AboutPage = lazy(() => import('@/pages/About').then((m) => ({ default: m.AboutPage })));
 
 /**
  * Signed-in shell: one layout route for every signed-in page, the dashboard included (as the index child), so the
@@ -121,7 +124,9 @@ export default function App() {
             path="/login"
             element={
               <RedirectIfAuthed>
-                <LoginPage />
+                <Suspense fallback={<FullPageSpinner label="Loading…" />}>
+                  <LoginPage />
+                </Suspense>
               </RedirectIfAuthed>
             }
           />

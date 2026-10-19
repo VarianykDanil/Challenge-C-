@@ -6,7 +6,7 @@ import { ArrowRight } from 'lucide-react';
 import type { BoardStreak, CheckInPerson, Dashboard, LeaderboardRow, Role } from '@lm/shared';
 import { Card, CardHeader, EmptyState, Skeleton } from '@/components/ui';
 import { ErrorBoundary } from '@/features/common';
-import { CheckInList, TeamCoaching } from '@/features/smart';
+import { LazyCheckInList, LazyTeamCoaching } from '@/features/smart';
 import { formatNumber, formatPct } from '@/lib/format';
 import { MiniLeaderboard } from './MiniLeaderboard';
 
@@ -43,8 +43,8 @@ export function TeamCard({ dashboard: d, meId, role, companyBoard, streaks, chec
           <ErrorBoundary name="mini-leaderboard"><MiniLeaderboard rows={d.team.leaderboard} highlightUserId={meId} streaks={streaks} /></ErrorBoundary>
           {role === 'leader' && (
             <>
-              <ErrorBoundary name="team-coaching" className="mt-4"><TeamCoaching totals={d.team.totals} ratios={d.team.ratios} className="mt-4" /></ErrorBoundary>
-              <ErrorBoundary name="team-check-ins" className="mt-4"><CheckInList people={checkIns} className="mt-4" /></ErrorBoundary>
+              <ErrorBoundary name="team-coaching" className="mt-4"><LazyTeamCoaching totals={d.team.totals} ratios={d.team.ratios} className="mt-4" /></ErrorBoundary>
+              <ErrorBoundary name="team-check-ins" className="mt-4"><LazyCheckInList people={checkIns} className="mt-4" /></ErrorBoundary>
             </>
           )}
         </>

@@ -9,7 +9,7 @@ import { DonutChart, TrendChart } from '@/components/charts';
 import { useCampaigns, useDeleteExpense, useExpenses, useFinanceSummary, useMyFinance, usePayRun, usePayroll } from '@/api/hooks';
 import { useCurrentUser } from '@/auth/AuthProvider';
 import { ChartSkeleton, ColourChip, ConfirmDialog, ErrorState, ExportButton, KpiSkeletons, RangePicker, StopRowEvents, errorMessage, useRangeState } from '@/features/common';
-import { AddExpenseModal, BulkPayBar, FlaggedRunsList, PayrollRunsTable, PayslipModal, campaignFinanceCsvColumns, expenseCsvColumns, financeWeekCsvColumns, payrollRunCsvColumns, payrollRunsRange, useBulkMarkPaid, warningFlags, type PayrollRunSelection } from '@/features/finance';
+import { AddExpenseModal, FlaggedRunsList, LazyBulkPayBar, PayrollRunsTable, PayslipModal, campaignFinanceCsvColumns, expenseCsvColumns, financeWeekCsvColumns, payrollRunCsvColumns, payrollRunsRange, useBulkMarkPaid, warningFlags, type PayrollRunSelection } from '@/features/finance';
 import { FORECAST_LABEL, bonusLine, forecastMethod, forecastNoRangeReason, forecastRange } from '@/features/smart/weekPayCopy';
 import { csvFilename, sortRows } from '@/lib/csv';
 import { todayISO } from '@/lib/dates';
@@ -494,7 +494,7 @@ function Company({ onOpen, scrollToRuns = false, onScrolled }: { onOpen: (r: Pay
         ) : (
           <PayrollRunsTable rows={toPay} loading={pending.isLoading} {...runsTableProps} emptyMessage="Everyone is paid up" bare className="border-t border-border" />
         )}
-        <BulkPayBar
+        <LazyBulkPayBar
           runs={selectedRuns}
           flagged={flaggedSelected.length}
           paidDate={paidDate}
