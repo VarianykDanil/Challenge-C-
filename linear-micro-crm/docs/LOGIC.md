@@ -321,6 +321,12 @@ Every builder is switched off by `LM_SMART=0` (`server/src/lib/smart/enabled.ts`
 empty Map, routes attach nothing, and the dashboard looks exactly as it did in 1.0. Every payload is built from data
 the caller may already see; nobody ever sees another person's alerts, pace, forecast or check-in reasons.
 
+The switch turns off estimates and generated advice, not workflow rules. **Recruitment SLAs stay on with
+`LM_SMART=0`** (lead decision): the stage targets, the next-action deadline a create or stage move sets from them, the
+**Idle** badges and the candidate page's **Record the outcome** card (§14.8) are workflow rules, not estimates, and the
+client already names the deadline a move will set. The offline outbox (§14.7) stays on too: it is a reliability
+feature. The Needs-attention feed, including its outcome reminders, is a smart builder and is emptied.
+
 ### 14.0 Copy style guide (every generated sentence)
 
 * **British English** ("colour", "organise", "programme"); dates like "Thu 15 Oct"; weeks "w/c 12 Oct".

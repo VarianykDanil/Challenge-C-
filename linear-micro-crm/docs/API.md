@@ -111,7 +111,9 @@ unless the requester is an `admin` or the row is the requester themselves. `GET 
 Release 1.1 ("smart release"). Every change is **additive**: no response field was renamed or removed, and every new
 field on an existing payload is optional. Role scoping is unchanged and every smart payload is built from data the
 caller may already see. **Kill switch:** with `LM_SMART=0` every smart part below is null / empty, and the optional
-keys on existing payloads are absent (the 1.0 shapes exactly). Types are in `shared/src/types.ts`
+keys on existing payloads are absent (the 1.0 shapes exactly). Recruitment SLAs are not switched off: they are
+workflow rules, not estimates, so `POST /recruitment/candidates` and `POST /recruitment/candidates/:id/stage` still set
+the stage's default `nextActionAt` when the body leaves it out (send `nextActionAt: null` for no deadline). Types are in `shared/src/types.ts`
 ("Smart release 1.1").
 
 | Endpoint | Who | Answer | Cached |

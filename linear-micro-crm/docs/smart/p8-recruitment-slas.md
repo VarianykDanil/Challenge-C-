@@ -59,11 +59,11 @@ builders, and the client states the deadline it expects a move to set ("Phone sc
 server default off behind the client's back would make that line wrong. A caller that wants no deadline sends
 `nextActionAt: null`.
 
-**Lead decision at merge** (the release notes say everything switches off with `LM_SMART=0`). Restoring 1.0 exactly
-would take: in `server/src/routes/recruitment.ts`, when `!smartEnabled()`, create with an omitted `nextActionAt` → `null`
-and a stage move with an omitted one → carry `candidate.nextActionAt` forward (closed stages still `null`); and a flag
-the client can read (none exists today) so it can drop the `· due …` option labels, the toast's target, the Idle badges
-and order, and the candidate page's outcome card. The deadline validation above is not a smart feature and stays either way.
+**Lead decision: accepted.** SLAs are workflow rules, not estimates, so `LM_SMART=0` leaves them on; the kill-switch
+docs say so (LOGIC.md §14, API.md "Smart endpoints"). With `LM_SMART=0`: creating a candidate without `nextActionAt`
+still gets applied + 3 days, a move to Screening still gets + 5 days, and the Idle badges and the candidate page's
+outcome card still show, while `GET /me/attention` answers `{ items: [], disabled: true }` (so the dashboard's outcome
+reminders are off with the rest of the feed). The deadline validation above is not a smart feature either.
 
 ## Logic
 
