@@ -12,8 +12,9 @@
  *  - admin      every team, every candidate, own pay plus every pending / failed run in the to-pay window.
  *
  * Inputs come from at most 8 statements after `ensurePayrollMaterialised` (the same guard the finance routes use;
- * admin 6, leader 8, recruiter 3, rep 5): pay plan, events dated today − 3 … tomorrow, gauge rows dated today − 3 …
- * today, active members, runs (unpaid or paid in the last 7 days; admin: the to-pay window), open candidates with a due
+ * admin 6, leader 8, recruiter 3, rep 5): pay plan, events dated `from` … tomorrow, gauge rows dated `from` … today
+ * (`from` = attentionLookbackFrom: today − 3, or this week's Monday when earlier, so the own-gauge rule sees the whole
+ * pay week), active members, runs (unpaid or paid in the last 7 days; admin: the to-pay window), open candidates with a due
  * follow-up, pending interviews within ±2 days, and the caller's usual attendance (pay-cost wording).
  * Date-bounded where the table is large: events, gauge rows, runs and the attendance count use their indexes. Open
  * candidates, interviews and the admin's member list are small full scans (no index on interviews.scheduled_at or on
@@ -25,6 +26,7 @@ import { Router } from 'express';
 import {
   ATTENTION_RULES,
   attentionItems,
+  attentionLookbackFrom,
   attentionPayrollWindow,
   type AttentionAttendance,
   type AttentionFeed,
@@ -57,13 +59,14 @@ const MEMBER_SELECT = `SELECT id, first_name AS firstName, last_name AS lastName
 export function attentionInput(db: Db, me: UserWithTeam, now: AttentionNow): AttentionInput {
   const { today } = now;
   const fieldRole = me.role === 'rep' || me.role === 'leader';
-  const from = addDays(today, -ATTENTION_RULES.lookbackDays);
+  // today − 3, or this week's Monday when earlier: the own-gauge rule asks for any unlogged day of this pay week
+  const from = attentionLookbackFrom(today);
   const self: Member = { id: me.id, firstName: me.firstName, lastName: me.lastName, role: me.role, teamId: me.teamId, startDate: me.startDate, status: me.status };
 
   // (1) the caller's own plan — only the field roles' rows ever mention money for a day
   const plan = fieldRole ? (getPayPlan(db, me.payPlanId) ?? null) : null;
 
-  // (2) events dated today − 3 … tomorrow: rep / leader their own team, admin all, recruiter none
+  // (2) events dated `from` … tomorrow: rep / leader their own team, admin all, recruiter none
   const eventsVisible = me.role === 'admin' || (fieldRole && me.teamId !== null);
   const events = eventsVisible
     ? listEvents(
@@ -75,7 +78,7 @@ export function attentionInput(db: Db, me: UserWithTeam, now: AttentionNow): Att
       )
     : [];
 
-  // (3) gauge rows dated today − 3 … today: rep own, leader own team's members, admin all
+  // (3) gauge rows dated `from` … today: rep own, leader own team's members, admin all
   const ENTRY_SELECT = `SELECT g.id, g.event_id AS eventId, g.user_id AS userId, g.date, g.stops, g.table_count AS "table", g.sales, g.submitted_at AS submittedAt FROM gauge_entries g`;
   let entries: Entry[] = [];
   if (me.role === 'admin') entries = all<Entry>(db, `${ENTRY_SELECT} WHERE g.date BETWEEN ? AND ? ORDER BY g.id`, [from, today]);

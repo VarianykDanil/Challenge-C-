@@ -1,15 +1,21 @@
 /**
  * GET /me/attention (p5) on the small fixture: role scoping, resolution by a real write, the to-pay count matching
  * Runs to pay, the response cache and the query budget. Shapes and scoping only — never seeded names.
+ * The business clock is pinned to a Thursday afternoon: a rep's own unlogged days are THIS PAY WEEK only, so on a
+ * Monday the fixture's "yesterday" (a Sunday) would belong to last week and rightly ask for nothing.
  */
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { paydayForWeek, type UserWithTeam } from '@lm/shared';
 import { run, type Db } from '../db/connection.ts';
 import { getUser } from '../db/queries.ts';
-import { addDays, mondayOf, todayISO } from '../lib/dates.ts';
+import { addDays, mondayOf, setBusinessClock, todayISO } from '../lib/dates.ts';
 import { attentionNow, buildAttentionFeed } from '../routes/attention.ts';
-import { addGauge, funnelFrom, startTestServer, withSmart, type Json } from './helpers.ts';
+import { addEvent, addGauge, funnelFrom, startTestServer, withSmart, type Json } from './helpers.ts';
+
+// Thu 15 Oct 2026, 15:00 London (the server test script pins TZ=Europe/London). Monday 12 Oct starts this pay week.
+const THURSDAY = new Date('2026-10-15T15:00:00');
+setBusinessClock(THURSDAY);
 
 const keysOf = (r: { json: Json }) => (r.json.items as Json[]).map((i) => i.key as string);
 
@@ -188,5 +194,40 @@ test('every role: at most 12 statements to build the feed; LM_SMART=0 → empty 
     assert.ok(on.json.generatedAt.startsWith(todayISO().slice(0, 4)));
   } finally {
     await srv.close();
+  }
+});
+
+test('rep: the whole pay week is asked for (Monday … yesterday), never a day of the week before', async () => {
+  // Sunday 18 Oct: Monday 12 Oct is 6 days back, beyond the team rules' 3-day look-back, so the route must load it
+  setBusinessClock(new Date('2026-10-18T15:00:00'));
+  const srv = await startTestServer();
+  try {
+    const fx = srv.fixture!;
+    assert.equal(fx.today, '2026-10-18');
+    const monday = addEvent(srv.db, { campaignId: fx.campaignId, teamId: fx.teams.a, date: '2026-10-12' });
+    const wednesday = addEvent(srv.db, { campaignId: fx.campaignId, teamId: fx.teams.a, date: '2026-10-14' });
+    const lastSunday = addEvent(srv.db, { campaignId: fx.campaignId, teamId: fx.teams.a, date: '2026-10-11' });
+    srv.resetCache();
+    const rep = await srv.login('rep');
+    const keys = keysOf(await rep.get('/me/attention'));
+    const own = (eventId: number) => `gauges:event:${eventId}:user:${fx.users.rep}`;
+    assert.ok(keys.includes(own(monday)), `Monday of this week: ${keys.join(', ')}`);
+    assert.ok(keys.includes(own(wednesday)));
+    assert.ok(keys.includes(own(fx.events.yesterdayA)), 'yesterday (Saturday) too');
+    assert.ok(!keys.includes(own(lastSunday)), 'last week’s Sunday is never asked for');
+    const item = (await rep.get('/me/attention')).json.items.find((i: Json) => i.key === own(monday));
+    assert.match(item.body, /that day’s £60 base plus commission is not in Friday’s pay \(23 Oct\) until it is logged\.$/, 'the pay-cost wording');
+    // logging Monday clears just that day
+    addGauge(srv.db, { eventId: monday, userId: fx.users.rep, date: '2026-10-12', stops: 40, sales: 2 });
+    srv.resetCache();
+    const after = keysOf(await rep.get('/me/attention'));
+    assert.ok(!after.includes(own(monday)) && after.includes(own(wednesday)), after.join(', '));
+    // the leader's own items follow the same week; never a team-B event
+    const leaderKeys = keysOf(await (await srv.login('leader')).get('/me/attention'));
+    assert.ok(leaderKeys.includes(`gauges:event:${monday}:user:${fx.users.leader}`), leaderKeys.join(', '));
+    assert.ok(!leaderKeys.includes(`gauges:event:${lastSunday}:user:${fx.users.leader}`));
+  } finally {
+    await srv.close();
+    setBusinessClock(THURSDAY);
   }
 });

@@ -4,6 +4,8 @@ import type { AttentionItem, CandidateWithMeta, PayPlan, PayrollRunWithUser, Rol
 import {
   ATTENTION_MAX_ITEMS,
   attentionItems,
+  attentionLookbackFrom,
+  attentionOwnGapWindow,
   attentionPayrollWindow,
   attentionUsuallyAttends,
   sortAttentionItems,
@@ -152,25 +154,47 @@ test('rep: a still-live event before its end time → no item; once its end has 
   assert.match(it.body, /^If you worked it/);
 });
 
-test('rep: only today − 2 … today, own team, not cancelled, not before my start date, not a week already paid', () => {
-  const tooOld = ev({ id: 60, date: '2026-10-12' });
+test('rep: this pay week only (Monday … today), own team, not cancelled, not before my start date, not a week already paid', () => {
+  // Thursday 15 Oct: Monday 12 Oct (today − 3) is still this pay week → asked for; Sunday 11 Oct is last week → never
+  const monday12 = ev({ id: 59, date: '2026-10-12' });
+  const sunday11 = ev({ id: 60, date: '2026-10-11' });
   const otherTeam = ev({ id: 61, date: '2026-10-14', teamId: TEAM_B });
   const cancelled = ev({ id: 62, date: '2026-10-14', status: 'cancelled' });
-  assert.deepEqual(keys(attentionItems(input('rep', { events: [tooOld, otherTeam, cancelled] }), NOW)), []);
+  assert.deepEqual(keys(attentionItems(input('rep', { events: [sunday11, otherTeam, cancelled] }), NOW)), []);
+  const mon = byKey(attentionItems(input('rep', { events: [monday12, sunday11] }), NOW), 'gauges:event:59:user:10')!;
+  assert.ok(mon, 'Monday of this week is in the window');
+  assert.equal(mon.body, 'If you worked it: that day’s £60 base plus commission is not in Friday’s pay (23 Oct) until it is logged.', 'the pay-cost wording is kept');
+  assert.deepEqual(attentionOwnGapWindow(NOW.today), { from: '2026-10-12', to: '2026-10-15' });
   const beforeStart = ev({ id: 63, date: '2026-10-13' });
   const starter = input('rep', { events: [beforeStart] });
   starter.me.startDate = '2026-10-14';
   assert.deepEqual(keys(attentionItems(starter, NOW)), []);
-  // Monday 19 Oct: Saturday 17 Oct belongs to a week whose run was already paid → the rep could not log it
+  // Monday 19 Oct: Saturday 17 Oct belongs to last week (which may already be paid) → never asked for, paid or not
   const monday: AttentionNow = { today: '2026-10-19', nowHHMM: '10:00', nowISO: '2026-10-19T09:00:00.000Z' };
   const sat = ev({ id: 64, date: '2026-10-17' });
-  const paid = run({ id: 9, userId: 10, weekStart: '2026-10-12', weekEnd: '2026-10-18', dueDate: '2026-10-23', paidDate: '2026-10-19', status: 'paid' });
-  const satItem = byKey(attentionItems(input('rep', { events: [sat] }), monday), 'gauges:event:64:user:10');
-  assert.ok(satItem);
-  assert.match(satItem.body, /Friday’s pay \(23 Oct\)/, 'last week is paid this Friday');
+  assert.equal(byKey(attentionItems(input('rep', { events: [sat] }), monday), 'gauges:event:64:user:10'), undefined);
+  assert.deepEqual(attentionOwnGapWindow(monday.today), { from: '2026-10-19', to: '2026-10-19' });
+  // … and today's own event counts only once it has ended
+  const mondayLive = ev({ id: 66, date: '2026-10-19', status: 'live', endTime: '17:00' });
+  assert.equal(byKey(attentionItems(input('rep', { events: [mondayLive] }), monday), 'gauges:event:66:user:10'), undefined, 'still running');
   const mondayEvent = ev({ id: 65, date: '2026-10-19', endTime: '09:30' });
   assert.match(byKey(attentionItems(input('rep', { events: [mondayEvent] }), monday), 'gauges:event:65:user:10')!.body, /Friday’s pay \(30 Oct\)/, 'this week is paid the Friday after it ends');
-  assert.equal(byKey(attentionItems(input('rep', { events: [sat], runs: [paid] }), monday), 'gauges:event:64:user:10'), undefined);
+  // Sunday 25 Oct: every unlogged day Monday 19 … Saturday 24 is asked for, nothing from the week before
+  const sunday: AttentionNow = { today: '2026-10-25', nowHHMM: '12:00', nowISO: '2026-10-25T11:00:00.000Z' };
+  const week = ['2026-10-18', '2026-10-19', '2026-10-20', '2026-10-21', '2026-10-22', '2026-10-23', '2026-10-24'].map((date, i) => ev({ id: 400 + i, date }));
+  assert.deepEqual(
+    keys(attentionItems(input('rep', { events: week }), sunday)).sort(),
+    [401, 402, 403, 404, 405, 406].map((id) => `gauges:event:${id}:user:10`),
+  );
+  // a week already paid is still never asked for (defensive: the run exists before payday only after a pay run)
+  const paid = run({ id: 9, userId: 10, weekStart: '2026-10-19', weekEnd: '2026-10-25', dueDate: '2026-10-30', paidDate: '2026-10-25', status: 'paid' });
+  assert.deepEqual(keys(attentionItems(input('rep', { events: week, runs: [paid] }), sunday)).filter((k) => k.startsWith('gauges:event')), []);
+});
+
+test('the route loads from today − 3, or from Monday when that is earlier', () => {
+  assert.equal(attentionLookbackFrom('2026-10-15'), '2026-10-12', 'Thursday: today − 3 is Monday');
+  assert.equal(attentionLookbackFrom('2026-10-19'), '2026-10-16', 'Monday: today − 3 (the team rules still look back 2 days)');
+  assert.equal(attentionLookbackFrom('2026-10-25'), '2026-10-19', 'Sunday: Monday is 6 days back');
 });
 
 test('rep: pay-cost framing — firm when I usually work my team’s days, hedged otherwise, no money when the base is 0', () => {

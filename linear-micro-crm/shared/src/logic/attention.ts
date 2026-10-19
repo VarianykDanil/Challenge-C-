@@ -31,10 +31,11 @@ export const ATTENTION_MAX_ITEMS = 20;
 
 /** Every threshold the rules use, in one place (documented in docs/smart/p5-needs-attention-feed.md). */
 export const ATTENTION_RULES = {
-  /** Days back the input covers (events and gauge rows dated ≥ today − 3). */
+  /**
+   * Days back the input covers at least (events and gauge rows dated ≥ today − 3, or from this week's Monday when that
+   * is earlier: see attentionLookbackFrom). Own unlogged event days use THIS PAY WEEK instead (attentionOwnGapWindow).
+   */
   lookbackDays: 3,
-  /** Own unlogged event days: today − 2 … today (deliberately the spec's short window, not the whole unpaid week). */
-  ownGapDays: 2,
   /** Team gaps: the event ended at least this long ago … */
   gapMinMinutes: 120,
   /** … and at most this long ago. */
@@ -106,7 +107,7 @@ export interface AttentionInput {
   me: { id: number; role: Role; teamId: number | null; firstName: string; twoFactorEnabled: boolean; startDate?: string };
   /** The caller's own pay plan (for "that day's £60 base plus commission"); null when unknown. */
   plan: PayPlan | null;
-  /** Events dated today − 3 … tomorrow that the caller may see (rep / leader: own team; admin: all). */
+  /** Events dated attentionLookbackFrom(today) … tomorrow that the caller may see (rep / leader: own team; admin: all). */
   events: ReadonlyArray<SalesEventWithMeta>;
   /** Gauge rows on those dates for the people in scope (numbers only; rep: own; leader: own team; admin: all). */
   entries: ReadonlyArray<Pick<GaugeEntry, 'id' | 'eventId' | 'userId' | 'date' | 'stops' | 'table' | 'sales' | 'submittedAt'>>;
@@ -253,6 +254,22 @@ export function attentionPayrollWindow(today: string): { from: string; to: strin
   return { from: addDays(startOfWeekISO(today), -7 * ATTENTION_RULES.payrollWindowWeeks), to: today };
 }
 
+/**
+ * The rep's / leader's own unlogged event days: THIS PAY WEEK, Monday of today's week to today (today only once that
+ * day's event has ended, which `ownGaugeItems` checks). A day before Monday belongs to a week that may already be paid,
+ * so it is never asked for.
+ */
+export function attentionOwnGapWindow(today: string): { from: string; to: string } {
+  return { from: startOfWeekISO(today), to: today };
+}
+
+/** The first date the route loads events and gauge rows from: today − 3, or this week's Monday when that is earlier. */
+export function attentionLookbackFrom(today: string): string {
+  const back = addDays(today, -ATTENTION_RULES.lookbackDays);
+  const monday = attentionOwnGapWindow(today).from;
+  return monday < back ? monday : back;
+}
+
 /** True when the attendance history says the caller usually works their team's event days. */
 export function attentionUsuallyAttends(a: AttentionAttendance | null | undefined): boolean {
   if (!a || a.teamDays < ATTENTION_RULES.usualAttendanceMinDays) return false;
@@ -273,7 +290,8 @@ function ownGaugeItems(input: AttentionInput, now: AttentionNow, out: AttentionI
   const firm = attentionUsuallyAttends(input.attendance);
   const base = input.plan ? estimateWeekPay(input.plan, { daysWorked: 1, sales: 0, teamSales: 0 }).basePay : 0;
   const withCommission = (input.plan?.commissionPerSale ?? 0) > 0;
-  const from = addDays(now.today, -ATTENTION_RULES.ownGapDays);
+  // this pay week only: Monday … today (a day before Monday belongs to a week that may already be paid)
+  const { from } = attentionOwnGapWindow(now.today);
   // one item per unlogged DATE: a day pays one base however many team events ran on it, so two events on the same
   // day must not each claim "that day's £60". The item is keyed on the day's first event (start time, then id) and
   // names the others.

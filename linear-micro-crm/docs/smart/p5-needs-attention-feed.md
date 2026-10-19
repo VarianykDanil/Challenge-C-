@@ -42,7 +42,8 @@ request from rows the caller may already see.
   `security:*` items, and never anything about another person's rows or pay.
 - **Queries**: `ensurePayrollMaterialised(db, today)` first (as the finance routes do, so last week's runs exist before
   they are counted), then at most 8 statements (admin 6, leader 8, recruiter 3, rep 5): pay plan, events dated
-  today − 3 … tomorrow, gauge rows dated today − 3 … today, active members, runs (unpaid, or paid in the last 7 days;
+  `from` … tomorrow and gauge rows dated `from` … today (`from` = `attentionLookbackFrom(today)`: today − 3, or this
+  week's Monday when that is earlier, so the own-gauge rule sees the whole pay week), active members, runs (unpaid, or paid in the last 7 days;
   admin also the to-pay window), open candidates with a follow-up already due, pending interviews within ± 2 days, and
   the caller's usual attendance over the 28 days before the window. Events, gauge rows, runs and the attendance count
   are date-bounded and use their indexes; open candidates, interviews and the admin's member list are small full scans
@@ -67,7 +68,7 @@ Shared, pure and deterministic: `attentionItems(input, now)` in `shared/src/logi
 
 | Key | Who | Severity | Fires when |
 |---|---|---|---|
-| `gauges:event` | rep, leader | warning | An own-team event dated today − 2 … today is over, and I have **no gauge row at all on that date** (a row at another event counts). **One item per date**: when the team ran two events that day the item is keyed on the earlier one (start time, then id) and names the other ("If you worked it or Volt — MediaCity: …"), because a day pays one base. Skipped before my start date and for a week whose run is already paid (the server would refuse the entry with 409). |
+| `gauges:event` | rep, leader | warning | An own-team event dated **this pay week** (Monday of today's week … today; `attentionOwnGapWindow`) is over (today's only once it has ended), and I have **no gauge row at all on that date** (a row at another event counts). **One item per date**: when the team ran two events that day the item is keyed on the earlier one (start time, then id) and names the other ("If you worked it or Volt — MediaCity: …"), because a day pays one base. Skipped before my start date and for a week whose run is already paid (the server would refuse the entry with 409). |
 | `events:tomorrow` | rep, leader | info | An own-team event tomorrow that is not cancelled. Title: campaign, venue and start ("Tomorrow: BCN — Asda Hulme at 10:00"); body: city, times and the notes cut to 140 characters (the venue is not repeated). |
 | `pay:overdue` | anyone with runs | danger | My pending / failed run is past its due date. "Your pay for w/c 5 Oct is 2 days overdue" · "£412.50 (PAY-…) was due Fri 16 Oct. The office sees this too." The last sentence only when the run's week is inside the office's 12-week **Runs to pay** window (the one `payroll:to-pay` counts); an older run (own runs go back 52 weeks) says instead "It is older than the 12 weeks the office's pay list shows, so please mention it to them." An admin's own run has neither. |
 | `pay:due-tomorrow` | anyone with runs | info | My pending / failed run is due tomorrow. |
@@ -83,10 +84,15 @@ Shared, pure and deterministic: `attentionItems(input, now)` in `shared/src/logi
 | `payroll:due-today` | admin | warning | On a Friday with runs due that day. |
 | `security:2fa` | admin | info | The admin's own two-step verification is off. |
 
-**Own-gap window.** `gauges:event` looks at today − 2 … today, as the spec says, not at the whole unpaid pay week. An
-unlogged Monday therefore stops being flagged from Thursday, although it stays missing from pay until that week is
-paid (and logging it later still counts: the pending run follows the gauges until it is paid). Widening it to the start
-of the unpaid week needs the events / rows look-back to grow to about 10 days; it is a product call for the lead.
+**Own-gap window (lead decision).** `gauges:event` covers THIS PAY WEEK: from `mondayOf(today)` to yesterday, and today
+once today's event has ended. An unlogged Monday is therefore still asked for on Thursday, Friday and over the weekend,
+while it still counts towards Friday-week's pay (the pending run follows the gauges until it is paid). A day before
+Monday is never asked for: it belongs to a week that may already be paid (and once paid the server refuses the entry
+with 409). So on a Monday only today's ended event can appear; Saturday and Sunday of the week before do not. The route
+loads events and rows from `attentionLookbackFrom(today)` = the earlier of today − 3 and Monday, so on Friday to Sunday it
+reaches back up to 6 days; the team rules (`gauges:gap`, `events:empty`, `gauges:odd`) keep their own 2-day windows.
+The attendance look-back (pay-cost wording) is the 28 days before `from`, so this week's unlogged days never count
+against "usually works their team's days".
 
 **Pay-cost wording** (`gauges:event`, the lead's addition). The base comes from my own pay plan through
 `estimateWeekPay(plan, { daysWorked: 1 })`; "plus commission" is added when the plan pays commission. The payday is named
@@ -140,7 +146,8 @@ three places:
 The list checks again every minute while Linear Hub is open, and clears itself: log the gauges and that line disappears.
 
 What each person sees:
-- **Reps**: event days in the last three days (today and the two before) that you have not logged yet, one line per day,
+- **Reps**: event days this pay week (from Monday, and today once the event has finished) that you have not logged yet,
+  one line per day,
   with what that day is worth from your own pay plan so it is not missing from Friday's pay; tomorrow's event with its
   start time and notes; and your own pay: due tomorrow, overdue, or just paid. If an overdue payment is older than the
   12 weeks the office's pay list shows, the line asks you to mention it to the office. Only ever about you and your own
