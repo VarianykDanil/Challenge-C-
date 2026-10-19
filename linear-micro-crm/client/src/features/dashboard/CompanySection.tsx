@@ -1,10 +1,15 @@
-// Admin / leader company overview on the dashboard.
+// Admin / leader company overview on the dashboard. Smart release 1.1 (p4): the owner also gets company coaching
+// (the shared coaching rules worded about Linear MCR, with tips for the leaders) and the private company-wide
+// "Check in with…" list. Leaders see the section as before.
+import { Lightbulb } from 'lucide-react';
 import type { CheckInPerson, Dashboard } from '@lm/shared';
 import { Card, CardHeader, EmptyState, KpiTile } from '@/components/ui';
 import { DonutChart, TrendChart } from '@/components/charts';
 import { formatDateShort, formatGBP, formatNumber, formatPct } from '@/lib/format';
 import { ratioTone } from '@/lib/ratios';
+import { useAuth } from '@/auth/AuthProvider';
 import { ErrorBoundary } from '@/features/common/ErrorBoundary';
+import { CoachingInsights } from '@/features/gauges/CoachingInsights';
 import { CheckInList } from '@/features/smart/CheckInList';
 
 export interface CompanySectionProps {
@@ -15,6 +20,8 @@ export interface CompanySectionProps {
 }
 
 export function CompanySection({ company, rangeLabel, checkIns }: CompanySectionProps) {
+  // Company coaching speaks to the owner ("ask the leaders to …"); leaders have their own team coaching.
+  const isOwner = useAuth().user?.role === 'admin';
   return (
     <section aria-labelledby="company-heading" className="space-y-4">
       <div>
@@ -48,7 +55,21 @@ export function CompanySection({ company, rangeLabel, checkIns }: CompanySection
           <p className="mt-3 text-xs text-muted">Overall conversion is <span className={`font-semibold ${ratioTone('overallConversion', company.ratios.overallConversion) === 'success' ? 'text-success' : 'text-warning'}`}>{formatPct(company.ratios.overallConversion, 1)}</span>.</p>
         </Card>
       </div>
-      <ErrorBoundary name="company-check-ins"><CheckInList people={checkIns} showTeam /></ErrorBoundary>
+      {(isOwner || checkIns) && (
+        <div className="grid grid-cols-1 gap-6 lg:grid-cols-2 lg:items-start">
+          {isOwner && (
+            <Card className="min-w-0">
+              <CardHeader title="Company coaching" description={`From every team's gauges · ${rangeLabel}`} icon={<Lightbulb />} />
+              <ErrorBoundary name="company-coaching"><CoachingInsights totals={company.totals} ratios={company.ratios} subject="company" /></ErrorBoundary>
+            </Card>
+          )}
+          {checkIns && (
+            <Card className="min-w-0">
+              <ErrorBoundary name="company-check-ins"><CheckInList people={checkIns} showTeam /></ErrorBoundary>
+            </Card>
+          )}
+        </div>
+      )}
     </section>
   );
 }
