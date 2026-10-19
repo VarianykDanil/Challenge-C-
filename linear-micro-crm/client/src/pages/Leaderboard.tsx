@@ -9,6 +9,7 @@ import { Avatar, Badge, DataTable, EmptyState, PageHeader, SegmentedControl, Sel
 import { useLeaderboard, useTeams } from '@/api/hooks';
 import { useCurrentUser } from '@/auth/AuthProvider';
 import { ErrorState, ExportButton } from '@/features/common';
+import { StreakFlame } from '@/features/smart/StreakFlame';
 import { csvFilename, csvLabel, csvPct, sortRows, type CsvColumn } from '@/lib/csv';
 import { formatNumber, formatPct } from '@/lib/format';
 import { usePageTitle } from '@/lib/usePageTitle';
@@ -66,7 +67,7 @@ export function LeaderboardPage() {
             <Link to={`/team/${r.userId}`} className={clsx('flex items-center gap-3 hover:underline', isMe && 'font-semibold text-primary')}>
               <Avatar name={r.userName} color={r.avatarColor} size="sm" />
               <span>
-                <span className="flex items-center gap-2 text-fg">{r.userName}{isMe && <Badge tone="primary">You</Badge>}</span>
+                <span className="flex items-center gap-2 text-fg">{r.userName}{isMe && <Badge tone="primary">You</Badge>}<StreakFlame streak={r.streak} /></span>
                 <span className="block text-xs font-normal text-muted">{POSITION_LABELS[r.position]}</span>
               </span>
             </Link>

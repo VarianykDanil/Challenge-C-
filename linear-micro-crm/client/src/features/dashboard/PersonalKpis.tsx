@@ -27,6 +27,18 @@ export function safeStreakHint(streaks: Streaks | null | undefined): string | un
   }
 }
 
+/**
+ * The Sales tile's hint: p2's streak first (the tile clamps hints to two lines, so on a phone the streak stays
+ * visible), then the rank, or the days worked. "0 days worked" is left out beside a streak: on a Monday it would read
+ * "21-day sales streak · best 21 · 0 days worked".
+ */
+export function salesHint(personal: Dashboard['personal'], role: Role, streaks: Streaks | null | undefined): string | undefined {
+  const streak = safeStreakHint(streaks);
+  const rank = personal.rank ? `Ranked #${personal.rank} of ${personal.rankOutOf} ${role === 'rep' ? 'in your team' : 'company-wide'}` : null;
+  const days = streak && personal.days === 0 ? null : `${formatNumber(personal.days)} days worked`;
+  return joinHints(streak, rank ?? days);
+}
+
 export interface PersonalKpisProps {
   dashboard: Dashboard | undefined;
   role: Role;
@@ -43,7 +55,7 @@ export function PersonalKpis({ dashboard: d, role, deltaLabel, streaks }: Person
         <KpiSkeletons count={6} />
       ) : (
         <>
-          <KpiTile label="Sales" value={formatNumber(d.personal.totals.sales)} delta={d.personal.deltas.sales} deltaLabel={deltaLabel} tone="primary" hint={joinHints(d.personal.rank ? `Ranked #${d.personal.rank} of ${d.personal.rankOutOf} ${role === 'rep' ? 'in your team' : 'company-wide'}` : `${formatNumber(d.personal.days)} days worked`, safeStreakHint(streaks))} />
+          <KpiTile label="Sales" value={formatNumber(d.personal.totals.sales)} delta={d.personal.deltas.sales} deltaLabel={deltaLabel} tone="primary" hint={salesHint(d.personal, role, streaks)} />
           <KpiTile label="Conversion" value={formatPct(d.personal.ratios.overallConversion, 1)} delta={d.personal.deltas.conversion} deltaLabel={deltaLabel} tone={ratioTone('overallConversion', d.personal.ratios.overallConversion)} hint="sales ÷ stops" />
           <KpiTile label="Stops" value={formatNumber(d.personal.totals.stops)} delta={d.personal.deltas.stops} deltaLabel={deltaLabel} hint={`${formatNumber(d.personal.totals.presentations)} presentations`} />
           <KpiTile label="Earnings to date" value={formatGBP(d.personal.earningsToDate)} hint="gross, this period" />

@@ -1,6 +1,8 @@
+import { useMemo } from 'react';
 import { Link } from 'react-router-dom';
 import type { BoardStreak, LeaderboardRow } from '@lm/shared';
 import { Avatar, EmptyState } from '@/components/ui';
+import { StreakFlame } from '@/features/smart/StreakFlame';
 import { formatNumber, formatPct } from '@/lib/format';
 
 export interface MiniLeaderboardProps {
@@ -12,7 +14,11 @@ export interface MiniLeaderboardProps {
 }
 
 export function MiniLeaderboard({ rows, highlightUserId, limit = 5, streaks }: MiniLeaderboardProps) {
-  void streaks; // p2 renders the flames
+  // The streaks prop (insights.boardStreaks) wins; rows from GET /leaderboard carry their own row.streak.
+  const streakOf = useMemo(() => {
+    const byUser = new Map((streaks ?? []).map((s) => [s.userId, s.streak]));
+    return (r: LeaderboardRow) => byUser.get(r.userId) ?? r.streak;
+  }, [streaks]);
   const top = rows.slice(0, limit);
   if (!top.length) return <EmptyState title="No sales yet this period" size="sm" className="border-0" />;
   return (
@@ -26,6 +32,7 @@ export function MiniLeaderboard({ rows, highlightUserId, limit = 5, streaks }: M
             <Link to={`/team/${r.userId}`} className="min-w-0 flex-1 truncate text-sm font-medium text-fg hover:underline">
               {r.userName}{me && <span className="ml-1 text-xs text-primary">(you)</span>}
             </Link>
+            <StreakFlame streak={streakOf(r)} />
             <span className="text-sm font-semibold tabular-nums text-fg">{formatNumber(r.sales)}</span>
             <span className="w-12 text-right text-xs tabular-nums text-muted">{formatPct(r.conversion, 1)}</span>
           </li>
