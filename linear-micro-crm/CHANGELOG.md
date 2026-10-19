@@ -7,7 +7,19 @@ response field is renamed or removed, and new fields are optional.
 
 ## [Unreleased]
 
+### Added
+
+- `npm run latest`: update in one command (stop, pull, install, build, start or restart the background service). It
+  stops rather than touch your own edits, and resets only npm's package-lock.json rewrite.
+- `npm start` installs changed dependencies (`npm ci`) and rebuilds stale screens first, naming the file that changed,
+  so new features always show after a pull. The server warns at start-up when its screens are older than the code, and
+  `npm run doctor` checks both.
+
 ### Fixed
+
+- package-lock.json disagreed with package.json (the Node requirement), so every `npm install` rewrote it, and that
+  local change then blocked the next `git pull`. It is regenerated, installs use `npm ci`, and CI now fails if the two
+  drift apart again.
 
 - Collapsed sidebar: the page names that pop out beside the icons were cut off by the scrolling link list, so only a
   sliver showed. They now draw above the page and show in full. They appear on mouse hover and keyboard focus only (a

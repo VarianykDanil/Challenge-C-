@@ -13,6 +13,7 @@ import path from 'node:path';
 import { DEFAULT_DB_PATH } from './db/seed.ts';
 import { BACKUP_RULES, backupDirFor, backupStatus, backupsEnabled, formatBytes, hoursSince } from './lib/backup.ts';
 import { findPortHolder, portBusyMessage } from './lib/boot.ts';
+import { clientBuildStatus, depsStatus, shortStamp, staleBuildMessage } from './lib/buildStatus.ts';
 import { installedServiceFile, staleNodeWarning } from './service.ts';
 
 type Status = 'ok' | 'info' | 'warn' | 'fail';
@@ -69,15 +70,15 @@ console.log(`Linear Hub doctor — ${new Date().toISOString()}\n`);
   }
 }
 
-// 2. Built client
+// 2. Built client (and the dependencies it was built with)
 {
-  const indexHtml = path.join(repoDir, 'client', 'dist', 'index.html');
-  if (existsSync(indexHtml)) {
-    const built = statSync(indexHtml).mtime;
-    report('ok', `Built client found (client/dist, built ${built.toISOString()})`);
-  } else {
-    report('fail', 'Built client missing (client/dist/index.html)', 'Run:  npm run build   then  npm start');
-  }
+  const build = clientBuildStatus(repoDir);
+  const stale = staleBuildMessage(build);
+  if (!build.built) report('fail', 'Built client missing (client/dist/index.html)', stale ?? undefined);
+  else if (stale) report('warn', `Built client is out of date (built ${shortStamp(build.builtAtMs!)})`, stale);
+  else report('ok', `Built client is up to date (built ${shortStamp(build.builtAtMs!)})`);
+  const deps = depsStatus(repoDir);
+  if (deps.stale) report('warn', deps.installed ? 'Dependencies changed since the last install' : 'Dependencies are not installed', 'Run:  npm ci   (npm start does it for you when needed)');
 }
 
 // 3. Data folder

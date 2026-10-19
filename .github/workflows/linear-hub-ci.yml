@@ -24,6 +24,12 @@ jobs:
           cache-dependency-path: linear-micro-crm/package-lock.json
       - name: Install
         run: npm ci --no-audit --no-fund
+      - name: package-lock.json matches package.json
+        # A lockfile that disagrees with package.json is rewritten by every npm install, and that local change then
+        # blocks the next git pull on the owner's Mac. Fail here instead.
+        run: |
+          npm install --package-lock-only --ignore-scripts --no-audit --no-fund
+          git diff --exit-code -- package-lock.json || { echo "::error::package-lock.json is out of sync with package.json: run npm install --package-lock-only and commit it"; exit 1; }
       - name: Typecheck
         run: npm run typecheck
       - name: Unit and route tests (shared logic and server)

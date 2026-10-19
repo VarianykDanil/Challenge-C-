@@ -8,6 +8,7 @@ import { materialisePayrollRuns, rollForwardEventStatuses } from './db/maintenan
 import { DEFAULT_DB_PATH, seed } from './db/seed.ts';
 import { findPortHolder, installExitDiagnostics, listeningUrl, networkUrls, portBusyMessage } from './lib/boot.ts';
 import { backupDirFor, backupHour, backupsEnabled, configureBackupDir, scheduleBackups, whenBackupIdle } from './lib/backup.ts';
+import { clientBuildStatus, staleBuildMessage } from './lib/buildStatus.ts';
 import { announceAppSecret, appSecretFile, configureAppSecret } from './lib/crypto.ts';
 import { businessClockPinned, businessNow } from './lib/dates.ts';
 import { purgeExpiredChallenges, reencryptLegacySecrets } from './lib/twofactor.ts';
@@ -77,6 +78,11 @@ if (backupsEnabled()) {
 }
 
 const isProduction = process.env.NODE_ENV === 'production';
+if (isProduction) {
+  // Started some other way than `npm start` (which builds when needed): say so if the screens are older than the code.
+  const stale = staleBuildMessage(clientBuildStatus(path.resolve(import.meta.dirname, '../..')));
+  if (stale) console.warn(stale);
+}
 const app = createApp(db, {
   staticDir: isProduction ? path.resolve(import.meta.dirname, '../../client/dist') : undefined,
   trustProxy: parseTrustProxy(process.env.TRUST_PROXY),

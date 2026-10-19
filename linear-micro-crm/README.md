@@ -99,8 +99,24 @@ npm run dev
 The database is created and seeded automatically on first start. Production build on one port:
 
 ```bash
-npm run build && npm start      # API + built client on http://localhost:4000
+npm start      # API + built client on http://localhost:4000
 ```
+
+`npm start` first installs the dependencies (`npm ci`) if `package-lock.json` changed since the last install, and
+rebuilds the screens (`npm run build`) if any client or shared file is newer than the last build, saying which file. So
+after a `git pull` the new screens always show. `LM_SKIP_PREPARE=1` skips that step.
+
+### Updating to the latest version
+
+```bash
+npm run latest
+```
+
+It stops the running copy, pulls, installs and builds what changed, and starts again (or restarts the background
+service if you installed one). It never throws away your own edits: if you changed a tracked file it stops and names
+it. The one file it does reset is `package-lock.json`, which npm rewrites on install; the pulled version replaces it.
+`npm run latest -- --no-start` updates without starting. Do not use `npm update`: that is npm's own command, which
+upgrades packages and rewrites the lockfile.
 
 ### Scripts
 
@@ -110,7 +126,9 @@ Every command below exists in `package.json` (root) or `server/package.json`.
 |---|---|
 | `npm run dev` | Server (`node --watch`, `TZ=Europe/London`) and client (Vite) together |
 | `npm run build` | Typecheck and build the client into `client/dist` |
-| `npm start` | Serve the API **and** the built client on <http://localhost:4000> (`NODE_ENV=production`) |
+| `npm run setup` | Install the dependencies if the lockfile changed (`npm ci`) and rebuild the client if its code changed; `npm start` runs it first |
+| `npm start` | Serve the API **and** the built client on <http://localhost:4000> (`NODE_ENV=production`), after `npm run setup` |
+| `npm run latest` | Update to the latest version: stop, pull, install, build, start (see Updating to the latest version) |
 | `npm run stop` | Stop an earlier copy of Linear Hub that is still holding port 4000 (`PORT=…` for another port). Anything else on the port is reported and left alone |
 | `npm run restart` | `npm run stop` followed by `npm start` |
 | `npm run share` | While the server runs: the addresses phones and laptops on the same Wi-Fi or hotspot can use, with a QR code to scan |
@@ -232,7 +250,9 @@ parses, `KeepAlive` and `RunAtLoad` are true, and the environment and log path a
 | The browser shows a blank page that never finishes loading on <http://localhost:4000> | Something else is answering on that port. If it is an old Linear Hub, `npm run stop` ends it; otherwise find it with `lsof -nP -iTCP:4000 -sTCP:LISTEN` and `kill <PID>`, or use `PORT=4001 npm start` |
 | An old copy keeps appearing on port 4000 | Stop the server with **Ctrl+C** in the terminal where it runs, not Ctrl+Z (which only pauses it and keeps the port) and not by closing the window. The current build stops within two seconds of Ctrl+C and treats Ctrl+Z as a stop request; an older copy that is still around is ended by `npm run stop` |
 | A phone on the same Wi-Fi or hotspot cannot open the address | Allow incoming connections for `node` in **System Settings → Network → Firewall**, check both devices are on the same network, re-run `npm run share` for the current address, and make sure `HOST` is not set |
-| `Cannot find module 'qrcode'` or similar after a `git pull` | Dependencies changed: run `npm install`, then `npm run build`, then `npm start` |
+| `Cannot find module 'qrcode'` or similar after a `git pull` | Dependencies changed. `npm start` now installs them first; with an older checkout run `npm ci`, then `npm start` |
+| New features do not appear after updating | Either the pull did not happen or the screens were not rebuilt. Use `npm run latest`, which does both. `npm start` also rebuilds stale screens, and the server warns at start-up when they are out of date. `curl -s localhost:4000/api/health` shows the running version |
+| `git pull` says "Your local changes to package-lock.json would be overwritten" | npm rewrote that file during an install. It is generated, so discard it: `git restore package-lock.json`, then `git pull` (or just `npm run latest`, which does this for you). Installs now use `npm ci`, which never rewrites it |
 | `npm start` serves the API but the page is empty or stale | Rebuild the client: `npm run build` (the server serves `client/dist`) |
 
 ### Backups and restore
