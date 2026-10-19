@@ -9,14 +9,17 @@
  *  - rep        own gauge rows, own team's events, own pay — never anyone else's rows, runs or candidates;
  *  - leader     the same for themself, plus their own team's rows / members, and candidates they own;
  *  - recruiter  own pay, open candidates they own or nobody owns, interviews they run or own;
- *  - admin      every team, every candidate, own pay plus every pending / failed run in the to-pay window.
+ *  - admin      every team, every candidate, own pay plus every pending run in the to-pay window and every failed one.
  *
  * Inputs come from at most 8 statements after `ensurePayrollMaterialised` (the same guard the finance routes use;
- * admin 6, leader 8, recruiter 3, rep 5): pay plan, events dated `from` … tomorrow, gauge rows dated `from` … today
- * (`from` = attentionLookbackFrom: today − 3, or this week's Monday when earlier, so the own-gauge rule sees the whole
- * pay week), active members, runs (unpaid or paid in the last 7 days; admin: the to-pay window), open candidates with a due
- * follow-up, pending interviews of open candidates from `outcomeLookbackFrom(now)` (56 days back: the shared outcome
- * rule's look-back, recruitment.ts) to 2 days ahead, and the caller's usual attendance (pay-cost wording).
+ * admin 6, leader 8, recruiter 4, rep 5), plus, for leaders and admins with an event live today, those events'
+ * forecasts from the GET /events builder (≤ 2 grouped queries, memoised per data version): pay plan, events dated
+ * `from` … tomorrow, gauge rows dated `from` … today (`from` = attentionLookbackFrom: today − 3, or this week's Monday
+ * when earlier, so the own-gauge rule sees the whole pay week), active members, runs (unpaid or paid in the last 7
+ * days; admin: the Runs to pay card's set), open candidates with a due follow-up (and, for recruiters, the whole
+ * pipeline's overdue count: the "Overdue actions" tile), pending interviews of open candidates from
+ * `outcomeLookbackFrom(now)` (56 days back: the shared outcome rule's look-back, recruitment.ts) to 2 days ahead, and
+ * the caller's usual attendance (pay-cost wording).
  * Date-bounded where the table is large: events, gauge rows, runs and the attendance count use their indexes. Open
  * candidates, interviews and the admin's member list are small full scans (no index on interviews.scheduled_at or on
  * candidates' open stages; the seed has ~160 interviews, 120 candidates, 34 users). An index on
@@ -41,6 +44,8 @@ import { all, get, type Db, type Param } from '../db/connection.ts';
 import { ensurePayrollMaterialised } from '../db/maintenance.ts';
 import { getPayPlan, listCandidates, listEvents, listPayroll } from '../db/queries.ts';
 import { addDays, nowHHMM, nowISO, todayISO } from '../lib/dates.ts';
+import { eventForecasts } from '../lib/smart/eventForecast.ts';
+import { countOverdueActions } from './recruitment.ts';
 import { smartEnabled } from '../lib/smart/enabled.ts';
 import { currentUser } from '../middleware/auth.ts';
 
@@ -70,7 +75,7 @@ export function attentionInput(db: Db, me: UserWithTeam, now: AttentionNow): Att
 
   // (2) events dated `from` … tomorrow: rep / leader their own team, admin all, recruiter none
   const eventsVisible = me.role === 'admin' || (fieldRole && me.teamId !== null);
-  const events = eventsVisible
+  const listed = eventsVisible
     ? listEvents(
         db,
         me.role === 'admin' ? 'WHERE e.date BETWEEN ? AND ?' : 'WHERE e.date BETWEEN ? AND ? AND e.team_id = ?',
@@ -79,6 +84,11 @@ export function attentionInput(db: Db, me: UserWithTeam, now: AttentionNow): Att
         { from, to: addDays(today, 1) },
       )
     : [];
+  // (2b) leader / admin: the forecast of each event live today, so events:behind follows the same rule as the row's
+  //      "Behind target" pill. eventForecasts is the GET /events builder (≤ 2 grouped queries, memoised per data version)
+  const live = me.role === 'admin' || me.role === 'leader' ? listed.filter((e) => e.status === 'live' && e.date === today) : [];
+  const forecasts = live.length ? eventForecasts(db, live, today, now.nowHHMM) : null;
+  const events = forecasts?.size ? listed.map((e) => (forecasts.has(e.id) ? { ...e, forecast: forecasts.get(e.id)! } : e)) : listed;
 
   // (3) gauge rows dated `from` … today: rep own, leader own team's members, admin all
   const ENTRY_SELECT = `SELECT g.id, g.event_id AS eventId, g.user_id AS userId, g.date, g.stops, g.table_count AS "table", g.sales, g.submitted_at AS submittedAt FROM gauge_entries g`;
@@ -93,7 +103,8 @@ export function attentionInput(db: Db, me: UserWithTeam, now: AttentionNow): Att
   if (me.role === 'admin') members = all<Member>(db, `${MEMBER_SELECT} WHERE status = 'active' ORDER BY id`);
   else if (me.role === 'leader' && me.teamId !== null) members = all<Member>(db, `${MEMBER_SELECT} WHERE team_id = ? AND status = 'active' ORDER BY id`, [me.teamId]);
 
-  // (5) runs: own unpaid (≤ 52 weeks) or paid in the last 7 days; admin also every unpaid run in the to-pay window
+  // (5) runs: own unpaid (≤ 52 weeks) or paid in the last 7 days; admin also every pending run in the to-pay window and
+  //     every failed one whatever its age (GET /finance/payroll?status=pending,failed, the Runs to pay card)
   const ownSince = addDays(today, -7 * ATTENTION_RULES.ownRunsWeeks);
   const paidSince = addDays(today, -ATTENTION_RULES.paidRecentDays);
   const ownClause = `(p.user_id = ? AND p.week_start >= ? AND (p.status IN ('pending', 'failed') OR p.paid_date >= ?))`;
@@ -101,7 +112,7 @@ export function attentionInput(db: Db, me: UserWithTeam, now: AttentionNow): Att
   const win = attentionPayrollWindow(today);
   const runs =
     me.role === 'admin'
-      ? listPayroll(db, `WHERE ${ownClause} OR (p.status IN ('pending', 'failed') AND p.week_start BETWEEN ? AND ?)`, [...ownParams, win.from, win.to], 'p.week_start DESC, p.id ASC')
+      ? listPayroll(db, `WHERE ${ownClause} OR (p.status = 'pending' AND p.week_start BETWEEN ? AND ?) OR p.status = 'failed'`, [...ownParams, win.from, win.to], 'p.week_start DESC, p.id ASC')
       : listPayroll(db, `WHERE ${ownClause}`, ownParams, 'p.week_start DESC, p.id ASC');
 
   // (6) open candidates with a follow-up already due: recruiter own + unowned, leader own, admin all
@@ -110,6 +121,7 @@ export function attentionInput(db: Db, me: UserWithTeam, now: AttentionNow): Att
   const recruitmentRole = me.role === 'recruiter' || me.role === 'leader' || me.role === 'admin';
   let candidates: AttentionInput['candidates'] = [];
   let interviews: AttentionInterview[] = [];
+  let pipelineOverdue: number | null = null;
   if (recruitmentRole) {
     const owner = me.role === 'recruiter' ? ' AND (c.owner_id = ? OR c.owner_id IS NULL)' : me.role === 'leader' ? ' AND c.owner_id = ?' : '';
     candidates = listCandidates(
@@ -118,6 +130,8 @@ export function attentionInput(db: Db, me: UserWithTeam, now: AttentionNow): Att
       me.role === 'admin' ? [now.nowISO] : [now.nowISO, me.id],
       'c.next_action_at ASC, c.id ASC',
     );
+    // (6b) recruiter: the whole pipeline's figure (the "Overdue actions" tile), so the item can say how its own count relates
+    if (me.role === 'recruiter') pipelineOverdue = countOverdueActions(db, new Date(now.nowISO));
     const nowMs = Date.parse(now.nowISO);
     const lo = outcomeLookbackFrom(now.nowISO);
     const hi = new Date(nowMs + 2 * DAY_MS).toISOString();
@@ -160,6 +174,7 @@ export function attentionInput(db: Db, me: UserWithTeam, now: AttentionNow): Att
     candidates,
     interviews,
     attendance,
+    pipelineOverdue,
   };
 }
 

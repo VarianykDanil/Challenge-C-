@@ -15,8 +15,10 @@
  *  - `scheduleBackups` (index.ts): 10 minutes after start-up when the last backup is over 24 h old, and an hourly
  *    check that backs up once the local hour reaches `LM_BACKUP_HOUR` (default 2) and there is none dated today, so a
  *    laptop asleep at 02:00 still gets its nightly copy when it wakes. `LM_BACKUP=0` turns the schedule off.
- *  - `restoreDatabase` (restore.ts) refuses while a server holds the port, checks the candidate, shows what changes,
- *    asks, then moves the current database aside (`<db>.before-restore-<time>`) and puts the candidate in its place.
+ *  - `restoreDatabase` (restore.ts) refuses while the database is open in another process (an exclusive-lock probe, so
+ *    a server on another PORT or HOST is caught too) or anything answers on the port, checks the candidate, shows what
+ *    changes, asks, then moves the current database aside (`<db>.before-restore-<time>`) and puts the candidate in its
+ *    place.
  *
  * Backups run on the real clock (they are about files on a disk, not about the business day), so a pinned
  * LM_BUSINESS_NOW never changes their names or the schedule.
@@ -38,11 +40,12 @@ import {
   unlinkSync,
   writeFileSync,
 } from 'node:fs';
+import { execFileSync } from 'node:child_process';
 import path from 'node:path';
 import type { BackupStatus } from '@lm/shared';
 import type { Db } from '../db/connection.ts';
 import { DEFAULT_DB_PATH } from '../db/seed.ts';
-import { findPortHolder } from './boot.ts';
+import { findPortHolder, processCommand } from './boot.ts';
 import { addDays, mondayOf } from './dates.ts';
 
 export const BACKUP_RULES = {
@@ -586,12 +589,73 @@ function isWalFile(file: string): boolean {
   }
 }
 
+/** SQLite's "database is locked" result codes (SQLITE_BUSY, SQLITE_LOCKED). */
+function isBusyError(err: unknown): boolean {
+  const e = err as { errcode?: number; message?: string } | null;
+  return e?.errcode === 5 || e?.errcode === 6 || /database is locked|database table is locked|SQLITE_BUSY/i.test(String(e?.message ?? ''));
+}
+
+/** Process ids that have the file open, as `lsof` reports them (empty when it cannot tell). */
+function pidsWithFileOpen(file: string): number[] {
+  if (process.platform === 'win32') return [];
+  try {
+    const out = execFileSync('lsof', ['-nP', '-t', '--', file], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'], timeout: 3000 });
+    return [...new Set(out.split('\n').map((l) => Number(l.trim())).filter((n) => Number.isInteger(n) && n > 0))];
+  } catch {
+    return [];
+  }
+}
+
+/**
+ * Is the database open in another process? A Linear Hub server keeps its connection open in WAL mode for as long as
+ * it runs, and that holds a shared lock on the file, so an exclusive lock taken without waiting (busy timeout 0,
+ * `locking_mode = EXCLUSIVE`, `BEGIN EXCLUSIVE`) fails with SQLITE_BUSY: whatever PORT or HOST that server uses.
+ * Returns the refusal text, or null when the file is free or missing. Any other error (a damaged file, say) is not
+ * "in use": replacing a damaged database is what restore is for, and the candidate is checked on its own.
+ */
+export function databaseInUse(file: string): string | null {
+  if (!existsSync(file)) return null;
+  let busy = false;
+  let db: DatabaseSync | null = null;
+  try {
+    db = new DatabaseSync(file);
+    db.exec('PRAGMA busy_timeout = 0');
+    db.exec('PRAGMA locking_mode = EXCLUSIVE');
+    db.exec('BEGIN EXCLUSIVE');
+    db.exec('ROLLBACK');
+  } catch (err) {
+    busy = isBusyError(err);
+  } finally {
+    try {
+      db?.close();
+    } catch {
+      // closing a connection that never opened
+    }
+  }
+  if (!busy) return null;
+  const who = pidsWithFileOpen(file)
+    .filter((pid) => pid !== process.pid)
+    .map((pid) => {
+      const cmd = processCommand(pid);
+      return `  pid ${pid}${cmd ? `: ${cmd.length > 120 ? `${cmd.slice(0, 117)}...` : cmd}` : ''}`;
+    });
+  return [
+    `The database is open in another process, so it was not touched: ${file}`,
+    ...(who.length ? ['Open right now in:', ...who] : []),
+    'This is usually Linear Hub still running, perhaps on another port or address (PORT=4001 npm start) or as a background service.',
+    'Stop it first, with the PORT it runs on (for example: PORT=4001 npm run stop), then restore again.',
+  ].join('\n');
+}
+
 export interface RestoreOptions {
   /** The live database file to replace. */
   dbPath: string;
   /** The backup to put in its place. */
   candidate: string;
-  /** The port Linear Hub listens on: restore refuses while anything answers there. */
+  /**
+   * The port Linear Hub listens on: restore refuses while anything answers there. A hint only: the real guard is
+   * `databaseInUse`, which catches a server on any port or address.
+   */
   port: number;
   /** Asked once the comparison is printed; false cancels. */
   confirm: (question: string) => Promise<boolean>;
@@ -638,7 +702,8 @@ export function comparisonTable(current: DbSummary | null, candidate: DbSummary,
 }
 
 /**
- * Replace the live database with a backup. Never runs while something answers on the port. The candidate is copied
+ * Replace the live database with a backup. Never runs while the live database is open in another process (any port,
+ * any address: `databaseInUse`) or while something answers on the port. The candidate is copied
  * to a private staging file next to the database (so the backup itself is never changed and the final swap is an
  * atomic rename on one disk), checked read-only, compared with the current database and confirmed; then the current
  * database and its -wal/-shm files move to `<db>.before-restore-<time>` and the staging copy takes its name.
@@ -648,6 +713,9 @@ export async function restoreDatabase(opts: RestoreOptions): Promise<RestoreOutc
   const dbPath = path.resolve(opts.dbPath);
   const candidate = path.resolve(opts.candidate);
   const running = async (): Promise<string | null> => {
+    // the lock probe first: it is the one that cannot be fooled by a server on another port or bound to a LAN address
+    const inUse = databaseInUse(dbPath);
+    if (inUse) return [inUse, opts.runningHint].filter(Boolean).join('\n');
     const holder = await findPortHolder(opts.port);
     if (!holder) return null;
     const who = holder.linearHub ? `Linear Hub is running on port ${opts.port}` : `Something is listening on port ${opts.port}`;

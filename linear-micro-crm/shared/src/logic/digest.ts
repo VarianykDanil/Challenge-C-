@@ -129,8 +129,8 @@ export interface AdminDigestFacts {
   /** recruitmentSummary(monday, sunday). */
   recruitment: { applied: number; hired: number };
   /**
-   * Private. Runs for the week (due the Friday after) and the failed runs still to send again in the to-pay window
-   * (the Runs to pay card's and the bell's: week_start in the last 12 weeks). `paydayPassed`: the payday
+   * Private. Runs for the week (due the Friday after) and the failed runs still to send again, whatever their age
+   * (the Runs to pay card's and the bell's set). `paydayPassed`: the payday
    * is before today, so unpaid runs read "still to pay" instead of "due".
    */
   payroll: { payday: string; runs: number; gross: number; unpaidRuns: number; unpaidGross: number; failedRuns: number; failedGross: number; paydayPassed?: boolean };
@@ -337,18 +337,14 @@ function leaderBullets(f: LeaderDigestFacts): DigestBullet[] {
   }
 
   // 4. Biggest movers up and down (new entrants ignored; ties: better rank, then name). A mover on the check-in list
-  //    is left out, never swapped for the next one, so the line stays true.
+  //    is left out, never swapped for the next one, so the line stays true. The move up is shareable; the move down
+  //    is private (the leader's eyes only): naming one person's fall in the team group is not kind.
   const movers = f.board.filter((r) => r.movement !== null && r.movement !== 0);
   const order = (a: DigestBoardRow, b: DigestBoardRow) => Math.abs(b.movement!) - Math.abs(a.movement!) || a.rank - b.rank || a.userName.localeCompare(b.userName);
   const up = movers.filter((r) => r.movement! > 0).sort(order)[0];
   const down = movers.filter((r) => r.movement! < 0).sort(order)[0];
-  const parts: string[] = [];
-  if (up && !hidden.has(up.userId)) parts.push(`biggest move up: ${plain(up.userName)}, ${plural(up.movement!, 'place')} to ${ordinal(up.rank)}`);
-  if (down && !hidden.has(down.userId)) parts.push(`biggest move down: ${plain(down.userName)}, ${plural(-down.movement!, 'place')} to ${ordinal(down.rank)}`);
-  if (parts.length) {
-    const text = parts.join('; ');
-    out.push(bullet(`${text.charAt(0).toUpperCase()}${text.slice(1)}.`));
-  }
+  if (up && !hidden.has(up.userId)) out.push(bullet(`Biggest move up: ${plain(up.userName)}, ${plural(up.movement!, 'place')} to ${ordinal(up.rank)}.`));
+  if (down && !hidden.has(down.userId)) out.push(bullet(`Biggest move down: ${plain(down.userName)}, ${plural(-down.movement!, 'place')} to ${ordinal(down.rank)}.`, true));
 
   // 5. Late check-ins (count only)
   const { late, recorded } = f.late;

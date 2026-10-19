@@ -226,7 +226,7 @@ function Company({ onOpen, scrollToRuns = false, onScrolled }: { onOpen: (r: Pay
   const toast = useToast();
   const [range, setRange] = useRangeState('last_12_weeks');
   const summary = useFinanceSummary({ from: range.from, to: range.to });
-  // Everything still to pay: pending runs plus failed transfers (both can be marked paid).
+  // Everything still to pay: pending runs (last 12 weeks) plus failed transfers of any age (both can be marked paid).
   const pending = usePayroll({ status: 'pending,failed' });
   const [expenseLimit, setExpenseLimit] = useState(EXPENSE_PAGE);
   // The expenses table is sorted here (whole range) and only then paged, so "Amount ↓" really shows the biggest costs.
@@ -416,7 +416,7 @@ function Company({ onOpen, scrollToRuns = false, onScrolled }: { onOpen: (r: Pay
                     {flaggedRuns.length === 1 ? '1 run needs a look' : `${formatNumber(flaggedRuns.length)} runs need a look`}
                   </span>
                 )}
-                Pending and failed runs — mark them paid once the transfer has gone{failedCount > 0 ? ' · failed transfers are flagged' : ''}
+                Pending runs of the last 12 weeks and failed transfers from any week — mark them paid once the transfer has gone{failedCount > 0 ? ' · failed transfers are flagged' : ''}
               </>
             )}
             className="mb-0"

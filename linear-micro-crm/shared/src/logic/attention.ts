@@ -42,7 +42,10 @@ export const ATTENTION_RULES = {
   gapMaxMinutes: 48 * 60,
   /** Events with no rows at all: dated today − 2 … today, ended ≥ gapMinMinutes ago. */
   emptyDays: 2,
-  /** Live events are "behind target" from this time … */
+  /**
+   * Live events WITHOUT a forecast (too little history) are "behind target" from this time … (an event with a forecast
+   * uses the forecast's own rule instead, the one behind its "Behind target" pill: see eventBehindTarget)
+   */
   behindFrom: '13:00',
   /** … when sales so far are below this share of the target. */
   behindShare: 0.5,
@@ -58,7 +61,7 @@ export const ATTENTION_RULES = {
   interviewSoonMinutes: 24 * 60,
   /** Runs count as "just paid" while paid_date ≥ today − 6 (one pay cycle). */
   paidRecentDays: 6,
-  /** GET /finance/payroll's default window: week_start between mondayOf(today) − 12 weeks and today. */
+  /** GET /finance/payroll's default window: week_start between mondayOf(today) − 12 weeks and today (failed runs: any age). */
   payrollWindowWeeks: 12,
   /** Own unpaid runs older than this are left to the Finance page. */
   ownRunsWeeks: 52,
@@ -105,13 +108,19 @@ export interface AttentionInput {
   me: { id: number; role: Role; teamId: number | null; firstName: string; twoFactorEnabled: boolean; startDate?: string };
   /** The caller's own pay plan (for "that day's £60 base plus commission"); null when unknown. */
   plan: PayPlan | null;
-  /** Events dated attentionLookbackFrom(today) … tomorrow that the caller may see (rep / leader: own team; admin: all). */
+  /**
+   * Events dated attentionLookbackFrom(today) … tomorrow that the caller may see (rep / leader: own team; admin: all).
+   * Running events carry `forecast` when GET /events would show one (events:behind follows its flag).
+   */
   events: ReadonlyArray<SalesEventWithMeta>;
   /** Gauge rows on those dates for the people in scope (numbers only; rep: own; leader: own team; admin: all). */
   entries: ReadonlyArray<Pick<GaugeEntry, 'id' | 'eventId' | 'userId' | 'date' | 'stops' | 'table' | 'sales' | 'submittedAt'>>;
   /** Active members of the teams in scope (leader: own team; admin: all; rep: themself). */
   members: ReadonlyArray<Pick<User, 'id' | 'firstName' | 'lastName' | 'role' | 'teamId' | 'startDate' | 'status'>>;
-  /** Own runs (unpaid, or paid in the last 7 days); admin also every pending / failed run in the to-pay window. */
+  /**
+   * Own runs (unpaid, or paid in the last 7 days); admin also every pending run in the to-pay window and every failed
+   * run whatever its age (the Runs to pay card's set: inRunsToPay).
+   */
   runs: ReadonlyArray<PayrollRunWithUser>;
   /** Open candidates in recruitment scope (recruiter: own and unowned; leader: own; admin: all). */
   candidates: ReadonlyArray<CandidateWithMeta>;
@@ -122,6 +131,12 @@ export interface AttentionInput {
   interviews: ReadonlyArray<AttentionInterview>;
   /** Rep / leader only: how often the caller usually logs on their team's event days; null when unknown. */
   attendance?: AttentionAttendance | null;
+  /**
+   * Recruiter only: open candidates past their next action across the whole pipeline (the "Overdue actions" tile,
+   * recruitmentSummary.overdueActions). The feed's own item covers the recruiter's own and unassigned candidates, so its
+   * sentence says so and quotes this figure when it is larger.
+   */
+  pipelineOverdue?: number | null;
 }
 
 // ───────────────────────────── formatting (en-GB) ─────────────────────────────
@@ -221,6 +236,18 @@ function isRunning(e: SalesEventWithMeta, now: AttentionNow): boolean {
   return e.startTime <= now.nowHHMM && now.nowHHMM < e.endTime;
 }
 
+/**
+ * One rule for "behind target", shared by the Needs-attention item and the event row's pill: a running event with a
+ * positive target is behind when its forecast says so (`flag === 'at_risk'`: sales so far plus the estimate for the
+ * rest of the day fall short of 70 % of the target, eventForecast.ts liveFlag). Only an event with no forecast (too
+ * little history to estimate) falls back to "after 13:00 with sales under half the target".
+ */
+export function eventBehindTarget(e: SalesEventWithMeta, now: AttentionNow): boolean {
+  if (!isRunning(e, now) || !(e.targetSales > 0)) return false;
+  if (e.forecast) return e.forecast.flag === 'at_risk';
+  return now.nowHHMM >= ATTENTION_RULES.behindFrom && e.totals.sales < ATTENTION_RULES.behindShare * e.targetSales;
+}
+
 /** A date-only follow-up is overdue the day after; a timestamp once it has passed (business date for date-only). */
 function followUpOverdue(nextActionAt: string | null, now: AttentionNow): boolean {
   if (!nextActionAt) return false;
@@ -253,6 +280,17 @@ export function sortAttentionItems(items: ReadonlyArray<AttentionItem>): Attenti
 /** The to-pay window GET /finance/payroll uses by default: week_start between mondayOf(today) − 12 weeks and today. */
 export function attentionPayrollWindow(today: string): { from: string; to: string } {
   return { from: addDays(startOfWeekISO(today), -7 * ATTENTION_RULES.payrollWindowWeeks), to: today };
+}
+
+/**
+ * Is the run on the office's Runs to pay card (GET /finance/payroll?status=pending,failed)? Pending runs of the 12-week
+ * window, and failed transfers whatever their age: a failed transfer is wages still owed, however old.
+ */
+export function inRunsToPay(r: Pick<PayrollRunWithUser, 'status' | 'weekStart'>, today: string): boolean {
+  if (r.status === 'failed') return true;
+  if (r.status !== 'pending') return false;
+  const { from, to } = attentionPayrollWindow(today);
+  return r.weekStart >= from && r.weekStart <= to;
 }
 
 /**
@@ -360,9 +398,8 @@ function payItems(input: AttentionInput, now: AttentionNow, out: AttentionItem[]
   const { me } = input;
   const tomorrow = addDays(now.today, 1);
   const paidSince = addDays(now.today, -ATTENTION_RULES.paidRecentDays);
-  // Runs to pay (and the admin's payroll:to-pay item) only cover the 12-week window: only claim the office sees a run
-  // that is in it, and ask about an older one
-  const officeFrom = attentionPayrollWindow(now.today).from;
+  // Runs to pay (and the admin's payroll:to-pay item) cover pending runs of the 12-week window and failed ones of any
+  // age: only claim the office sees a run that is on it, and ask about an older pending one
   for (const r of input.runs) {
     if (r.userId !== me.id) continue;
     const week = weekLabel(r.weekStart);
@@ -375,7 +412,7 @@ function payItems(input: AttentionInput, now: AttentionNow, out: AttentionItem[]
         severity: 'danger',
         title: `Your pay for ${week} is ${plural(days, 'day')} overdue`,
         body: `${money(r.gross)} (${r.reference}) was due ${shortDate(r.dueDate)}.${
-          me.role === 'admin' ? '' : r.weekStart >= officeFrom ? ' The office sees this too.' : ' It is older than the 12 weeks the office’s pay list shows, so please mention it to them.'
+          me.role === 'admin' ? '' : inRunsToPay(r, now.today) ? ' The office sees this too.' : ' It is older than the 12 weeks the office’s pay list shows, so please mention it to them.'
         }`,
         href: '/finance?tab=me',
         actionLabel: 'View my pay',
@@ -474,8 +511,8 @@ function teamEventItems(input: AttentionInput, now: AttentionNow, out: Attention
       });
     }
 
-    // events:behind — live after 13:00 with sales under half the target
-    if (isRunning(e, now) && now.nowHHMM >= ATTENTION_RULES.behindFrom && e.targetSales > 0 && e.totals.sales < ATTENTION_RULES.behindShare * e.targetSales) {
+    // events:behind — the row's "Behind target" pill rule (forecast), or half the target after 13:00 without a forecast
+    if (eventBehindTarget(e, now)) {
       const left = minutesBetween(now.today, now.nowHHMM, e.date, e.endTime);
       const h = Math.floor(left / 60);
       const m = left % 60;
@@ -533,13 +570,27 @@ function recruitmentItems(input: AttentionInput, now: AttentionNow, out: Attenti
     .filter((c) => !TERMINAL.has(c.stage) && followUpOverdue(c.nextActionAt, now))
     .sort((a, b) => (a.nextActionAt ?? '').localeCompare(b.nextActionAt ?? '') || a.lastName.localeCompare(b.lastName) || a.id - b.id);
   if (overdue.length) {
+    const n = overdue.length;
     const names = nameList(overdue.map((c) => `${c.firstName} ${c.lastName}`), ATTENTION_RULES.overdueNames);
+    // whose they are: admin the whole pipeline; a leader their own candidates; a recruiter their own and unassigned ones,
+    // with the pipeline's figure (the "Overdue actions" tile above the card) when that is larger
+    const title =
+      me.role === 'admin'
+        ? n === 1 ? '1 recruitment follow-up is overdue' : `${n} recruitment follow-ups are overdue`
+        : n === 1 ? '1 of your recruitment follow-ups is overdue' : `${n} of your recruitment follow-ups are overdue`;
+    const pipeline = input.pipelineOverdue ?? null;
+    const scope =
+      me.role === 'recruiter'
+        ? pipeline != null && pipeline > n
+          ? ` (yours or unassigned; ${pipeline} across the pipeline)`
+          : ' (yours or unassigned)'
+        : '';
     out.push({
       key: 'recruitment:overdue',
       kind: 'recruitment',
       severity: 'warning',
-      title: overdue.length === 1 ? '1 recruitment follow-up is overdue' : `${overdue.length} recruitment follow-ups are overdue`,
-      body: `${names} ${overdue.length === 1 ? 'is' : 'are'} waiting on a next step. Book it or move them on.`,
+      title,
+      body: `${names} ${n === 1 ? 'is' : 'are'} waiting on a next step${scope}. Book it or move them on.`,
       href: '/recruitment',
       actionLabel: 'Open recruitment',
       at: overdue[overdue.length - 1]!.nextActionAt ?? undefined,
@@ -594,8 +645,7 @@ function recruitmentItems(input: AttentionInput, now: AttentionNow, out: Attenti
 function adminItems(input: AttentionInput, now: AttentionNow, out: AttentionItem[]): void {
   const { me } = input;
   if (me.role !== 'admin') return;
-  const { from, to } = attentionPayrollWindow(now.today);
-  const toPay = input.runs.filter((r) => (r.status === 'pending' || r.status === 'failed') && r.weekStart >= from && r.weekStart <= to);
+  const toPay = input.runs.filter((r) => inRunsToPay(r, now.today));
   if (toPay.length) {
     const total = toPay.reduce((a, r) => a + r.gross, 0);
     const failed = toPay.filter((r) => r.status === 'failed').length;

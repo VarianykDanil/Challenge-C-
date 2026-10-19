@@ -34,7 +34,7 @@ rep `jordan.lee@…`/`LM-0010`.
 
 | Script | What it does |
 |---|---|
-| `mix.mjs` | Read-heavy mixed workload. Role mix 60% rep / 25% leader / 10% recruiter / 5% admin, per-connection sessions, role-appropriate endpoint pools (dashboard, gauges summary, leaderboard, events, finance/recruitment summary, users, gauges). Reports p50/p95/p99, req/s, error rate overall and per endpoint. |
+| `mix.mjs` | Read-heavy mixed workload. Role mix 60% rep / 25% leader / 10% recruiter / 5% admin, per-connection sessions, role-appropriate endpoint pools (dashboard, gauges summary, leaderboard, events, finance/recruitment summary, users, gauges). Reports p50/p95/p99, req/s, error rate overall and per endpoint. `--smart 1` adds the 1.1 endpoints (`/me/attention`, `/me/insights`, `/me/digest`) to every role's pool. |
 | `writes.mjs` | Write path. Concurrent `POST /api/gauges` upserts (admin, so any user×event) over a shared pool of valid `(event,user,date)` combos to force contention, plus concurrent `POST /api/recruitment/candidates`. Afterwards verifies **no duplicate `(event_id,user_id,date)` rows** and counts any 5xx. Needs `--db` for combo selection + verification (read-only). |
 | `abuse.mjs` | Robustness suite: oversized JSON (2/20 MB → 413), deeply nested JSON (→ 400), out-of-range/malformed dates, `limit=999999` capping, 10 KB + unicode strings in search/notes, 500 parallel invalid-session requests, login flood from N distinct `X-Forwarded-For` IPs (rate-limiter memory, pass `--pid` to sample RSS), and slowloris half-open sockets (does the server keep serving?). |
 | `lag.mjs` | Event-loop lag probe: a 20 ms `setInterval` measures drift while polling `/api/health`. Reports max/p99 lag and health latency. Run alongside any load test. |

@@ -41,10 +41,11 @@ numbers you can already see (no outside service, no AI). Every forecast is label
 - **Recruitment deadlines**: each stage has a target (3 / 5 / 7 / 7 / 7 days) that sets the next-action date on create
   and on every move; **Idle** badges and **Longest idle first**; an **Idle beyond target** tile; **Record the outcome**
   on the candidate page and in **Needs attention**.
-- **Your week in review** on the dashboard every Monday, per role, with private lines locked and **Copy as text** for
+- **Your week in review** of the last finished week on the dashboard, per role, with private lines locked and **Copy as text** for
   the WhatsApp group (`GET /me/digest`).
 - **Backups**: a consistent, checked copy of the database 10 minutes after start-up and every night, kept for 30 days
-  plus 8 weekly copies; `npm run backup`, `npm run backups` and a guarded `npm run restore`; a **Backups** card in
+  plus 8 weekly copies; `npm run backup`, `npm run backups` and a guarded `npm run restore` (it refuses while the
+  database is open in another process, whatever port that server uses); a **Backups** card in
   Settings for administrators (`backup` on `GET /health`); `npm run doctor` warns about stale backups and low disk.
 - **Run it in the background**: `npm run service:install`, `service:status` and `service:uninstall` (macOS
   LaunchAgent, Linux systemd user unit, printed steps for Windows).
@@ -66,6 +67,9 @@ numbers you can already see (no outside service, no AI). Every forecast is label
 - Moving a candidate to a new stage starts that stage's deadline instead of carrying the previous one forward, and
   `nextActionAt` must be a real date or an ISO 8601 timestamp (`400` otherwise) on create, edit and stage moves.
 - Scheduled events show a neutral **Target N** until they start.
+- **Runs to pay** (`GET /finance/payroll?status=pending,failed` without a range) lists failed transfers whatever their
+  week; pending runs keep the 12-week window. The bell, the week in review and a rep's overdue-pay note count the same
+  runs.
 - The recruiter dashboard asks for interview outcomes once, in **Needs attention**.
 - The server runs on plain Node (built-in TypeScript type stripping, Node 22.18 or newer) instead of `tsx`.
 - `GET /api/health` reports version `1.1.0`.
@@ -78,6 +82,7 @@ numbers you can already see (no outside service, no AI). Every forecast is label
 - The server no longer prints "listening" and exits when the port is already taken; it names the process holding the
   port. Ctrl+Z stops it instead of leaving a paused copy on the port.
 - Pending pay runs follow every gauge change; paid weeks are locked for everyone but administrators.
+- Relative dates count calendar days: on a Monday afternoon Friday reads "in 4 days", not "in 3 days".
 
 ### Security
 

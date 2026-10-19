@@ -1,8 +1,10 @@
 /**
  * Backups (p10): a consistent, self-contained copy that opens and checks out; rotation over synthetic names; the
- * schedule rules; and restore's guard rails (refuses while a server holds the port, otherwise swaps the files and
- * keeps the old database as .before-restore).
+ * schedule rules; and restore's guard rails (refuses while the database is open in another process, on any port, or
+ * a server holds the port; otherwise swaps the files and keeps the old database as .before-restore).
  */
+import { spawn } from 'node:child_process';
+import { once } from 'node:events';
 import { after, before, describe, mock, test } from 'node:test';
 import assert from 'node:assert/strict';
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, utimesSync, writeFileSync } from 'node:fs';
@@ -18,6 +20,7 @@ import {
   backupFileName,
   backupNow,
   backupStatus,
+  databaseInUse,
   lastBackupMeta,
   listBackups,
   needsBootBackup,
@@ -418,6 +421,77 @@ describe('restoreDatabase', () => {
     assert.ok(existsSync(r.path));
     // the comparison was printed
     assert.ok(lines.some((l) => /Gauge entries\s+0\s+1/.test(l)), lines.join('\n'));
+  });
+
+  test('refuses while another connection has the database open, whatever the port; restores once it is closed', async () => {
+    const f = fixtureDb('restore-open');
+    const backups = path.join(f.dir, 'backups');
+    const r = await backupNow(f.db, { dir: backups, secretFile: f.secret, now: new Date('2026-10-19T01:00:00Z') });
+    // f.db stays open, like a server running on another port (nothing answers on port 1)
+    const nothingMoved = () => readdirSync(f.dir).filter((n) => n.includes('before-restore') || n.includes('restoring')).length === 0;
+    assert.match(databaseInUse(f.dbPath) ?? '', /open in another process/);
+    const refused = await restoreDatabase({ dbPath: f.dbPath, candidate: r.path, port: 1, confirm: async () => true, log: () => {}, runningHint: 'service hint' });
+    assert.equal(refused.status, 'refused');
+    assert.match(refused.status === 'refused' ? refused.reason : '', /The database is open in another process, so it was not touched.*PORT=4001 npm run stop.*service hint/s);
+    assert.ok(nothingMoved(), 'nothing moved');
+    // the open connection still works and still sees its own file
+    assert.ok(count(f.db, 'users') > 0);
+    f.db.close();
+
+    // idle (no connection open): the probe leaves the file alone and restore goes ahead
+    assert.equal(databaseInUse(f.dbPath), null);
+    assert.equal(databaseInUse(path.join(f.dir, 'missing.sqlite')), null);
+    assert.equal(existsSync(path.join(f.dir, 'missing.sqlite')), false, 'the probe never creates a database');
+
+    // a connection opened while the question is on screen is caught by the second check, before anything moves
+    let late: DatabaseSync | null = null;
+    const raced = await restoreDatabase({
+      dbPath: f.dbPath,
+      candidate: r.path,
+      port: 1,
+      log: () => {},
+      confirm: async () => {
+        late = openDb(f.dbPath);
+        count(late, 'users');
+        return true;
+      },
+    });
+    assert.equal(raced.status, 'refused');
+    assert.ok(nothingMoved(), 'nothing moved after the late connection');
+    (late as DatabaseSync | null)?.close();
+
+    const done = await restoreDatabase({ dbPath: f.dbPath, candidate: r.path, port: 1, confirm: async () => true, log: () => {}, now: new Date('2026-10-19T14:10:00Z') });
+    assert.equal(done.status, 'restored');
+  });
+
+  test('a server process on another port is caught by the lock, not the port', async () => {
+    const f = fixtureDb('restore-other-process');
+    const backups = path.join(f.dir, 'backups');
+    const r = await backupNow(f.db, { dir: backups, secretFile: f.secret, now: new Date('2026-10-19T01:00:00Z') });
+    f.db.close();
+    // another process opens the file the way the server does (WAL, one read) and keeps it open
+    const holder = spawn(
+      process.execPath,
+      [
+        '--input-type=module',
+        '-e',
+        `import { DatabaseSync } from 'node:sqlite'; const db = new DatabaseSync(process.argv[1]); db.exec('PRAGMA journal_mode = WAL'); db.prepare('SELECT COUNT(*) FROM users').get(); console.log('ready'); setInterval(() => {}, 1000);`,
+        f.dbPath,
+      ],
+      { stdio: ['ignore', 'pipe', 'inherit'] },
+    );
+    try {
+      await once(holder.stdout!, 'data');
+      const refused = await restoreDatabase({ dbPath: f.dbPath, candidate: r.path, port: 1, confirm: async () => true, log: () => {} });
+      assert.equal(refused.status, 'refused');
+      assert.match(refused.status === 'refused' ? refused.reason : '', /open in another process/);
+      assert.equal(readdirSync(f.dir).filter((n) => n.includes('before-restore') || n.includes('restoring')).length, 0, 'nothing moved');
+    } finally {
+      holder.kill('SIGKILL');
+      await once(holder, 'exit');
+    }
+    const done = await restoreDatabase({ dbPath: f.dbPath, candidate: r.path, port: 1, confirm: async () => true, log: () => {}, now: new Date('2026-10-19T14:11:00Z') });
+    assert.equal(done.status, 'restored');
   });
 
   test('says when no two-step key is left anywhere, and how many people that affects', async () => {

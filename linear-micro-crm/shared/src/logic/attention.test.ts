@@ -8,6 +8,8 @@ import {
   attentionOwnGapWindow,
   attentionPayrollWindow,
   attentionUsuallyAttends,
+  eventBehindTarget,
+  inRunsToPay,
   sortAttentionItems,
   type AttentionInput,
   type AttentionInterview,
@@ -99,6 +101,7 @@ function input(role: Role, p: Partial<AttentionInput> & { meId?: number; teamId?
     candidates: p.candidates ?? [],
     interviews: p.interviews ?? [],
     attendance: p.attendance ?? null,
+    pipelineOverdue: p.pipelineOverdue ?? null,
   };
 }
 
@@ -240,12 +243,19 @@ test('pay: an overdue unpaid run → danger with the amount, reference and due d
   assert.equal(attentionItems(input('rep', { runs: [r] }), NOW)[0]!.key, 'pay:overdue:7', 'danger sorts first');
 });
 
-test('pay: "The office sees this too" only for a run on Runs to pay (12-week window); an older one asks the rep to mention it', () => {
+test('pay: "The office sees this too" only for a run on Runs to pay (pending: 12-week window; failed: any age); an older pending one asks the rep to mention it', () => {
   const win = attentionPayrollWindow(NOW.today);
-  const inside = run({ id: 30, userId: 10, weekStart: win.from, weekEnd: '2026-07-26', dueDate: '2026-07-31', status: 'failed' });
-  const older = run({ id: 31, userId: 10, weekStart: '2026-07-06', weekEnd: '2026-07-12', dueDate: '2026-07-17', gross: 435, status: 'failed' });
-  const items = attentionItems(input('rep', { runs: [inside, older] }), NOW);
+  const inside = run({ id: 30, userId: 10, weekStart: win.from, weekEnd: '2026-07-26', dueDate: '2026-07-31', status: 'pending' });
+  const older = run({ id: 31, userId: 10, weekStart: '2026-07-06', weekEnd: '2026-07-12', dueDate: '2026-07-17', gross: 435, status: 'pending' });
+  const oldFailed = run({ id: 32, userId: 10, weekStart: '2026-06-08', weekEnd: '2026-06-14', dueDate: '2026-06-19', gross: 122, status: 'failed' });
+  const items = attentionItems(input('rep', { runs: [inside, older, oldFailed] }), NOW);
   assert.match(byKey(items, 'pay:overdue:30')!.body, /The office sees this too\.$/);
+  // a failed transfer is on Runs to pay whatever its age, so the rep is not asked to chase it
+  assert.match(byKey(items, 'pay:overdue:32')!.body, /The office sees this too\.$/);
+  assert.equal(inRunsToPay(oldFailed, NOW.today), true);
+  assert.equal(inRunsToPay(older, NOW.today), false);
+  assert.equal(inRunsToPay(inside, NOW.today), true);
+  assert.equal(inRunsToPay({ ...inside, status: 'paid' }, NOW.today), false);
   assert.equal(byKey(items, 'pay:overdue:31')!.body, '£435 (PAY-202641-LM-0010) was due Fri 17 Jul. It is older than the 12 weeks the office’s pay list shows, so please mention it to them.');
   assert.equal(byKey(items, 'pay:overdue:31')!.severity, 'danger');
   // the admin's own overdue run never says either (they are the office)
@@ -336,6 +346,18 @@ test('events:empty, events:behind and gauges:odd for leaders and admins', () => 
   assert.equal(b.severity, 'info');
   assert.equal(b.body, '4 of 12 sales so far with 3 h 30 min to go. More stops in that time is the lever.');
   assert.equal(byKey(attentionItems(input('leader', { events: [live], members }), { ...NOW, nowHHMM: '12:30' }), 'events:behind:95'), undefined, 'not before 13:00');
+  // with a forecast, the item follows the row's "Behind target" pill (forecast.flag), never the half-target rule
+  const fc = (flag: 'at_risk' | null): NonNullable<SalesEventWithMeta['forecast']> => ({
+    expectedSales: 9, low: 4.1, high: 13.9, expectedReps: 3, perRepRate: 3, repsNeeded: 4, basisDays: 12, basis: 'team', flag, suggestedTarget: 10,
+  });
+  const onTrack = { ...live, forecast: fc(null) }; // 4 of 12 after 13:00, but the estimate says the day gets there
+  assert.equal(byKey(attentionItems(input('leader', { events: [onTrack], members }), NOW), 'events:behind:95'), undefined, 'no pill, no item');
+  assert.equal(eventBehindTarget(onTrack, NOW), false);
+  const early = { ...live, forecast: fc('at_risk') }; // the pill shows before 13:00 too, and so does the item
+  assert.equal(byKey(attentionItems(input('leader', { events: [early], members }), { ...NOW, nowHHMM: '11:00' }), 'events:behind:95')?.title, `BCN — ${live.venue} is behind target`);
+  assert.equal(eventBehindTarget(early, { ...NOW, nowHHMM: '11:00' }), true);
+  assert.equal(eventBehindTarget({ ...early, targetSales: 0 }, NOW), false, 'no target, nothing to be behind');
+  assert.equal(eventBehindTarget(early, { ...NOW, nowHHMM: '18:30' }), false, 'over: not running any more');
   const o1 = byKey(items, 'gauges:odd:1')!;
   assert.equal(o1.title, 'Check Jordan’s gauges for Thu 15 Oct');
   assert.match(o1.body, /62 stops with nobody at the table/);
@@ -374,10 +396,20 @@ test('recruitment: one overdue summary with up to 3 names; never for reps', () =
   ];
   const it = byKey(attentionItems(input('recruiter', { candidates: cs }), NOW), 'recruitment:overdue')!;
   assert.equal(it.severity, 'warning');
-  assert.equal(it.title, '4 recruitment follow-ups are overdue');
+  // a recruiter's feed covers their own and unassigned candidates: the sentence says whose they are
+  assert.equal(it.title, '4 of your recruitment follow-ups are overdue');
   assert.equal(it.count, 4);
-  assert.equal(it.body, 'Aisha Khan, Sam Lee, Mia Chen and 1 more are waiting on a next step. Book it or move them on.');
+  assert.equal(it.body, 'Aisha Khan, Sam Lee, Mia Chen and 1 more are waiting on a next step (yours or unassigned). Book it or move them on.');
   assert.equal(it.href, '/recruitment');
+  // … and quotes the pipeline's figure (the "Overdue actions" tile above the card) when that is larger
+  const wider = byKey(attentionItems(input('recruiter', { candidates: cs, pipelineOverdue: 7 }), NOW), 'recruitment:overdue')!;
+  assert.equal(wider.title, '4 of your recruitment follow-ups are overdue');
+  assert.equal(wider.body, 'Aisha Khan, Sam Lee, Mia Chen and 1 more are waiting on a next step (yours or unassigned; 7 across the pipeline). Book it or move them on.');
+  assert.equal(byKey(attentionItems(input('recruiter', { candidates: cs.slice(0, 1), pipelineOverdue: 1 }), NOW), 'recruitment:overdue')!.title, '1 of your recruitment follow-ups is overdue');
+  // a leader's are the candidates they own; the admin's are the whole pipeline
+  assert.equal(byKey(attentionItems(input('leader', { candidates: cs }), NOW), 'recruitment:overdue')!.body, 'Aisha Khan, Sam Lee, Mia Chen and 1 more are waiting on a next step. Book it or move them on.');
+  assert.equal(byKey(attentionItems(input('leader', { candidates: cs }), NOW), 'recruitment:overdue')!.title, '4 of your recruitment follow-ups are overdue');
+  assert.equal(byKey(attentionItems(input('admin', { candidates: cs }), NOW), 'recruitment:overdue')!.title, '4 recruitment follow-ups are overdue');
   assert.deepEqual(keys(attentionItems(input('rep', { candidates: cs }), NOW)), []);
 });
 
@@ -424,7 +456,7 @@ test('recruitment:interview follows the shared outcome rule: 120-minute grace, 5
 
 // ───────────────────────────── admin ─────────────────────────────
 
-test('admin: runs to pay — count and total match the to-pay window, failed transfers named, danger when any is overdue', () => {
+test('admin: runs to pay — pending runs of the to-pay window plus failed transfers of any age, failed named, danger when any is overdue', () => {
   const win = attentionPayrollWindow(NOW.today);
   assert.deepEqual(win, { from: '2026-07-20', to: '2026-10-15' });
   const runs = [
@@ -447,6 +479,11 @@ test('admin: runs to pay — count and total match the to-pay window, failed tra
   assert.equal(byKey(attentionItems(input('admin', { runs: twoLate }), NOW), 'payroll:to-pay')!.body, '2 are overdue: the oldest was due Fri 2 Oct. Paying those first is the lever.');
   // reps never get payroll items, even if handed other people's runs
   assert.ok(attentionItems(input('rep', { runs }), NOW).every((i) => !i.key.startsWith('payroll:')));
+  // a failed transfer older than the window is still owed: counted, totalled, and the oldest due date is its own
+  const oldFailed = [...runs, run({ id: 7, userId: 27, gross: 122, weekStart: '2026-06-08', weekEnd: '2026-06-14', dueDate: '2026-06-19', status: 'failed' })];
+  const owed = byKey(attentionItems(input('admin', { runs: oldFailed }), NOW), 'payroll:to-pay')!;
+  assert.equal(owed.title, '3 runs to pay · £872.50 · 2 failed transfers');
+  assert.equal(owed.body, '1 is overdue: it was due Fri 19 Jun. Paying it first is the lever.');
 });
 
 test('admin: the due-today item on payday Friday only; two-step reminder when it is off', () => {

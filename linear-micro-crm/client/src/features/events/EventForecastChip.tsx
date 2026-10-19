@@ -38,10 +38,15 @@ export function forecastRange(f: Pick<EventForecast, 'low' | 'high'>): string {
   return `${formatNumber(Math.round(f.low))}–${formatNumber(Math.round(f.high))}`;
 }
 
+/** ["expect ≈ 14 (8–20)", "· 5 reps usually"]: the two halves a narrow cell may break between (never inside one). */
+export function forecastHeadlineParts(f: Pick<EventForecast, 'expectedSales' | 'expectedReps' | 'low' | 'high'>): [string, string] {
+  const reps = Math.max(1, Math.round(f.expectedReps));
+  return [`expect ≈ ${formatNumber(Math.round(f.expectedSales))} (${forecastRange(f)})`, `· ${pluralise(reps, 'rep')} usually`];
+}
+
 /** "expect ≈ 14 (8–20) · 5 reps usually": the range is always on show, not only in the hover tooltip (phones). */
 export function forecastHeadline(f: Pick<EventForecast, 'expectedSales' | 'expectedReps' | 'low' | 'high'>): string {
-  const reps = Math.max(1, Math.round(f.expectedReps));
-  return `expect ≈ ${formatNumber(Math.round(f.expectedSales))} (${forecastRange(f)}) · ${pluralise(reps, 'rep')} usually`;
+  return forecastHeadlineParts(f).join(' ');
 }
 
 /**
@@ -77,7 +82,7 @@ export interface EventForecastChipProps {
   type: EventType;
   /** The event's team, named in the basis ("Deansgate team, BCN private sites"). */
   teamName?: string;
-  /** `chip` (rows: one line, the full sentence on hover) or `detail` (event page: the sentence written out). */
+  /** `chip` (rows: the headline, wrapping inside its cell, the full sentence on hover) or `detail` (event page: the sentence written out). */
   variant?: 'chip' | 'detail';
   /** Tooltip side for the chip variant. */
   side?: 'top' | 'bottom';
@@ -86,10 +91,16 @@ export interface EventForecastChipProps {
 
 export function EventForecastChip({ forecast: f, targetSales, campaignCode, type, teamName, variant = 'chip', side = 'top', className }: EventForecastChipProps) {
   const sentence = forecastSentence(f, targetSales, campaignCode, type, teamName);
+  const [estimate, reps] = forecastHeadlineParts(f);
+  // A block that takes its cell's width and wraps inside it: in a narrow grid cell (Events rows from 768 to ~1600 px)
+  // the reps half drops to a second line instead of running over the next cell (each half is an inline-block, so the
+  // line breaks between them first). Never truncated: the range stays on show.
   const headline = (
-    <span className="inline-flex min-w-0 items-center gap-1 text-xs text-muted">
-      <Sparkles className="h-3 w-3 shrink-0 text-accent" aria-hidden />
-      <span className="truncate">{forecastHeadline(f)}</span>
+    <span className="flex min-w-0 items-start gap-1 text-xs leading-snug text-muted">
+      <Sparkles className="mt-[0.2em] h-3 w-3 shrink-0 text-accent" aria-hidden />
+      <span className="min-w-0">
+        <span className="inline-block max-w-full">{estimate}</span> <span className="inline-block max-w-full">{reps}</span>
+      </span>
     </span>
   );
   if (variant === 'detail') {
@@ -107,8 +118,8 @@ export function EventForecastChip({ forecast: f, targetSales, campaignCode, type
     );
   }
   return (
-    <span className={clsx('inline-flex max-w-full flex-wrap items-center gap-1.5', className)} data-testid="event-forecast">
-      <Tooltip content={sentence} side={side}>
+    <span className={clsx('flex w-full min-w-0 flex-wrap items-center gap-x-1.5 gap-y-1', className)} data-testid="event-forecast">
+      <Tooltip content={sentence} side={side} className="min-w-0 max-w-full">
         {headline}
       </Tooltip>
       <ForecastFlag flag={f.flag} />

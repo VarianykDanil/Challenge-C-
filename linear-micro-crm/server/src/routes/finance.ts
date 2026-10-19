@@ -66,16 +66,19 @@ export function financeRouter(db: Db): Router {
     const today = todayISO();
     ensurePayrollMaterialised(db, today);
     const { from, to } = parseRange(req.query, last12Weeks(today));
-    const where = new Where().add('p.week_start BETWEEN ? AND ?', from, to);
     const userId = optionalIdQuery(req.query.userId, 'userId');
     const teamId = optionalIdQuery(req.query.teamId, 'teamId');
     const status = optionalString(req.query.status);
-    if (status) {
-      // one status or a comma list, e.g. status=pending,failed for "everything still to pay"
-      const statuses = status.split(',').map((s) => s.trim()).filter(Boolean);
-      if (!statuses.length || statuses.some((s) => !PAYROLL_STATUSES.includes(s as (typeof PAYROLL_STATUSES)[number]))) throw badRequest('Invalid status');
-      where.add(`p.status IN (${placeholders(statuses.length)})`, ...statuses);
-    }
+    const statuses = status ? status.split(',').map((s) => s.trim()).filter(Boolean) : [];
+    if (status && (!statuses.length || statuses.some((s) => !PAYROLL_STATUSES.includes(s as (typeof PAYROLL_STATUSES)[number])))) throw badRequest('Invalid status');
+    // A failed transfer is still owed whatever its age: when `status` asks for failed runs and no range is given (the
+    // Runs to pay card), they are listed from any week; everything else keeps the 12-week default.
+    const failedAnyAge = statuses.includes('failed') && req.query.from === undefined && req.query.to === undefined;
+    const where = failedAnyAge
+      ? new Where().add(`(p.week_start BETWEEN ? AND ? OR p.status = 'failed')`, from, to)
+      : new Where().add('p.week_start BETWEEN ? AND ?', from, to);
+    // one status or a comma list, e.g. status=pending,failed for "everything still to pay"
+    if (statuses.length) where.add(`p.status IN (${placeholders(statuses.length)})`, ...statuses);
     if (me.role === 'rep' || me.role === 'recruiter') {
       if (userId && userId !== me.id) throw forbidden('You can only view your own payroll');
       where.add('p.user_id = ?', me.id);

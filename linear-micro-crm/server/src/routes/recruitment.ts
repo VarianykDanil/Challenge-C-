@@ -304,6 +304,17 @@ const NEXT_ACTION: Partial<Record<CandidateStage, string>> = {
   offer: 'Chase offer acceptance',
 };
 
+/**
+ * Open candidates past their next action across the whole pipeline: the "Overdue actions" tile (recruitmentSummary),
+ * also quoted by the recruiter's Needs-attention item. The shared rule, not a string compare: a date-only deadline is
+ * overdue from the next calendar day, a timestamp once now is past it.
+ */
+export function countOverdueActions(db: Db, now: Date): number {
+  return all<{ at: string }>(db, `SELECT next_action_at AS at FROM candidates WHERE stage NOT IN ${TERMINAL_SQL} AND next_action_at IS NOT NULL`).filter((r) =>
+    isOverdue(r.at, now),
+  ).length;
+}
+
 export function recruitmentSummary(db: Db, from: string, to: string): RecruitmentSummary {
   const toEnd = `${to}T23:59:59.999Z`;
   const fromStart = `${from}T00:00:00.000Z`;
@@ -362,10 +373,7 @@ export function recruitmentSummary(db: Db, from: string, to: string): Recruitmen
     ? Math.round((hiredRows.reduce((a, r) => a + (Date.parse(r.hiredAt) - Date.parse(r.appliedAt)) / 86_400_000, 0) / hiredRows.length) * 10) / 10
     : 0;
   const applied = get<{ n: number }>(db, `SELECT COUNT(*) AS n FROM candidates WHERE applied_at BETWEEN ? AND ?`, [fromStart, toEnd])!.n;
-  // the shared rule, not a string compare: a date-only deadline is overdue from the next calendar day, a timestamp once now is past it
-  const now = businessNow();
-  const overdue = all<{ at: string }>(db, `SELECT next_action_at AS at FROM candidates WHERE stage NOT IN ${TERMINAL_SQL} AND next_action_at IS NOT NULL`)
-    .filter((r) => isOverdue(r.at, now)).length;
+  const overdue = countOverdueActions(db, businessNow());
 
   return {
     from,

@@ -1,7 +1,8 @@
 /**
  * `npm run restore -- <file> [--yes]`: put a backup back as the live database.
  *
- * Refuses while Linear Hub (or anything) answers on PORT (default 4000): stop it first with npm run stop, or
+ * Refuses while the database is open in another process (a Linear Hub on any PORT or HOST: an exclusive-lock probe),
+ * or anything answers on PORT (default 4000): stop it first with npm run stop (with the PORT it runs on), or
  * npm run service:uninstall when it runs as a background service. The backup is checked (PRAGMA integrity_check and
  * the core tables), compared with the current database, and only replaces it after --yes or a typed "y". The current
  * database and its -wal/-shm files are kept as <db>.before-restore-<time>.

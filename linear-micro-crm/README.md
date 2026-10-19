@@ -58,10 +58,10 @@ its range; pay, pace notes and the check-in list are only ever shown to the pers
 | **Payroll checks** and paying many runs at once | administrators | **Finance → Company → Runs to pay** |
 | **Check in with…**, **Team / Company coaching**, **Focus** chips | leaders (own team), the owner (every team) | dashboard, **Gauges → Team** |
 | **Needs attention** | everyone, scoped to their role | the bell, pop-up notes, dashboard card |
-| **Event forecasts**, suggested targets, **N / M logged** | everyone (forecasts); leaders and administrators (targets, who has not logged) | Events, event page, **New event** |
+| **Event forecasts**, suggested targets, **N / M logged** | everyone (forecasts and the **N / M logged** counts); leaders and administrators (targets, and the names of who has not logged) | Events, event page, **New event** |
 | **Signal-proof logging** and the **Tally** | anyone who logs gauges | **Log gauges**, an offline strip under the top bar |
 | **Recruitment deadlines**, **Idle** badges, **Record the outcome** | recruiters, leaders, the owner | Recruitment, candidate page |
-| **Your week in review**, ready for WhatsApp | everyone | bottom of the dashboard, every Monday |
+| **Your week in review**, ready for WhatsApp | everyone | bottom of the dashboard (always the last finished week, Monday to Sunday) |
 
 `LM_SMART=0` switches the estimates and suggestions off on the server; the recruitment deadlines, the phone outbox
 and the coaching worked out in the browser stay on. Plain-words guide:
@@ -257,7 +257,10 @@ npm run restore -- linear-2026-10-19-0200.sqlite        # shows what changes and
 npm start
 ```
 
-`restore` refuses while anything answers on the port ("Stop it first: npm run stop"), checks the backup
+`restore` refuses while the database is open in another process — a Linear Hub started with another `PORT` or
+`HOST`, or a background service, is caught too, because it checks the file's lock rather than only the port ("The
+database is open in another process … Stop it first, with the PORT it runs on") — and while anything answers on the
+port ("Stop it first: npm run stop"). It checks the backup
 (`PRAGMA integrity_check` and the Linear Hub tables), prints the current and the backup's users, gauge entries,
 payroll runs and latest gauge date side by side, and only then asks (`--yes` skips the question). The database it
 replaces is kept next to it as `linear.sqlite.before-restore-<date-time>`, so a restore can itself be undone. If
@@ -376,7 +379,7 @@ linear-micro-crm/
 - [`CHANGELOG.md`](CHANGELOG.md) — what changed in each release (1.1.0: the smart release)
 - [`docs/API.md`](docs/API.md) — the API contract and implementation notes
 - [`docs/LOGIC.md`](docs/LOGIC.md) and [`docs/DESIGN.md`](docs/DESIGN.md) — the maths (section 14: the smart release, backups and what loads when) and the design system
-- [`docs/LOAD_TEST.md`](docs/LOAD_TEST.md) — the load and robustness report
+- [`docs/LOAD_TEST.md`](docs/LOAD_TEST.md) — the load and robustness report (§10: 1.1 against 1.0 on the same machine)
 - [`docs/TEAM.md`](docs/TEAM.md) and [`docs/TEAM_CONTRACT.md`](docs/TEAM_CONTRACT.md) — who built it and how
 
 ---

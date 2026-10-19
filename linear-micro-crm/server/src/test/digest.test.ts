@@ -83,7 +83,7 @@ test("admin: revenue equals totals.revenue of GET /finance/summary for that week
   const payroll = d.bullets.filter((b: Json) => /payroll|transfer/i.test(b.text));
   assert.ok(payroll.length >= 1 && payroll.every((b: Json) => b.private), 'payroll is private');
   assert.ok(!/payroll/i.test(d.text));
-  // failed transfers: the same runs as the Runs to pay card (GET /finance/payroll?status=failed, its default window)
+  // failed transfers: the same runs as the Runs to pay card (GET /finance/payroll?status=failed: any age without a range)
   const failed = (await admin.get('/finance/payroll?status=failed')).json as Json[];
   const failedLine = texts(d).find((t) => /failed transfer/.test(t));
   if (failed.length === 0) assert.equal(failedLine, undefined);

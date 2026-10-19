@@ -235,12 +235,17 @@ test('leader: team lines, top seller, movers (new entrants ignored), late count,
     'Team North made 54 sales — up 6 on the week before.',
     'Team conversion 2.1% from 2,540 stops — up from 1.9% the week before.',
     'Top seller: Sam Patel with 15 sales.',
-    'Biggest move up: Jordan Lee, 3 places to 2nd; biggest move down: Ali Khan, 2 places to 3rd.',
+    'Biggest move up: Jordan Lee, 3 places to 2nd.',
     '3 of 41 recorded check-ins were late (more than 5 minutes after the start).',
     'Next week (w/c 19 Oct): 6 events, expect about 78 sales (estimate 64–93) against targets of 90.',
+    'Biggest move down: Ali Khan, 2 places to 3rd.',
     '2 people on your check-in list — the dashboard shows who.',
   ]);
-  assert.deepEqual(bs.map((b) => b.private), [false, false, false, false, false, false, true]);
+  // the move down names one person's fall: the leader sees it (private lines come last), the WhatsApp text never does
+  assert.deepEqual(bs.map((b) => b.private), [false, false, false, false, false, false, true, true]);
+  const shared = digestText({ title: digestTitle(WEEK.weekStart), bullets: bs });
+  assert.ok(shared.includes('Biggest move up: Jordan Lee'));
+  assert.ok(!shared.includes('Ali Khan') && !/move down/i.test(shared), shared);
 });
 
 test('leader: anyone on the check-in list is never named in shareable text', () => {

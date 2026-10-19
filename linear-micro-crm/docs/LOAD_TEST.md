@@ -1,6 +1,10 @@
-# Load test report (17 Oct 2026, sandbox hardware)
+# Load test report (17 Oct 2026, sandbox hardware; 1.1 update 19 Oct 2026)
 
 Run with the scripts in `server/loadtest/` (see its README). Numbers below come from an isolated instance with the seeded sample database.
+
+> **Read §10 first for Linear Hub 1.1.** Sections 1–9 are the 17 Oct report on the code before the response cache:
+> its ~430 req/s ceiling and most of its §8 recommendations (the cache, grouped per-week queries, the
+> `events.campaign_id` index, the windowed events aggregate, the limiter sweep, immutable assets) have since shipped.
 
 # Linear Hub — load & robustness report
 
@@ -202,4 +206,47 @@ node server/loadtest/abuse.mjs  --url http://127.0.0.1:4600 --pid <node pid> --i
 node server/loadtest/lag.mjs    --url http://127.0.0.1:4600 --duration 300    # alongside a 50c mix
 npx autocannon -c 100 -d 15 http://127.0.0.1:4600/            # + /login + largest /assets/*.js
 node server/loadtest/plan.cjs   --db <copy of DB>             # EXPLAIN QUERY PLAN
+```
+
+---
+
+## 10. Linear Hub 1.1 (19 Oct 2026)
+
+**Same host as §1–9** (4 vCPU Intel Xeon 2.8 GHz / 16 GB, Node 22.22, `node:sqlite`), measured one server at a time
+on an otherwise idle machine. Each server had its own freshly seeded database (34 users, ~590 events, ~2.7k gauges,
+~690 payroll runs, 120 candidates), `NODE_ENV=production`, `TZ=Europe/London`, `LM_BACKUP=0`. **1.0** is commit
+`76058b1` (before the smart release); **1.1** is the release branch with the review fixes. Load client:
+`server/loadtest/mix.mjs`, 30 s per run, the same 60/25/10/5 role mix as §1. The first run after a start warms the JIT
+and is listed but not counted in the range.
+
+| Build · mix | Connections | req/s (runs) | p50 | p95 | p99 | errors |
+|---|---|---|---|---|---|---|
+| 1.0 · 1.0 mix | 50 | **796–809** (759 first run) | 57–59 ms | 100–101 ms | 142–144 ms | 0 |
+| 1.1 · 1.0 mix | 50 | **724–807** (637–677 first runs) | 58–66 ms | 105–118 ms | 139–162 ms | 0 |
+| 1.1 · 1.0 mix, `LM_COMPRESSION=0` | 50 | **724–746** (653 first run) | 62–63 ms | 111–116 ms | 160–164 ms | 0 |
+| 1.1 · 1.0 mix | 10 | **708** | 12.4 ms | 28.9 ms | 38.9 ms | 0 |
+| 1.1 · 1.0 mix | 150 | **772** | 184 ms | 275 ms | 386 ms | 0 |
+| 1.1 · smart mix (`--smart 1`) | 50 | **901** | 52 ms | 94 ms | 125 ms | 0 |
+
+- **1.1 against 1.0:** on the same mix 1.1 is about 5–10 % slower at 50 connections (best runs 807 v 809; typical
+  725–730 v 796–809). The extra time is spread evenly — every endpoint's average is 4–6 ms higher, none stands out
+  (`/events` 69.9 v 63.8 ms, `/me/dashboard` 67.8 v 62.7 ms, `/gauges/summary` 68.3 v 62.2 ms in the paired runs) — so
+  it is per-request work (the extra smart fields, the cache bookkeeping, security headers) rather than one slow query.
+  Turning gzip off (`LM_COMPRESSION=0`) makes no measurable difference on this mix.
+- **Still single-core bound:** throughput stays flat from 10 to 150 connections (708 → 772 req/s) while latency grows
+  with the queue, as in §1. At 150 connections p99 is 386 ms with no outliers above 0.7 s (§1 had a 4.2 s tail).
+- **The 1.1 endpoints are cheap:** with the bell, insights and the week in review added to every role's pool
+  (`--smart 1`: `/me/attention`, `/me/insights`, `/me/digest`, all in the response cache), the mix answers 901 req/s;
+  their p95 is 75–107 ms at 50 connections, the same as the rest of the mix.
+- **Against 17 Oct:** 1.1 answers ~1.7× the requests of the pre-cache code (725–807 v ~430 req/s at 50 connections)
+  with p95 105–118 ms instead of 155 ms. Zero errors in every run (about 336,000 requests over 15 runs).
+- Not re-run for 1.1: the write path, static serving, abuse and soak sections (§2–5); the 1.1 changes do not touch
+  their code paths beyond the response cache, which every write clears.
+
+Reproduce (two terminals; stop each server by its pid afterwards):
+
+```
+DB_PATH=/tmp/lt11/load.sqlite PORT=4306 LM_BACKUP=0 NODE_ENV=production TZ=Europe/London node server/src/index.ts
+node server/loadtest/mix.mjs --url http://127.0.0.1:4306 --connections 50 --duration 30            # 1.0 mix
+node server/loadtest/mix.mjs --url http://127.0.0.1:4306 --connections 50 --duration 30 --smart 1  # + 1.1 endpoints
 ```

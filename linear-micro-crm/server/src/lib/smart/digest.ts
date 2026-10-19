@@ -18,7 +18,6 @@
  */
 import {
   BRAND,
-  attentionPayrollWindow,
   buildDigest,
   coachingInsights,
   digestText,
@@ -194,18 +193,17 @@ function adminFacts(db: Db, w: Week, today: string): AdminDigestFacts {
     [w.monday, w.monday, w.prevMonday, w.sunday],
   ).map((c) => ({ name: c.name, current: Number(c.current), previous: Number(c.previous) }));
   const recruitment = recruitmentSummary(db, w.monday, w.sunday);
-  // failed transfers: the same to-pay window as the Runs to pay card and the bell (week_start in the last 12 weeks)
-  const toPay = attentionPayrollWindow(today);
+  // failed transfers whatever their age: the same runs as the Runs to pay card and the bell (inRunsToPay)
   const payroll = get<{ runs: number; gross: number; unpaidRuns: number; unpaidGross: number; failedRuns: number; failedGross: number }>(
     db,
     `SELECT COALESCE(SUM(week_start = ?), 0) AS runs,
             COALESCE(SUM(CASE WHEN week_start = ? THEN gross END), 0) AS gross,
             COALESCE(SUM(week_start = ? AND status IN ('pending', 'failed')), 0) AS unpaidRuns,
             COALESCE(SUM(CASE WHEN week_start = ? AND status IN ('pending', 'failed') THEN gross END), 0) AS unpaidGross,
-            COALESCE(SUM(status = 'failed' AND week_start BETWEEN ? AND ?), 0) AS failedRuns,
-            COALESCE(SUM(CASE WHEN status = 'failed' AND week_start BETWEEN ? AND ? THEN gross END), 0) AS failedGross
+            COALESCE(SUM(status = 'failed'), 0) AS failedRuns,
+            COALESCE(SUM(CASE WHEN status = 'failed' THEN gross END), 0) AS failedGross
      FROM payroll_runs`,
-    [w.monday, w.monday, w.monday, w.monday, toPay.from, toPay.to, toPay.from, toPay.to],
+    [w.monday, w.monday, w.monday, w.monday],
   )!;
   const round2 = (n: number) => Math.round(Number(n) * 100) / 100;
   const payday = paydayForWeek(w.monday);

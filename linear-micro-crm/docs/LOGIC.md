@@ -661,17 +661,17 @@ disappears.
 |---|---|---|---|
 | `gauges:event` | rep, leader | warning | An own-team event dated **this pay week** (Monday of today's week … today; `attentionOwnGapWindow`) is over (today's only once it has ended), and I have **no gauge row at all on that date** (a row at another event counts). **One item per date**: when the team ran two events that day the item is keyed on the earlier one (start time, then id) and names the other ("If you worked it or Volt — MediaCity: …"), because a day pays one base. Skipped before my start date and for a week whose run is already paid (the server would refuse the entry with 409). |
 | `events:tomorrow` | rep, leader | info | An own-team event tomorrow that is not cancelled. Title: campaign, venue and start ("Tomorrow: BCN — Asda Hulme at 10:00"); body: city, times and the notes cut to 140 characters (the venue is not repeated). |
-| `pay:overdue` | anyone with runs | danger | My pending / failed run is past its due date. "Your pay for w/c 5 Oct is 2 days overdue" · "£412.50 (PAY-…) was due Fri 16 Oct. The office sees this too." The last sentence only when the run's week is inside the office's 12-week **Runs to pay** window (the one `payroll:to-pay` counts); an older run (own runs go back 52 weeks) says instead "It is older than the 12 weeks the office's pay list shows, so please mention it to them." An admin's own run has neither. |
+| `pay:overdue` | anyone with runs | danger | My pending / failed run is past its due date. "Your pay for w/c 5 Oct is 2 days overdue" · "£412.50 (PAY-…) was due Fri 16 Oct. The office sees this too." The last sentence only when the run is on the office's **Runs to pay** card (`inRunsToPay`: a pending run whose week is inside the 12-week window, or a **failed** run of any age — the set `payroll:to-pay` counts); an older pending run (own runs go back 52 weeks) says instead "It is older than the 12 weeks the office's pay list shows, so please mention it to them." An admin's own run has neither. |
 | `pay:due-tomorrow` | anyone with runs | info | My pending / failed run is due tomorrow. |
 | `pay:paid` | anyone with runs | info | My run was paid (paid or late) with `paid_date` in today − 6 … today: "You've been paid £412.50 for w/c 5 Oct". |
 | `gauges:gap` | leader (own team), admin | warning | The event ended ≥ 2 h and ≤ 48 h ago, has ≥ 1 entry, and active rep / leader members who had started by that date have no row on that date at all. The count covers the whole team (a leader and the admin read the same "3 of 7"); the viewer is never chased by name (they get their own `gauges:event`), and a gap that is only the viewer is no gap item. Up to 5 first names. Exactly one other person missing → `/gauges?log=1&eventId&userId` with **Log for Jordan**; otherwise `/events/<id>`. |
 | `events:empty` | leader (own team), admin | warning | An over event dated today − 2 … today (ended ≥ 2 h ago when it is today) with zero rows: "did it run? Log it or mark it cancelled." |
-| `events:behind` | leader (own team), admin | info | A running event after 13:00 with sales < 50 % of a positive target: "4 of 12 sales so far with 3 h 30 min to go. More stops in that time is the lever." |
+| `events:behind` | leader (own team), admin | info | **One rule with the event row's "Behind target" pill** (`eventBehindTarget`): a running event with a positive target whose forecast flag is `at_risk` (sales so far + E × the share of the day still to come < 70 % of the target, §14.6 `liveFlag`; the route attaches today's live forecasts with the GET /events builder). Only an event with **no forecast** (too little history) falls back to "after 13:00 with sales < 50 % of the target". "4 of 12 sales so far with 3 h 30 min to go. More stops in that time is the lever." |
 | `gauges:odd` | leader (own team), admin | info | A row dated today − 2 … today with stops ≥ 30 and table 0, or stops ≥ 50 and sales ÷ stops > 20 %. Links to Log gauges for that row. |
-| `recruitment:overdue` | recruiter, leader, admin | warning | One summary: open candidates in scope whose follow-up is overdue (a date-only follow-up the day after, by the business date; a timestamp once passed), oldest first, up to 3 names. |
+| `recruitment:overdue` | recruiter, leader, admin | warning | One summary: open candidates in scope whose follow-up is overdue (a date-only follow-up the day after, by the business date; a timestamp once passed), oldest first, up to 3 names. The sentence says whose they are: admin "8 recruitment follow-ups are overdue" (the whole pipeline); leader "2 of your recruitment follow-ups are overdue" (candidates they own); recruiter "8 of your recruitment follow-ups are overdue" with "(yours or unassigned; 11 across the pipeline)" in the body — the pipeline figure is the **Overdue actions** tile (`countOverdueActions`, `pipelineOverdue` in the input), quoted only when larger. |
 | `recruitment:interview` | recruiter, leader, admin | warning | **The shared outcome rule** (`outcomesToRecord` in `shared/src/logic/recruitment.ts`, §14.8): a pending interview of an open candidate that started at least 120 minutes ago and no more than 56 days ago, where I am the interviewer or own the candidate (admin: all): "Record the outcome of Aisha Khan's first interview (Tue 10:00)". On the recruiter dashboard this is the only outcome prompt. |
 | `recruitment:today` | recruiter, leader, admin | info | My pending interviews in the next 24 h (I am the interviewer, or nobody is and I own the candidate), up to 3 listed. |
-| `payroll:to-pay` | admin | danger if any run is overdue, else warning | Pending + failed runs with `week_start` in GET /finance/payroll's default window (Monday of this week − 12 weeks … today), so the number matches **Runs to pay**: "29 runs to pay · £24,540 · 6 failed transfers". Body: "1 is overdue: it was due Fri 28 Aug. Paying it first is the lever." / "3 are overdue: the oldest was due … Paying those first is the lever." / "The next one is due …". Unpaid runs older than the window are not counted here (they are not on Runs to pay either); their owner's `pay:overdue` says so. |
+| `payroll:to-pay` | admin | danger if any run is overdue, else warning | `inRunsToPay`: pending runs with `week_start` in GET /finance/payroll's default window (Monday of this week − 12 weeks … today) plus **failed runs of any age** (a failed transfer is wages still owed), so the number matches **Runs to pay** (`?status=pending,failed` with no range lists exactly these): "29 runs to pay · £24,540 · 6 failed transfers". Body: "1 is overdue: it was due Fri 28 Aug. Paying it first is the lever." / "3 are overdue: the oldest was due … Paying those first is the lever." / "The next one is due …". Pending runs older than the window are not counted here (they are not on Runs to pay either); their owner's `pay:overdue` says so. |
 | `payroll:due-today` | admin | warning | On a Friday with runs due that day. |
 | `security:2fa` | admin | info | The admin's own two-step verification is off. |
 
@@ -1019,7 +1019,7 @@ figures, and only from the functions behind the tiles, so a digest can never con
 | campaigns | one grouped query: each campaign's sales this week and the week before |
 | hires, applications | `recruitmentSummary(db, monday, sunday)` (`hired`, `applied`); the recruiter's interviews = its `weekly[].interviews` |
 | payroll (private) | `payroll_runs` with `week_start = monday`: count, gross, and the unpaid (`pending` / `failed`) part; payday = `paydayForWeek(monday)` |
-| failed transfers (private) | runs with status `failed` in the to-pay window (`attentionPayrollWindow`: week_start in the last 12 weeks) — the same runs as **Runs to pay** and the bell |
+| failed transfers (private) | every run with status `failed`, whatever its age — the same runs as **Runs to pay** and the bell (`inRunsToPay`) |
 | overdue actions | `recruitmentSummary.overdueActions` — the recruiter's **Overdue actions** tile (open candidates past their next action, whole pipeline) |
 | outcomes to record | the shared `outcomesToRecord` (§14.8) over pending interviews the recruiter runs or owns, from `outcomeLookbackFrom(now)` to now |
 | open pipeline | Σ `recruitmentSummary.openByStage` over the open stages (applied … offer) |
@@ -1049,9 +1049,11 @@ figures, and only from the functions behind the tiles, so a digest can never con
      team's conversion is holding …")
   3. `Top seller: Amelia Hart with 22 sales.` / `Joint top sellers: A and B with 12 sales each.` Left out when nobody
      sold, or when anyone sharing the top spot is on the leader's check-in list.
-  4. `Biggest move up: X, 2 places to 1st; biggest move down: Y, 2 places to 3rd.` New entrants (movement null) and
-     unchanged places are ignored; ties go to the bigger move, then the better rank, then the name. Either half is
-     left out (never swapped for the next person, so the line stays true) when that person is on the check-in list.
+  4. `Biggest move up: X, 2 places to 1st.` (shareable) and `Biggest move down: Y, 2 places to 3rd.` (**private**:
+     naming one person's fall in the team group would not be kind, so it never reaches the WhatsApp text). New
+     entrants (movement null) and unchanged places are ignored; ties go to the bigger move, then the better rank, then
+     the name. Either line is left out (never swapped for the next person, so it stays true) when that person is on
+     the check-in list.
   5. `4 of 31 recorded check-ins were late (more than 5 minutes after the start).` · `All 12 recorded check-ins were on
      time.` · `No check-in times were recorded this week.` (a count only, never names)
   6. Next week — `Next week (w/c 19 Oct): 5 events, expect about 85 sales (estimate 70–100) against targets of 84.`
@@ -1150,8 +1152,13 @@ README.md ("Backups and restore", "Run it in the background"); the switches are 
 - `LM_BACKUP=0`: no timers (logged at start-up); `npm run backup` still works.
 
 **Restore** (`restoreDatabase`, `npm run restore -- <file> [--yes]`)
-1. Refuse while `findPortHolder(PORT)` finds anything ("Linear Hub is running on port N … Stop it first: npm run stop";
-   when a service file is installed the message adds "npm run service:uninstall first").
+1. Refuse while the live database is open in another process, on whatever port or address that server listens
+   (`databaseInUse`: open the file with busy timeout 0, `PRAGMA locking_mode = EXCLUSIVE`, `BEGIN EXCLUSIVE`; a running
+   server keeps a WAL connection open, which holds a shared lock, so this fails with SQLITE_BUSY: "The database is open
+   in another process, so it was not touched", plus the pid and command `lsof` reports, and "Stop it first, with the
+   PORT it runs on"). Any other error opening it (a damaged file) is not "in use". Then, as an extra hint, refuse while
+   `findPortHolder(PORT)` finds anything ("Linear Hub is running on port N … Stop it first: npm run stop"). When a
+   service file is installed either message adds "npm run service:uninstall first".
 2. Refuse a missing file, the live database itself, or a file without the SQLite header.
 3. Copy the candidate to a private staging file next to the database (`<db>.restoring-<time>`; a raw copy of a live
    WAL database has its `-wal` folded in). The backup itself is never modified.
@@ -1159,7 +1166,7 @@ README.md ("Backups and restore", "Run it in the background"); the switches are 
    pay_plans, campaigns, events, gauge_entries, payroll_runs, meta` must exist; otherwise refuse and delete staging.
 5. Print current v backup: users, gauge entries, payroll runs, latest gauge date.
 6. Ask (`--yes`, or a typed `y`/`yes` in a terminal; no terminal and no `--yes` = cancel).
-7. Check the port again, move `<db>`, `<db>-wal`, `<db>-shm`, `<db>-journal` to
+7. Check the lock and the port again, move `<db>`, `<db>-wal`, `<db>-shm`, `<db>-journal` to
    `<db>.before-restore-<YYYY-MM-DD-HHmmss>` (+ suffix), rename staging to `<db>`.
 8. Key: if `<backup folder>/app-secret` exists and the live key file is missing, install it (0600); if both exist and
    differ, say so and change nothing. If neither exists (and `LM_APP_SECRET` is not set) and the restored database has

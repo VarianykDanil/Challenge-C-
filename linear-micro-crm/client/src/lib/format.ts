@@ -3,12 +3,13 @@ import { BRAND } from '@lm/shared';
 import {
   differenceInCalendarDays,
   format,
-  formatDistanceToNowStrict,
+  formatDistanceStrict,
   isToday,
   isTomorrow,
   isValid,
   isYesterday,
   parseISO,
+  startOfDay,
 } from 'date-fns';
 
 const gbp = new Intl.NumberFormat(BRAND.locale, { style: 'currency', currency: BRAND.currency, maximumFractionDigits: 0 });
@@ -71,15 +72,24 @@ export function formatDateTime(value: string | null | undefined): string {
   const d = parseDate(value);
   return d ? format(d, 'd MMM yyyy, HH:mm') : '—';
 }
-/** e.g. "3 days ago", "in 2 hours", "today" */
-export function formatRelative(value: string | null | undefined): string {
+/**
+ * e.g. "3 days ago", "in 2 hours", "today". A date-only value ("2026-10-23") is a day, not a moment: it counts calendar
+ * days from today ("in 4 days" on Monday afternoon for Friday, never 3, which measuring from now to Friday's midnight
+ * and rounding down gave), with months and years from today's midnight beyond 30 days. Timestamps keep the distance
+ * from now ("in 2 hours").
+ */
+export function formatRelative(value: string | null | undefined, now: Date = new Date()): string {
   const d = parseDate(value);
   if (!d) return '—';
-  const days = differenceInCalendarDays(d, new Date());
-  if (days === 0 && /^\d{4}-\d{2}-\d{2}$/.test(value ?? '')) return 'today';
-  if (days === 1 && /^\d{4}-\d{2}-\d{2}$/.test(value ?? '')) return 'tomorrow';
-  if (days === -1 && /^\d{4}-\d{2}-\d{2}$/.test(value ?? '')) return 'yesterday';
-  return formatDistanceToNowStrict(d, { addSuffix: true });
+  if (/^\d{4}-\d{2}-\d{2}$/.test(value ?? '')) {
+    const days = differenceInCalendarDays(d, now);
+    if (days === 0) return 'today';
+    if (days === 1) return 'tomorrow';
+    if (days === -1) return 'yesterday';
+    if (Math.abs(days) < 30) return days > 0 ? `in ${days} days` : `${-days} days ago`;
+    return formatDistanceStrict(d, startOfDay(now), { addSuffix: true });
+  }
+  return formatDistanceStrict(d, now, { addSuffix: true });
 }
 /** "+12%" / "−8%" for fractional deltas; "—" when null. */
 export function formatDelta(fraction: number | null | undefined, digits = 0): string {

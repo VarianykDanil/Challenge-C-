@@ -6,7 +6,7 @@
  */
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { paydayForWeek, type UserWithTeam } from '@lm/shared';
+import { paydayForWeek, remainingFraction, type UserWithTeam } from '@lm/shared';
 import { run, type Db } from '../db/connection.ts';
 import { getUser } from '../db/queries.ts';
 import { addDays, mondayOf, setBusinessClock, todayISO } from '../lib/dates.ts';
@@ -133,6 +133,8 @@ test('admin: payroll:to-pay counts exactly the runs GET /finance/payroll?status=
     addRun(srv.db, { userId: fx.users.repB, weekStart: twoWeeks, gross: 250.25, status: 'failed', ref: 'PAY-T-3' }); // overdue
     addRun(srv.db, { userId: fx.users.leader, weekStart: twoWeeks, gross: 500, status: 'paid', paidDate: addDays(twoWeeks, 11), ref: 'PAY-T-4' });
     addRun(srv.db, { userId: fx.users.repB, weekStart: addDays(mondayOf(fx.today), -7 * 14), gross: 99, status: 'pending', ref: 'PAY-T-5' }); // outside the window
+    // a failed transfer is wages still owed whatever its age: on the card, in the count and in the total
+    const oldFailed = addRun(srv.db, { userId: fx.users.repB, weekStart: addDays(mondayOf(fx.today), -7 * 20), gross: 100, status: 'failed', ref: 'PAY-T-6' });
     srv.resetCache();
     const admin = await srv.login('admin');
     const first = await admin.get('/me/attention');
@@ -144,9 +146,14 @@ test('admin: payroll:to-pay counts exactly the runs GET /finance/payroll?status=
     assert.equal(listed.status, 200);
     const count = Number(/^(\d+) runs? to pay/.exec(toPay.title)?.[1]);
     assert.equal(count, listed.json.length);
-    assert.equal(count, 3);
+    assert.equal(count, 4);
+    assert.ok((listed.json as Json[]).some((r) => r.id === oldFailed), 'Runs to pay lists the 20-week-old failed transfer');
+    assert.ok(!(listed.json as Json[]).some((r) => r.reference === 'PAY-T-5'), 'an old pending run keeps the 12-week default');
     assert.equal(toPay.count, listed.json.length, 'the summary count (client unread token) is the same number');
-    assert.match(toPay.title, /£962\.75 · 1 failed transfer$/);
+    assert.match(toPay.title, /£1,062\.75 · 2 failed transfers$/);
+    // an explicit range still means that range
+    const ranged = await admin.get(`/finance/payroll?status=pending,failed&from=${twoWeeks}&to=${fx.today}`);
+    assert.ok(!(ranged.json as Json[]).some((r) => r.id === oldFailed), 'from/to given: only that range');
     assert.equal(toPay.severity, 'danger', 'one run is past its due date');
     assert.equal(toPay.href, '/finance?tab=company#runs');
     assert.ok(keysOf(first).includes('security:2fa'), 'the fixture admin has two-step off');
@@ -158,6 +165,11 @@ test('admin: payroll:to-pay counts exactly the runs GET /finance/payroll?status=
     const rep = await srv.login('rep');
     const repKeys = keysOf(await rep.get('/me/attention'));
     assert.ok(repKeys.every((k) => !k.startsWith('payroll:')));
+    // the rep with the old failed transfer is told the office sees it (it is on Runs to pay), not asked to chase it
+    const bo = (await (await srv.login('repB')).get('/me/attention')).json.items as Json[];
+    const owed = bo.find((i) => i.key === `pay:overdue:${oldFailed}`);
+    assert.ok(owed, bo.map((i) => i.key).join(', '));
+    assert.match(owed.body, /The office sees this too\.$/);
     // the paid leader run (paid 3 days after the week's payday) is an info item only while it is recent
     const leaderKeys = keysOf(await (await srv.login('leader')).get('/me/attention'));
     assert.ok(leaderKeys.every((k) => !k.startsWith('payroll:')));
@@ -269,6 +281,59 @@ test('recruiter: interview outcomes follow the one shared rule — 120-minute gr
     const patched = await recruiter.patch(`/recruitment/interviews/${ids.fiveDays}`, { outcome: 'passed' });
     assert.equal(patched.status, 200);
     assert.deepEqual(outcomeKeys(await recruiter.get('/me/attention')), [`recruitment:interview:${ids.threeHours}`]);
+  } finally {
+    await srv.close();
+  }
+});
+
+test('events:behind follows the row\'s "Behind target" pill; the recruiter\'s overdue item says whose and quotes the tile', async () => {
+  const srv = await startTestServer({ seed: true }); // Thu 15 Oct 2026, 15:00 London: the seed has events live now
+  try {
+    const today = todayISO();
+    for (const who of ['admin', 'leader'] as const) {
+      const client = await srv.login(who);
+      const feed = keysOf(await client.get('/me/attention'));
+      const me = (await client.get('/auth/me')).json.user;
+      const events = (await client.get(`/events?from=${today}&to=${today}`)).json as Json[];
+      // the feed's team items cover the leader's own team (admin: every team); /events shows a leader every team
+      const live = events.filter((e) => (who === 'admin' || e.teamId === me.teamId) && e.status === 'live' && e.forecast && e.targetSales > 0 && e.startTime <= '15:00' && '15:00' < e.endTime);
+      if (who === 'admin') assert.ok(live.length > 0, 'the seed has events live at 15:00 with a forecast');
+      for (const e of live) {
+        const pill = e.forecast.flag === 'at_risk';
+        assert.equal(feed.includes(`events:behind:${e.id}`), pill, `${who}: event ${e.id} pill ${pill} vs feed ${feed.join(', ')}`);
+      }
+    }
+    // a target where the old half-target rule and the pill disagree: the feed follows the pill
+    const admin = await srv.login('admin');
+    const picked = ((await admin.get(`/events?from=${today}&to=${today}`)).json as Json[]).find((x) => x.status === 'live' && x.forecast && x.startTime <= '15:00' && '15:00' < x.endTime)!;
+    // most of its day still to come (14:00–21:00), so the estimate for the rest of the day carries weight
+    run(srv.db, `UPDATE events SET start_time = '14:00', end_time = '21:00' WHERE id = ?`, [picked.id]);
+    srv.resetCache();
+    const e = ((await admin.get(`/events?from=${today}&to=${today}`)).json as Json[]).find((x) => x.id === picked.id)!;
+    const sales = Number(e.totals.sales);
+    const ahead = Number(e.forecast.expectedSales) * remainingFraction(e.startTime, e.endTime, '15:00');
+    const target = Array.from({ length: 300 }, (_, i) => i + 1).find((t) => {
+      const half = sales < 0.5 * t;
+      const projected = sales + ahead - 0.7 * t; // < 0 → at risk; keep clear of the boundary (rounding)
+      return Math.abs(projected) > 0.3 && sales !== 0.5 * t && half !== projected < 0;
+    })!;
+    assert.ok(target, `a disagreeing target exists for ${sales} sales, ${ahead} to come`);
+    run(srv.db, `UPDATE events SET target_sales = ? WHERE id = ?`, [target, e.id]);
+    srv.resetCache();
+    const after = ((await admin.get(`/events?from=${today}&to=${today}`)).json as Json[]).find((x) => x.id === e.id)!;
+    const pill = after.forecast.flag === 'at_risk';
+    assert.notEqual(pill, sales < 0.5 * target, 'the half-target rule would say the opposite');
+    assert.equal(keysOf(await admin.get('/me/attention')).includes(`events:behind:${e.id}`), pill, `target ${target}: the feed follows the pill`);
+    const recruiter = await srv.login('recruiter');
+    const item = ((await recruiter.get('/me/attention')).json.items as Json[]).find((i) => i.key === 'recruitment:overdue');
+    const tile = Number((await recruiter.get('/recruitment/summary')).json.overdueActions);
+    if (item) {
+      assert.match(item.title, /^\d+ of your recruitment follow-ups? (is|are) overdue$/);
+      assert.match(item.body, /\(yours or unassigned(; \d+ across the pipeline)?\)\. Book it or move them on\.$/);
+      const across = /; (\d+) across the pipeline/.exec(item.body)?.[1];
+      if (item.count < tile) assert.equal(Number(across), tile, 'the pipeline figure is the Overdue actions tile');
+      else assert.equal(across, undefined);
+    }
   } finally {
     await srv.close();
   }

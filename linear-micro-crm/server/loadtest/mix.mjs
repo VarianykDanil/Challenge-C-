@@ -1,6 +1,9 @@
 // Read-heavy mixed-workload load generator for Linear Hub.
 //
-//   node mix.mjs --url http://127.0.0.1:4600 --connections 50 --duration 30 [--json out.json]
+//   node mix.mjs --url http://127.0.0.1:4600 --connections 50 --duration 30 [--json out.json] [--smart 1]
+//
+// --smart 1 adds the 1.1 endpoints every signed-in page also calls (the bell's GET /me/attention, the dashboard's
+// GET /me/insights and GET /me/digest) to every role's pool; without it the mix is the 1.0 one, for comparisons.
 //
 // Models a realistic role mix (60% rep, 25% leader, 10% recruiter, 5% admin). Each virtual
 // connection logs in once (its own session cookie) and then loops, firing a random endpoint
@@ -11,7 +14,8 @@
 
 import { parseArgs, login, summarise, todayISO, addDays, mdTable } from './common.mjs';
 
-const args = parseArgs({ url: 'http://127.0.0.1:4600', connections: '50', duration: '30' });
+const args = parseArgs({ url: 'http://127.0.0.1:4600', connections: '50', duration: '30', smart: '0' });
+const SMART = String(args.smart) === '1';
 const BASE = String(args.url).replace(/\/$/, '');
 const CONNS = Number(args.connections);
 const DURATION_MS = Number(args.duration) * 1000;
@@ -32,6 +36,13 @@ const COMMON = [
   [3, 'GET /events', () => `/api/events?from=${w3.from}&to=${w3.to}`],
   [2, 'GET /users', () => `/api/users`],
   [1, 'GET /gauges', () => `/api/gauges?from=${w12.from}&to=${w12.to}&limit=200`],
+  ...(SMART
+    ? [
+        [3, 'GET /me/attention', () => `/api/me/attention`],
+        [2, 'GET /me/insights', () => `/api/me/insights`],
+        [1, 'GET /me/digest', () => `/api/me/digest`],
+      ]
+    : []),
 ];
 const POOLS = {
   rep: COMMON,
