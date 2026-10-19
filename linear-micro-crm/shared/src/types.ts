@@ -717,6 +717,8 @@ export interface AttentionItem {
   actionLabel?: string;
   /** ISO timestamp (or date) the item is about; sorts newest first within a severity. */
   at?: string;
+  /** p5: how many things a summary item covers (people missing, follow-ups, runs); a higher count is new again. */
+  count?: number;
 }
 
 /** p5 — GET /me/attention. Sorted danger → warning → info, then newest first; at most 20 items. */
@@ -724,6 +726,8 @@ export interface AttentionFeed {
   items: AttentionItem[];
   /** ISO timestamp of when the feed was built. */
   generatedAt: string;
+  /** p5: present (true) only when the smart features are switched off (LM_SMART=0), so the client hides the card. */
+  disabled?: true;
 }
 
 /** p6 — expected sales for a scheduled or live event, from comparable completed days. */
