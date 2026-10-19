@@ -28,16 +28,23 @@ export function safeStreakHint(streaks: Streaks | null | undefined): string | un
 }
 
 /**
- * The Sales tile's hint: p2's streak first (the tile clamps hints to two lines, so on a phone the streak stays
- * visible), then the rank, or the days worked. "0 days worked" is left out beside a streak: on a Monday it would read
- * "21-day sales streak · best 21 · 0 days worked".
+ * The Sales tile's hint, in p1's order (lead decision): the rank (or the days worked) first, then p2's streak. The tile
+ * gives this hint three lines of its own (`hintLines={3}`) and, on phones, the six tiles use 16 px padding, so neither
+ * fragment is cut at 360–390 px. Beside a streak the rank drops its "Ranked" (the "#" says it), which is what makes the
+ * longest real hints fit three lines at 360 px: "#6 of 23 company-wide · 8-day sales streak · best 85". On its own it
+ * reads as in 1.0, "Ranked #2 of 6 in your team". "0 days worked" is left out beside a streak: on a Monday it would read
+ * "0 days worked · 21-day sales streak · best 21".
  */
 export function salesHint(personal: Dashboard['personal'], role: Role, streaks: Streaks | null | undefined): string | undefined {
   const streak = safeStreakHint(streaks);
-  const rank = personal.rank ? `Ranked #${personal.rank} of ${personal.rankOutOf} ${role === 'rep' ? 'in your team' : 'company-wide'}` : null;
+  const position = personal.rank ? `#${personal.rank} of ${personal.rankOutOf} ${role === 'rep' ? 'in your team' : 'company-wide'}` : null;
+  const rank = position && !streak ? `Ranked ${position}` : position;
   const days = streak && personal.days === 0 ? null : `${formatNumber(personal.days)} days worked`;
-  return joinHints(streak, rank ?? days);
+  return joinHints(rank ?? days, streak);
 }
+
+/** Phones: 16 px padding for the six tiles (one grid, so the numbers still line up), 20 px from 640 px as before. */
+const TILE = 'max-sm:p-4';
 
 export interface PersonalKpisProps {
   dashboard: Dashboard | undefined;
@@ -55,12 +62,12 @@ export function PersonalKpis({ dashboard: d, role, deltaLabel, streaks }: Person
         <KpiSkeletons count={6} />
       ) : (
         <>
-          <KpiTile label="Sales" value={formatNumber(d.personal.totals.sales)} delta={d.personal.deltas.sales} deltaLabel={deltaLabel} tone="primary" hint={salesHint(d.personal, role, streaks)} />
-          <KpiTile label="Conversion" value={formatPct(d.personal.ratios.overallConversion, 1)} delta={d.personal.deltas.conversion} deltaLabel={deltaLabel} tone={ratioTone('overallConversion', d.personal.ratios.overallConversion)} hint="sales ÷ stops" />
-          <KpiTile label="Stops" value={formatNumber(d.personal.totals.stops)} delta={d.personal.deltas.stops} deltaLabel={deltaLabel} hint={`${formatNumber(d.personal.totals.presentations)} presentations`} />
-          <KpiTile label="Earnings to date" value={formatGBP(d.personal.earningsToDate)} hint="gross, this period" />
-          <KpiTile label="Next payday" value={d.personal.nextPayday ? formatDateShort(d.personal.nextPayday) : '—'} tone={d.personal.nextPayday && d.personal.nextPayday < todayISO() ? 'danger' : 'default'} hint={d.personal.nextPayday ? `${d.personal.nextPayAmount != null ? formatGBP(d.personal.nextPayAmount, { cents: true }) : 'amount pending'} · ${d.personal.nextPayday < todayISO() ? 'overdue · ' : ''}${formatRelative(d.personal.nextPayday)}` : 'No pending run'} />
-          <KpiTile label="Punctuality" value={d.personal.punctualityRate == null ? '—' : formatPct(d.personal.punctualityRate)} tone={d.personal.punctualityRate == null ? 'default' : d.personal.punctualityRate >= 0.9 ? 'success' : d.personal.punctualityRate >= 0.75 ? 'warning' : 'danger'} hint="check-ins on time" />
+          <KpiTile className={TILE} label="Sales" value={formatNumber(d.personal.totals.sales)} delta={d.personal.deltas.sales} deltaLabel={deltaLabel} tone="primary" hint={salesHint(d.personal, role, streaks)} hintLines={3} />
+          <KpiTile className={TILE} label="Conversion" value={formatPct(d.personal.ratios.overallConversion, 1)} delta={d.personal.deltas.conversion} deltaLabel={deltaLabel} tone={ratioTone('overallConversion', d.personal.ratios.overallConversion)} hint="sales ÷ stops" />
+          <KpiTile className={TILE} label="Stops" value={formatNumber(d.personal.totals.stops)} delta={d.personal.deltas.stops} deltaLabel={deltaLabel} hint={`${formatNumber(d.personal.totals.presentations)} presentations`} />
+          <KpiTile className={TILE} label="Earnings to date" value={formatGBP(d.personal.earningsToDate)} hint="gross, this period" />
+          <KpiTile className={TILE} label="Next payday" value={d.personal.nextPayday ? formatDateShort(d.personal.nextPayday) : '—'} tone={d.personal.nextPayday && d.personal.nextPayday < todayISO() ? 'danger' : 'default'} hint={d.personal.nextPayday ? `${d.personal.nextPayAmount != null ? formatGBP(d.personal.nextPayAmount, { cents: true }) : 'amount pending'} · ${d.personal.nextPayday < todayISO() ? 'overdue · ' : ''}${formatRelative(d.personal.nextPayday)}` : 'No pending run'} />
+          <KpiTile className={TILE} label="Punctuality" value={d.personal.punctualityRate == null ? '—' : formatPct(d.personal.punctualityRate)} tone={d.personal.punctualityRate == null ? 'default' : d.personal.punctualityRate >= 0.9 ? 'success' : d.personal.punctualityRate >= 0.75 ? 'warning' : 'danger'} hint="check-ins on time" />
         </>
       )}
     </div>

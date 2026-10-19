@@ -1,6 +1,6 @@
 // Sales-tile streak hint — OWNED BY p2-personal-pace-streaks.
-// The dashboard puts this hint first on the Sales tile, before the existing one ("12-day sales streak · best 26 ·
-// Ranked #3 of 9 in your team"; the tile clamps hints to two lines), through PersonalKpis' safeStreakHint().
+// The dashboard puts this hint second on the Sales tile, after the rank ("#3 of 9 in your team · 12-day sales
+// streak · best 26"; the Sales tile lets its hint wrap to three lines), through PersonalKpis' safeStreakHint().
 // Positive states only, never "streak broken"; one fragment at most:
 //   current ≥ 3        → '12-day sales streak · best 26'
 //   personalBestWeek   → 'Personal best week so far'

@@ -14,6 +14,11 @@ export interface KpiTileProps {
   invertDelta?: boolean;
   icon?: ReactNode;
   hint?: string;
+  /**
+   * Lines the hint may wrap to before it is clamped (default 2). With 3 (the dashboard's Sales tile) the hint also takes
+   * a line of its own under the delta, without the leading "·", so all three lines are its own.
+   */
+  hintLines?: 2 | 3;
   tone?: KpiTone;
   /** Small chart rendered in the bottom-right (e.g. <Sparkline />). */
   sparkline?: ReactNode;
@@ -38,6 +43,9 @@ const CHIP: Record<KpiTone, string> = {
   info: 'bg-info-soft text-info',
 };
 
+// Literal class names so Tailwind generates both.
+const HINT_CLAMP = { 2: 'line-clamp-2', 3: 'line-clamp-3' } as const;
+
 const EDGE: Record<KpiTone, string> = {
   default: '',
   primary: 'before:bg-primary',
@@ -55,7 +63,7 @@ const VALUE_SIZE = {
   lg: 'text-[clamp(1.5rem,2.8vw,2.25rem)]',
 } as const;
 
-export function KpiTile({ label, value, delta, deltaLabel, invertDelta, icon, hint, tone = 'default', sparkline, className, loading, size = 'md', onClick, suffix }: KpiTileProps) {
+export function KpiTile({ label, value, delta, deltaLabel, invertDelta, icon, hint, hintLines = 2, tone = 'default', sparkline, className, loading, size = 'md', onClick, suffix }: KpiTileProps) {
   const Tag = onClick ? 'button' : 'div';
   return (
     <Tag
@@ -94,7 +102,7 @@ export function KpiTile({ label, value, delta, deltaLabel, invertDelta, icon, hi
             <div className="mt-2 flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-muted">
               {delta !== undefined && !loading && <StatDelta value={delta} invert={invertDelta} />}
               {delta !== undefined && !loading && <span className="line-clamp-2">{deltaLabel ?? 'vs previous period'}</span>}
-              {hint && <span className={clsx('line-clamp-2', delta !== undefined && 'before:mr-2 before:content-["·"]')}>{hint}</span>}
+              {hint && <span className={clsx(HINT_CLAMP[hintLines], hintLines === 3 ? 'basis-full' : delta !== undefined && 'before:mr-2 before:content-["·"]')}>{hint}</span>}
             </div>
           )}
         </div>

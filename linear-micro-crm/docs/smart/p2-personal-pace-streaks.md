@@ -86,9 +86,16 @@ and at least 4 such weeks exist (a tie is not a best). `bestPreviousWeekSales` i
 
 **Positive states only.** The Sales tile shows "12-day sales streak · best 26" from 3 days, otherwise "Personal best
 week so far" when that is true, otherwise nothing; flames appear from 5 days. Nothing ever says a streak was broken.
-The streak comes first in the tile's hint, before the rank or "N days worked" (the tile clamps hints to two lines, so
-on a phone the end of the rank can be cut off); "0 days worked" is left out beside a streak, so a Monday never reads
-"21-day sales streak · best 21 · 0 days worked".
+**Order and fit on the Sales tile (lead decision).** The rank (or "N days worked") comes first and the streak second,
+p1's order: "#2 of 6 in your team · 24-day sales streak · best 24". The Sales tile gives its hint three lines of its own
+(`KpiTile hintLines={3}`: `line-clamp-3`, on its own line under the delta without the leading "·"), so neither fragment
+is cut. Two small changes make the longest real hints fit three lines on a 360 px phone: beside a streak the rank
+drops its "Ranked" (on its own it still reads "Ranked #2 of 6 in your team", as in 1.0), and below 640 px the six
+personal tiles use 16 px padding instead of 20 px (the whole grid, so the numbers still line up). Measured at 360, 375,
+390 and 1440 px with the seed (rep, leader, admin) and with the longest the copy can produce ("#12 of 23 company-wide ·
+120-day sales streak · best 120", "#12 of 23 company-wide · Personal best week so far"): three lines or fewer, nothing
+clamped. "0 days worked" is left out beside a streak, so a Monday never reads "0 days worked · 21-day sales streak ·
+best 21".
 
 ## User guide
 
@@ -112,8 +119,8 @@ weeks in the last 8 (about 20 stops a day or more) before a pace note appears; n
 card exactly as before. These notes are private: nobody else — not your leader, not the admin — sees them.
 
 **Streaks.** A streak is the number of days you worked in a row with at least one sale. Days off never break it, and
-today only counts once it is over. From 3 days, the **Sales** tile on your dashboard shows **12-day sales streak ·
-best 26**; in a week where your sales so far already beat every earlier week of 3 or more worked days (once you have
+today only counts once it is over. From 3 days, the **Sales** tile on your dashboard shows it after your rank, for example
+**#3 of 9 in your team · 12-day sales streak · best 26**; in a week where your sales so far already beat every earlier week of 3 or more worked days (once you have
 at least 4 of those) it shows **Personal best week so far**.
 
 **Flames on the leaderboard.** On the **Leaderboard** page and in the team card on the dashboard, a small flame icon
