@@ -15,7 +15,8 @@
  * admin 6, leader 8, recruiter 3, rep 5): pay plan, events dated `from` … tomorrow, gauge rows dated `from` … today
  * (`from` = attentionLookbackFrom: today − 3, or this week's Monday when earlier, so the own-gauge rule sees the whole
  * pay week), active members, runs (unpaid or paid in the last 7 days; admin: the to-pay window), open candidates with a due
- * follow-up, pending interviews within ±2 days, and the caller's usual attendance (pay-cost wording).
+ * follow-up, pending interviews of open candidates from `outcomeLookbackFrom(now)` (56 days back: the shared outcome
+ * rule's look-back, recruitment.ts) to 2 days ahead, and the caller's usual attendance (pay-cost wording).
  * Date-bounded where the table is large: events, gauge rows, runs and the attendance count use their indexes. Open
  * candidates, interviews and the admin's member list are small full scans (no index on interviews.scheduled_at or on
  * candidates' open stages; the seed has ~160 interviews, 120 candidates, 34 users). An index on
@@ -28,6 +29,7 @@ import {
   attentionItems,
   attentionLookbackFrom,
   attentionPayrollWindow,
+  outcomeLookbackFrom,
   type AttentionAttendance,
   type AttentionFeed,
   type AttentionInput,
@@ -103,7 +105,8 @@ export function attentionInput(db: Db, me: UserWithTeam, now: AttentionNow): Att
       : listPayroll(db, `WHERE ${ownClause}`, ownParams, 'p.week_start DESC, p.id ASC');
 
   // (6) open candidates with a follow-up already due: recruiter own + unowned, leader own, admin all
-  // (7) pending interviews within ±2 days that involve the caller (admin: all), joined to the candidate's name
+  // (7) pending interviews that involve the caller (admin: all), joined to the candidate's name: from the outcome rule's
+  //     56-day look-back (shared needsOutcome decides which still ask) to 2 days ahead (the next-24-hours summary)
   const recruitmentRole = me.role === 'recruiter' || me.role === 'leader' || me.role === 'admin';
   let candidates: AttentionInput['candidates'] = [];
   let interviews: AttentionInterview[] = [];
@@ -116,7 +119,7 @@ export function attentionInput(db: Db, me: UserWithTeam, now: AttentionNow): Att
       'c.next_action_at ASC, c.id ASC',
     );
     const nowMs = Date.parse(now.nowISO);
-    const lo = new Date(nowMs - 2 * DAY_MS).toISOString();
+    const lo = outcomeLookbackFrom(now.nowISO);
     const hi = new Date(nowMs + 2 * DAY_MS).toISOString();
     interviews = all<AttentionInterview>(
       db,

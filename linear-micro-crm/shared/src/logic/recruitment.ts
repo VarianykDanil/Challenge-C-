@@ -153,10 +153,13 @@ export const STAGE_SLA_DAYS: Readonly<Record<SlaStage, number>> = {
   offer: 7,
 };
 
-/** A pending interview asks for its outcome once it started at least this many hours ago. */
+/** A pending interview asks for its outcome once it started at least this many hours ago (the 120-minute grace). */
 export const OUTCOME_PROMPT_HOURS = 2;
 
-/** How far back the recruiter dashboard looks for pending outcomes (calendar days). */
+/**
+ * How far back a pending interview still asks for its outcome (days of 24 h before now). Older forgotten outcomes stop
+ * nagging. The Needs-attention feed loads interviews from `outcomeLookbackFrom(now)`.
+ */
 export const OUTCOME_LOOKBACK_DAYS = 56;
 
 /** The SLA in days for an open stage; null for hired, rejected and withdrawn. */
@@ -253,29 +256,42 @@ export function compareLongestIdle(
 }
 
 /**
- * Does a past interview still need its outcome recorded? Outcome `pending` and `scheduledAt` at least
- * OUTCOME_PROMPT_HOURS (2 h) before `now`. Future or recorded interviews never do.
+ * THE interview-outcome rule (one rule, one place: the Needs-attention feed's `recruitment:interview` items and the
+ * candidate page's "Record the outcome" card both use it). Does a past interview still need its outcome recorded?
+ * Outcome `pending`, `scheduledAt` at least OUTCOME_PROMPT_HOURS (2 h, the 120-minute grace) before `now`, and no more
+ * than OUTCOME_LOOKBACK_DAYS (56 days) before `now`. Future, recorded, too old or unreadable interviews never do.
  */
 export function needsOutcome(iv: Pick<Interview, 'outcome' | 'scheduledAt'>, now: string | Date = new Date()): boolean {
   if (iv.outcome !== 'pending') return false;
   const at = toMs(iv.scheduledAt);
   const ref = toMs(now);
   if (!Number.isFinite(at) || !Number.isFinite(ref)) return false;
-  return at <= ref - OUTCOME_PROMPT_HOURS * 3_600_000;
+  return at <= ref - OUTCOME_PROMPT_HOURS * 3_600_000 && at >= ref - OUTCOME_LOOKBACK_DAYS * DAY_MS;
 }
 
+/** The earliest `scheduledAt` (ISO instant) `needsOutcome` can still ask about: `now` − OUTCOME_LOOKBACK_DAYS. */
+export function outcomeLookbackFrom(now: string | Date = new Date()): string {
+  return new Date(toMs(now) - OUTCOME_LOOKBACK_DAYS * DAY_MS).toISOString();
+}
+
+/** An interview as `outcomesToRecord` reads it; `candidateStage`, when the caller has it, drops closed candidates. */
+export type OutcomeInterview = Pick<Interview, 'id' | 'candidateId' | 'interviewerId' | 'outcome' | 'scheduledAt'> & { candidateStage?: CandidateStage };
+
 /**
- * The interviews `me` should record an outcome for: `needsOutcome`, and (unless `me` is an admin, who sees them all)
- * either `me` is the interviewer or `me` owns the candidate. `ownerOf` maps a candidate id to its owner; candidates it
- * does not know (e.g. closed ones the caller did not load) count as not owned. Oldest first, then by id.
+ * The interviews `me` should record an outcome for: `needsOutcome`, the candidate still in the open pipeline (when the
+ * interview carries `candidateStage`; a closed candidate's forgotten outcome is nothing to act on), and (unless `me` is
+ * an admin, who sees them all) either `me` is the interviewer or `me` owns the candidate. `ownerOf` maps a candidate id
+ * to its owner; candidates it does not know count as not owned. Oldest first, then by id.
+ * Used by the Needs-attention feed (shared/src/logic/attention.ts) for every role's `recruitment:interview` items.
  */
-export function outcomesToRecord<T extends Pick<Interview, 'id' | 'candidateId' | 'interviewerId' | 'outcome' | 'scheduledAt'>>(
+export function outcomesToRecord<T extends OutcomeInterview>(
   interviews: ReadonlyArray<T>,
   me: { id: number; role: Role },
   ownerOf: (candidateId: number) => number | null | undefined,
   now: string | Date = new Date(),
 ): T[] {
   return interviews
-    .filter((iv) => needsOutcome(iv, now) && (me.role === 'admin' || iv.interviewerId === me.id || ownerOf(iv.candidateId) === me.id))
+    .filter((iv) => needsOutcome(iv, now) && !(iv.candidateStage && isTerminalStage(iv.candidateStage)))
+    .filter((iv) => me.role === 'admin' || iv.interviewerId === me.id || ownerOf(iv.candidateId) === me.id)
     .sort((a, b) => toMs(a.scheduledAt) - toMs(b.scheduledAt) || a.id - b.id);
 }

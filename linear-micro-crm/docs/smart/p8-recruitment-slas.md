@@ -8,7 +8,8 @@ have happened but still say *pending* ask for their outcome.
 
 No new endpoints and no response-shape changes: two write routes gain **defaults**, one gains an **optional body
 field**, and all three that take a deadline now **validate it the same way**. `GET` payloads are untouched (idle days
-and outcome prompts are worked out by the client from `stageUpdatedAt` and the interview list it already has). The
+are worked out by the client from `stageUpdatedAt`; outcome prompts come from the shared `needsOutcome` rule, on the
+candidate page and in `GET /me/attention`'s `recruitment:interview` items). The
 demo seed is unchanged; seeded rows keep their dates.
 
 "Today" below is the server's business date (`todayISO()`, Europe/London, honouring the business clock).
@@ -51,7 +52,8 @@ took anything `Date.parse` could read; every value the app and the smoke test se
 
 ### Kill switch
 
-`LM_SMART=0` does not turn p8 off: the deadline defaults, idle badges and outcome prompts all stay on. They are
+`LM_SMART=0` does not turn p8 off: the deadline defaults, idle badges and the candidate page's **Record the outcome**
+card stay on (the dashboard's outcome reminders live in the Needs-attention feed, which the switch empties). They are
 write-time defaults on an existing field and client-side readings of fields every 1.0 payload already has, not smart
 builders, and the client states the deadline it expects a move to set ("Phone screen · due Sat 24 Oct"); switching the
 server default off behind the client's back would make that line wrong. A caller that wants no deadline sends
@@ -61,7 +63,7 @@ server default off behind the client's back would make that line wrong. A caller
 would take: in `server/src/routes/recruitment.ts`, when `!smartEnabled()`, create with an omitted `nextActionAt` → `null`
 and a stage move with an omitted one → carry `candidate.nextActionAt` forward (closed stages still `null`); and a flag
 the client can read (none exists today) so it can drop the `· due …` option labels, the toast's target, the Idle badges
-and order, and the outcome prompts. The deadline validation above is not a smart feature and stays either way.
+and order, and the candidate page's outcome card. The deadline validation above is not a smart feature and stays either way.
 
 ## Logic
 
@@ -106,31 +108,29 @@ it (Offer from Thu 22 Oct → Thu 29 Oct across the 25 Oct clock change).
 - "Idle" and "overdue" are independent: overdue is about the next-action date (which a person may push back), idle is
   about time in the stage (which only a move resets).
 
-### Outcomes to record
+### Outcomes to record — one rule, one place (lead decision)
 
-- `needsOutcome(interview, now)` = `outcome === 'pending'` and `scheduledAt ≤ now − OUTCOME_PROMPT_HOURS` (**2 h**).
-  Exactly two hours counts; future, recorded (`passed`/`failed`/`no_show`) or unreadable interviews never do.
-- `outcomesToRecord(interviews, me, ownerOf, now)` keeps the `needsOutcome` ones where `me` is the **interviewer** or
-  **owns the candidate** (`ownerOf(candidateId) === me.id`); an **admin** gets them all. Oldest first, then by id.
-  A candidate `ownerOf` does not know counts as not owned.
-- The recruiter dashboard reads interviews from `today − OUTCOME_LOOKBACK_DAYS` (**56 days**) to `today + 14` (one
-  request, replacing the default Monday → +14 window; the existing tiles filter by date exactly as before) and only
-  lists interviews of candidates **still in the open pipeline**: a forgotten outcome on a rejected or withdrawn
-  candidate is no longer anything to act on and would otherwise nag for eight weeks.
+The rule lives once, in `shared/src/logic/recruitment.ts`, and both places that ask for an outcome call it:
+
+- `needsOutcome(interview, now)` = `outcome === 'pending'`, `scheduledAt ≤ now − OUTCOME_PROMPT_HOURS` (**2 h**, the
+  120-minute grace after the scheduled time) **and** `scheduledAt ≥ now − OUTCOME_LOOKBACK_DAYS` (**56 days** of 24 h).
+  Exactly two hours and exactly 56 days count; future, recorded (`passed`/`failed`/`no_show`), older or unreadable
+  interviews never do. `outcomeLookbackFrom(now)` is that earliest instant (ISO).
+- `outcomesToRecord(interviews, me, ownerOf, now)` keeps the `needsOutcome` ones whose candidate is still in the open
+  pipeline (when the interview carries `candidateStage`; a forgotten outcome on a hired, rejected or withdrawn
+  candidate is no longer anything to act on) and where `me` is the **interviewer** or **owns the candidate**
+  (`ownerOf(candidateId) === me.id`); an **admin** gets them all. Oldest first, then by id. A candidate `ownerOf` does
+  not know counts as not owned.
+- **Call sites.** The Needs-attention feed (`shared/src/logic/attention.ts`, `recruitment:interview` items for
+  recruiters, leaders and the admin) calls `outcomesToRecord`; its route (`server/src/routes/attention.ts`) loads
+  pending interviews of open candidates from `outcomeLookbackFrom(now)` to 2 days ahead. The candidate page's **Record
+  the outcome** card and **Outcome due** badge (`client/src/pages/CandidateDetail.tsx`) call `needsOutcome`. Nothing
+  else carries a copy (p5's `ATTENTION_RULES.interviewOutcomeAfterMinutes` is gone).
+- **Shown once on the recruiter dashboard**: in the **Needs attention** card at the top (and the bell). The recruiter
+  section no longer has its own **Outcomes to record** card, and it reads interviews with the server default again
+  (Monday of this week → today + 14) for **Interviews this week** and **Upcoming interviews**.
 - **Recruiter dashboard tiles**: six KPI tiles, one row of six only from 1536 px (`2xl`); 2 columns on phones and
   3 columns (two rows) from 768 px, so no label is cut off at 1280–1535 px.
-
-### Merge note: p5's Needs-attention feed (lead to reconcile)
-
-p5's `recruitment:interview` attention item and this card ask for the same thing with two copies of the rule: p5 uses
-its own `ATTENTION_RULES.interviewOutcomeAfterMinutes: 120` (same 2 h) and its route only loads pending interviews
-within **±2 days**, while this card looks back **56 days**. Both skip closed candidates and both count interviewer or
-candidate owner (admin: all). After merge a recruiter would see a fresh one twice on the dashboard (AttentionCard and
-**Outcomes to record**), and an interview 3+ days old only in the card, so the bell can show fewer than the card.
-Suggested: p5 imports `needsOutcome`, `OUTCOME_PROMPT_HOURS` and `OUTCOME_LOOKBACK_DAYS` from
-`shared/src/logic/recruitment.ts` and widens its interview window to the same lookback; and pick one prompt for the
-recruiter dashboard (e.g. the AttentionCard skips `recruitment:interview` items when **Outcomes to record** is shown,
-keeping them in the bell for every role).
 
 ### Client rules
 
@@ -184,21 +184,19 @@ them on resets the count. To see who needs moving most, choose **Longest idle fi
 the top, then everyone else, the nearest to their target first. The same menu has **Recently moved first** and, in the
 list, **Newest applicants first**.
 
-**Record the outcome.** Two hours after an interview's start time, if its outcome still says *Pending*, the
-candidate's page shows a **Record the outcome** card at the top with the outcome menu right there — pick **Passed**,
+**Record the outcome.** Two hours after an interview's start time, if its outcome still says *Pending* (and for up to
+eight weeks after it), the candidate's page shows a **Record the outcome** card at the top with the outcome menu right there — pick **Passed**,
 **Failed** or **No show** and it saves straight away. The interview also carries an **Outcome due** badge in the
 **Interviews** list.
 
-**Recruiter dashboard.** Recruiters get two additions:
-
-- an **Idle beyond target** tile — how many open candidates have been in a stage longer than its target;
-- an **Outcomes to record** card (only when there is something to record) listing interviews that have happened but
-  still say pending — the ones **you ran or whose candidate you own** — oldest first, each with the outcome menu
-  inline. Once you save an outcome the row disappears.
+**Recruiter dashboard.** Recruiters get an **Idle beyond target** tile — how many open candidates have been in a stage
+longer than its target. Interviews that have happened but still say pending (the ones **you ran or whose candidate you
+own**, from the last eight weeks) are asked for once, in the **Needs attention** card at the top of the dashboard and in
+the bell: **Record outcome** opens the candidate's page with the outcome menu at the top. Once you save an outcome the
+line disappears.
 
 **Who sees what.** Recruitment pages are for recruiters, team leaders and the owner, as before; reps never see them.
-The **Idle beyond target** tile and the **Outcomes to record** card are on the **recruiter** dashboard only, and the
-card lists only your own interviews and candidates. Team leaders and the owner, whose dashboards lead with sales, see
-idle badges on the Recruitment pages and the **Record the outcome** card on each candidate's page (and, from the
-Needs-attention bell, interviews from the last two days that they ran or whose candidate they own; the owner sees them
-all).
+The **Idle beyond target** tile is on the **recruiter** dashboard only. Everyone who runs interviews — recruiters, team
+leaders and the owner — gets the same outcome reminders in **Needs attention** and the bell: interviews from the last
+eight weeks that they ran or whose candidate they own (the owner sees them all), and the **Record the outcome** card on
+each candidate's page.

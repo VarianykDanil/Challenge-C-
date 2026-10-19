@@ -44,7 +44,8 @@ request from rows the caller may already see.
   they are counted), then at most 8 statements (admin 6, leader 8, recruiter 3, rep 5): pay plan, events dated
   `from` … tomorrow and gauge rows dated `from` … today (`from` = `attentionLookbackFrom(today)`: today − 3, or this
   week's Monday when that is earlier, so the own-gauge rule sees the whole pay week), active members, runs (unpaid, or paid in the last 7 days;
-  admin also the to-pay window), open candidates with a follow-up already due, pending interviews within ± 2 days, and
+  admin also the to-pay window), open candidates with a follow-up already due, pending interviews of open candidates
+  from `outcomeLookbackFrom(now)` (56 days back, the shared outcome rule's look-back) to 2 days ahead, and
   the caller's usual attendance over the 28 days before the window. Events, gauge rows, runs and the attendance count
   are date-bounded and use their indexes; open candidates, interviews and the admin's member list are small full scans
   (there is no index on `interviews.scheduled_at`; worth adding in `db/schema.ts` if the interview table grows).
@@ -78,7 +79,7 @@ Shared, pure and deterministic: `attentionItems(input, now)` in `shared/src/logi
 | `events:behind` | leader (own team), admin | info | A running event after 13:00 with sales < 50 % of a positive target: "4 of 12 sales so far with 3 h 30 min to go. More stops in that time is the lever." |
 | `gauges:odd` | leader (own team), admin | info | A row dated today − 2 … today with stops ≥ 30 and table 0, or stops ≥ 50 and sales ÷ stops > 20 %. Links to Log gauges for that row. |
 | `recruitment:overdue` | recruiter, leader, admin | warning | One summary: open candidates in scope whose follow-up is overdue (a date-only follow-up the day after, by the business date; a timestamp once passed), oldest first, up to 3 names. |
-| `recruitment:interview` | recruiter, leader, admin | warning | A pending interview that started ≥ 2 h ago, where I am the interviewer or own the candidate (admin: all): "Record the outcome of Aisha Khan's first interview (Tue 10:00)". |
+| `recruitment:interview` | recruiter, leader, admin | warning | **The shared outcome rule** (`outcomesToRecord` / `needsOutcome` in `shared/src/logic/recruitment.ts`, also used by the candidate page): a pending interview of an open candidate that started at least 120 minutes ago and no more than 56 days ago, where I am the interviewer or own the candidate (admin: all): "Record the outcome of Aisha Khan's first interview (Tue 10:00)". On the recruiter dashboard this is the only outcome prompt (the recruiter section has no card of its own). |
 | `recruitment:today` | recruiter, leader, admin | info | My pending interviews in the next 24 h (I am the interviewer, or nobody is and I own the candidate), up to 3 listed. |
 | `payroll:to-pay` | admin | danger if any run is overdue, else warning | Pending + failed runs with `week_start` in GET /finance/payroll's default window (Monday of this week − 12 weeks … today), so the number matches **Runs to pay**: "29 runs to pay · £24,540 · 6 failed transfers". Body: "1 is overdue: it was due Fri 28 Aug. Paying it first is the lever." / "3 are overdue: the oldest was due … Paying those first is the lever." / "The next one is due …". Unpaid runs older than the window are not counted here (they are not on Runs to pay either); their owner's `pay:overdue` says so. |
 | `payroll:due-today` | admin | warning | On a Friday with runs due that day. |
@@ -155,8 +156,8 @@ What each person sees:
 - **Crew leaders**: the same for yourself, plus your team: who has not logged an event that finished (with **Log for …**
   when it is one person), events with nothing logged ("did it run?"), today's events that are behind target after 1 pm,
   and numbers that look mistyped. Also the candidates you own: overdue follow-ups and interviews that need an outcome.
-- **Recruiters**: overdue follow-ups for your candidates and unassigned ones, interviews that need an outcome, your
-  interviews in the next 24 hours, and your own pay.
+- **Recruiters**: overdue follow-ups for your candidates and unassigned ones, interviews from the last eight weeks that
+  need an outcome (the only place the dashboard asks for them), your interviews in the next 24 hours, and your own pay.
 - **Owner / admin**: every team's gaps and events, **Runs to pay** with the total and any failed transfers (red when a run
   is overdue), a payday reminder on Fridays, the whole recruitment pipeline, and a reminder to turn on two-step
   verification if it is off.

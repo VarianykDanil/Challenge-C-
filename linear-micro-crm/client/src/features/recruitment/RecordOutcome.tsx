@@ -1,6 +1,6 @@
-// "Record the outcome" (1.1, p8): interviews that started at least two hours ago and are still `pending`, each with the
-// outcome select inline so it can be saved without opening anything. Used on the candidate page and the recruiter
-// dashboard; which interviews to list is the caller's choice (shared `needsOutcome` / `outcomesToRecord`).
+// "Record the outcome" (1.1, p8): interviews the shared rule says still need an outcome (`needsOutcome`: pending, at
+// least two hours after the start, within the last 56 days), each with the outcome select inline so it can be saved
+// without opening anything. Used on the candidate page; the dashboard asks through the Needs attention card instead.
 import { Link } from 'react-router-dom';
 import { ClipboardPen } from 'lucide-react';
 import type { Interview } from '@lm/shared';

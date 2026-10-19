@@ -25,7 +25,7 @@ import type {
 } from '../types.ts';
 import { addDays, daysBetween, dayOfWeek, isValidISODate, startOfWeekISO } from './dates.ts';
 import { estimateWeekPay, paydayForWeek } from './finance.ts';
-import { isOverdue } from './recruitment.ts';
+import { isOverdue, outcomesToRecord } from './recruitment.ts';
 
 export const ATTENTION_MAX_ITEMS = 20;
 
@@ -54,8 +54,6 @@ export const ATTENTION_RULES = {
   oddStopsHighConversion: 50,
   /** … above this sales ÷ stops. */
   oddConversion: 0.2,
-  /** Interviews still "pending" this long after their start need an outcome. */
-  interviewOutcomeAfterMinutes: 120,
   /** "My interviews in the next 24 h". */
   interviewSoonMinutes: 24 * 60,
   /** Runs count as "just paid" while paid_date ≥ today − 6 (one pay cycle). */
@@ -117,7 +115,10 @@ export interface AttentionInput {
   runs: ReadonlyArray<PayrollRunWithUser>;
   /** Open candidates in recruitment scope (recruiter: own and unowned; leader: own; admin: all). */
   candidates: ReadonlyArray<CandidateWithMeta>;
-  /** Interviews within ±2 days in recruitment scope (interviewer or candidate owner; admin: all). */
+  /**
+   * Pending interviews of open candidates in recruitment scope (interviewer or candidate owner; admin: all), scheduled
+   * from outcomeLookbackFrom(now) (56 days back, the outcome rule's look-back) to 2 days ahead.
+   */
   interviews: ReadonlyArray<AttentionInterview>;
   /** Rep / leader only: how often the caller usually logs on their team's event days; null when unknown. */
   attendance?: AttentionAttendance | null;
@@ -546,14 +547,15 @@ function recruitmentItems(input: AttentionInput, now: AttentionNow, out: Attenti
     });
   }
 
-  const involved = (i: AttentionInterview) => me.role === 'admin' || i.interviewerId === me.id || i.candidateOwnerId === me.id;
   const mine = (i: AttentionInterview) => i.interviewerId === me.id || (i.interviewerId === null && i.candidateOwnerId === me.id);
   const open = input.interviews.filter((i) => i.outcome === 'pending' && !TERMINAL.has(i.candidateStage) && Number.isFinite(Date.parse(i.scheduledAt)));
 
-  // recruitment:interview — pending ≥ 2 h after its start
-  for (const i of open) {
+  // recruitment:interview — THE outcome rule, shared with the recruitment pages (recruitment.ts outcomesToRecord /
+  // needsOutcome): pending, at least 120 minutes after its start and at most 56 days ago, open candidate, and I am the
+  // interviewer or own the candidate (admin: all)
+  const ownerOf = new Map(input.interviews.map((i) => [i.candidateId, i.candidateOwnerId]));
+  for (const i of outcomesToRecord(input.interviews, me, (id) => ownerOf.get(id), now.nowISO)) {
     const t = Date.parse(i.scheduledAt);
-    if (!involved(i) || nowMs - t < ATTENTION_RULES.interviewOutcomeAfterMinutes * 60_000) continue;
     out.push({
       key: `recruitment:interview:${i.id}`,
       kind: 'recruitment',

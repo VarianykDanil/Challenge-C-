@@ -13,6 +13,7 @@ import {
   type AttentionInterview,
   type AttentionNow,
 } from './attention.ts';
+import { outcomesToRecord } from './recruitment.ts';
 
 // Thu 15 Oct 2026, 15:00 in London (BST, so 14:00Z). Fri 16 Oct is payday.
 const NOW: AttentionNow = { today: '2026-10-15', nowHHMM: '15:00', nowISO: '2026-10-15T14:00:00.000Z' };
@@ -400,6 +401,25 @@ test('recruitment: a pending interview 3 h ago → record-the-outcome item; 1 h 
   assert.equal(today.body, 'Sam Lee (phone interview, today 16:30) and Aisha Khan (first interview, tomorrow 09:00)');
   const far = interview(6, '2026-10-16T16:00:00.000Z');
   assert.equal(byKey(attentionItems(input('recruiter', { interviews: [far] }), NOW), 'recruitment:today'), undefined);
+});
+
+test('recruitment:interview follows the shared outcome rule: 120-minute grace, 56-day look-back, open candidates only', () => {
+  const at = (id: number, scheduledAt: string, p: Partial<AttentionInterview> = {}) => interview(id, scheduledAt, p);
+  const list = [
+    at(11, '2026-10-15T12:00:00.000Z'), // exactly 120 minutes before 14:00Z → asks
+    at(12, '2026-10-15T12:01:00.000Z'), // 119 minutes → not yet
+    at(13, '2026-10-10T09:00:00.000Z', { candidateName: 'Sam Lee', candidateFirstName: 'Sam' }), // 5 days ago → asks
+    at(14, '2026-08-20T09:00:00.000Z'), // 56 days and more → no longer
+    at(15, '2026-10-14T09:00:00.000Z', { candidateStage: 'rejected' }), // closed candidate → never
+    at(16, '2026-10-14T09:00:00.000Z', { outcome: 'passed' }),
+  ];
+  const items = attentionItems(input('recruiter', { interviews: list }), NOW).filter((i) => i.key.startsWith('recruitment:interview'));
+  assert.deepEqual(keys(items).sort(), ['recruitment:interview:11', 'recruitment:interview:13']);
+  assert.equal(byKey(items, 'recruitment:interview:13')!.title, 'Record the outcome of Sam Lee’s first interview (Sat 10:00)');
+  assert.equal(byKey(items, 'recruitment:interview:13')!.body, 'Passed, failed or no-show: recording it lets Sam’s next step be booked.');
+  // the same list through the shared function gives the same interviews (one rule, one place)
+  const ownerOf = new Map(list.map((i) => [i.candidateId, i.candidateOwnerId]));
+  assert.deepEqual(outcomesToRecord(list, { id: 10, role: 'recruiter' }, (id) => ownerOf.get(id), NOW.nowISO).map((i) => i.id).sort(), [11, 13]);
 });
 
 // ───────────────────────────── admin ─────────────────────────────

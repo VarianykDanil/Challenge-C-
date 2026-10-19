@@ -231,3 +231,45 @@ test('rep: the whole pay week is asked for (Monday … yesterday), never a day o
     setBusinessClock(THURSDAY);
   }
 });
+
+test('recruiter: interview outcomes follow the one shared rule — 120-minute grace, 56-day look-back, open candidates', async () => {
+  const srv = await startTestServer(); // Thu 15 Oct 2026, 15:00 London (14:00Z)
+  try {
+    const fx = srv.fixture!;
+    const recruiter = await srv.login('recruiter');
+    const make = async (firstName: string) => {
+      const r = await recruiter.post('/recruitment/candidates', { firstName, lastName: 'Test', email: `${firstName.toLowerCase()}@x.test`, ownerId: fx.users.recruiter });
+      assert.equal(r.status, 201, JSON.stringify(r.json));
+      return r.json.id as number;
+    };
+    const interview = async (candidateId: number, scheduledAt: string) => {
+      const r = await recruiter.post('/recruitment/interviews', { candidateId, type: 'first', scheduledAt, interviewerId: fx.users.recruiter });
+      assert.equal(r.status, 201, JSON.stringify(r.json));
+      return r.json.id as number;
+    };
+    const ids = {
+      threeHours: await interview(await make('Courtney'), '2026-10-15T11:00:00.000Z'),
+      oneHour: await interview(await make('Nadia'), '2026-10-15T13:00:00.000Z'),
+      fiveDays: await interview(await make('Cameron'), '2026-10-10T09:00:00.000Z'), // outside the old ±2-day load
+      sixtyDays: await interview(await make('Eleanor'), '2026-08-16T09:00:00.000Z'), // past the 56-day look-back
+    };
+    const closedCandidate = await make('Rory');
+    const closed = await interview(closedCandidate, '2026-10-14T09:00:00.000Z');
+    srv.db.prepare(`UPDATE candidates SET stage = 'rejected' WHERE id = ?`).run(closedCandidate);
+    srv.resetCache();
+    const outcomeKeys = (r: { json: Json }) => keysOf(r).filter((k) => k.startsWith('recruitment:interview:')).sort();
+    // not ids.oneHour (inside the 120-minute grace), ids.sixtyDays (past the look-back) or the closed candidate's
+    const want = [ids.threeHours, ids.fiveDays].map((id) => `recruitment:interview:${id}`).sort();
+    assert.deepEqual(outcomeKeys(await recruiter.get('/me/attention')), want);
+    // the admin sees the same interviews (all of them); a leader who neither ran nor owns them sees none
+    assert.deepEqual(outcomeKeys(await (await srv.login('admin')).get('/me/attention')), want);
+    assert.deepEqual(outcomeKeys(await (await srv.login('leader')).get('/me/attention')), []);
+    assert.ok(!keysOf(await recruiter.get('/me/attention')).includes(`recruitment:interview:${closed}`));
+    // recording the outcome clears it
+    const patched = await recruiter.patch(`/recruitment/interviews/${ids.fiveDays}`, { outcome: 'passed' });
+    assert.equal(patched.status, 200);
+    assert.deepEqual(outcomeKeys(await recruiter.get('/me/attention')), [`recruitment:interview:${ids.threeHours}`]);
+  } finally {
+    await srv.close();
+  }
+});

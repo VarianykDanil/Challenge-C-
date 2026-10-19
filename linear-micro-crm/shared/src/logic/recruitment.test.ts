@@ -2,6 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import type { CandidateStage, Interview } from '../types.ts';
 import {
+  OUTCOME_LOOKBACK_DAYS,
   OUTCOME_PROMPT_HOURS,
   STAGE_SLA_DAYS,
   avg,
@@ -17,6 +18,7 @@ import {
   isOverdue,
   isTerminalStage,
   needsOutcome,
+  outcomeLookbackFrom,
   nextStage,
   outcomesToRecord,
   previousStage,
@@ -293,4 +295,27 @@ test('outcomesToRecord: interviewer or candidate owner is me, admin sees all; ol
   assert.deepEqual(outcomesToRecord(list, { id: 7, role: 'leader' }, ownerOf, now).map((x) => x.id), [4, 5]);
   assert.deepEqual(outcomesToRecord(list, { id: 1, role: 'admin' }, ownerOf, now).map((x) => x.id), [1, 2, 3, 4, 5]);
   assert.deepEqual(outcomesToRecord([], { id: 7, role: 'recruiter' }, ownerOf, now), []);
+});
+
+test('needsOutcome: the one rule also stops asking after the 56-day look-back', () => {
+  const now = '2026-10-19T15:00:00.000Z';
+  assert.equal(OUTCOME_LOOKBACK_DAYS, 56);
+  assert.equal(outcomeLookbackFrom(now), '2026-08-24T15:00:00.000Z');
+  assert.equal(needsOutcome(iv({ id: 1, scheduledAt: '2026-10-14T09:00:00.000Z' }), now), true, '5 days ago');
+  assert.equal(needsOutcome(iv({ id: 1, scheduledAt: '2026-08-24T15:00:00.000Z' }), now), true, 'exactly 56 days');
+  assert.equal(needsOutcome(iv({ id: 1, scheduledAt: '2026-08-24T14:59:59.000Z' }), now), false, 'just over 56 days');
+  assert.equal(needsOutcome(iv({ id: 1, scheduledAt: '2026-08-20T09:00:00.000Z' }), now), false, '60 days ago');
+});
+
+test('outcomesToRecord: an interview carrying a closed candidate stage never asks; without the stage it is not filtered', () => {
+  const now = '2026-10-19T15:00:00.000Z';
+  const base = iv({ id: 1, candidateId: 10, interviewerId: 7, scheduledAt: '2026-10-19T11:00:00.000Z' });
+  const me = { id: 7, role: 'recruiter' as const };
+  const ownerOf = () => null;
+  for (const stage of ['hired', 'rejected', 'withdrawn'] as const) {
+    assert.deepEqual(outcomesToRecord([{ ...base, candidateStage: stage }], me, ownerOf, now), [], stage);
+  }
+  assert.deepEqual(outcomesToRecord([{ ...base, candidateStage: 'interview' as const }], me, ownerOf, now).map((x) => x.id), [1]);
+  assert.deepEqual(outcomesToRecord([base], me, ownerOf, now).map((x) => x.id), [1]);
+  assert.deepEqual(outcomesToRecord([{ ...base, scheduledAt: '2026-08-20T09:00:00.000Z' }], me, ownerOf, now), [], 'past the look-back');
 });

@@ -25,7 +25,8 @@ export function CandidateDetailPage() {
   usePageTitle(c ? fullName(c) : 'Candidate');
   const [scheduleOpen, setScheduleOpen] = useState(false);
   const canWrite = me.role === 'admin' || me.role === 'recruiter' || me.role === 'leader';
-  // Interviews that happened (2 h+ ago) and still say "pending": asked for first, with the outcome select inline.
+  // The shared outcome rule (needsOutcome: pending, 2 h+ after the start, within the last 56 days — the same rule as the
+  // Needs attention feed): asked for first, with the outcome select inline.
   const toRecord = c ? [...c.interviews].filter((iv) => needsOutcome(iv)).sort((a, b) => a.scheduledAt.localeCompare(b.scheduledAt)) : [];
 
   if (q.isError && q.error instanceof ApiError && q.error.status === 404) return <NotFoundPage />;
