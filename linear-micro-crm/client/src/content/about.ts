@@ -8,7 +8,7 @@ export interface RoleSummary { role: Role; title: string; description: string }
 
 export const ABOUT = {
   version: APP_VERSION,
-  releaseDate: '2026-10-15',
+  releaseDate: '2026-10-19',
   madeIn: 'Made in Manchester',
 
   /** The product story, one paragraph per entry. */

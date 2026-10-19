@@ -58,12 +58,13 @@ export function EventsPage() {
         actions={canCreate ? <Button onClick={() => setCreateOpen(true)} leftIcon={<Plus className="h-4 w-4" aria-hidden />}>New event</Button> : undefined}
       />
 
-      <div className="mb-5 flex flex-col gap-3 rounded-xl border border-border bg-surface p-3 lg:flex-row lg:items-center lg:justify-between">
+      {/* The range presets and three filters only fit side by side from about 1400 px (with the sidebar open); below that they stack. */}
+      <div className="mb-5 flex flex-col gap-3 rounded-xl border border-border bg-surface p-3 min-[1400px]:flex-row min-[1400px]:items-center min-[1400px]:justify-between">
         <RangePicker value={range} onChange={setRange} presets={['next_3_weeks', 'this_week', 'last_week', 'this_month', 'last_month']} clampToToday={false} />
-        <div className="grid grid-cols-1 gap-2 sm:grid-cols-3">
+        <div className="grid grid-cols-1 gap-2 sm:grid-cols-3 min-[1400px]:min-w-[34rem]">
           {me.role === 'rep' ? (
             // The server scopes reps to their own team, so a picker would silently show the wrong label.
-            <span className="inline-flex h-8 items-center gap-2 text-sm text-muted">Team <Badge tone="neutral" dot color={teams.data?.find((t) => t.id === me.teamId)?.color}>{me.teamName ?? 'No team'}</Badge></span>
+            <span className="flex h-8 min-w-0 items-center gap-2 text-sm text-muted"><span className="shrink-0">Team</span> <Badge tone="neutral" dot className="min-w-0" color={teams.data?.find((t) => t.id === me.teamId)?.color}>{me.teamName ?? 'No team'}</Badge></span>
           ) : (
             <Select aria-label="Team" value={teamId} onChange={(e) => setTeamId(e.target.value)} placeholder="All teams" options={(teams.data ?? []).map((t) => ({ value: String(t.id), label: t.name }))} size="sm" />
           )}

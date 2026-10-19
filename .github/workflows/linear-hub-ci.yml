@@ -26,7 +26,7 @@ jobs:
         run: npm ci --no-audit --no-fund
       - name: Typecheck
         run: npm run typecheck
-      - name: Unit tests (shared logic)
+      - name: Unit and route tests (shared logic and server)
         run: npm test
       - name: API smoke test
         run: npm run smoke -w server
