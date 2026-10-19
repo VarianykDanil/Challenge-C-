@@ -32,6 +32,7 @@ Linear Hub fixes those four things without asking the business to change how it 
 | **Campaigns** | The clients Linear represents, with sector, type, payout per sale, default rep commission and active/inactive status. |
 | **Public page** | Signed-out visitors land on an outward-facing page about Linear MCR and Linear Hub (what we do, the six gauges, the careers ladder) with **Sign in**; staff can review it any time at `/welcome`. The logo and colours come from one config (`client/src/content/brand.ts` and the `--brand-*` block in `client/src/index.css`). |
 | **Export & print** | Every table has **Download as CSV** (Excel-ready, exactly the rows on screen, filters in the file name), and each payslip has **Print payslip** for a clean A4 copy. |
+| **Smart features** (1.1) | Pace notes, this week's pay estimate, **Check in with…**, the **Needs attention** bell, event forecasts, signal-proof logging, recruitment deadlines and **Your week in review** — see [Smart features](#smart-features-11) below. |
 
 ### Roles
 
@@ -42,7 +43,31 @@ Linear Hub fixes those four things without asking the business to change how it 
 | `recruiter` | The whole recruitment pipeline, the directory, own pay; events and the leaderboard read-only | Candidates, interviews, stage changes (hiring creates the rep's account) |
 | `admin` | Everything, including every employee ID | Everything — people, campaigns, events, any gauges, payroll payments, expenses, announcements |
 
-**Signing in and security, honestly.** Sign-in is a work email plus an employee ID — there is no password yet, so the employee ID is half of the credential and the API only returns it to administrators and to the person themselves (everyone else sees it blank on the Team page, payslips and profiles). Sessions are httpOnly cookies that last 14 days; after eight failed attempts for the same email in fifteen minutes the login is paused for that window; setting a person's status to **Left** deletes their sessions at once, so they are signed out everywhere. A sign-in PIN and single sign-on are on the [roadmap](docs/ROADMAP.md).
+**Signing in and security, honestly.** Sign-in is a work email plus an employee ID — there is no password yet, so the employee ID is half of the credential and the API only returns it to administrators and to the person themselves (everyone else sees it blank on the Team page, payslips and profiles). Sessions are httpOnly cookies that last 14 days; after eight failed attempts for the same email in fifteen minutes the login is paused for that window; setting a person's status to **Left** deletes their sessions at once, so they are signed out everywhere. Anyone can turn on optional two-step verification with an authenticator app in **Settings → Security**. A sign-in PIN and single sign-on are on the [roadmap](docs/ROADMAP.md).
+
+### Smart features (1.1)
+
+Release 1.1 makes the existing screens notice things, using fixed rules over the numbers people can already see — no
+outside service, no AI, and the same data always gives the same sentence. Every forecast says **estimate** and shows
+its range; pay, pace notes and the check-in list are only ever shown to the person they belong to.
+
+| Feature | Who sees it | Where |
+|---|---|---|
+| **Your usual pace** and **sales streaks** | reps, leaders, administrators (their own) | dashboard funnel card, **Sales** tile, leaderboard flames |
+| **This week (estimate)** of pay, with the distance to the bonus | reps and leaders (their own) | dashboard strip, **Finance → My pay** |
+| **Payroll checks** and paying many runs at once | administrators | **Finance → Company → Runs to pay** |
+| **Check in with…**, **Team / Company coaching**, **Focus** chips | leaders (own team), the owner (every team) | dashboard, **Gauges → Team** |
+| **Needs attention** | everyone, scoped to their role | the bell, pop-up notes, dashboard card |
+| **Event forecasts**, suggested targets, **N / M logged** | everyone (forecasts); leaders and administrators (targets, who has not logged) | Events, event page, **New event** |
+| **Signal-proof logging** and the **Tally** | anyone who logs gauges | **Log gauges**, an offline strip under the top bar |
+| **Recruitment deadlines**, **Idle** badges, **Record the outcome** | recruiters, leaders, the owner | Recruitment, candidate page |
+| **Your week in review**, ready for WhatsApp | everyone | bottom of the dashboard, every Monday |
+
+`LM_SMART=0` switches the estimates and suggestions off on the server; the recruitment deadlines, the phone outbox
+and the coaching worked out in the browser stay on. Plain-words guide:
+[USER_GUIDE.md, "What's new in 1.1"](docs/USER_GUIDE.md#whats-new-in-11); rules and thresholds:
+[LOGIC.md §14](docs/LOGIC.md#14-smart-release-11); endpoints and fields:
+[API.md, "Smart endpoints"](docs/API.md#smart-endpoints); history: [CHANGELOG.md](CHANGELOG.md).
 
 ---
 
@@ -96,9 +121,10 @@ Every command below exists in `package.json` (root) or `server/package.json`.
 | `npm run service:install` | Run Linear Hub in the background and start it at log-in (macOS LaunchAgent, Linux systemd user unit; on Windows it prints the Task Scheduler steps) |
 | `npm run service:uninstall` | Remove the background service and free the port |
 | `npm run service:status` | Is the service loaded and answering; its last 20 log lines; whether it still points at this Node |
+| `npm run service:install -- --print` | Dry run: print the service file and the commands for this machine and change nothing (add `--platform=darwin`, `linux` or `win32` to see another platform's file) |
 | `npm run typecheck` | Typecheck `shared`, `server` and `client` |
-| `npm test` | Run the shared domain-logic tests (`node:test`) |
-| `npm run smoke -w server` | Boot the API on a temporary seeded database and exercise every endpoint against the contract |
+| `npm test` | Run the shared domain-logic tests and the server route tests (`node:test`) |
+| `npm run smoke -w server` | Boot the API on a temporary seeded database and exercise every endpoint against the contract (it pins the business clock to 15:00 on the latest weekday; `SMOKE_REAL_CLOCK=1` uses the real clock) |
 
 ### Environment variables
 
@@ -112,10 +138,17 @@ Every command below exists in `package.json` (root) or `server/package.json`.
 | `LM_BACKUP_HOUR` | `2` | London hour (0–23) from which the nightly backup may run |
 | `LM_COMPRESSION` | on | `0` turns HTTP compression off (for example behind a reverse proxy that compresses already) |
 | `LM_DEMO_ACCOUNTS` | unset | Set to `0` on any deployment with real users: the sign-in page then shows no demo accounts and the API never publishes a login |
-| `LM_APP_SECRET` | unset (generated key file) | Key material for encrypting two-step verification secrets at rest (AES-256-GCM, key = SHA-256 of the value). When unset, a random key is generated on first start into `server/data/app-secret` (mode 600, next to the database; `LM_APP_SECRET_FILE` relocates it). Back that file up with the database, or set the variable to manage the key yourself |
+| `LM_SMART` | on | `0` switches the 1.1 smart features off: pace notes, pay estimates, payroll checks, check-in lists, the Needs-attention feed, event forecasts, streaks and the week in review answer empty, and the optional fields are left out of existing payloads. Recruitment deadlines stay on (they are workflow rules) |
+| `LM_BUSINESS_NOW` | unset (real time) | Pins the business clock — "today" and "now" for events, gauges, pay and the demo seed — to this instant, e.g. `2026-10-19T15:00:00`, for demos and screenshots out of hours (use a fresh `DB_PATH` so the seed is built around it). The clock keeps ticking from there; sessions, rate limits, two-step codes and backups stay on the real clock. The server warns at start-up while it is set. Never set it for real use |
+| `LM_APP_SECRET` | unset (generated key file) | Key material for encrypting two-step verification secrets at rest (AES-256-GCM, key = SHA-256 of the value). When unset, a random key is generated on first start into `server/data/app-secret` (mode 600, next to the database). Back that file up with the database, or set the variable to manage the key yourself |
+| `LM_APP_SECRET_FILE` | `<data dir>/app-secret` | Where the generated key file lives when `LM_APP_SECRET` is unset |
+| `TRUST_PROXY` | unset (off) | Behind a TLS-terminating reverse proxy: `1` (one hop), the proxy's address or CIDR, or a comma list, so `X-Forwarded-Proto` is honoured (Secure cookies, HSTS). Leave unset otherwise |
 | `COOKIE_SECURE` | unset | Set to `1` to force the `Secure` flag on the session cookie; it is set automatically when the request arrived over HTTPS (`X-Forwarded-Proto: https`, `trust proxy` is on) |
 | `TZ` | `Europe/London` | The business time zone — "today" for events and pay weeks. The npm scripts and the Dockerfile pin it; keep it if you run the server another way |
 | `NODE_ENV` | — | `production` makes the server serve `client/dist`; `npm start` sets it |
+
+For troubleshooting and tests only: `LM_DEBUG=1` explains a failed health probe (`npm run stop`, `share`, `doctor`),
+`LM_DOCTOR_SKIP_BOOT=1` skips the doctor's boot test, and `SMOKE_REAL_CLOCK=1` runs the smoke test on the real clock.
 
 ### Use it from a phone or another laptop (Wi-Fi or hotspot)
 
@@ -143,32 +176,52 @@ npm run service:status       # loaded? answering? the last 20 log lines
 npm run service:uninstall    # stop it for good and free the port
 ```
 
-- **macOS**: a LaunchAgent, `~/Library/LaunchAgents/uk.co.linear-mcr.hub.plist`, with `RunAtLoad` and `KeepAlive`: it
-  starts at log-in and macOS restarts it within seconds if it stops. Logs go to
+#### macOS: a LaunchAgent
+
+- `npm run service:install` writes `~/Library/LaunchAgents/uk.co.linear-mcr.hub.plist` (label `uk.co.linear-mcr.hub`)
+  with `RunAtLoad` and `KeepAlive`: it starts at log-in and macOS restarts it within seconds if it stops. Logs go to
   `~/Library/Logs/LinearHub/linear-hub.log`. It runs this checkout's `server/src/index.ts` with the Node you ran the
-  command with, in production mode with `TZ=Europe/London`, plus `PORT`, `HOST`, `DB_PATH` and the other Linear Hub
-  settings if they are set in that terminal.
-- **Linux**: a systemd user unit, `~/.config/systemd/user/linear-hub.service` (`Restart=always`), started with
-  `systemctl --user enable --now`. Run `loginctl enable-linger $USER` to keep it running while nobody is logged in.
-- **Windows**: `npm run service:install` prints the Task Scheduler steps.
+  command with (a Homebrew Cellar path becomes the stable `…/opt/node/bin/node` link), in production mode with
+  `TZ=Europe/London`, plus `PORT`, `HOST`, `DB_PATH`, `LM_APP_SECRET_FILE`, `LM_BACKUP`, `LM_BACKUP_DIR`,
+  `LM_BACKUP_HOUR`, `TRUST_PROXY`, `LM_SMART` and `LM_COMPRESSION` if they are set in that terminal. `LM_APP_SECRET`
+  is never written into the file (it would sit there in plain text): use `LM_APP_SECRET_FILE` instead.
+- It refuses to install without a built client (`npm run build` first), stops a copy running in a terminal, then loads
+  the agent and waits up to 20 seconds for it to answer.
 - While it runs as a service, `npm run stop` only makes macOS start it again: use `npm run service:uninstall`
   (for example before `npm run restore`, then `npm run service:install` afterwards).
 - After switching Node (`nvm use`, `brew upgrade node`), run `npm run service:install` again; `service:status` and
   `npm run doctor` warn when the service still points at the old Node.
 - A sleeping Mac answers nobody: for a day in the field, set System Settings › Battery › Options › "Prevent automatic
   sleeping on power adapter when the display is off".
-- **Keep the Linear Hub folder out of Desktop, Documents, Downloads and iCloud Drive** on a Mac. macOS guards those
-  folders, and a background service (unlike Terminal) can be refused access to them ("Operation not permitted" in the
-  log), so it could not open the database or write backups. `service:install` and `service:status` warn when the
-  checkout, `DB_PATH`, `LM_BACKUP_DIR` or `LM_APP_SECRET_FILE` is in one: move the folder (for example to
-  `~/LinearHub`) and install again, or give the Node it names Full Disk Access in System Settings › Privacy & Security.
-  For the same reason, do not point `LM_BACKUP_DIR` into iCloud Drive while it runs as a service: copy the folder there
-  by hand instead.
-- **Windows**: the printed `.cmd` creates `%LOCALAPPDATA%\LinearHub` before writing its log there.
+- **Keep the Linear Hub folder out of Desktop, Documents, Downloads and iCloud Drive.** macOS guards those folders, and
+  a background service (unlike Terminal) can be refused access to them ("Operation not permitted" in the log), so it
+  could not open the database or write backups. `service:install` and `service:status` warn when the checkout,
+  `DB_PATH`, `LM_BACKUP_DIR` or `LM_APP_SECRET_FILE` is in one: move the folder (for example to `~/LinearHub`) and
+  install again, or give the Node it names Full Disk Access in System Settings › Privacy & Security. For the same
+  reason, do not point `LM_BACKUP_DIR` into iCloud Drive while it runs as a service: copy the folder there by hand
+  instead.
 
-The macOS install, restart-after-a-crash and uninstall checks need a Mac, so they are release checks for the owner
-(listed in [docs/smart/p10-backups-autostart.md](docs/smart/p10-backups-autostart.md)); the files `--print` writes for
-macOS, Linux and Windows are covered by the server tests (`server/src/test/service.test.ts`).
+#### Linux and Windows
+
+- **Linux**: a systemd user unit, `~/.config/systemd/user/linear-hub.service` (`Restart=always`), started with
+  `systemctl --user enable --now`. Run `loginctl enable-linger $USER` to keep it running while nobody is logged in.
+- **Windows**: `npm run service:install` prints the Task Scheduler steps; the printed `.cmd` creates
+  `%LOCALAPPDATA%\LinearHub` before writing its log there.
+
+`npm run service:install -- --print` shows the file and the commands without changing anything. The files it prints
+for macOS, Linux and Windows are covered by the server tests (`server/src/test/service.test.ts`).
+
+#### Release checks on the owner's Mac
+
+macOS cannot run in CI, so these stay as release checks for the owner (only the `--print` plist has been checked: it
+parses, `KeepAlive` and `RunAtLoad` are true, and the environment and log path are as above):
+
+1. From a checkout outside Desktop/Documents/Downloads/iCloud: `npm run build && npm run service:install`, then
+   `launchctl list | grep uk.co.linear-mcr.hub` and `curl http://localhost:4000/api/health`.
+2. `kill -9 <pid>` (the pid from `npm run service:status`): a new pid answers within 10 seconds.
+3. `npm run service:uninstall`: port 4000 is free (`lsof -iTCP:4000 -sTCP:LISTEN` prints nothing).
+4. `npm run backup && npm run backups`; delete a gauge, `npm run service:uninstall`, `npm run restore -- <file> --yes`,
+   `npm run service:install`: the gauge is back.
 
 ### Troubleshooting
 
@@ -193,7 +246,8 @@ copies of it in **`server/data/backups/`** (set `LM_BACKUP_DIR` to put them else
 Each copy is a complete, checked database (`linear-2026-10-19-0200.sqlite`, named in London time), made with SQLite's
 online backup, so it is consistent even while people are logging gauges. The folder keeps the newest copy of each of
 the last 30 days plus one a week for the 8 weeks before that; older copies are deleted (never one made in the last 24
-hours), anything else in the folder is left alone.
+hours), anything else in the folder is left alone. `LM_BACKUP=0` turns the automatic schedule off (`npm run backup`
+still works). Backups always run on the real clock, even when `LM_BUSINESS_NOW` pins the business day.
 
 ```bash
 npm run backup                       # back up now (works while the server is running)
@@ -206,7 +260,9 @@ npm start
 `restore` refuses while anything answers on the port ("Stop it first: npm run stop"), checks the backup
 (`PRAGMA integrity_check` and the Linear Hub tables), prints the current and the backup's users, gauge entries,
 payroll runs and latest gauge date side by side, and only then asks (`--yes` skips the question). The database it
-replaces is kept next to it as `linear.sqlite.before-restore-<date-time>`, so a restore can itself be undone.
+replaces is kept next to it as `linear.sqlite.before-restore-<date-time>`, so a restore can itself be undone. If
+Linear Hub runs as a background service, stop it with `npm run service:uninstall` instead of `npm run stop` (macOS
+would only start it again), restore, then `npm run service:install`.
 
 **Keep the folder private and copy it off the laptop.** It holds everyone's names and pay. It also holds
 `app-secret`, a copy of the key that encrypts two-step sign-in secrets (mode 600): without it, people with two-step
@@ -216,8 +272,9 @@ iCloud Drive or Google Drive now and then. `npm run doctor` warns when the last 
 when the disk has less than 1 GB free; **Settings › Backups** shows the same to the owner.
 
 **Never commit the backups folder.** `server/data/backups/`, the `*.before-restore-*` copies a restore keeps and its
-`*.restoring-*` staging files are in `.gitignore`; if you set `LM_BACKUP_DIR`, choose a folder outside the repository
-(never push a copy of payroll and the sign-in key to GitHub).
+`*.restoring-*` staging files are in `.gitignore`, as are the live database (`server/data/*.sqlite`) and
+`server/data/app-secret`; if you set `LM_BACKUP_DIR`, choose a folder outside the repository (never push a copy of
+payroll and the sign-in key to GitHub). Before any `git add`, `git status` should show nothing under `server/data/`.
 
 ### Docker
 
@@ -269,12 +326,14 @@ linear-micro-crm/
 │       ├── content/                 # copy.ts, about.ts, team.ts — all microcopy
 │       ├── features/                # the bulk of the UI, by domain
 │       │   ├── campaigns/           #   campaign form
-│       │   ├── common/              #   range picker, status badges, confirm dialog, loading/error states
+│       │   ├── common/              #   range picker, status badges, confirm dialog, loading/error states, ErrorBoundary, offline banner
 │       │   ├── dashboard/           #   announcements, company section, recruiter section, upcoming events
-│       │   ├── events/              #   event form, event row
-│       │   ├── finance/             #   payroll runs table, payslip, add expense
-│       │   ├── gauges/              #   Log gauges modal, summary and entries tables, performance panel, coaching
-│       │   ├── recruitment/         #   candidate card, "Move to…" control, schedule interview, stage stepper
+│       │   ├── events/              #   event form, event row, forecast chip
+│       │   ├── finance/             #   payroll runs table, payslip, add expense, bulk Mark paid
+│       │   ├── gauges/              #   Log gauges modal, outbox, tally, summary and entries tables, performance panel, coaching
+│       │   ├── recruitment/         #   candidate card, "Move to…" control, schedule interview, stage stepper, Record the outcome
+│       │   ├── settings/            #   two-step verification set-up and recovery codes
+│       │   ├── smart/               #   1.1 dashboard slots: Needs attention, pace note, pay strip, check-ins, week in review (lazy.tsx)
 │       │   └── team/                #   user form
 │       ├── lib/                     # formatGBP, dates, labels, ratios
 │       └── pages/                   # one file per route
@@ -285,16 +344,24 @@ linear-micro-crm/
 │       ├── index.ts                 # bootstrap: open DB, seed, maintenance timers, listen
 │       ├── db/                      # connection, schema, seed, seed-data, queries
 │       │   └── maintenance.ts       # payroll materialisation, event status roll-forward
-│       ├── lib/                     # dates, pay rules, metrics, scope (role rules + redaction), validation, errors
+│       ├── lib/                     # dates (business clock), pay rules, metrics, scope (role rules + redaction), validation,
+│       │   │                        #   errors, response cache, compression, backups, two-step verification
+│       │   └── smart/               # 1.1 builders (pace, streaks, pay forecast, payroll checks, check-ins, event forecasts,
+│       │                            #   digest) behind the LM_SMART switch
 │       ├── middleware/              # session authentication
-│       ├── routes/                  # one file per API area
+│       ├── routes/                  # one file per API area (incl. insights, attention, digest)
+│       ├── test/                    # server route tests (node:test, npm test)
+│       ├── backup.ts · restore.ts   # npm run backup / backups / restore
+│       ├── service.ts               # npm run service:install / uninstall / status
+│       ├── doctor.ts · stop.ts · share.ts   # npm run doctor / stop / share
 │       └── smoke.ts                 # boots a temporary DB and exercises every endpoint
 ├── shared/                          # @lm/shared — types, constants, pure logic (+ node:test suites)
 │   └── src/
 │       ├── types.ts
 │       ├── constants.ts
 │       └── logic/
-├── docs/                            # API, LOGIC, DESIGN, TEAM_CONTRACT, TEAM, PITCH, USER_GUIDE, ROADMAP, screenshots/
+├── docs/                            # API, LOGIC, DESIGN, TEAM_CONTRACT, TEAM, PITCH, USER_GUIDE, ROADMAP, LOAD_TEST, screenshots/
+├── CHANGELOG.md
 ├── Dockerfile
 └── package.json                     # npm workspaces + root scripts
 ```
@@ -306,8 +373,10 @@ linear-micro-crm/
 - [`docs/USER_GUIDE.md`](docs/USER_GUIDE.md) — step-by-step for reps, leaders, recruiters and administrators, using the app's own button and tab names
 - [`docs/PITCH.md`](docs/PITCH.md) — the business case and rollout plan for Linear MCR
 - [`docs/ROADMAP.md`](docs/ROADMAP.md) — what comes next
+- [`CHANGELOG.md`](CHANGELOG.md) — what changed in each release (1.1.0: the smart release)
 - [`docs/API.md`](docs/API.md) — the API contract and implementation notes
-- [`docs/LOGIC.md`](docs/LOGIC.md) and [`docs/DESIGN.md`](docs/DESIGN.md) — the maths and the design system
+- [`docs/LOGIC.md`](docs/LOGIC.md) and [`docs/DESIGN.md`](docs/DESIGN.md) — the maths (section 14: the smart release, backups and what loads when) and the design system
+- [`docs/LOAD_TEST.md`](docs/LOAD_TEST.md) — the load and robustness report
 - [`docs/TEAM.md`](docs/TEAM.md) and [`docs/TEAM_CONTRACT.md`](docs/TEAM_CONTRACT.md) — who built it and how
 
 ---

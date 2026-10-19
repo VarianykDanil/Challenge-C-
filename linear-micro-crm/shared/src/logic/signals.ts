@@ -5,7 +5,7 @@
  * number of grouped queries and hands it here. Each signal compares the person with their OWN usual weeks (or with
  * their team's calendar), never with colleagues' results, and is written out as a conversation starter.
  * Reasons are conversation starters, not verdicts: never "at risk", "underperforming", "failing" or "struggling".
- * See docs/smart/p4-leader-check-ins-coaching.md (LOGIC.md §14.4).
+ * See docs/LOGIC.md §14.4 (and docs/API.md, "Check-ins (p4)").
  */
 import { BENCHMARK_RATIOS, LATE_GRACE_MINUTES, MIN_STOPS_FOR_INSIGHTS, RATIO_KEYS, RATIO_LABELS } from '../constants.ts';
 import type { CheckInPerson, CheckInReason, CheckInReasonCode, GaugeTotals, Position } from '../types.ts';

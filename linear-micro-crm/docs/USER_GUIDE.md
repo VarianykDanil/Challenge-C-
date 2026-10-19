@@ -13,7 +13,26 @@ Step-by-step for everyone at Linear MCR, by role. Start with **Everyone**, then 
 
 ## What's new in 1.1
 
-<!-- p9-week-in-review-digest writes the introduction here. -->
+Linear Hub 1.1 is the **smart release**. It does not add new screens so much as make the existing ones notice things
+for you: how your week is going against your own usual pace, what this week's pay is likely to be, who on a team might
+welcome a chat, what needs doing next, how an event is likely to go, and — every Monday — a short review of last week
+you can paste straight into WhatsApp. It also keeps your gauges safe when the hotspot drops. Everything is worked out
+from the same numbers you already see on your tiles, by fixed rules (no outside service and no AI), so the same week
+always reads the same way, and every forecast is labelled an **estimate** with its range. Nothing private leaves your
+screen: your pay, your pace notes and the check-in list are only ever shown to the person they belong to. If the office
+ever wants them gone, the estimates and suggestions can be switched off on the server with one setting.
+
+Everything below is built for a phone first: buttons are big enough to tap, and anything a mouse shows on hover is
+also on the screen already, or one tap away (open the event, the run or the person).
+
+**At a glance, by role**
+
+| You are | What is new for you |
+|---|---|
+| **Rep** | A note when your week is off (or ahead of) your usual pace; your sales streak on the **Sales** tile; **This week (estimate)** of your pay with how far you are from the bonus; the bell and **Needs attention** card (unlogged days, tomorrow's event, your pay); event forecasts; saves that wait on your phone when the signal drops; the **Tally** counter; **Your week in review** on Mondays. |
+| **Leader** | All of the rep's, plus **Check in with…** (a private list for your team), **Team coaching**, **Focus** chips, who has not logged an event yet with **Log for …**, suggested targets when you create an event, and team lines in the bell. |
+| **Recruiter** | Deadlines that set themselves when you move a candidate, **Idle** badges and **Longest idle first**, **Record the outcome** prompts, an **Idle beyond target** tile, the bell, and your week in review. |
+| **Owner / administrator** | Company-wide **Check in with…** and **Company coaching**, payroll checks before you pay, **Mark week paid** and paying many runs at once, **Runs to pay** in the bell, the **Backups** card in Settings, and the company review on Mondays. |
 
 ### Links that open the right screen
 
@@ -29,41 +48,332 @@ button; the rest of the page keeps working. The bell at the top works the same w
 crossed-out bell, and tapping it tries again. If a whole page fails you see **This page hit a problem** instead — try
 again, or open another page from the menu.
 
-### Your pace and streaks (p2)
+### Your pace and streaks
 
-<!-- p2-personal-pace-streaks: filled from docs/smart/p2-personal-pace-streaks.md -->
+**Your usual pace (reps, leaders and administrators who log gauges).** Under the coaching tips in **Your funnel** on
+the dashboard, Linear Hub compares this week (Monday to yesterday) with your own last 8 weeks — never with anyone else:
 
-### This week's pay estimate and payroll checks (p3)
+* **Off your usual pace** — you are averaging noticeably fewer stops a day than usual (after at least 2 days). When your
+  conversion is holding (at least 100 stops this week, and no more than 10% under your usual), it also tells you how
+  many extra stops usually make one sale.
+* **Conversion below your usual** — after at least 100 stops this week, your conversion is clearly below your usual.
+  It names the one funnel stage to work on first.
+* **Converting above your usual** and **Ahead of your usual pace** — a well-done when you are clearly beating your own
+  usual.
+* **Steadily improving: 3.6% → 5.2% over the last 16 weeks**, or **Conversion has drifted from … over 16 weeks** — how
+  your conversion has moved across the last 16 weeks, shown only when the change is clear.
 
-<!-- p3-money-forecast-payroll-checks: filled from docs/smart/p3-money-forecast-payroll-checks.md -->
+Today and events still live never count, so the note does not change while you are on site. You need at least 4 worked
+weeks in the last 8 (about 20 stops a day or more) before a pace note appears; new starters and recruiters see the
+card exactly as before. These notes are private: nobody else — not your leader, not the office — sees them.
 
-### Check in with… (leaders and the owner) (p4)
+**Streaks.** A streak is the number of days you worked in a row with at least one sale. Days off never break it, and
+today only counts once it is over. From 3 days, the **Sales** tile on your dashboard shows it after your rank, for
+example **#3 of 9 in your team · 12-day sales streak · best 26**. In a week where your sales so far already beat every
+earlier week of 3 or more worked days (once you have at least 4 of those) it shows **Personal best week so far**.
+Nothing ever tells you a streak was broken.
 
-<!-- p4-leader-check-ins-coaching: filled from docs/smart/p4-leader-check-ins-coaching.md -->
+**Flames on the leaderboard.** On the **Leaderboard** page and in the team card on the dashboard, a small flame with a
+number marks anyone on a streak of 5 days or more (on a computer, hover it to read "12-day sales streak"; screen
+readers say the same). Flames only appear on boards you can already see: reps see their own team, the dashboard team
+card shows your team, and **Top performers** (administrators and recruiters) shows the company. Only the streak is ever
+shown for a colleague — never their pace notes or personal bests.
 
-### Needs attention (p5)
+### This week's pay estimate and payroll checks
 
-<!-- p5-needs-attention-feed: filled from docs/smart/p5-needs-attention-feed.md -->
+**This week's pay estimate (reps and team leaders).**
 
-### Event forecasts and who has not logged yet (p6)
+- **Dashboard.** Under your tiles, a strip reads **This week (estimate): about £1,050 · £930–£1,140** — what this
+  week's payslip is likely to be, with a low–high range — and one line about your bonus: how many more sales unlock
+  it and roughly how many stops that is at your own rate, or **Bonus unlocked** once you are there. On a phone the
+  same facts are shorter ("~" means "about"), for example **£75 bonus: one more sale · ~23 stops**. Tap the strip to
+  open **Finance → My pay**.
+- **Finance → My pay → This week so far.** The same estimate with the workings: what you have logged so far, days and
+  sales, the team event days left, and a bar towards the bonus. The **ⓘ** button explains the method, e.g. "your 2.1
+  sales a day over the last 8 weeks, for the 2 team event days left".
+- It is an **estimate**: it assumes you work every team event day left this week and sell at your usual rate. Friday's
+  payslip is the official figure, and **Next payday** still shows the official amount. New starters see "not enough
+  history for a range" until they have five worked days in the last 8 weeks.
+- Only you see your estimate. Recruiters and administrators do not get one.
 
-<!-- p6-event-forecasts-roster: filled from docs/smart/p6-event-forecasts-roster.md -->
+**Payroll checks and paying many runs at once (administrators).**
 
-### If the signal drops (p7)
+- **Finance → Company → Runs to pay** says **N runs need a look** when some unpaid runs look unusual. Those runs carry
+  an amber **Check** badge. Open the run for the payslip's **Checks before paying** list (on a computer you can also
+  hover the badge), for example "£780 is 2.6× the usual £300". Checks are advice only: you can always pay.
+- **Select runs** with the boxes on the left (the box in the header selects every run you can in that list). In a long
+  list grouped by week, **Mark week paid** selects that week's pending runs. Failed transfers are left out until you
+  tick **Include failed transfers**.
+- The bar at the bottom shows **Mark 23 selected paid · £4,310.00** and a **Paid on** date (today unless you change it;
+  it cannot be before the latest selected week ends or after today). **Clear** empties the selection.
+- If any selected run has a check, you see the reasons first and confirm with **Mark N paid**. The same happens when
+  you press **Mark paid** on a single run with a check.
+- Runs are paid one at a time while a notice says **Marking N runs paid…**; then a summary such as **22 marked paid ·
+  1 skipped (already paid) · 0 failed**. A run someone already paid is skipped, not paid twice. Runs that fail stay
+  selected so you can try again. While the batch runs, the single **Mark paid** buttons wait (they are greyed out).
 
-<!-- p7-signal-proof-logging: filled from docs/smart/p7-signal-proof-logging.md -->
+### Check in with… (leaders and the owner)
 
-### Recruitment deadlines (p8)
+**Check in with…** is a short, private list of people it may be worth a word with this week. It is a list of
+conversation starters, not a ranking or a verdict.
 
-<!-- p8-recruitment-slas: filled from docs/smart/p8-recruitment-slas.md -->
+- **Leaders** find it on the dashboard, at the bottom of their team card under **Team coaching**. It covers only their
+  own team and never themselves.
+- **The owner** finds it in the **Company** section, next to **Company coaching**. It covers every team, and shows
+  each person's team under their name.
+- Each person shows their first two reasons, one per line, with the numbers behind them. For example: "Worked 2 of the
+  team's 9 event days this fortnight — usually 7 in 9", or "Late for 4 of the last 10 check-ins (team: 1 in 7)" (the
+  team figure is everyone else on the team). Tap **+N more** to show the rest, **Show less** to fold them away again,
+  and tap the name to open their profile.
+- Earnings reasons always include last week's pay: if last week's payroll has not been worked out yet, the list works
+  it out first.
+- At most five people appear, the ones with the most to talk about first. Lateness on its own never puts anyone on
+  the list.
+- Nobody on leave, and nobody who has left, ever appears.
+- When nobody stands out, the card says **Nobody needs a check-in this week**.
+- Reps and recruiters never see this list, about themselves or anyone else.
 
-### Your week in review (p9)
+**Team coaching (leaders).** Under the team's mini leaderboard, up to three sentences about the team's funnel for the
+selected period, each with one thing to run at the huddle. For example: "The team's stop-to-table rate is 31% vs the
+35% benchmark. Run a five-minute opener drill at the huddle".
 
-<!-- p9-week-in-review-digest: filled from docs/smart/p9-week-in-review-digest.md -->
+**Company coaching (owner).** In the Company section: the same coaching for every team together, with one thing to
+ask of the leaders. For example: "Linear MCR's tap-to-sale rate is 80% vs the 90% benchmark. Ask the leaders to
+spot-check sign-up forms this week".
 
-### Backups and running in the background (administrators) (p10)
+**Focus chips (leaders and the owner).** On **Gauges → Team → By person**, anyone with at least 20 stops in the
+selected range whose weakest stage is below benchmark gets a chip such as **Focus: stop → table**. The ratio cells in
+the same row show their rate against the benchmark (on a computer, hovering the chip shows it too). It tells you what
+to practise together.
 
-<!-- p10-backups-autostart: filled from docs/smart/p10-backups-autostart.md -->
+Reps keep their own coaching on the dashboard and the Gauges page exactly as before. If the office switches the smart
+features off, the check-in list disappears for everyone; Team coaching, Company coaching and the Focus chips stay,
+because they are worked out from the figures already on the page.
+
+### Needs attention
+
+Linear Hub now tells you what needs doing instead of waiting for you to look. Everything comes from one list, shown in
+three places:
+
+- **The bell** at the top right shows a number when something new needs you. Tap it to see the list, grouped (**Your
+  pay**, **Gauges**, **Events**, **Payroll**, **Recruitment**, **Security**). Each line has a button that takes you
+  straight to the right screen, for example **Log gauges** or **Log for Jordan**. Opening the bell clears the number on
+  this device; a line you have read comes back as new only if it gets bigger (for example a second person has not
+  logged yet). The browser tab shows the same number, like "(2) Dashboard · Linear Hub". If Linear Hub cannot be
+  reached, the bell says **Could not check just now** and offers **Try again**.
+- **Pop-up notes** appear at the bottom of the screen for new, important things (at most one when you open the app).
+  They never interrupt you while a window such as **Log gauges** is open; those wait in the bell. You will not see the
+  same pop-up twice on the same phone or computer.
+- **The Needs attention card** at the top of the dashboard shows the first five, with **Show all** for the rest. When
+  nothing needs you it simply says **All caught up**.
+
+The list checks again every minute while Linear Hub is open, and clears itself: log the gauges and that line
+disappears. There are no phone notifications while Linear Hub is closed (those need a secure https address, and the
+hotspot uses plain http).
+
+What each person sees:
+
+- **Reps**: event days this pay week (from Monday, and today once the event has finished) that you have not logged yet,
+  one line per day, with what that day is worth from your own pay plan so it is not missing from Friday's pay;
+  tomorrow's event with its start time and notes; and your own pay: due tomorrow, overdue, or just paid ("You've been
+  paid …"). If an overdue payment is older than the 12 weeks the office's pay list shows, the line asks you to mention
+  it to the office. Only ever about you and your own team's events.
+- **Leaders**: the same for yourself, plus your team: who has not logged an event that finished (with **Log for …**
+  when it is one person), events with nothing logged ("did it run?"), today's events that are behind target after 1 pm,
+  and numbers that look mistyped. Also the candidates you own: overdue follow-ups and interviews that need an outcome.
+- **Recruiters**: overdue follow-ups for your candidates and unassigned ones, interviews from the last eight weeks that
+  need an outcome (the only place the dashboard asks for them), your interviews in the next 24 hours, and your own pay.
+- **Owner / administrators**: every team's gaps and events, **Runs to pay** with the total and any failed transfers
+  (red when a run is overdue), a payday reminder on Fridays, the whole recruitment pipeline, and a reminder to turn on
+  two-step verification if it is off.
+
+### Event forecasts and who has not logged yet
+
+**Event forecasts (everyone).** Upcoming and live events now show what to expect, for example
+**expect ≈ 14 (9–20) · 5 reps usually**: an estimate of about 14 sales, likely between 9 and 20, with the 5 people who
+usually turn up. It is based on the team's own similar days over the last 12 weeks. Tap the event to see what it is
+based on and how many people the target needs (on a computer, hovering the estimate shows the same): "Estimate from 23
+similar days (Deansgate team, BCN private sites, last 12 weeks) · range 9–20 · target 17 needs about 7 reps". An amber
+**Stretch** pill means the target is well above what the team usually sells on days like this. A red **Behind target**
+pill on a live event means the day is unlikely to reach 70 % of its target at the usual pace. Events without enough
+history show no estimate.
+
+**Upcoming days are neutral.** Events that have not started show **Target 17** with a grey bar instead of an amber
+"0 / 17". Colour starts once the day is under way.
+
+**Suggested target (administrators and leaders).** In **New event**, once you have picked the campaign, team and type,
+you see **Suggested target: 14** with a **Use** button. It is only a suggestion: tap **Use** to put it in the **Sales
+target** box, or type your own. Nothing is changed for you. It also tells you how many reps the typed target needs.
+When there is no suggestion for that choice, the form says so and you set the target as usual.
+
+**Who has not logged yet (administrators and team leaders).** On the Events page, today's and the last two days' events
+read **4 / 7 logged**, in amber while someone on that team is missing. The 7 is the team's active members who had
+started by that day. Someone from outside the team who logged there (an administrator helping out, say) does not count
+towards the 4, so the row always matches the event's own list. Open the event to see **Not logged yet** with one
+button per person. Tap **Log for Sophie** to open **Log gauges** with Sophie already chosen. Once you save, her button
+goes. Reps, recruiters and other teams never see this list.
+
+**Reps.** If you have not logged today's event yet, its page says **Log today's gauges**. On the dashboard, today's
+event (once it has started) has a **Log gauges** button that opens the form for that event.
+
+**Directions.** Every event row has a directions button (the arrow icon), and the event page has a **Directions**
+link. It opens Google Maps (the Maps app on a phone) at the venue.
+
+### If the signal drops
+
+**Reps, leaders and administrators** (anyone who logs gauges):
+
+* **When the signal drops** — or Linear Hub itself is not running — an amber strip appears under the top bar: **Can't
+  reach Linear Hub — check the hotspot. Gauges you save are kept on this phone.** It goes away by itself when the
+  connection is back; **Try again** checks straight away.
+* **Logging without signal.** Log gauges as normal. The button reads **Save on this phone**. You'll see **Saved on
+  this phone — it will send when you're back online**, and a blue strip says **1 entry waiting to send**.
+* **When the signal is back**, it sends by itself and tells you **Sent from this phone — logged** (or **— updated
+  your earlier entry**). Tap **Send now** to try straight away, or **View** to see what is waiting.
+* **If someone changed the same day while yours was waiting** — for example your leader corrected it — your entry is
+  not sent over theirs. The strip says **1 entry needs a look**. Tap **Review** to see both versions, then choose:
+  * **Send mine anyway** to replace theirs with yours;
+  * **Open** to edit yours first;
+  * **Discard** to keep theirs.
+
+  The same happens if the entry you were changing was **deleted** while yours waited: the sheet says **Linear Hub no
+  longer has the entry you changed — it may have been deleted.** **Send mine anyway** logs the day again;
+  **Discard** leaves it deleted.
+
+  If Linear Hub refuses an entry (for example a check-in time in the future from a phone clock that is wrong), it
+  shows **Not accepted** with the reason.
+* **Signing out.** If entries are still waiting, Linear Hub asks first: **1 entry hasn't been sent — it stays on this
+  phone and sends next time you sign in as Jordan.** Nothing is deleted.
+* **Private browsing.** Some private modes don't let Linear Hub keep anything on the phone. Then a save without signal
+  shows **Could not save gauges**, as before. Keep the form open and save again when you have signal.
+* **Keep the page open.** Saves wait safely while Linear Hub is open in the browser. Linear Hub cannot open from
+  scratch without any signal yet (that needs a secure https address; it is on the roadmap).
+* **Two taps to log.** Opening **Log gauges** from the dashboard or the Gauges page on a day when your team has one
+  event under way picks it for you (**Today's event selected**). Around the start of an event (from an hour before to
+  an hour and a half after) a **Checking in? Use now (09:58)** button appears. Tap it to record your arrival; it never
+  fills itself in.
+* **Leaders and administrators:** there, **Rep** starts on the first person in the team who hasn't logged that event
+  yet (**First on the team without an entry yet**). From an event's own page it still starts on you.
+
+**Tally — count your shift as you go** (reps, leaders and administrators):
+
+* **Opening it.** Tap **Tally** on the Gauges page, or **Count your shift** on the dashboard's **Upcoming events**
+  card.
+* **Counting.** Tap the big **+1** next to Stops, To table, Presentations, Closes, Taps and Sales as it happens; the
+  small **−** takes one off. The tally keeps the funnel in order: you can't add a sale before the tap that led to it,
+  and it tells you why in one line.
+* **Your counts are safe** on the phone through reloads and lost signal. The **Tally** button shows today's stop
+  count, and the dashboard says **Carry on counting**. An unfinished tally is dropped after 14 days.
+* **Finish shift** opens Log gauges with your counts filled in: check them, add your check-in or notes, and save
+  (without signal it is kept on the phone like any other save). The tally then clears.
+
+**Recruiters** see the same amber strip when Linear Hub can't be reached, without the line about gauges.
+
+### Recruitment deadlines
+
+**Every candidate now gets a real deadline.** A new candidate is due a **Phone screen** within 3 days. Each time you
+move someone to a new stage, their next-action date is set from that stage's target:
+
+| Stage | Target |
+|---|---|
+| Applied | 3 days |
+| Phone screen | 5 days |
+| Interview | 7 days |
+| Observation day | 7 days |
+| Offer | 7 days |
+
+The **Move to…** list shows the date each stage would set ("Phone screen · due Sat 24 Oct"), and the confirmation
+says it again: "Next action due Sat 24 Oct (5-day target)". You can still change the date under **Notes & next
+action → Due** on the candidate's page. Hiring, rejecting or withdrawing someone clears their deadline.
+
+**Idle badges.** When someone has been in the same stage for longer than its target, an amber **Idle 9d** badge
+appears on their board card, under their stage in the list view, and on the **Pipeline** card of their page. Moving
+them on resets the count. To see who needs moving most, choose **Longest idle first** in the order menu next to
+**Any owner** (it works on the board and in the list): everyone past their target comes first, the furthest past at
+the top, then everyone else, the nearest to their target first. The same menu has **Recently moved first** and, in the
+list, **Newest applicants first**.
+
+**Record the outcome.** Two hours after an interview's start time, if its outcome still says *Pending* (and for up to
+eight weeks after it), the candidate's page shows a **Record the outcome** card at the top with the outcome menu right
+there — pick **Passed**, **Failed** or **No show** and it saves straight away. The interview also carries an
+**Outcome due** badge in the **Interviews** list.
+
+**Recruiter dashboard.** Recruiters get an **Idle beyond target** tile — how many open candidates have been in a stage
+longer than its target. Interviews that have happened but still say pending (the ones **you ran or whose candidate you
+own**, from the last eight weeks) are asked for once, in the **Needs attention** card at the top of the dashboard and
+in the bell: **Record outcome** opens the candidate's page with the outcome menu at the top. Once you save an outcome
+the line disappears.
+
+**Who sees what.** Recruitment pages are for recruiters, team leaders and the owner, as before; reps never see them.
+The **Idle beyond target** tile is on the **recruiter** dashboard only. Everyone who runs interviews — recruiters, team
+leaders and the owner — gets the same outcome reminders in **Needs attention** and the bell: interviews from the last
+eight weeks that they ran or whose candidate they own (the owner sees them all), and the **Record the outcome** card on
+each candidate's page. Deadlines, Idle badges and the **Record the outcome** card stay on even if the office switches
+the smart features off.
+
+### Your week in review
+
+At the bottom of the **Dashboard**, under the team, events and announcements, the **Your week in review · w/c 12 Oct**
+card sums up the last full week (Monday to Sunday) in five to eight short lines.
+
+- **‹ / ›** step back and forward a week. **›** is greyed out on the latest finished week: a week has no review until
+  it is over.
+- Lines with a **lock** are private to you — your pay, the payroll figures, the size of your check-in list. They are
+  never copied.
+- **Copy as text** copies the other lines, with the title, as plain text, ready for the team WhatsApp group. You will
+  see **Copied — paste it into WhatsApp**. It works on the office Wi-Fi and over a phone hotspot. If a phone refuses,
+  the text appears selected under the card so you can copy it by hand.
+
+What each role sees:
+
+- **Reps** — your sales, stops and conversion against the week before; where you finished on your team's board and
+  whether you moved; how you did against the bonus (for example **You finished one sale short of the £75 bonus**); one
+  coaching tip for the stage that most needs it; and, with a lock, your pay for the week. Nobody else's name appears in
+  your review.
+- **Leaders** — your team's sales and conversion against the week before; the top seller and the biggest moves up and
+  down on your team's board; how many recorded check-ins were late (a number, never names); next week's events with an
+  estimate of the sales they should bring against their targets; and, with a lock, how many people are on your
+  **Check in with…** list — the card never names them, and nobody on that list is named in the lines you can copy.
+- **Administrators** — company sales and revenue against the week before; the campaign with the biggest rise and the
+  one with the biggest fall; hires and applications; and, with a lock, the payroll due on Friday and any failed
+  transfers still to send again (the same runs as **Runs to pay**).
+- **Recruiters** — applications, interviews and hires against the week before; how many open candidates are past their
+  next action (the **Overdue actions** tile); interview outcomes to record now; and the size of the open pipeline.
+
+The numbers are the same ones as on your tiles, the leaderboard and the finance and recruitment pages for that week —
+if the review and a tile ever disagree, the tile is looking at a different period.
+
+### Backups and running in the background (administrators)
+
+**Settings › Backups** (only the owner and other administrators see this card) shows:
+
+- **Last backup** — how long ago, and the date and time. A green **Up to date** badge means there is one from the last
+  36 hours.
+- **Kept** — how many copies there are. Linear Hub keeps one a day for 30 days, then one a week for 8 weeks.
+- **Latest file** and **Folder on the server laptop**, with a **Copy path** button.
+
+If there has been no backup for more than 36 hours the card turns amber (**No backup for 3 days**). Backups only
+happen while Linear Hub is running: leave it running overnight, or on the laptop run `npm run backup`. Either way,
+copy the backups folder to iCloud or Drive now and then — a backup on the same laptop does not survive losing it.
+
+If the server was started with automatic backups switched off (`LM_BACKUP=0`), the card says so with an amber **Off**
+badge and does not promise nightly copies: run `npm run backup` on the laptop yourself, or start Linear Hub again
+without `LM_BACKUP=0`.
+
+The backups folder is a full copy of everyone's details, pay and the two-step key: keep it private, never commit it to
+git or share it.
+
+To go back to a backup (for example after a mistake that deleted the wrong entries): on the laptop, stop the server
+(`npm run stop`, or `npm run service:uninstall` if it runs in the background) and run
+`npm run restore -- <file name>`. It shows what will change and asks first; the database it replaces is kept, so you
+can change your mind.
+
+To keep Linear Hub running without a Terminal window — so phones on the hotspot keep working and it starts by itself
+when you log in — run `npm run service:install` once on the laptop. `npm run service:status` says whether it is
+running; `npm run service:uninstall` stops it. The README has the details.
+
+Everyone else sees no change, except that pages load faster over the hotspot: the server now sends compressed pages
+and data (about a third of the bytes it sent before).
 
 ---
 
@@ -211,7 +521,7 @@ Open **Team**. Team chips at the top (member count and leader) filter by team; t
 
 ### Settings
 
-**Settings** shows your profile as the office holds it (**Employee ID**, **Email**, **Phone**, **Position**, **Role**, **Team**, **Pay plan**, **Start date**, **City** — ask an administrator to change anything), **Appearance** and **About this app** (version and when the sample data was seeded).
+**Settings** shows your profile as the office holds it (**Employee ID**, **Email**, **Phone**, **Position**, **Role**, **Team**, **Pay plan**, **Start date**, **City** — ask an administrator to change anything), **Appearance**, **Security** (turn on **Two-step verification** with an authenticator app, so a six-digit code is needed after your email and employee ID) and **About this app** (version and when the sample data was seeded). Administrators also see **Backups** (see [What's new in 1.1](#backups-and-running-in-the-background-administrators)).
 
 ---
 
@@ -250,7 +560,7 @@ On the Dashboard choose **New announcement**, add a **Title** and the **Message*
 
 ### Your dashboard
 
-Your dashboard leads with **Recruitment**: **Open candidates** (with how many are at interview or observation), **Interviews this week**, **Overdue actions**, **Hires** for the chosen period and **Avg time to hire**; then **Upcoming interviews** (the next two weeks), **Overdue follow-ups** and **Weekly activity** for the last twelve weeks. Below that: **Top performers** across the company, **Upcoming events** and **Announcements**. You do not log gauges, so the Gauges page is not on your menu; Events, Leaderboard and Team are read-only.
+Your dashboard opens with the **Needs attention** card (overdue follow-ups, interview outcomes to record, today's interviews), then leads with **Recruitment**: **Open candidates** (with how many are at interview or observation), **Interviews this week**, **Overdue actions**, **Idle beyond target**, **Hires** for the chosen period and **Avg time to hire**; then **Upcoming interviews** (the next two weeks), **Overdue follow-ups** and **Weekly activity** for the last twelve weeks. Below that: **Top performers** across the company, **Upcoming events** and **Announcements**. You do not log gauges, so the Gauges page is not on your menu; Events, Leaderboard and Team are read-only.
 
 ### The pipeline
 
@@ -274,7 +584,7 @@ Open **Recruitment**. The range picker (**Last 4 weeks**, **Last 12 weeks**, **T
 
 - **Pipeline** — a stepper showing the stage and since when.
 - **Profile** — email, phone, city, **Source**, **Rating** (click the stars, 1–5), **Owner**, **Position**, and after hiring **Hired as → View profile**.
-- **Notes & next action** — **Notes**, **Next action**, **Due** and **Owner**; **Save**. Always set a next action and its date: when it passes, the candidate is flagged **Overdue** on the board, in the list and on your dashboard, so nothing goes quiet.
+- **Notes & next action** — **Notes**, **Next action**, **Due** and **Owner**; **Save**. Every new candidate and every stage move gets a **Due** date from the stage's target (see [Recruitment deadlines](#recruitment-deadlines)); change it here if you need to. When it passes, the candidate is flagged **Overdue** on the board, in the list and on your dashboard, so nothing goes quiet.
 - **Interviews** and **Timeline** — every stage change, newest first, with who made it and the note.
 
 ### Moving candidates
@@ -361,5 +671,8 @@ From the repository root, `npm run seed` rebuilds the database with the determin
 | Your punctuality shows **—** | No check-ins have been recorded yet. | Tap **Now** in **Checked in at** when you arrive at each event. |
 | **Check-in** shows **—** for other people | Their check-in times are only shown to administrators and their own team's leader. | Expected. |
 | "Demo accounts aren’t available right now" | The database has real users, or demo accounts are switched off. | Sign in with your own details. |
+| An amber strip: **Can't reach Linear Hub — check the hotspot** | Your phone has no signal, or the laptop running Linear Hub is asleep or stopped. | Keep logging: saves wait on this phone (**Save on this phone**) and send by themselves when the connection is back. |
+| **1 entry needs a look** | Someone changed or deleted the same day while your save was waiting on the phone. | Tap **Review**, then **Send mine anyway**, **Open** or **Discard**. |
+| A strip or card you expected is missing (pace note, pay estimate, **Needs attention**) | There is not enough history yet, or the office has switched the smart features off. | Nothing to do; the rest of the page works as before. |
 
-*Linear Hub v1.0.0 — © Linear MCR Limited, internal use.*
+*Linear Hub v1.1.0 — © Linear MCR Limited, internal use.*

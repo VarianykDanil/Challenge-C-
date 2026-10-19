@@ -3,7 +3,7 @@
  *
  * Pure: the server (lib/smart/eventForecast.ts) gathers comparable completed days with two grouped queries and hands
  * the buckets here; the client reuses the small helpers (repsNeededFor, scheduledFlag) for the New event form.
- * See docs/smart/p6-event-forecasts-roster.md and LOGIC.md §14.6.
+ * See docs/LOGIC.md §14.6 (and docs/API.md, "Event forecasts (p6)").
  */
 import { EVENT_MAX_TARGET_SALES } from '../constants.ts';
 import type { EventForecast, EventStatus } from '../types.ts';

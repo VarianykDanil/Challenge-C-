@@ -112,4 +112,4 @@ A rep: under five minutes. A leader: half an hour. The recruiter: half an hour. 
 
 ---
 
-*Linear Hub v1.0.0 — © Linear MCR Limited, internal use.*
+*Linear Hub v1.1.0 — © Linear MCR Limited, internal use.*

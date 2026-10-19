@@ -29,7 +29,7 @@ import { isOverdue, outcomesToRecord } from './recruitment.ts';
 
 export const ATTENTION_MAX_ITEMS = 20;
 
-/** Every threshold the rules use, in one place (documented in docs/smart/p5-needs-attention-feed.md). */
+/** Every threshold the rules use, in one place (documented in docs/LOGIC.md §14.5). */
 export const ATTENTION_RULES = {
   /**
    * Days back the input covers at least (events and gauge rows dated ≥ today − 3, or from this week's Monday when that

@@ -22,6 +22,11 @@ the built `index.html`; styles inline or Google Fonts; fonts gstatic; `frame-anc
 `Strict-Transport-Security` whenever the request arrived over HTTPS. `GET /assets/*` (hashed Vite bundles) is served
 with `Cache-Control: public, max-age=31536000, immutable`; `index.html` with `no-cache`.
 
+**Compression** (1.1): JSON, HTML, JavaScript, CSS and SVG responses of 1 KB or more are sent `gzip`-encoded when
+`Accept-Encoding` allows it (`br` only when the client ranks it above gzip), with an exact `Content-Length` and
+`Vary: Accept-Encoding`. `LM_COMPRESSION=0` turns it off. Details under *Smart endpoints → Backups, health and
+compression*.
+
 **Response cache.** `GET /me/dashboard`, `/finance/summary`, `/recruitment/summary`, `/leaderboard`,
 `/gauges/summary` and (1.1) `/me/insights`, `/me/attention`, `/me/digest` and `/events/forecast` are cached for 20 s per (user, URL) and invalidated by **every** write (`POST`/`PATCH`/`DELETE`
 on `/api/*`) and by the maintenance jobs. The header `X-Cache: HIT | MISS` (exposed through CORS) says which it was.
@@ -96,15 +101,15 @@ unless the requester is an `admin` or the row is the requester themselves. `GET 
 ## Recruitment (recruiter, leader, admin)
 - `GET /recruitment/candidates?stage&ownerId&source&q&open=true` → `CandidateWithMeta[]` (`open=true` excludes terminal stages). Sorted by `stageUpdatedAt` desc.
 - `GET /recruitment/candidates/:id` → `CandidateWithMeta & { history: StageChange[]; interviews: Interview[] }`.
-- `POST /recruitment/candidates` body: `Pick<Candidate,'firstName'|'lastName'|'email'> & Partial<Candidate>` → `CandidateWithMeta` (201). Creates an `applied` stage change. **`409 { error: 'A candidate with that email is already in the pipeline (#id)' }`** when an open (non-terminal) candidate has the same email (case-insensitive); a closed candidate may re-apply.
-- `PATCH /recruitment/candidates/:id` partial `Candidate` (not `stage`) → `CandidateWithMeta`. Changing `email` onto one that is open in the pipeline → `409`.
-- `POST /recruitment/candidates/:id/stage` body `{ stage: CandidateStage; note?: string; teamId?: number | null; position?: 'trainee' | 'field_rep' }` → `CandidateWithMeta`. Records a `StageChange`. **Stage machine** (anything else → `409`): from an open stage a candidate may move **forward** any number of steps along `applied → screening → interview → observation → offer`, **back one step**, or to `rejected`/`withdrawn`; **`hired` only from `offer`**. Terminal stages are immutable, except that an **admin may reopen a `rejected`/`withdrawn` candidate to `offer`**; `hired` is final. Moving to `hired` creates a `User` and sets `hiredUserId`: role `rep`, `teamId` from the body (default: the owner's team, else none; unknown team → `400`), `position` from the body (default: the application's position when it is `trainee`/`field_rep`, else `trainee`), the server's default pay plan for that position (a `payPlanId` in the body is ignored), `startDate` = today, the next free `LM-xxxx`, and a `first.last@linear-mcr.co.uk` address built from the name with accents transliterated to ASCII (`Łukasz Żółć` → `lukasz.zolc@…`; an untranslatable part is dropped, `staff@…` when nothing is left; a taken address gets a number). The hire is refused with **`409`** when a user with the candidate's email already exists or another candidate with that email was already hired. Leaders and owners cannot be minted through recruitment.
+- `POST /recruitment/candidates` body: `Pick<Candidate,'firstName'|'lastName'|'email'> & Partial<Candidate>` → `CandidateWithMeta` (201). Creates an `applied` stage change. `nextActionAt` omitted → today + 3 days (the Applied target, 1.1); `null` → no deadline; any other value must be a valid deadline (see *Recruitment SLAs*), else `400`. **`409 { error: 'A candidate with that email is already in the pipeline (#id)' }`** when an open (non-terminal) candidate has the same email (case-insensitive); a closed candidate may re-apply.
+- `PATCH /recruitment/candidates/:id` partial `Candidate` (not `stage`) → `CandidateWithMeta`. Changing `email` onto one that is open in the pipeline → `409`. The deadline changes only when the body sets `nextActionAt`, and it must be a valid deadline (1.1).
+- `POST /recruitment/candidates/:id/stage` body `{ stage: CandidateStage; note?: string; teamId?: number | null; position?: 'trainee' | 'field_rep'; nextActionAt?: string | null }` → `CandidateWithMeta`. Records a `StageChange`. The new stage's next-action deadline is today + that stage's target unless the body sets `nextActionAt` (1.1; closed stages always get `null`; see *Recruitment SLAs*). **Stage machine** (anything else → `409`): from an open stage a candidate may move **forward** any number of steps along `applied → screening → interview → observation → offer`, **back one step**, or to `rejected`/`withdrawn`; **`hired` only from `offer`**. Terminal stages are immutable, except that an **admin may reopen a `rejected`/`withdrawn` candidate to `offer`**; `hired` is final. Moving to `hired` creates a `User` and sets `hiredUserId`: role `rep`, `teamId` from the body (default: the owner's team, else none; unknown team → `400`), `position` from the body (default: the application's position when it is `trainee`/`field_rep`, else `trainee`), the server's default pay plan for that position (a `payPlanId` in the body is ignored), `startDate` = today, the next free `LM-xxxx`, and a `first.last@linear-mcr.co.uk` address built from the name with accents transliterated to ASCII (`Łukasz Żółć` → `lukasz.zolc@…`; an untranslatable part is dropped, `staff@…` when nothing is left; a taken address gets a number). The hire is refused with **`409`** when a user with the candidate's email already exists or another candidate with that email was already hired. Leaders and owners cannot be minted through recruitment.
 - `GET /recruitment/interviews?from&to&candidateId` → `Interview[]`. `POST /recruitment/interviews` → `Interview` (201). `PATCH /recruitment/interviews/:id` → `Interview`.
 - `GET /recruitment/summary?from&to` → `RecruitmentSummary`. Default range: last 12 weeks. `weekly` buckets are **clipped to the requested range** (the first bucket is keyed by `from` when the range starts mid-week, the last ends at `to`), so the bars add up to `applied`/`hired`. `overdueActions` uses the shared `isOverdue` rule: a date-only `nextActionAt` is overdue from the next calendar day, a timestamp once now is past it.
 
 ## Misc
 - `GET /announcements` → `Announcement[]` (pinned first, newest first). `POST /announcements` (admin, leader) → `Announcement` (201).
-- `GET /health` → `{ ok: true, version: string, seededAt: string }`.
+- `GET /health` → `{ ok: true, version: string, seededAt: string }` (`version` is read from `server/package.json`, `"1.1.0"`). An admin session also gets `backup` (see *Backups, health and compression*).
 
 ## Smart endpoints
 
@@ -113,8 +118,9 @@ field on an existing payload is optional. Role scoping is unchanged and every sm
 caller may already see. **Kill switch:** with `LM_SMART=0` every smart part below is null / empty, and the optional
 keys on existing payloads are absent (the 1.0 shapes exactly). Recruitment SLAs are not switched off: they are
 workflow rules, not estimates, so `POST /recruitment/candidates` and `POST /recruitment/candidates/:id/stage` still set
-the stage's default `nextActionAt` when the body leaves it out (send `nextActionAt: null` for no deadline). Types are in `shared/src/types.ts`
-("Smart release 1.1").
+the stage's default `nextActionAt` when the body leaves it out (send `nextActionAt: null` for no deadline). Backups
+(`LM_BACKUP`) and compression (`LM_COMPRESSION`) have their own switches, and the phone outbox adds no endpoint.
+Types are in `shared/src/types.ts` ("Smart release 1.1"). The rules behind every field are in LOGIC.md §14.
 
 | Endpoint | Who | Answer | Cached |
 |---|---|---|---|
@@ -125,12 +131,14 @@ the stage's default `nextActionAt` when the body leaves it out (send `nextAction
 
 - `GET /me/insights` → `SmartInsights { generatedFor, personal: { baseline, direction, streaks, payForecast }, boardStreaks, team, company }`.
   `personal` is always the caller's own (each part null when it does not apply). `boardStreaks` (`{ userId, streak }[]`,
-  streaks ≥ 5 only): rep and leader — their own team; admin — every active rep and leader; recruiter — `[]`.
+  streaks ≥ 5 only): rep and leader with a team — their own team; admin — every active rep and leader; recruiter and
+  anyone without a team — `[]`.
   `team` = `{ checkIns: CheckInPerson[] }` **only for a leader with a team** (own team, never the leader); `company` =
   `{ checkIns }` **only for an admin** (every team, never the admin). Reps and recruiters always get `team: null` and
   `company: null`.
-- `GET /me/attention` → `AttentionFeed { items: AttentionItem[], generatedAt }`, sorted danger → warning → info, then
-  newest first, at most 20. Keys are deterministic, so a resolved item disappears by itself.
+- `GET /me/attention` → `AttentionFeed { items: AttentionItem[], generatedAt, disabled? }`, sorted danger → warning →
+  info, then newest first, at most 20. Keys are deterministic, so a resolved item disappears by itself. `disabled: true`
+  appears only with `LM_SMART=0` (then `items` is `[]`).
 - `GET /me/digest?week=YYYY-MM-DD` → `WeekDigest { weekStart, weekEnd, role, title, bullets, text }`. Any date
   normalises to its Monday; the default is the last completed week; a week that has not finished yet, or one before
   2020, → `400`. `text` holds only the shareable bullets (plain text, no markdown or HTML).
@@ -138,51 +146,430 @@ the stage's default `nextActionAt` when the body leaves it out (send `nextAction
   recruiter `403`) → `{ forecast: EventForecast | null }`. `campaignId`, `teamId` and `type` are required (`400`
   otherwise); `targetSales` is optional, a whole number 0–500. `null` when there is not enough comparable history.
 
-Optional fields on existing payloads (absent when not computed, and always absent with `LM_SMART=0`):
+New fields on existing payloads (optional keys are absent when not computed and with `LM_SMART=0`; the two exceptions
+are noted in their rows: `/finance/me`'s `forecast` is always present, and `backup` does not depend on `LM_SMART`):
 
 | Field | On | Rule |
 |---|---|---|
-| `forecast?: EventForecast \| null` | `GET /events`, `GET /events/:id` (`SalesEventWithMeta`) | scheduled and live events with enough history only |
-| `streak?: number` | `GET /leaderboard` rows (`LeaderboardRow`) | the person's current sales streak in worked days |
-| `flags?: PayrollFlag[]` | `GET /finance/payroll`, `GET /finance/payroll/:id` (`PayrollRunWithUser`) | **admins only**, pending / failed runs only; advisory, never blocks paying |
-| `forecast: PayForecast \| null` | `GET /finance/me` | always present (null for recruiters, admins and `LM_SMART=0`); an estimate — `nextPayAmount` stays the official figure |
-| `backup?: BackupStatus` | `GET /health` | admins only |
+| `forecast?: EventForecast` | `GET /events`, `GET /events/:id` (`SalesEventWithMeta`) | scheduled and live events with enough history only; otherwise the key is absent (the type allows `null`, the server never sends it) |
+| `roster?: EventRosterCount` (`{ members, logged }`) | `GET /events`, `GET /events/:id` (`SalesEventWithMeta`) | completed and live events dated today − 2 … today only; counts, no names |
+| `streak?: number` | `GET /leaderboard` rows (`LeaderboardRow`) | every ranked row: the person's current sales streak in worked days over the last 180 days (0 when none) |
+| `flags?: PayrollFlag[]` | `GET /finance/payroll`, `GET /finance/payroll/:id` (`PayrollRunWithUser`) | **admins only**, pending / failed runs only (at most 80 per call, newest weeks first; `[]` when a checked run looks normal); advisory, never blocks paying |
+| `forecast: PayForecast \| null` | `GET /finance/me` | always present; null for recruiters, admins, anyone without a team or a pay plan, and with `LM_SMART=0`; an estimate — `nextPayAmount` stays the official figure |
+| `backup?: BackupStatus & { enabled? }` | `GET /health` | admins only, whatever `LM_SMART` says; not cached |
+
+Request bodies (Recruitment SLAs, not switched off by `LM_SMART=0`): `nextActionAt` on `POST /recruitment/candidates`,
+`PATCH /recruitment/candidates/:id` and the new optional `nextActionAt` on `POST /recruitment/candidates/:id/stage`.
 
 ### Pace and streaks (p2)
 
-<!-- p2-personal-pace-streaks: filled from docs/smart/p2-personal-pace-streaks.md -->
+No new endpoint. Pace and streaks fill parts of two cached payloads (both switched off by `LM_SMART=0`).
+
+**`GET /me/insights` → `personal.baseline`, `personal.direction`, `personal.streaks`, `boardStreaks`**
+
+| Field | Type | Who gets a value | Notes |
+|---|---|---|---|
+| `personal.baseline` | `PersonalBaseline \| null` | the caller only; null for recruiters, new starters (fewer than 4 worked weeks in the last 8) and anyone under 20 stops a day | `weeks`, `stopsPerDayMean` (μ), `stopsPerDaySd` (σ), `conversion` (pooled usual rate, 0..1), `current` {`days`, `stops`, `sales`, `stopsPerDay`, `conversion`}, `alerts` (0–2) |
+| `personal.baseline.alerts[]` | `BaselineAlert` | — | `metric` `stopsPerDay`\|`conversion`, `tone` `warning`\|`positive`, `z` (2 dp), `current` and `usual` (stops a day, or conversion 0..1), `title`, `body` (ready-to-show sentence) |
+| `personal.direction` | `TrendDirection \| null` | the caller only; null for recruiters and when either 8-week half has under 400 stops | `label` `improving`\|`declining`\|`steady`, `z`, `earlierConversion`, `recentConversion`, `earlierStops`, `recentStops` |
+| `personal.streaks` | `Streaks \| null` | the caller only; null for recruiters and for anyone with no gauge rows before today | `current`, `best` (worked days in a row with ≥ 1 sale), `personalBestWeek`, `weekSales` (Monday to yesterday), `bestPreviousWeekSales` (best earlier week with ≥ 3 worked days; 0 when none) |
+| `boardStreaks` | `{ userId, streak }[]` | rep / leader with a team: their own team; admin: every active rep and leader; recruiter (and anyone without a team): `[]` | only streaks ≥ 5, longest first (ties by user id); counted over the last 180 days |
+
+Nobody can read another person's baseline, direction or personal-best flag: they exist only inside the caller's own
+`/me/insights.personal`. Only the streak number appears for other people, on boards the caller can already see.
+
+**`GET /leaderboard` → `row.streak`** (optional number): every ranked row carries its person's current streak over the
+last 180 days (0 when they have no selling run). Absent with `LM_SMART=0`.
+
+Cost: one grouped SQL statement per builder (`personalPace` is one `weeklyHistory` call for 16 weeks + this week;
+`personalStreaks`, `streaksForUsers`, `boardStreaks`) and no writes. On the seeded demo database
+`/leaderboard?period=quarter` with streaks answers in about 12 ms uncached; a cached `/me/insights` in under 2 ms.
 
 ### Pay forecast and payroll checks (p3)
 
-<!-- p3-money-forecast-payroll-checks: filled from docs/smart/p3-money-forecast-payroll-checks.md -->
+**Pay forecast** — `forecast` on `GET /finance/me`, `personal.payForecast` on `GET /me/insights` (same builder, same
+numbers). `GET /finance/me` always carries the key; it is `null` with `LM_SMART=0`, for admins and recruiters, for
+anyone without a team, and for anyone without a pay plan. It is only ever the caller's own estimate. `/finance/me` is
+not in the response cache; `/me/insights` is.
+
+| Field | Meaning |
+|---|---|
+| `weekStart` | Monday of the current pay week |
+| `payday` | the Friday after the week ends (`paydayForWeek`) |
+| `estimate` | always `true` |
+| `soFar` | `{ days, sales, gross }` logged this week so far (`weekPayFor(monday, today)`; `gross` = `estimateWeekPay` of it) |
+| `remainingDays` | team event days still to come this week (LOGIC §14.3) |
+| `low`, `likely`, `high` | GBP gross for the whole week, `low ≤ likely ≤ high` |
+| `bonusThreshold`, `bonusAmount` | from the person's plan |
+| `bonusGap` | sales still needed for the bonus (0 when reached, or when the plan has no threshold) |
+| `bonusProbability` | 0–1 chance of reaching the bonus this week |
+| `bonusLikelihood` | `'reached' \| 'likely' \| 'possible' \| 'unlikely' \| 'none'` |
+| `stopsForBonus` | stops needed at the person's own conversion to close the gap, or `null` |
+| `basis` | `{ weeks, workedDays, salesPerDay }` — the history the estimate rests on (`weeks = 0` → no range) |
+| `sales` (optional) | `{ low, likely, high }` projected week sales behind the three money figures |
+
+The forecast is never written anywhere: no payroll run, no gauge row. `nextPayday` / `nextPayAmount` are unchanged and
+stay the official figures.
+
+**Payroll checks** — `flags` on `GET /finance/payroll` and `GET /finance/payroll/:id`:
+`PayrollRunWithUser.flags?: PayrollFlag[]` with `PayrollFlag = { code, severity: 'info' | 'warning', text }`.
+
+- **Admins only.** Leaders, reps and recruiters never get the key, not even on their own runs or payslip.
+- **Unpaid runs only** (`pending` or `failed`). Paid and late runs never carry the key.
+- At most **80 runs per call** are checked, newest weeks first; a checked run always has the key (`[]` when nothing
+  is unusual), an unchecked one has none. `GET /finance/payroll?status=pending,failed` (the **Runs to pay** card) is
+  the normal caller. Not cached: about 14 ms for the seed's 31 unpaid runs (3 ms with `LM_SMART=0`), roughly 30 ms at
+  the 80-run cap.
+- Advisory only: `POST /finance/payroll/:id/pay` never looks at flags.
+
+| `code` | `severity` | Example `text` |
+|---|---|---|
+| `first_payslip` | info | First payslip for this person — check their bank details and pay plan before paying |
+| `high_gross` | warning | £780 is 2.6× the usual £305 (median of the last 4 runs) |
+| `bonus_single_day` | warning | The £75 bonus rests on one day: 9 sales against a usual 2 sales a day — worth checking that day's gauges |
+| `sales_without_days` | warning | 2 sales with no days worked — a gauge row may be missing its date |
+| `high_deductions` | warning | Deductions of £300 take 60% of the £500 earned |
+| `stale_amount` | warning | The gauges changed since this run was calculated: they now give £795, not £600 |
+| `override_no_days` | info | £120 of team overrides with no days worked this week |
+
+**Bulk "Mark paid"** (no new endpoint). The **Runs to pay** card pays a selection by calling the existing
+`POST /finance/payroll/:id/pay` once per run, one after another (never in parallel), with `{ paidDate }` only when the
+admin picked a date other than today. Outcomes: `200` = marked paid, `409` (already paid / late) = **skipped**,
+anything else = **failed**; a `401`/`403` stops the batch and the rest are reported as failed without being sent. The
+client invalidates `['finance']` and `['dashboard']` once, after the last run. While a batch runs, the single
+**Mark paid** buttons and the boxes are disabled, so a click cannot race a run that is later in the batch. The server
+still validates every date (`weekEnd ≤ paidDate ≤ today`, else `400`).
 
 ### Check-ins (p4)
 
-<!-- p4-leader-check-ins-coaching: filled from docs/smart/p4-leader-check-ins-coaching.md -->
+No new endpoint and no schema change: `team.checkIns` and `company.checkIns` on **`GET /me/insights`** carry people
+(`server/src/lib/smart/checkIns.ts`).
+
+| Caller | `team` | `company` |
+|---|---|---|
+| leader with a team | `{ checkIns }`: their own team, never the leader | `null` |
+| admin | `null` | `{ checkIns }`: every team, never the admin |
+| rep, recruiter, leader without a team | `null` | `null` |
+| anyone with `LM_SMART=0` | `null` | `null` |
+
+`checkIns` is `CheckInPerson[]`, at most **5** people, each with a score of at least **2**, highest score first and
+then by name:
+
+| Field | Type | Meaning |
+|---|---|---|
+| `userId`, `userName`, `position`, `avatarColor` | | the person (status `active`, role `rep` or `leader` only) |
+| `teamId`, `teamName` | number \| null, string \| null | their current team |
+| `score` | integer ≥ 2 | sum of the reason weights |
+| `reasons` | `CheckInReason[]` | heaviest first; ties in a fixed order (LOGIC §14.4) |
+
+`CheckInReason` = `{ code, weight, text }`. `code` is one of `sustained_decline`, `conversion_drop`, `stops_drop`,
+`attendance_drop`, `zero_week`, `earnings_drop`, `trainee_slow` and `late_often`. `text` is a finished British-English
+sentence.
+
+- **Scoping.** The builder reads only people in the caller's scope, and their team's own calendar and check-ins. A
+  rep's or recruiter's payload never contains a check-in list.
+- **Caching.** Part of `/me/insights`: cached per user (20 s, cleared by any write).
+- **Cost.** 7 SQL statements per list, whatever the team size; 1 when nobody is in scope, none with `LM_SMART=0`. On
+  the demo seed an admin's uncached `GET /me/insights` takes about 17–33 ms (the route test asserts under 150 ms).
+- **Writes.** Only the payroll guard can write, exactly as `/finance` does: when last completed week has no payroll
+  runs yet (a server left running over the weekend, before the daily job), it creates them first, so that week is
+  never read as £0. Nothing else is written, and never a gauge row.
+- **Shared API (client and tests).** `coachingInsights(totals, ratios, benchmarks = BENCHMARK_RATIOS, subject = 'you')`
+  gains an optional `subject: 'you' | 'team' | 'company'` (`InsightSubject`). With `'you'` the output is byte-for-byte
+  what it was before. Team and company coaching and the Focus chips are worked out in the browser, so they need no
+  endpoint and stay on with `LM_SMART=0`.
 
 ### Needs attention (p5)
 
-<!-- p5-needs-attention-feed: filled from docs/smart/p5-needs-attention-feed.md -->
+**`GET /me/attention` → `AttentionFeed`.** Every signed-in role. Cached per user through `CACHED_PATHS` (20 s, cleared
+by any write), so a repeat call within 20 s answers `X-Cache: HIT`. No query parameters. There is no table behind it:
+the feed is derived on every uncached request from rows the caller may already see.
+
+```jsonc
+{
+  "items": [
+    {
+      "key": "gauges:gap:516",            // deterministic: the same thing always has the same key
+      "kind": "gauges",                   // gauges | pay | payroll | events | recruitment | security
+      "severity": "warning",              // danger | warning | info
+      "title": "1 of 7 has not logged BCN — MediaCity Piazza",
+      "body": "Noah has no gauges for Sat 17 Oct yet: a quick message usually sorts it.",
+      "href": "/gauges?log=1&eventId=516&userId=23",
+      "actionLabel": "Log for Noah",      // optional
+      "at": "2026-10-17T17:00",           // optional: what the item is about (date, wall time or ISO timestamp)
+      "count": 1                          // optional: how many a summary covers (gap, follow-ups, runs, interviews)
+    }
+  ],
+  "generatedAt": "2026-10-19T14:00:11.794Z",
+  "disabled": true                        // optional, only with LM_SMART=0 (then items is always [])
+}
+```
+
+- Sorted danger → warning → info, then newest `at` first (items without `at` last), then by key. At most 20 items.
+- **Role scoping** (applied in the route before any rule runs; the rules only ever narrow):
+
+  | Role | Events / gauge rows | Members | Pay runs | Recruitment |
+  |---|---|---|---|---|
+  | rep | own team's events; **own** rows only | themself | own | none |
+  | leader | own team's events and rows | own team (active) | own | candidates they own; interviews they run or own |
+  | recruiter | none | themself | own | open candidates they own or nobody owns; interviews they run or own |
+  | admin | every team | everyone active | own, plus every pending / failed run in the to-pay window | everything |
+
+  A rep never receives `gauges:gap`, `gauges:odd`, `events:empty`, `events:behind`, `payroll:*`, `recruitment:*` or
+  `security:*` items, and never anything about another person's rows or pay.
+- **Queries**: `ensurePayrollMaterialised(db, today)` first (as the finance routes do, so last week's runs exist before
+  they are counted), then at most 8 statements (admin 6, leader 8, recruiter 3, rep 5): pay plan; events dated
+  `from` … tomorrow and gauge rows dated `from` … today (`from` = `attentionLookbackFrom(today)`: today − 3, or this
+  week's Monday when that is earlier); active members; runs (unpaid, or paid in the last 7 days; admin also the to-pay
+  window); open candidates with a follow-up already due; pending interviews of open candidates from
+  `outcomeLookbackFrom(now)` (56 days back) to 2 days ahead; and the caller's usual attendance over the 28 days before
+  the window. Events, gauge rows, runs and the attendance count are date-bounded and use their indexes; open
+  candidates, interviews and the admin's member list are small full scans (there is no index on
+  `interviews.scheduled_at`; worth adding in `db/schema.ts` if the interview table grows). Uncached it answers in a
+  few milliseconds on the seed. Nothing is written except the payroll materialisation the finance routes already do;
+  no gauge row is ever created.
+- `count` (optional, additive) is set on the summary items `gauges:gap` (people missing), `recruitment:overdue`
+  (follow-ups), `recruitment:today` (interviews) and `payroll:to-pay` (runs); the client uses it so a summary that
+  grows counts as new again.
+- Item keys: `gauges:event:<eventId>:user:<userId>`, `gauges:gap:<eventId>`, `gauges:odd:<entryId>`,
+  `events:tomorrow:<eventId>`, `events:empty:<eventId>`, `events:behind:<eventId>`, `pay:overdue:<runId>`,
+  `pay:due-tomorrow:<runId>`, `pay:paid:<runId>`, `payroll:to-pay`, `payroll:due-today:<date>`, `recruitment:overdue`,
+  `recruitment:interview:<interviewId>`, `recruitment:today`, `security:2fa`. What fires each one is in LOGIC §14.5.
+- `LM_SMART=0` → `{ "items": [], "generatedAt": …, "disabled": true }` (the client hides the card and the bell count).
 
 ### Event forecasts (p6)
 
-<!-- p6-event-forecasts-roster: filled from docs/smart/p6-event-forecasts-roster.md -->
+No schema change. Two optional fields on the event payloads and one new endpoint
+(`server/src/lib/smart/eventForecast.ts`: `eventForecasts`, `eventRosters`, `forecastFor`).
+
+**`forecast?: EventForecast` on `GET /events` and `GET /events/:id`** (`SalesEventWithMeta`)
+
+- Present only on **scheduled** and **live** events that have enough history (LOGIC §14.6). Completed and cancelled
+  events never carry the key; neither does any event with `LM_SMART=0`. Every role that can list an event gets its
+  forecast: it is a team-level estimate, never anyone's personal figure. Reps only ever list their own team's
+  calendar, as before.
+
+| Field | Type | Meaning |
+|---|---|---|
+| `expectedSales` | number (1 dp) | E = expectedReps × perRepRate |
+| `low` / `high` | number (1 dp) | max(0, E − 1.64√E) / E + 1.64√E |
+| `expectedReps` | number (1 dp) | mean distinct reps over the team's recent completed events |
+| `perRepRate` | number (2 dp) | sales per rep-day in the chosen bucket |
+| `repsNeeded` | integer \| null | ⌈targetSales ÷ perRepRate⌉ |
+| `basisDays` | integer ≥ 5 | completed event days in the chosen bucket |
+| `basis` | `'team' \| 'company' \| 'campaign'` | which bucket supplied the rate |
+| `flag` | `'stretch' \| 'at_risk' \| null` | scheduled: `stretch`; live: `at_risk` (shown as **Behind target**) |
+| `suggestedTarget` | integer | a suggestion only; never applied by the server |
+
+**`roster?: { members, logged }` on `GET /events` and `GET /events/:id`** (`EventRosterCount`)
+
+- Present on **completed** and **live** events dated **today − 2 … today** (business clock), absent otherwise and
+  with `LM_SMART=0`. `members` is the event team's **active** members who had **started by the event date**;
+  `logged` is how many of **them** have an entry. Admins with no team, and people from other teams who logged at the
+  event, are not counted, so `logged ≤ members` always. `repCount` is unchanged and still counts everyone with an
+  entry, so it can be larger than `logged`. Counts only (no names), for events the caller can already list.
+
+**`GET /events/forecast?campaignId&teamId&type[&targetSales]`** → `{ forecast: EventForecast | null }`
+
+- Admin for any team; a leader for their own team only (another team → `403 { error: 'Leaders can only forecast events
+  for their own team' }`); reps and recruiters `403`. `campaignId` and `teamId` (positive integers) and `type`
+  (`private_site | event | b2b | residential | retail`) are required, `targetSales` is optional (a whole number
+  0–500); anything else is `400 Validation failed`. Cached (`CACHED_PATHS`).
+- The forecast is for a new **scheduled** event of that team, campaign and type. Without `targetSales`, `repsNeeded`
+  and `flag` are `null`. The answer is `{ forecast: null }` when the team has fewer than 5 attended days in 8 weeks,
+  when no bucket has 5 completed days in 12 weeks (a brand-new campaign, for example), or with `LM_SMART=0`.
+
+**Cost.** `GET /events` and `GET /events/:id` are not in the response cache, so one request makes at most **3
+grouped SQL statements** whatever the number of events (forecast attendance, forecast rates, roster counts), each
+skipped when no listed event needs it, and memoised per data version and business day (LOGIC §14.6). Nothing is ever
+written. Measured on the demo seed (business clock pinned at 15:00, 300 sequential requests, 2 rounds), before 1.1 →
+1.1.0:
+
+| Request | Mean ms | Req/s at 50 connections |
+|---|---|---|
+| admin `GET /events` (89 events) | 4.6–5.8 → 5.6–6.1 | 237–272 → 205–247 |
+| admin, next 2 weeks (47 events) | 3.3–3.5 → 4.0–4.5 | — |
+| leader, next 2 weeks | 3.6–3.8 → 4.2–4.3 | 426–460 → 377–392 |
+| rep `GET /events` | 2.9–3.4 → 3.0 | — |
+| admin `GET /events/527` | 4.1–4.5 → 4.3–4.9 | — |
+
+The remaining gap is mostly payload: the admin list grows from 43 to 55 kB with the two new fields.
+
+**Client only (no API).** Directions links are built in the browser as
+`https://www.google.com/maps/search/?api=1&query=<encodeURIComponent("venue, city")>`. The dashboard's
+**Upcoming events** card fetches `GET /events?from=<first upcoming date>&to=<last>[&teamId]` and matches forecasts
+by event id; `/me/dashboard` is unchanged. The event page's "Not logged yet" list uses
+`GET /users?teamId&status=active`, which only runs for the admin or that team's leader.
 
 ### Logging when the signal drops (p7)
 
-<!-- p7-signal-proof-logging: filled from docs/smart/p7-signal-proof-logging.md -->
+**No endpoint was added or changed.** The phone's outbox replays through the existing gauge routes, and every role
+rule, the funnel check, the paid-week lock and the check-in rules still apply to a replayed save. Not affected by
+`LM_SMART=0`.
+
+| Step | Request | Meaning |
+|---|---|---|
+| Look the day up | `GET /gauges?eventId=&userId=&from=<date>&to=<date>&limit=5` | The entry the server holds now for that (event, person, date), if any. A rep may only read their own (403 otherwise). |
+| Send | `POST /gauges` (the upsert) | **201**: logged. **200**: the server found the day and updated it. Any other **4xx** (400 future check-in or event not started, 403 scope, 409 week paid or event cancelled): the item is marked *Not accepted* with the server's message. **401**: replay stops and the item waits for the next sign-in. **5xx**: replay stops and tries again later. |
+
+The `(eventId, userId, date)` upsert makes a repeated send idempotent: the same body sent twice answers 201, then 200,
+and leaves one row (`server/src/test/p7-outbox-replay.test.ts`). While the offline banner shows, the client asks
+`GET /health` every 30 seconds to notice the connection coming back.
+
+Client contract (`client/src/api/client.ts`, additive):
+
+| Name | What it is |
+|---|---|
+| `NetworkError` / `isNetworkError(e)` | Thrown when `fetch` gets no HTTP answer at all (it threw a `TypeError`: no signal, the hotspot dropped, the server is stopped). Every HTTP error response is still an `ApiError`, unchanged. An abort (`DOMException`) passes through untouched. |
+| `window` event `lm:network`, `detail: { online }` | `false` when a request got no answer; `true` whenever any HTTP response arrives, whatever its status. |
+| Unhandled `NetworkError` | A rejection nobody caught (for example signing out without signal) is not printed as "Uncaught (in promise)": the offline banner already reports it. Other rejections are untouched. |
+
+Storage on the phone (per browser, never sent anywhere):
+
+| Key | Holds |
+|---|---|
+| `lm-gauge-outbox:<signed-in userId>` | Up to 50 queued saves: `{ id, queuedAt, input: GaugeUpsertInput, expectedExistingId, seenSubmittedAt, eventName, userName, status: 'waiting' \| 'review' \| 'failed', error?, server? }` |
+| `lm-tally:<userId>:<eventId>:<date>` | `{ counts: GaugeTotals, updatedAt }` for one shift's tally |
+| `lm-attention-seen:<userId>`, `lm-attention-toasted:<userId>` | Needs-attention tokens already seen in the bell / already shown as a pop-up (p5) |
 
 ### Recruitment SLAs (p8)
 
-<!-- p8-recruitment-slas: filled from docs/smart/p8-recruitment-slas.md -->
+No new endpoints and no response-shape changes: two write routes gain **defaults**, one gains an **optional body
+field**, and all three that take a deadline now **validate it the same way**. `GET` payloads are untouched (idle days
+are worked out by the client from `stageUpdatedAt`; outcome prompts come from the shared `needsOutcome` rule, on the
+candidate page and in `GET /me/attention`'s `recruitment:interview` items). "Today" is the server's business date
+(`todayISO()`, Europe/London, honouring the business clock).
+
+**`POST /recruitment/candidates`**
+
+- `nextActionAt` **omitted** → `today + 3 days` as a date-only `YYYY-MM-DD` (the Applied target), e.g. created on
+  Mon 19 Oct → `"2026-10-22"`.
+- `nextActionAt: null` → stays `null` (no deadline).
+- An explicit value is stored as given, if it is a valid deadline (below).
+
+**`POST /recruitment/candidates/:id/stage`** — body `{ stage; note?; teamId?; position?; nextActionAt?: string | null }`
+→ `CandidateWithMeta` (unchanged).
+
+| `nextActionAt` in the body | Open target stage (`applied` … `offer`) | Closed target stage (`hired`, `rejected`, `withdrawn`) |
+|---|---|---|
+| omitted | `today + STAGE_SLA_DAYS[stage]`, date-only (`screening` on 19 Oct → `"2026-10-24"`) | `null` |
+| `null` | `null` (no deadline) | `null` |
+| `"YYYY-MM-DD"` or an ISO 8601 timestamp | stored as given | `null` (ignored) |
+
+- This **replaces 1.0's behaviour of carrying the previous stage's deadline forward**: a move now starts the new
+  stage's clock. Targets: applied 3, screening 5, interview 7, observation 7, offer 7 days.
+- An admin reopening a `rejected`/`withdrawn` candidate to `offer` gets the Offer target (`today + 7`).
+- `nextAction` (the text) still follows the stage (`Book first interview`, …) and is `null` for closed stages.
+- `PATCH /recruitment/candidates/:id` never touches the deadline unless the body sets it.
+- Effect on `GET /recruitment/summary`: a candidate moved without an explicit date is never overdue, so
+  `overdueActions` drops as people are moved on.
+
+**Valid deadlines** (create, patch and stage move alike). `nextActionAt` accepts `null`, a real calendar date
+`YYYY-MM-DD` (due that day, overdue from the next), or an ISO 8601 timestamp starting `YYYY-MM-DDT…` whose calendar day
+exists (`2026-10-24T17:00:00Z`, `2026-10-24T09:15:00+01:00`, `2026-10-24T09:15`). Anything else — `"garbage"`,
+`"2026-02-31"` (which `Date` would quietly roll over to 3 Mar), `"Oct 24 2026"`, `"24/10/2026"`, `""`, a number, a
+boolean — is **`400 { error: 'Validation failed', details: [{ path: 'nextActionAt', message: 'Expected a date
+(YYYY-MM-DD) or an ISO 8601 timestamp' }] }`** and nothing changes. This
+tightens create and patch, which in 1.0 took anything `Date.parse` could read; every value the app and the smoke test
+send is still accepted.
+
+**Kill switch.** `LM_SMART=0` does not turn these off (lead decision): the deadline defaults, the **Idle** badges and
+the candidate page's **Record the outcome** card are workflow rules, not estimates, and the client states the deadline
+it expects a move to set ("Phone screen · due Sat 24 Oct"); switching the server default off behind the client's back
+would make that line wrong. With `LM_SMART=0` the dashboard's outcome reminders are off with the rest of the
+Needs-attention feed. A caller that wants no deadline sends `nextActionAt: null`.
 
 ### Week in review (p9)
 
-<!-- p9-week-in-review-digest: filled from docs/smart/p9-week-in-review-digest.md -->
+**`GET /me/digest?week=YYYY-MM-DD` → `WeekDigest`.** Every signed-in role (`401` without a session). Answers the
+caller's own "Your week in review" for one completed Monday–Sunday week. Cached per user and URL through
+`CACHED_PATHS` (20 s, cleared by any write; `X-Cache: MISS`, then `HIT`).
 
-### Backups and health (p10)
+| Query | Rule |
+|---|---|
+| `week` (optional) | Any date in the week; it is normalised to its Monday. Default: the **last completed week** (the Monday before this week's). |
+| errors | `400 { error: 'That week has not finished yet' }` when its Sunday is today or later (this week and every future week); `400 { error: 'Weeks before 2020-01-01 are not supported' }` when it starts before 2020; `400 Validation failed` when `week` is not a `YYYY-MM-DD` date. |
 
-<!-- p10-backups-autostart: filled from docs/smart/p10-backups-autostart.md -->
+| Field | Type | Meaning |
+|---|---|---|
+| `weekStart`, `weekEnd` | string | Monday and Sunday of the week |
+| `role` | `Role` | the caller's role (decides which bullets are built) |
+| `title` | string | `Your week in review · w/c 12 Oct` |
+| `bullets` | `DigestBullet[]` | 5–8 lines `{ text, private }`; shareable lines first, private lines last |
+| `text` | string | WhatsApp-ready plain text: the title, a newline, then one `• ` line per **shareable** bullet. Private bullets are never in it. No markdown, no HTML (`<`, `>`, `*`, `#`, `_`, `~` and backticks are stripped from names and lines). `''` when nothing is shareable. |
+
+`DigestBullet.private` is `true` for: the rep's own pay for the week, the leader's check-in count, and the admin's
+payroll and failed-transfer lines. Nothing else. Which lines each role gets is in LOGIC §14.9.
+
+With `LM_SMART=0` the endpoint still answers `200` with the title, `bullets: []` and `text: ''` (the dashboard card then
+stays hidden). The route never writes, apart from `ensurePayrollMaterialised` — the finance routes' guard that creates
+last week's pending payroll runs if the daily job has not yet (never a gauge row).
+
+Example (leader):
+
+```json
+{
+  "weekStart": "2026-10-12", "weekEnd": "2026-10-18", "role": "leader",
+  "title": "Your week in review · w/c 12 Oct",
+  "bullets": [
+    { "text": "Northern Lights made 91 sales — up 20 on the week before.", "private": false },
+    { "text": "Team conversion 4.4% from 2,074 stops — up from 4.1% the week before.", "private": false },
+    { "text": "Top seller: Amelia Hart with 22 sales.", "private": false },
+    { "text": "Biggest move up: Amelia Hart, 2 places to 1st; biggest move down: Oliver Bennett, 2 places to 3rd.", "private": false },
+    { "text": "4 of 31 recorded check-ins were late (more than 5 minutes after the start).", "private": false },
+    { "text": "Next week (w/c 19 Oct): 5 events, expect about 85 sales (estimate 70–100) against targets of 84.", "private": false },
+    { "text": "Nobody is on your check-in list this week.", "private": true }
+  ],
+  "text": "Your week in review · w/c 12 Oct\n• Northern Lights made 91 sales — up 20 on the week before.\n• …\n• Next week (w/c 19 Oct): 5 events, expect about 85 sales (estimate 70–100) against targets of 84."
+}
+```
+
+**Version.** `GET /api/health` reports `"version": "1.1.0"` (read from `server/package.json`). The root, shared,
+server and client `package.json` files (and the workspace entries in `package-lock.json`) are 1.1.0, and **About**
+shows **Version 1.1.0** (`client/src/content/about.ts`, `APP_VERSION`).
+
+### Backups, health and compression (p10)
+
+Not switched by `LM_SMART`. The operator's side (scripts, the backups folder, the background service) is in README.md;
+the rules are in LOGIC §14.10.
+
+**`GET /api/health` — `backup` for administrators (additive).** Unchanged for everyone else: `{ ok, version, seededAt }`.
+When the request carries an **admin** session, the response also has `backup` (`BackupStatus` in
+`shared/src/types.ts`, plus `enabled`):
+
+| Field | Type | Meaning |
+|---|---|---|
+| `backup.lastAt` | `string \| null` | ISO time of the last backup; `null` when there has been none |
+| `backup.file` | `string \| null` | its file name, e.g. `linear-2026-10-19-0200.sqlite` |
+| `backup.count` | `number` | backup files kept in the folder now |
+| `backup.dir` | `string` | absolute path of the backup folder on the server |
+| `backup.enabled` | `boolean` (optional) | `false` when this server was started with `LM_BACKUP=0`, so it makes no automatic backups (`npm run backup` still works); `true` otherwise |
+
+- The health router runs after `authenticate`, so `req.user` is set for a signed-in request. Leaders, recruiters,
+  reps and anonymous probes (`npm run stop`, `npm run share`, `npm run doctor`, `loadtest/lag.mjs`) never see the key.
+  Covered by `server/src/test/backups.test.ts`.
+- `lastAt`/`file` are the newer of the meta record (`last_backup_at`, `last_backup_file`) and the newest file in the
+  folder (after a restore the meta table is the backup's own, older record).
+- Not cached (not in `CACHED_PATHS`); one `readdir` of the backup folder per admin request.
+- `enabled` is declared next to the route (`BackupStatus & { enabled?: boolean }`), so `shared/src/types.ts` is
+  unchanged; Settings reads it the same way.
+
+**HTTP compression (every response).**
+
+- `gzip` (level 6) for JSON, HTML, JavaScript, CSS and SVG responses of **1 KB or more** when `Accept-Encoding`
+  allows it; `br` (brotli quality 4) only when the client **prefers** it (ranks `br` above `gzip` with q-values, or
+  accepts only `br`). Browsers send `gzip, deflate, br, zstd` without q-values and get gzip.
+- Headers: `Content-Encoding`, an exact `Content-Length` (the compressed size), `Vary: Accept-Encoding` on every
+  compressible response (compressed or not), and no `Accept-Ranges` on a compressed one.
+- Left alone: `HEAD`, `204`, `206` (ranges), `304`, any non-2xx, responses that already have a `Content-Encoding`,
+  `Cache-Control: no-transform`, bodies under 1 KB, other types (PNG, fonts…), and clients without a usable
+  `Accept-Encoding`.
+- ETags are unchanged (Express's are weak, so one ETag for both encodings is correct); `If-None-Match` still gives a
+  `304` with no body. `X-Cache: HIT` replays from the response cache are compressed exactly like a fresh response.
+- `LM_COMPRESSION=0` turns it off (for example behind a reverse proxy that compresses already).
+- On the wire: the SPA shell 2,112 B → 908 B, the main JS bundle 449 kB → 139 kB, an admin
+  `/api/me/dashboard?range=week` 6,302 B → 2,250 B (57–69% fewer bytes over the hotspot). The load mix at 50
+  connections stays at 0 errors (smoke 82/82); compression-specific work is about 2% of the server's busy time.
 
 ## Seed & demo accounts
 The server seeds `server/data/linear.sqlite` on first start (or `npm run seed` to reset) with deterministic
@@ -226,7 +613,7 @@ Behaviour that the contract above leaves open, as implemented in `server/`:
 - **Errors.** Zod failures → `400 { error: 'Validation failed', details: [{ path, message }] }`; invalid funnels → `400 { error: 'Invalid funnel', details: string[] }`; SQLite unique-constraint violations → `409`; CHECK-constraint violations → `400`.
 - **Event statuses.** `rollForwardEventStatuses` (`db/maintenance.ts`) runs at startup and every 15 minutes: past `scheduled`/`live` events become `completed`, and today's `scheduled` events become `live` only once `start_time` has passed, matching the seed and `POST /events` defaults.
 - **Runtime.** The server runs on plain Node (**≥ 22.18**, which strips TypeScript types natively): `npm start` / `npm run dev` are `node src/index.ts` / `node --watch src/index.ts`, `npm run seed`, `npm run smoke` and `npm test` (`node --test "src/**/*.test.ts"`) likewise; `start:tsx`/`dev:tsx` remain as fallbacks. `server/src` and `shared/src` are kept to erasable syntax (`erasableSyntaxOnly` + `verbatimModuleSyntax` in both tsconfigs: no parameter properties, enums, namespaces or `import x = require`, and type-only imports marked `type`), so typecheck fails on anything Node could not strip.
-- **Database.** `node:sqlite` (`server/data/linear.sqlite`, WAL, foreign keys on). Override the location with `DB_PATH`. The server seeds on first start when the `meta.seeded_at` row is missing; `npm run seed -w server` deletes and rebuilds the file. Seeding is deterministic (mulberry32) but anchored to the real current date, so demo data stays "this week" whenever it is regenerated. **Schema upgrades:** `createSchema` (`db/schema.ts`) runs `CREATE TABLE IF NOT EXISTS` / `CREATE INDEX IF NOT EXISTS` for every table and index and then `upgradeSchema`, which adds any column listed in `COLUMN_UPGRADES` that `PRAGMA table_info` does not report (guarded `ALTER TABLE … ADD COLUMN`) and runs its backfill (`gauge_entries.payout_per_sale`/`commission_per_sale` from the current campaign and plan rates), so a database created by an earlier release is upgraded in place at start-up (the log says `Upgraded schema: added …`). Later columns so far: `users.totp_*`, `users.totp_last_counter`, `gauge_entries.payout_per_sale`, `gauge_entries.commission_per_sale`, `payroll_runs.adjusted_at`; later index: `idx_events_campaign`. `npm run smoke -w server` boots the API on a temporary seeded database and exercises every endpoint (including the upgrade of a first-release database); `npm test -w server` runs the unit tests (`src/**/*.test.ts`: RFC 4226/6238 vectors, base32, AES-GCM).
+- **Database.** `node:sqlite` (`server/data/linear.sqlite`, WAL, foreign keys on). Override the location with `DB_PATH`. The server seeds on first start when the `meta.seeded_at` row is missing; `npm run seed -w server` deletes and rebuilds the file. Seeding is deterministic (mulberry32) but anchored to the real current date, so demo data stays "this week" whenever it is regenerated. **Schema upgrades:** `createSchema` (`db/schema.ts`) runs `CREATE TABLE IF NOT EXISTS` / `CREATE INDEX IF NOT EXISTS` for every table and index and then `upgradeSchema`, which adds any column listed in `COLUMN_UPGRADES` that `PRAGMA table_info` does not report (guarded `ALTER TABLE … ADD COLUMN`) and runs its backfill (`gauge_entries.payout_per_sale`/`commission_per_sale` from the current campaign and plan rates), so a database created by an earlier release is upgraded in place at start-up (the log says `Upgraded schema: added …`). Later columns so far: `users.totp_*`, `users.totp_last_counter`, `gauge_entries.payout_per_sale`, `gauge_entries.commission_per_sale`, `payroll_runs.adjusted_at`; later index: `idx_events_campaign`. `npm run smoke -w server` boots the API on a temporary seeded database and exercises every endpoint (including the upgrade of a first-release database); `npm test -w server` (also run by the root `npm test`) runs the unit and route tests (`src/**/*.test.ts`: RFC 4226/6238 vectors, base32, AES-GCM, weekly history, backups and the service files, and the 1.1 routes on an in-memory database with role scoping and `LM_SMART=0`).
 - **Two-step verification (TOTP).** Lives in `server/src/lib/totp.ts` (pure RFC 4226/6238: HMAC-SHA1, 6 digits, 30 s, base32 without padding, constant-time compare, ±1 step), `lib/crypto.ts` (AES-256-GCM, key = SHA-256 of `LM_APP_SECRET`, payload `v1:<iv>:<tag>:<ciphertext>` base64) and `lib/twofactor.ts` (secrets, recovery codes, challenges, limiter). Storage: `users.totp_secret_enc` (active), `users.totp_pending_enc` (set by `/auth/2fa/setup`, replaced by every new setup, promoted by `/auth/2fa/enable`), `users.totp_enabled_at`; `recovery_codes (user_id, code_hash, used_at)` holds SHA-256 hashes of the normalised `xxxx-xxxx` codes; `two_factor_challenges (token, user_id, created_at, expires_at, attempts)` holds the five-minute login challenges (32 random bytes hex). `USER_SELECT` never selects the secret columns, so no user payload can carry them; `qrSvg` is rendered with the `qrcode` package (`toString`, `type: 'svg'`, margin 1) from the `otpauth://totp/Linear%20Hub:<email>?secret=…&issuer=Linear%20Hub&algorithm=SHA1&digits=6&period=30` URL. **Codes** are accepted with spaces (`123 456`), recovery codes case-insensitively with or without the hyphen; a matching recovery code is marked `used_at` at once (login or disable). **Enable** promotes the pending secret, issues 10 recovery codes and deletes every other session of the user (`DELETE FROM sessions WHERE user_id = ? AND token <> ?`). **Disable** and the **admin reset** clear both secret columns, every recovery code and any open challenge; the admin reset also deletes all sessions, and an admin cannot reset their own account through it (`400`). `GET /auth/2fa` reports `recoveryCodesLeft` as the unused codes (0 while off) and `pendingSetup` only while off with a pending secret. **Login:** with 2FA on, `/auth/login` creates a challenge and returns `{ requiresTwoFactor: true, challengeToken, method: 'totp' }` without a cookie; `/auth/login/2fa` answers `410 { error: 'This sign-in challenge has expired, start again' }` for an unknown, used or expired token (the row is deleted), `401 { error: 'That code is not valid' }` for a wrong code, and on success deletes the challenge, sets the cookie and returns `AuthResponse` with `twoFactorEnabled: true`. The settings endpoints answer `400 { error: 'That code is not valid' }` for a wrong code and `409` for state errors (`setup`/`enable` while on, `enable` with nothing pending, `disable`/`recovery-codes` while off). **Limits:** every wrong code counts in two in-memory counters (`lib/twofactor.ts`, bounded LRU maps): per **source address + user** — the 7th within 10 minutes gets `429 { error: 'Too many attempts, try again in N minutes' }` on every code-checking endpoint (`/auth/login/2fa`, `/auth/2fa/enable|disable|recovery-codes`) from that address until the window passes — and per **user from any address** (30 in 10 minutes) as a backstop against distributed guessing; a correct code clears both. Keying on the source means a stranger who can reach the second step cannot lock the real person out from another device. A wrong code at `/auth/login/2fa` also counts towards the login limiter (8 per source + email in 15 minutes), and that counter is only reset once the second step succeeds. Expired challenges are purged at start-up, every 15 minutes and whenever a new challenge is created; nothing logs a code or a secret. **Client sequence:** `POST /auth/login` → if `requiresTwoFactor`, keep the `challengeToken` and `POST /auth/login/2fa { challengeToken, code }` (or `{ challengeToken, recoveryCode }`) → `AuthResponse`; on `410` return to step one, on `401` let the user retry, on `429` show the message. Settings: `POST /auth/2fa/setup` → show `qrSvg` + `secret` → `POST /auth/2fa/enable { code }` → show `recoveryCodes` once → `GET /auth/2fa` for the card; `POST /auth/2fa/recovery-codes { code }` and `POST /auth/2fa/disable { code | recoveryCode }` as labelled; admins use `POST /users/:id/2fa/reset`. **Codes are single use:** the time-step counter of the last accepted authenticator code is stored in `users.totp_last_counter` and any code whose counter is not greater — a replay of a code already used, even inside the ±1-step window — is refused like a wrong code (login, enable, disable, recovery-code regeneration; RFC 6238 §5.2). **Challenges** are consumed after `CHALLENGE_MAX_ATTEMPTS` = 6 wrong codes (`410 { error: 'Too many wrong codes for this sign-in, start again' }`, row deleted). **Encryption key:** `LM_APP_SECRET` (a long random string) when set; otherwise the server generates 32 random bytes once and keeps them in `app-secret` next to the database (`server/data/app-secret` by default, `LM_APP_SECRET_FILE` relocates it; mode 0600; logged once at start-up as "LM_APP_SECRET is not set: … key in <file>"). Back that file up with the database. There is no usable built-in default key any more; rows written by earlier releases under the old development key are re-encrypted under the real key at start-up (`reencryptLegacySecrets`, logged when it did anything). Changing the secret afterwards makes existing TOTP secrets undecryptable (those users fall back to the admin reset).
 
 ## Two-step verification (TOTP, authenticator apps) — contract v1
