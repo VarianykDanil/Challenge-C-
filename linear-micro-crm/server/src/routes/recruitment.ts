@@ -1,9 +1,9 @@
 import { Router } from 'express';
 import { z } from 'zod';
-import { PIPELINE_STAGES, POSITIONS, TERMINAL_STAGES, isOverdue, stageIndex, type CandidateSource, type CandidateStage, type Position, type RecruitmentSummary, type UserWithTeam } from '@lm/shared';
+import { PIPELINE_STAGES, POSITIONS, TERMINAL_STAGES, defaultNextActionAt, isOverdue, stageIndex, type CandidateSource, type CandidateStage, type Position, type RecruitmentSummary, type UserWithTeam } from '@lm/shared';
 import { all, get, run, transaction, type Db } from '../db/connection.ts';
 import { Where, getCandidate, getInterview, getUser, listCandidates, listInterviews, listStageChanges } from '../db/queries.ts';
-import { addDays, businessNow, eachMonday, mondayOf, nowISO, todayISO } from '../lib/dates.ts';
+import { addDays, businessNow, eachMonday, isISODate, mondayOf, nowISO, todayISO } from '../lib/dates.ts';
 import { badRequest, conflict, notFound } from '../lib/errors.ts';
 import { idParam, isoTimestamp, optionalIdQuery, optionalString, parseRange } from '../lib/validate.ts';
 import { currentUser, requireRole } from '../middleware/auth.ts';
@@ -13,6 +13,19 @@ const SOURCES = ['indeed', 'linkedin', 'referral', 'website', 'walk_in', 'agency
 const STAGES = ['applied', 'screening', 'interview', 'observation', 'offer', 'hired', 'rejected', 'withdrawn'] as const;
 const INTERVIEW_TYPES = ['phone', 'first', 'observation', 'final'] as const;
 const OUTCOMES = ['pending', 'passed', 'failed', 'no_show'] as const;
+
+/**
+ * A next-action deadline (create, patch and stage move alike): a real calendar date `YYYY-MM-DD` (due that day, overdue
+ * from the next) or an ISO 8601 timestamp (`2026-10-24T17:00:00Z`, `…+01:00`). The calendar day must exist (`Date`
+ * would roll 31 Feb over to 3 Mar) and free text such as `Oct 24 2026` is refused.
+ */
+const nextActionDeadline = z
+  .string()
+  .trim()
+  .refine(
+    (s) => (/^\d{4}-\d{2}-\d{2}$/.test(s) ? isISODate(s) : /^\d{4}-\d{2}-\d{2}T/.test(s) && isISODate(s.slice(0, 10)) && !Number.isNaN(Date.parse(s))),
+    'Expected a date (YYYY-MM-DD) or an ISO 8601 timestamp',
+  );
 
 const candidateBody = z.object({
   firstName: z.string().trim().min(1).max(60),
@@ -27,7 +40,7 @@ const candidateBody = z.object({
   rating: z.number().int().min(1).max(5).nullable().optional(),
   notes: z.string().trim().max(5000).nullable().optional(),
   nextAction: z.string().trim().max(200).nullable().optional(),
-  nextActionAt: isoTimestamp.nullable().optional(),
+  nextActionAt: nextActionDeadline.nullable().optional(),
 });
 
 const interviewBody = z.object({
@@ -131,6 +144,8 @@ export function recruitmentRouter(db: Db): Router {
     if (body.referredById && !getUser(db, body.referredById)) throw badRequest('Unknown referredById');
     assertEmailNotOpen(body.email);
     const now = nowISO();
+    // 1.1: an omitted deadline defaults to the Applied target (today + 3 days, date-only); an explicit null stays null
+    const nextActionAt = body.nextActionAt === undefined ? defaultNextActionAt('applied', todayISO()) : body.nextActionAt;
     const id = transaction(db, () => {
       const r = run(
         db,
@@ -138,7 +153,7 @@ export function recruitmentRouter(db: Db): Router {
          VALUES (?, ?, ?, ?, ?, ?, 'applied', ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL)`,
         [
           body.firstName, body.lastName, body.email, body.phone ?? null, body.city ?? null, body.source ?? 'other', body.positionApplied ?? 'trainee',
-          now, now, ownerId, body.referredById ?? null, body.rating ?? null, body.notes ?? null, body.nextAction ?? 'Phone screen', body.nextActionAt ?? null,
+          now, now, ownerId, body.referredById ?? null, body.rating ?? null, body.notes ?? null, body.nextAction ?? 'Phone screen', nextActionAt,
         ],
       );
       run(db, `INSERT INTO stage_changes (candidate_id, from_stage, to_stage, changed_at, changed_by_id, note) VALUES (?, NULL, 'applied', ?, ?, NULL)`, [r.lastInsertRowid, now, me.id]);
@@ -170,10 +185,12 @@ export function recruitmentRouter(db: Db): Router {
     const id = idParam(req);
     const candidate = getCandidate(db, id);
     if (!candidate) throw notFound('Candidate');
-    const { stage, note, teamId, position } = z
+    const { stage, note, teamId, position, nextActionAt: bodyNextActionAt } = z
       .object({
         stage: z.enum(STAGES),
         note: z.string().trim().max(2000).optional(),
+        /** 1.1: the new stage's deadline. Omitted → today + the stage SLA (date-only); null → none. Ignored for terminal stages. */
+        nextActionAt: nextActionDeadline.nullable().optional(),
         /** hire only: the team the new rep joins (default: the candidate owner's team, or none) */
         teamId: z.number().int().positive().nullable().optional(),
         /** hire only: entry positions only — nobody is minted as a leader or owner through recruitment */
@@ -190,6 +207,9 @@ export function recruitmentRouter(db: Db): Router {
     }
     const now = nowISO();
     const isTerminal = TERMINAL_STAGES.includes(stage);
+    // A move starts the new stage's clock: the deadline is the stage target unless the body sets one (or null for none).
+    // It no longer carries the previous stage's date forward, which left most open candidates overdue.
+    const nextActionAt = isTerminal ? null : bodyNextActionAt === undefined ? defaultNextActionAt(stage, todayISO()) : bodyNextActionAt;
     transaction(db, () => {
       let hiredUserId: number | null = candidate.hiredUserId;
       if (stage === 'hired' && hiredUserId === null) {
@@ -219,7 +239,7 @@ export function recruitmentRouter(db: Db): Router {
       run(
         db,
         `UPDATE candidates SET stage = ?, stage_updated_at = ?, hired_user_id = ?, next_action = ?, next_action_at = ? WHERE id = ?`,
-        [stage, now, hiredUserId, isTerminal ? null : NEXT_ACTION[stage] ?? null, isTerminal ? null : candidate.nextActionAt, id],
+        [stage, now, hiredUserId, isTerminal ? null : NEXT_ACTION[stage] ?? null, nextActionAt, id],
       );
     });
     res.json(getCandidate(db, id));

@@ -2,20 +2,40 @@ import { useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { AlertCircle, Columns3, List, Search, UserPlus } from 'lucide-react';
 import type { CandidateSource, CandidateWithMeta } from '@lm/shared';
-import { PIPELINE_STAGES, SOURCE_LABELS, STAGE_LABELS, stageIndex } from '@lm/shared';
+import { PIPELINE_STAGES, SOURCE_LABELS, STAGE_LABELS, compareLongestIdle, stageIndex } from '@lm/shared';
 import { COPY } from '@/content/copy';
 import { Avatar, Button, Card, CardHeader, DataTable, EmptyState, Input, KpiTile, PageHeader, Select, Skeleton, Switch, type Column } from '@/components/ui';
 import { BarsChart, TrendChart } from '@/components/charts';
 import { useCandidates, useRecruitmentSummary, useUsers } from '@/api/hooks';
 import { useCurrentUser } from '@/auth/AuthProvider';
 import { ChartSkeleton, ErrorState, ExportButton, KpiSkeletons, RangePicker, SourceBadge, StageBadge, StarRating, StopRowEvents, ViewToggle, useRangeState } from '@/features/common';
-import { AddCandidateModal, CandidateCard, MoveStageControl, candidateCsvColumns, isOverdue } from '@/features/recruitment';
+import { AddCandidateModal, CandidateCard, IdleBadge, MoveStageControl, candidateCsvColumns, isOverdue } from '@/features/recruitment';
 import { csvFilename, sortRows } from '@/lib/csv';
 import { formatDate, formatDateShort, formatDecimal, formatNumber, formatPct, fullName } from '@/lib/format';
 import { optionsFrom } from '@/lib/labels';
 import { usePageTitle } from '@/lib/usePageTitle';
 
 type View = 'board' | 'list';
+/**
+ * Card / row order. `moved`: most recently moved first (the server's order; the board's default, and the list's when a
+ * column sort is cleared). `applied`: newest applicants first (list only, its default). `idle`: longest idle first.
+ */
+type Order = 'moved' | 'applied' | 'idle';
+type SortSpec = { key: string; dir: 'asc' | 'desc' };
+/** null = no column sort: rows stay in the server's order (most recently moved first). */
+type ListSort = SortSpec | null;
+
+const DEFAULT_LIST_SORT: SortSpec = { key: 'applied', dir: 'desc' };
+const IDLE_LIST_SORT: SortSpec = { key: 'idle', dir: 'desc' };
+
+/** "Longest idle first" (shared rule): idle candidates first, furthest past their stage target first; closed last. */
+function byLongestIdle(rows: CandidateWithMeta[]): CandidateWithMeta[] {
+  const now = new Date();
+  return [...rows].sort((a, b) => compareLongestIdle(a, b, now));
+}
+
+/** Phones get 40 px filter controls (tap targets); from `sm` up they shrink back to the compact 32 px row. */
+const FILTER_CONTROL = 'sm:h-8';
 
 export function RecruitmentPage() {
   usePageTitle(COPY.nav.recruitment.title);
@@ -29,6 +49,8 @@ export function RecruitmentPage() {
   const [search, setSearch] = useState('');
   const [showClosed, setShowClosed] = useState(false);
   const [addOpen, setAddOpen] = useState(false);
+  const [order, setOrder] = useState<Exclude<Order, 'applied'>>('moved');
+  const [listSort, setListSort] = useState<ListSort>(DEFAULT_LIST_SORT);
 
   const summary = useRecruitmentSummary({ from: range.from, to: range.to });
   const owners = useUsers({});
@@ -42,8 +64,9 @@ export function RecruitmentPage() {
     const m = new Map<string, CandidateWithMeta[]>();
     for (const s of PIPELINE_STAGES) m.set(s, []);
     for (const c of list) m.get(c.stage)?.push(c);
+    if (order === 'idle') for (const [stage, items] of m) m.set(stage, byLongestIdle(items));
     return m;
-  }, [list]);
+  }, [list, order]);
 
   const s = summary.data;
   const inInterview = s ? s.openByStage.interview + s.openByStage.observation : 0;
@@ -56,7 +79,8 @@ export function RecruitmentPage() {
   const columns = useMemo<Column<CandidateWithMeta>[]>(
     () => [
       { key: 'name', header: 'Candidate', render: (c) => <span className="flex items-center gap-2 font-medium text-fg">{isOverdue(c) && <AlertCircle className="h-3.5 w-3.5 text-danger" aria-label="Overdue" />}{fullName(c)}</span>, sortValue: (c) => fullName(c) },
-      { key: 'stage', header: 'Stage', render: (c) => <StageBadge stage={c.stage} />, sortValue: (c) => stageIndex(c.stage) },
+      // The idle badge sits under the stage (no extra column, so the list still fits a 1440 px screen).
+      { key: 'stage', header: 'Stage', render: (c) => <span className="flex flex-col items-start gap-1"><StageBadge stage={c.stage} /><IdleBadge candidate={c} /></span>, sortValue: (c) => stageIndex(c.stage) },
       { key: 'source', header: 'Source', render: (c) => <SourceBadge source={c.source} />, sortValue: (c) => c.source },
       { key: 'rating', header: 'Rating', render: (c) => <StarRating value={c.rating} size="sm" />, sortValue: (c) => c.rating ?? 0 },
       { key: 'owner', header: 'Owner', render: (c) => (c.ownerName ? <span className="flex items-center gap-2"><Avatar name={c.ownerName} size="xs" />{c.ownerName}</span> : <span className="text-muted">Unassigned</span>), sortValue: (c) => c.ownerName ?? '' },
@@ -67,6 +91,42 @@ export function RecruitmentPage() {
     ],
     [canWrite],
   );
+
+  // The list sorts here (controlled), so the order select and the column headers always agree. "Longest idle first" is
+  // a sort key of its own (the select's), not a column.
+  const sortedList = useMemo(() => {
+    if (!listSort) return list;
+    if (listSort.key === IDLE_LIST_SORT.key) {
+      const idleFirst = byLongestIdle(list);
+      return listSort.dir === 'desc' ? idleFirst : idleFirst.reverse();
+    }
+    const value = columns.find((c) => c.key === listSort.key)?.sortValue;
+    return value ? sortRows(list, value, listSort.dir) : list;
+  }, [list, listSort, columns]);
+  // The select always names the order on screen: a cleared column sort is the server's "recently moved" order, and any
+  // other column sort shows "Sorted by column".
+  const orderValue: Order | '' =
+    view === 'board'
+      ? order
+      : !listSort
+        ? 'moved'
+        : listSort.dir !== 'desc'
+          ? ''
+          : listSort.key === IDLE_LIST_SORT.key
+            ? 'idle'
+            : listSort.key === DEFAULT_LIST_SORT.key
+              ? 'applied'
+              : '';
+  const changeOrder = (next: Order | '') => {
+    if (!next) return;
+    // One choice for both views (the board has no "newest applicants" order, so that keeps it on "recently moved").
+    setOrder(next === 'idle' ? 'idle' : 'moved');
+    setListSort(next === 'idle' ? IDLE_LIST_SORT : next === 'applied' ? DEFAULT_LIST_SORT : null);
+  };
+  const orderOptions =
+    view === 'board'
+      ? [{ value: 'moved', label: 'Recently moved first' }, { value: 'idle', label: 'Longest idle first' }]
+      : [{ value: 'applied', label: 'Newest applicants first' }, { value: 'moved', label: 'Recently moved first' }, { value: 'idle', label: 'Longest idle first' }];
 
   // The board scroller is `relative` so absolutely positioned bits inside the cards (select chevrons) are clipped by it
   // instead of widening the whole page on phones.
@@ -119,10 +179,18 @@ export function RecruitmentPage() {
       )}
 
       <div className="mb-4 flex flex-col gap-3 rounded-xl border border-border bg-surface p-3 lg:flex-row lg:items-center lg:justify-between">
-        <div className="grid flex-1 gap-2 sm:grid-cols-3">
-          <Input aria-label="Search candidates" placeholder="Search name or email…" value={search} onChange={(e) => setSearch(e.target.value)} leftIcon={<Search className="h-4 w-4" aria-hidden />} size="sm" />
-          <Select aria-label="Source" value={source} onChange={(e) => setSource(e.target.value as CandidateSource | '')} placeholder="All sources" options={optionsFrom(SOURCE_LABELS)} size="sm" />
-          <Select aria-label="Owner" value={ownerId} onChange={(e) => setOwnerId(e.target.value)} placeholder="Any owner" options={(owners.data ?? []).filter((u) => u.role !== 'rep').map((u) => ({ value: String(u.id), label: fullName(u) }))} size="sm" />
+        <div className="grid flex-1 gap-2 sm:grid-cols-2 xl:grid-cols-[1.3fr_1fr_1fr_1.2fr]">
+          <Input aria-label="Search candidates" placeholder="Search name or email…" value={search} onChange={(e) => setSearch(e.target.value)} leftIcon={<Search className="h-4 w-4" aria-hidden />} className={FILTER_CONTROL} />
+          <Select aria-label="Source" value={source} onChange={(e) => setSource(e.target.value as CandidateSource | '')} placeholder="All sources" options={optionsFrom(SOURCE_LABELS)} className={FILTER_CONTROL} />
+          <Select aria-label="Owner" value={ownerId} onChange={(e) => setOwnerId(e.target.value)} placeholder="Any owner" options={(owners.data ?? []).filter((u) => u.role !== 'rep').map((u) => ({ value: String(u.id), label: fullName(u) }))} className={FILTER_CONTROL} />
+          <Select
+            aria-label="Order"
+            value={orderValue}
+            onChange={(e) => changeOrder(e.target.value as Order | '')}
+            placeholder={orderValue === '' ? 'Sorted by column' : undefined}
+            options={orderOptions}
+            className={FILTER_CONTROL}
+          />
         </div>
         <div className="flex items-center gap-3">
           {view === 'list' && (
@@ -167,7 +235,7 @@ export function RecruitmentPage() {
           </div>
         </div>
       ) : (
-        <DataTable columns={columns} rows={list} rowKey={(c) => c.id} loading={candidates.isLoading} className="min-w-0 max-w-full" onRowClick={(c) => navigate(`/recruitment/${c.id}`)} empty={<EmptyState title={COPY.empty.candidates.title} description={COPY.empty.candidates.description} size="sm" className="border-0" />} initialSort={{ key: 'applied', dir: 'desc' }} />
+        <DataTable columns={columns} rows={sortedList} sort={listSort} onSortChange={setListSort} rowKey={(c) => c.id} loading={candidates.isLoading} className="min-w-0 max-w-full" onRowClick={(c) => navigate(`/recruitment/${c.id}`)} empty={<EmptyState title={COPY.empty.candidates.title} description={COPY.empty.candidates.description} size="sm" className="border-0" />} />
       )}
 
       {canWrite && <AddCandidateModal open={addOpen} onClose={() => setAddOpen(false)} onCreated={(id) => navigate(`/recruitment/${id}`)} />}

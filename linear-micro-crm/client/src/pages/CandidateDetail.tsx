@@ -2,13 +2,14 @@ import { useEffect, useId, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import { ArrowLeft, CalendarPlus, Mail, MapPin, Phone, UserRound } from 'lucide-react';
 import type { Interview } from '@lm/shared';
-import { POSITION_LABELS, STAGE_LABELS } from '@lm/shared';
+import { POSITION_LABELS, STAGE_LABELS, needsOutcome } from '@lm/shared';
 import { Avatar, Badge, Button, Card, CardHeader, EmptyState, Field, Input, PageHeader, Select, Skeleton, Textarea, useToast } from '@/components/ui';
 import { ApiError } from '@/api/client';
 import { useCandidate, useUpdateCandidate, useUpdateInterview, useUsers, type CandidateDetail } from '@/api/hooks';
 import { useCurrentUser } from '@/auth/AuthProvider';
 import { ErrorState, SourceBadge, StageBadge, StarRating, errorMessage } from '@/features/common';
-import { MoveStageControl, ScheduleInterviewModal, StageStepper } from '@/features/recruitment';
+import { IdleBadge, MoveStageControl, ScheduleInterviewModal, StageStepper } from '@/features/recruitment';
+import { OutcomeToRecordRow } from '@/features/recruitment/RecordOutcome';
 import { isoToLocalInput, localInputToISO } from '@/lib/dates';
 import { formatDate, formatDateTime, formatRelative, fullName } from '@/lib/format';
 import { INTERVIEW_OUTCOME_LABELS, INTERVIEW_OUTCOME_TONES, INTERVIEW_TYPE_LABELS, optionsFrom } from '@/lib/labels';
@@ -24,6 +25,8 @@ export function CandidateDetailPage() {
   usePageTitle(c ? fullName(c) : 'Candidate');
   const [scheduleOpen, setScheduleOpen] = useState(false);
   const canWrite = me.role === 'admin' || me.role === 'recruiter' || me.role === 'leader';
+  // Interviews that happened (2 h+ ago) and still say "pending": asked for first, with the outcome select inline.
+  const toRecord = c ? [...c.interviews].filter((iv) => needsOutcome(iv)).sort((a, b) => a.scheduledAt.localeCompare(b.scheduledAt)) : [];
 
   if (q.isError && q.error instanceof ApiError && q.error.status === 404) return <NotFoundPage />;
 
@@ -47,7 +50,20 @@ export function CandidateDetailPage() {
         <div className="grid grid-cols-1 gap-6 lg:grid-cols-3"><Skeleton className="h-64" /><Skeleton className="h-64 lg:col-span-2" /></div>
       ) : (
         <div className="space-y-6">
-          <Card><CardHeader title="Pipeline" description={`Currently at ${STAGE_LABELS[c.stage]} since ${formatDate(c.stageUpdatedAt)}`} /><StageStepper stage={c.stage} /></Card>
+          <Card><CardHeader title="Pipeline" description={`Currently at ${STAGE_LABELS[c.stage]} since ${formatDate(c.stageUpdatedAt)}`} actions={<IdleBadge candidate={c} />} /><StageStepper stage={c.stage} /></Card>
+
+          {/* First thing on a phone, above the profile: a past interview that still says pending. */}
+          {canWrite && toRecord.length > 0 && (
+            <Card>
+              <CardHeader
+                title="Record the outcome"
+                description={toRecord.length === 1 ? 'This interview has happened but still says pending' : `These ${toRecord.length} interviews have happened but still say pending`}
+              />
+              <ul className="divide-y divide-border">
+                {toRecord.map((iv) => <OutcomeToRecordRow key={iv.id} interview={iv} />)}
+              </ul>
+            </Card>
+          )}
 
           <div className="grid grid-cols-1 gap-6 lg:grid-cols-3">
             <div className="min-w-0 space-y-6">
@@ -117,7 +133,7 @@ function InterviewRow({ interview: iv, canWrite }: { interview: Interview; canWr
   return (
     <li className="flex flex-wrap items-center justify-between gap-3 py-3">
       <div>
-        <div className="flex items-center gap-2 text-sm font-medium text-fg">{INTERVIEW_TYPE_LABELS[iv.type]}{upcoming && iv.outcome === 'pending' && <Badge tone="info">Upcoming</Badge>}</div>
+        <div className="flex items-center gap-2 text-sm font-medium text-fg">{INTERVIEW_TYPE_LABELS[iv.type]}{upcoming && iv.outcome === 'pending' && <Badge tone="info">Upcoming</Badge>}{needsOutcome(iv) && <Badge tone="warning">Outcome due</Badge>}</div>
         <div className="text-xs text-muted">{formatDateTime(iv.scheduledAt)} · {formatRelative(iv.scheduledAt)}{iv.interviewerName ? ` · with ${iv.interviewerName}` : ''}</div>
         {iv.notes && <p className="mt-1 text-xs text-muted">{iv.notes}</p>}
       </div>
@@ -133,6 +149,14 @@ function InterviewRow({ interview: iv, canWrite }: { interview: Interview; canWr
   );
 }
 
+/**
+ * The `datetime-local` value for a deadline. A date-only deadline (the 1.1 stage default) is due by the end of that day,
+ * so it shows as 23:59 on it rather than shifting to 01:00 in summer time.
+ */
+function dueInput(value: string | null | undefined): string {
+  return value && /^\d{4}-\d{2}-\d{2}$/.test(value) ? `${value}T23:59` : isoToLocalInput(value);
+}
+
 function NotesForm({ candidate, canWrite }: { candidate: CandidateDetail; canWrite: boolean }) {
   const toast = useToast();
   const uid = useId();
@@ -140,20 +164,24 @@ function NotesForm({ candidate, canWrite }: { candidate: CandidateDetail; canWri
   const owners = useUsers({}, { enabled: canWrite });
   const [notes, setNotes] = useState(candidate.notes ?? '');
   const [nextAction, setNextAction] = useState(candidate.nextAction ?? '');
-  const [nextAt, setNextAt] = useState(isoToLocalInput(candidate.nextActionAt));
+  const [nextAt, setNextAt] = useState(dueInput(candidate.nextActionAt));
   const [ownerId, setOwnerId] = useState(candidate.ownerId ? String(candidate.ownerId) : '');
-  const dirty = notes !== (candidate.notes ?? '') || nextAction !== (candidate.nextAction ?? '') || nextAt !== isoToLocalInput(candidate.nextActionAt) || ownerId !== (candidate.ownerId ? String(candidate.ownerId) : '');
+  const dirty = notes !== (candidate.notes ?? '') || nextAction !== (candidate.nextAction ?? '') || nextAt !== dueInput(candidate.nextActionAt) || ownerId !== (candidate.ownerId ? String(candidate.ownerId) : '');
 
   useEffect(() => {
     setNotes(candidate.notes ?? '');
     setNextAction(candidate.nextAction ?? '');
-    setNextAt(isoToLocalInput(candidate.nextActionAt));
+    setNextAt(dueInput(candidate.nextActionAt));
     setOwnerId(candidate.ownerId ? String(candidate.ownerId) : '');
   }, [candidate.id, candidate.notes, candidate.nextAction, candidate.nextActionAt, candidate.ownerId]);
 
   const save = () => {
     update.mutate(
-      { id: candidate.id, notes: notes.trim() || null, nextAction: nextAction.trim() || null, nextActionAt: localInputToISO(nextAt), ownerId: ownerId ? Number(ownerId) : null },
+      {
+        id: candidate.id, notes: notes.trim() || null, nextAction: nextAction.trim() || null, ownerId: ownerId ? Number(ownerId) : null,
+        // only a changed due date is sent, so saving notes never turns a date-only deadline into a timestamp
+        ...(nextAt !== dueInput(candidate.nextActionAt) ? { nextActionAt: localInputToISO(nextAt) } : {}),
+      },
       { onSuccess: () => toast.success('Candidate updated'), onError: (e) => toast.error('Could not save', errorMessage(e)) },
     );
   };

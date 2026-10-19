@@ -1,8 +1,8 @@
 import { Link } from 'react-router-dom';
-import { AlertCircle, Clock } from 'lucide-react';
+import { AlertCircle, Clock, Hourglass } from 'lucide-react';
 import type { CandidateWithMeta } from '@lm/shared';
-import { isOpenStage, isOverdue as sharedIsOverdue } from '@lm/shared';
-import { Avatar } from '@/components/ui';
+import { STAGE_LABELS, candidateIdleDays, isIdle, isOpenStage, isOverdue as sharedIsOverdue, stageSlaDays } from '@lm/shared';
+import { Avatar, Badge } from '@/components/ui';
 import { SourceBadge, StarRating } from '@/features/common';
 import { fullName } from '@/lib/format';
 import { MoveStageControl, TERMINAL_STAGES } from './MoveStageControl';
@@ -10,6 +10,22 @@ import { MoveStageControl, TERMINAL_STAGES } from './MoveStageControl';
 /** Open candidate whose next action date has passed (shared rule). */
 export function isOverdue(c: CandidateWithMeta): boolean {
   return isOpenStage(c.stage) && sharedIsOverdue(c.nextActionAt);
+}
+
+/**
+ * "Idle 9d": the candidate has sat in their stage for longer than its target (shared `isIdle`, Europe/London calendar
+ * days since the last stage change). Renders nothing while they are on target or closed.
+ */
+export function IdleBadge({ candidate: c, now }: { candidate: Pick<CandidateWithMeta, 'stage' | 'stageUpdatedAt'>; now?: Date }) {
+  if (!isIdle(c, now)) return null;
+  const days = candidateIdleDays(c, now) ?? 0;
+  const sla = stageSlaDays(c.stage) ?? 0;
+  const label = `${days} days in ${STAGE_LABELS[c.stage]}, target ${sla} days`;
+  return (
+    <Badge tone="warning" size="sm" title={label}>
+      <Hourglass aria-hidden />Idle {days}d<span className="sr-only"> ({label})</span>
+    </Badge>
+  );
 }
 
 export function CandidateCard({ candidate: c, canMove }: { candidate: CandidateWithMeta; canMove: boolean }) {
@@ -25,7 +41,8 @@ export function CandidateCard({ candidate: c, canMove }: { candidate: CandidateW
       </div>
       <div className="mt-1.5 flex flex-wrap items-center gap-1.5 text-xs text-muted">
         <SourceBadge source={c.source} />
-        <span className="inline-flex items-center gap-1"><Clock className="h-3 w-3" aria-hidden />{c.daysInPipeline}d</span>
+        <span className="inline-flex items-center gap-1" title="Days since they applied"><Clock className="h-3 w-3" aria-hidden />{c.daysInPipeline}d</span>
+        <IdleBadge candidate={c} />
         {c.rating != null && <StarRating value={c.rating} size="sm" />}
       </div>
       {c.nextAction && <p className={`mt-2 truncate text-xs ${overdue ? 'text-danger' : 'text-muted'}`} title={c.nextAction}>Next: {c.nextAction}</p>}
