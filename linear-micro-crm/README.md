@@ -90,6 +90,12 @@ Every command below exists in `package.json` (root) or `server/package.json`.
 | `npm run share` | While the server runs: the addresses phones and laptops on the same Wi-Fi or hotspot can use, with a QR code to scan |
 | `npm run doctor` | Check this machine can run Linear Hub: Node version, built client, data folder, database, port, and a real boot on a temporary database. Run it whenever `npm start` misbehaves |
 | `npm run seed` | Delete and rebuild the database with fresh sample data |
+| `npm run backup` | Back the database up now (fine while the server runs) into `server/data/backups/` |
+| `npm run backups` | List the backup files with size and age |
+| `npm run restore -- <file> [--yes]` | Put a backup back as the live database (stop the server first). `<file>` is a path or a file name from the backups folder; it shows what changes and asks first |
+| `npm run service:install` | Run Linear Hub in the background and start it at log-in (macOS LaunchAgent, Linux systemd user unit; on Windows it prints the Task Scheduler steps) |
+| `npm run service:uninstall` | Remove the background service and free the port |
+| `npm run service:status` | Is the service loaded and answering; its last 20 log lines; whether it still points at this Node |
 | `npm run typecheck` | Typecheck `shared`, `server` and `client` |
 | `npm test` | Run the shared domain-logic tests (`node:test`) |
 | `npm run smoke -w server` | Boot the API on a temporary seeded database and exercise every endpoint against the contract |
@@ -101,6 +107,10 @@ Every command below exists in `package.json` (root) or `server/package.json`.
 | `PORT` | `4000` | Port the API (and, in production, the client) listens on |
 | `HOST` | unset (every interface) | Set to `127.0.0.1` to make the server reachable from this machine only; unset so phones and laptops on the same network can open it |
 | `DB_PATH` | `server/data/linear.sqlite` | Where the SQLite file lives; the directory is created if needed |
+| `LM_BACKUP` | on | `0` turns the automatic backups off (`npm run backup` still works) |
+| `LM_BACKUP_DIR` | `<data dir>/backups` | Where backups go. Keep it outside the repository (never commit backups) |
+| `LM_BACKUP_HOUR` | `2` | London hour (0–23) from which the nightly backup may run |
+| `LM_COMPRESSION` | on | `0` turns HTTP compression off (for example behind a reverse proxy that compresses already) |
 | `LM_DEMO_ACCOUNTS` | unset | Set to `0` on any deployment with real users: the sign-in page then shows no demo accounts and the API never publishes a login |
 | `LM_APP_SECRET` | unset (generated key file) | Key material for encrypting two-step verification secrets at rest (AES-256-GCM, key = SHA-256 of the value). When unset, a random key is generated on first start into `server/data/app-secret` (mode 600, next to the database; `LM_APP_SECRET_FILE` relocates it). Back that file up with the database, or set the variable to manage the key yourself |
 | `COOKIE_SECURE` | unset | Set to `1` to force the `Secure` flag on the session cookie; it is set automatically when the request arrived over HTTPS (`X-Forwarded-Proto: https`, `trust proxy` is on) |
@@ -122,6 +132,44 @@ provides the hotspot, and any other device joined to it, can open the printed ad
   expose the port to the public internet without a reverse proxy and HTTPS.
 - `HOST=127.0.0.1 npm start` keeps it private to this machine, for example on public Wi-Fi.
 
+### Run it in the background
+
+So phones on the hotspot keep working with no Terminal window open, and Linear Hub starts by itself when you log in:
+
+```bash
+npm run build                # the service serves the built client
+npm run service:install      # stops a copy running in a terminal, then installs and starts the service
+npm run service:status       # loaded? answering? the last 20 log lines
+npm run service:uninstall    # stop it for good and free the port
+```
+
+- **macOS**: a LaunchAgent, `~/Library/LaunchAgents/uk.co.linear-mcr.hub.plist`, with `RunAtLoad` and `KeepAlive`: it
+  starts at log-in and macOS restarts it within seconds if it stops. Logs go to
+  `~/Library/Logs/LinearHub/linear-hub.log`. It runs this checkout's `server/src/index.ts` with the Node you ran the
+  command with, in production mode with `TZ=Europe/London`, plus `PORT`, `HOST`, `DB_PATH` and the other Linear Hub
+  settings if they are set in that terminal.
+- **Linux**: a systemd user unit, `~/.config/systemd/user/linear-hub.service` (`Restart=always`), started with
+  `systemctl --user enable --now`. Run `loginctl enable-linger $USER` to keep it running while nobody is logged in.
+- **Windows**: `npm run service:install` prints the Task Scheduler steps.
+- While it runs as a service, `npm run stop` only makes macOS start it again: use `npm run service:uninstall`
+  (for example before `npm run restore`, then `npm run service:install` afterwards).
+- After switching Node (`nvm use`, `brew upgrade node`), run `npm run service:install` again; `service:status` and
+  `npm run doctor` warn when the service still points at the old Node.
+- A sleeping Mac answers nobody: for a day in the field, set System Settings › Battery › Options › "Prevent automatic
+  sleeping on power adapter when the display is off".
+- **Keep the Linear Hub folder out of Desktop, Documents, Downloads and iCloud Drive** on a Mac. macOS guards those
+  folders, and a background service (unlike Terminal) can be refused access to them ("Operation not permitted" in the
+  log), so it could not open the database or write backups. `service:install` and `service:status` warn when the
+  checkout, `DB_PATH`, `LM_BACKUP_DIR` or `LM_APP_SECRET_FILE` is in one: move the folder (for example to
+  `~/LinearHub`) and install again, or give the Node it names Full Disk Access in System Settings › Privacy & Security.
+  For the same reason, do not point `LM_BACKUP_DIR` into iCloud Drive while it runs as a service: copy the folder there
+  by hand instead.
+- **Windows**: the printed `.cmd` creates `%LOCALAPPDATA%\LinearHub` before writing its log there.
+
+The macOS install, restart-after-a-crash and uninstall checks need a Mac, so they are release checks for the owner
+(listed in [docs/smart/p10-backups-autostart.md](docs/smart/p10-backups-autostart.md)); the files `--print` writes for
+macOS, Linux and Windows are covered by the server tests (`server/src/test/service.test.ts`).
+
 ### Troubleshooting
 
 | Symptom | What to do |
@@ -132,6 +180,44 @@ provides the hotspot, and any other device joined to it, can open the printed ad
 | A phone on the same Wi-Fi or hotspot cannot open the address | Allow incoming connections for `node` in **System Settings → Network → Firewall**, check both devices are on the same network, re-run `npm run share` for the current address, and make sure `HOST` is not set |
 | `Cannot find module 'qrcode'` or similar after a `git pull` | Dependencies changed: run `npm install`, then `npm run build`, then `npm start` |
 | `npm start` serves the API but the page is empty or stale | Rebuild the client: `npm run build` (the server serves `client/dist`) |
+
+### Backups and restore
+
+Everything — people, gauges, pay — is in one file, `server/data/linear.sqlite`. While the server runs it keeps dated
+copies of it in **`server/data/backups/`** (set `LM_BACKUP_DIR` to put them elsewhere):
+
+- **10 minutes after start-up**, when the last backup is more than 24 hours old;
+- **every night**: an hourly check backs up once the London time has reached 02:00 (`LM_BACKUP_HOUR`) and there is no
+  backup dated today. A laptop that was asleep at 02:00 gets its copy within an hour of waking.
+
+Each copy is a complete, checked database (`linear-2026-10-19-0200.sqlite`, named in London time), made with SQLite's
+online backup, so it is consistent even while people are logging gauges. The folder keeps the newest copy of each of
+the last 30 days plus one a week for the 8 weeks before that; older copies are deleted (never one made in the last 24
+hours), anything else in the folder is left alone.
+
+```bash
+npm run backup                       # back up now (works while the server is running)
+npm run backups                      # list the copies with size and age
+npm run stop                         # a restore needs the server stopped
+npm run restore -- linear-2026-10-19-0200.sqlite        # shows what changes and asks before replacing
+npm start
+```
+
+`restore` refuses while anything answers on the port ("Stop it first: npm run stop"), checks the backup
+(`PRAGMA integrity_check` and the Linear Hub tables), prints the current and the backup's users, gauge entries,
+payroll runs and latest gauge date side by side, and only then asks (`--yes` skips the question). The database it
+replaces is kept next to it as `linear.sqlite.before-restore-<date-time>`, so a restore can itself be undone.
+
+**Keep the folder private and copy it off the laptop.** It holds everyone's names and pay. It also holds
+`app-secret`, a copy of the key that encrypts two-step sign-in secrets (mode 600): without it, people with two-step
+sign-in could not sign in after restoring on a new laptop (restore puts it in place when the new laptop has none, and
+warns when there is no key anywhere). A backup on the same laptop does not survive losing the laptop: copy the folder to
+iCloud Drive or Google Drive now and then. `npm run doctor` warns when the last backup is more than 36 hours old and
+when the disk has less than 1 GB free; **Settings › Backups** shows the same to the owner.
+
+**Never commit the backups folder.** `server/data/backups/`, the `*.before-restore-*` copies a restore keeps and its
+`*.restoring-*` staging files are in `.gitignore`; if you set `LM_BACKUP_DIR`, choose a folder outside the repository
+(never push a copy of payroll and the sign-in key to GitHub).
 
 ### Docker
 

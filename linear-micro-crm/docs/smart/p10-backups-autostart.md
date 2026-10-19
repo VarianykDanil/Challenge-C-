@@ -5,8 +5,9 @@ copies of that file, makes putting one back safe, keeps the server answering pho
 window open, and compresses what the server sends over the hotspot.
 
 Per the fragment guide, p10 has no LOGIC.md section: the **Logic** section below is written as the two README sections
-("Backups and restore", "Run it in the background") plus the README table rows to merge, followed by the rules and
-measurements behind them.
+("Backups and restore", "Run it in the background") plus the README table rows, followed by the rules and measurements
+behind them. **Merged into README.md** (lead decision): both sections, the six script rows and the four environment
+variable rows are there now, including the never-commit rule for the backups folder.
 
 ## API
 
@@ -250,8 +251,10 @@ to `configureBackupDir`; without that call it follows `LM_BACKUP`).
   before the `node … >> "%LOCALAPPDATA%\LinearHub\linear-hub.log" 2>&1` line (cmd.exe cannot redirect into a missing
   folder, and the task would never start Node).
 
-**Release checks still to run on the owner's Mac** (macOS cannot run in CI; only the `--print` plist has been checked:
-it parses with `plistlib`, `KeepAlive`/`RunAtLoad` true, the environment and log path as above):
+**Release checks still to run on the owner's Mac** (lead decision: they need the owner's Mac and stay listed here as
+release checks for the owner; README's "Run it in the background" points here. macOS cannot run in CI; only the
+`--print` plist has been checked: it parses with `plistlib`, `KeepAlive`/`RunAtLoad` true, the environment and log
+path as above):
 1. From a checkout outside Desktop/Documents/Downloads/iCloud: `npm run build && npm run service:install`, then
    `launchctl list | grep uk.co.linear-mcr.hub` and `curl http://localhost:4000/api/health`.
 2. `kill -9 <pid>` (from `npm run service:status`): a new pid answers within 10 s.
