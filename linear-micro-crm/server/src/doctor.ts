@@ -2,24 +2,27 @@
  * `npm run doctor`: check this machine can run Linear Hub and say exactly what to do when it cannot.
  *
  * Checks, in order: Node version and environment, the built client, the data folder, the database file, the
- * two-step encryption key, the port, and finally a real boot of the server on a temporary database and a random
- * port (does it answer /api/health and stay up?). Exit code 1 when any check fails.
+ * two-step encryption key, backups (age, free disk, the background service's Node), the port, and finally a real
+ * boot of the server on a temporary database and a random port (does it answer /api/health and stay up?). Exit code
+ * 1 when any check fails; warnings and notes (ℹ) do not fail it.
  */
 import { spawn } from 'node:child_process';
-import { existsSync, mkdirSync, mkdtempSync, rmSync, statSync, unlinkSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, rmSync, statSync, statfsSync, unlinkSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { DEFAULT_DB_PATH } from './db/seed.ts';
+import { BACKUP_RULES, backupDirFor, backupStatus, backupsEnabled, formatBytes, hoursSince } from './lib/backup.ts';
 import { findPortHolder, portBusyMessage } from './lib/boot.ts';
+import { installedServiceFile, staleNodeWarning } from './service.ts';
 
-type Status = 'ok' | 'warn' | 'fail';
+type Status = 'ok' | 'info' | 'warn' | 'fail';
 interface Check {
   status: Status;
   title: string;
   detail?: string;
 }
 const checks: Check[] = [];
-const ICON: Record<Status, string> = { ok: '✔', warn: '▲', fail: '✖' };
+const ICON: Record<Status, string> = { ok: '✔', info: 'ℹ', warn: '▲', fail: '✖' };
 function report(status: Status, title: string, detail?: string): void {
   checks.push({ status, title, detail });
   console.log(`${ICON[status]} ${title}`);
@@ -58,6 +61,9 @@ console.log(`Linear Hub doctor — ${new Date().toISOString()}\n`);
   try {
     const sqlite = await import('node:sqlite');
     report(typeof sqlite.DatabaseSync === 'function' ? 'ok' : 'fail', 'node:sqlite is available');
+    if (typeof (sqlite as { backup?: unknown }).backup !== 'function') {
+      report('warn', 'This Node has no node:sqlite backup(), so backups cannot run', 'Backups need Node 22.16 or newer. Install the current LTS from https://nodejs.org.');
+    }
   } catch (err) {
     report('fail', 'node:sqlite is not available in this Node', String(err));
   }
@@ -127,14 +133,79 @@ console.log(`Linear Hub doctor — ${new Date().toISOString()}\n`);
   }
 }
 
-// 6. Port
+// 6. Backups, free disk and the background service (p10)
+{
+  const dir = backupDirFor(dbPath);
+  if (!existsSync(dbPath)) {
+    report('ok', `No database yet, so nothing to back up (backups go to ${dir})`);
+  } else {
+    try {
+      const { DatabaseSync } = await import('node:sqlite');
+      const db = new DatabaseSync(dbPath, { readOnly: true });
+      const read = () => ({
+        status: backupStatus(db, dir),
+        seededAt: (db.prepare(`SELECT value FROM meta WHERE key = 'seeded_at'`).get() as { value?: string } | undefined)?.value ?? null,
+      });
+      let snapshot: ReturnType<typeof read>;
+      try {
+        snapshot = read();
+      } finally {
+        db.close();
+      }
+      const { status, seededAt } = snapshot;
+      const age = hoursSince(status.lastAt);
+      const ageText = (h: number) => (h < 1.5 ? `${Math.max(1, Math.round(h * 60))} min` : h < 48 ? `${Math.round(h)} h` : `${Math.round(h / 24)} days`);
+      const off = backupsEnabled() ? '' : ' Automatic backups are off (LM_BACKUP=0): unset it, or run npm run backup yourself.';
+      if (!status.lastAt) {
+        const fresh = hoursSince(seededAt) < BACKUP_RULES.bootMaxAgeHours;
+        report(
+          fresh && !off ? 'info' : 'warn',
+          `No backup yet (${dir})`,
+          fresh && !off
+            ? 'A fresh install: the first backup runs 10 minutes after the server starts, then every night. Make one now with:  npm run backup'
+            : `Make one now with:  npm run backup   (the server also backs up every night while it runs).${off}`,
+        );
+      } else if (age > BACKUP_RULES.staleHours) {
+        report(
+          'warn',
+          `Last backup ${ageText(age)} ago (${status.file}, ${status.count} kept in ${dir})`,
+          `Backups only run while the server is running. Make one now with:  npm run backup${off}`,
+        );
+      } else {
+        report(off ? 'warn' : 'ok', `Last backup ${ageText(age)} ago (${status.file}, ${status.count} kept in ${dir})`, off ? off.trim() : undefined);
+      }
+    } catch (err) {
+      report('warn', 'Could not read the backup status', String(err));
+    }
+  }
+  try {
+    const where = existsSync(dir) ? dir : path.dirname(dbPath);
+    const fs = statfsSync(where);
+    const free = Number(fs.bavail) * Number(fs.bsize);
+    report(
+      free < 1024 ** 3 ? 'warn' : 'ok',
+      `${formatBytes(free)} free on the disk that holds ${where}`,
+      free < 1024 ** 3 ? 'Under 1 GB free: backups and the database may fail to write. Free some space (empty the Bin, remove old downloads).' : undefined,
+    );
+  } catch {
+    // statfs not supported here: say nothing
+  }
+  const service = installedServiceFile();
+  if (service) {
+    const stale = staleNodeWarning(service);
+    report(stale ? 'warn' : 'ok', stale ? 'The background service runs a different Node' : `Background service installed (${service})`, stale ?? undefined);
+  }
+}
+
+// 7. Port
 {
   const holder = await findPortHolder(port);
-  if (holder) report('fail', `Port ${port} is already in use`, portBusyMessage(port, holder));
+  if (holder?.linearHub && !holder.hung && installedServiceFile()) report('ok', `Port ${port} is held by Linear Hub running as the background service`);
+  else if (holder) report('fail', `Port ${port} is already in use`, portBusyMessage(port, holder));
   else report('ok', `Port ${port} is free`);
 }
 
-// 7. Boot test on a temporary database and a random port
+// 8. Boot test on a temporary database and a random port
 if (process.env.LM_DOCTOR_SKIP_BOOT === '1') {
   report('warn', 'Boot test skipped (LM_DOCTOR_SKIP_BOOT=1)');
 } else {

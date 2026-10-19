@@ -7,6 +7,7 @@ import express, { type ErrorRequestHandler, type Express, type RequestHandler } 
 import { ZodError } from 'zod';
 import type { Db } from './db/connection.ts';
 import { bumpDataVersion, responseCache } from './lib/cache.ts';
+import { compression } from './lib/compress.ts';
 import { HttpError } from './lib/errors.ts';
 import { authenticate, requireAuth } from './middleware/auth.ts';
 import { announcementsRouter } from './routes/announcements.ts';
@@ -107,6 +108,9 @@ export function createApp(db: Db, opts: AppOptions = {}): Express {
   app.disable('x-powered-by');
   app.set('trust proxy', opts.trustProxy ?? false);
   app.use(securityHeaders(contentSecurityPolicy(opts.staticDir)));
+  // gzip / brotli for JSON, HTML, JS, CSS and SVG over 1 KB (lib/compress.ts): phones on a hotspot download less.
+  // LM_COMPRESSION=0 turns it off (e.g. behind a reverse proxy that compresses already).
+  if (process.env.LM_COMPRESSION?.trim() !== '0') app.use(compression());
   app.use(express.json({ limit: '1mb' }));
   app.use(cookieParser());
   app.use(

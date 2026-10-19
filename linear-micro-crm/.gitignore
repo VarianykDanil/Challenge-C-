@@ -7,3 +7,7 @@ server/data/*.sqlite-*
 .DS_Store
 /screenshots/
 server/data/app-secret
+# backups, restore leftovers and the key copy (p10): copies of payroll and sign-in data, never commit them
+server/data/backups/
+server/data/*.before-restore-*
+server/data/*.restoring-*

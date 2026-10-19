@@ -7,7 +7,8 @@ import { createSchema, isSeeded } from './db/schema.ts';
 import { materialisePayrollRuns, rollForwardEventStatuses } from './db/maintenance.ts';
 import { DEFAULT_DB_PATH, seed } from './db/seed.ts';
 import { findPortHolder, installExitDiagnostics, listeningUrl, networkUrls, portBusyMessage } from './lib/boot.ts';
-import { announceAppSecret, configureAppSecret } from './lib/crypto.ts';
+import { backupDirFor, backupHour, backupsEnabled, configureBackupDir, scheduleBackups, whenBackupIdle } from './lib/backup.ts';
+import { announceAppSecret, appSecretFile, configureAppSecret } from './lib/crypto.ts';
 import { businessClockPinned, businessNow } from './lib/dates.ts';
 import { purgeExpiredChallenges, reencryptLegacySecrets } from './lib/twofactor.ts';
 import { purgeExpiredSessions } from './middleware/auth.ts';
@@ -63,6 +64,18 @@ setInterval(guarded(rollEvents), 15 * 60_000).unref();
 setInterval(guarded(purgeExpired), 15 * 60_000).unref();
 setInterval(guarded(materialisePayroll), 86_400_000).unref();
 
+// Backups (p10): dated copies of the database in <data dir>/backups (LM_BACKUP_DIR relocates it): 10 minutes after
+// start-up when the last one is over 24 h old, and nightly from LM_BACKUP_HOUR (default 02:00 London) when none is
+// dated today, so a laptop asleep at 02:00 catches up when it wakes. LM_BACKUP=0 turns the schedule off.
+const backupDir = backupDirFor(dbPath);
+configureBackupDir(backupDir, { scheduled: backupsEnabled() });
+if (backupsEnabled()) {
+  scheduleBackups(db, { dir: backupDir, secretFile: process.env.LM_APP_SECRET ? null : appSecretFile() });
+  console.log(`Backups: nightly from ${String(backupHour()).padStart(2, '0')}:00 (London) into ${backupDir}; npm run backup makes one now.`);
+} else {
+  console.log(`Automatic backups are off (LM_BACKUP=0). npm run backup still makes one into ${backupDir}.`);
+}
+
 const isProduction = process.env.NODE_ENV === 'production';
 const app = createApp(db, {
   staticDir: isProduction ? path.resolve(import.meta.dirname, '../../client/dist') : undefined,
@@ -90,8 +103,11 @@ function shutdown(): void {
   if (stopping) return;
   stopping = true;
   server.close(() => {
-    db.close();
-    process.exit(0);
+    // a backup in progress finishes first (it takes milliseconds; the 2 s guard below still applies)
+    void whenBackupIdle(db).then(() => {
+      db.close();
+      process.exit(0);
+    });
   });
   setTimeout(() => process.exit(0), 2000);
 }

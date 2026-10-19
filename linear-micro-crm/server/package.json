@@ -13,6 +13,12 @@
     "share": "NODE_NO_WARNINGS=1 node src/share.ts",
     "start:tsx": "TZ=Europe/London NODE_ENV=production NODE_NO_WARNINGS=1 tsx src/index.ts",
     "seed": "NODE_NO_WARNINGS=1 node src/db/seed.ts",
+    "backup": "NODE_NO_WARNINGS=1 node src/backup.ts",
+    "backups": "NODE_NO_WARNINGS=1 node src/backup.ts --list",
+    "restore": "NODE_NO_WARNINGS=1 node src/restore.ts",
+    "service:install": "NODE_NO_WARNINGS=1 node src/service.ts install",
+    "service:uninstall": "NODE_NO_WARNINGS=1 node src/service.ts uninstall",
+    "service:status": "NODE_NO_WARNINGS=1 node src/service.ts status",
     "smoke": "TZ=Europe/London NODE_NO_WARNINGS=1 node src/smoke.ts",
     "typecheck": "tsc --noEmit -p tsconfig.json",
     "test": "TZ=Europe/London NODE_NO_WARNINGS=1 node --test \"src/**/*.test.ts\""

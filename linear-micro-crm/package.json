@@ -17,6 +17,12 @@
     "restart": "npm run stop -w server; npm run start -w server",
     "share": "npm run share -w server",
     "seed": "npm run seed -w server",
+    "backup": "npm run backup -w server",
+    "backups": "npm run backups -w server",
+    "restore": "npm run restore -w server --",
+    "service:install": "npm run service:install -w server --",
+    "service:uninstall": "npm run service:uninstall -w server --",
+    "service:status": "npm run service:status -w server --",
     "typecheck": "npm run typecheck -w shared && npm run typecheck -w server && npm run typecheck -w client",
     "test": "npm run test -w shared && npm run test -w server"
   },

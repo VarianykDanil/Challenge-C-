@@ -1,13 +1,15 @@
 import { useState } from 'react';
-import { KeyRound, Monitor, Moon, RefreshCw, ShieldCheck, ShieldOff, Sun } from 'lucide-react';
+import { useQuery } from '@tanstack/react-query';
+import { Check, Copy, DatabaseBackup, KeyRound, Monitor, Moon, RefreshCw, ShieldCheck, ShieldOff, Sun, TriangleAlert } from 'lucide-react';
 import { BRAND, POSITION_LABELS, ROLE_LABELS } from '@lm/shared';
 import clsx from 'clsx';
 import { Avatar, Badge, Button, Card, CardHeader, PageHeader, Skeleton } from '@/components/ui';
-import { useHealth, useTwoFactorStatus } from '@/api/hooks';
+import { api } from '@/api/client';
+import { useHealth, useTwoFactorStatus, type HealthInfo } from '@/api/hooks';
 import { useCurrentUser } from '@/auth/AuthProvider';
 import { UserStatusBadge, errorMessage } from '@/features/common';
 import { RecoveryCodesModal, TwoFactorDisableModal, TwoFactorSetupModal } from '@/features/settings';
-import { formatDate, formatDateTime, fullName, pluralise } from '@/lib/format';
+import { formatDate, formatDateTime, formatRelative, fullName, pluralise } from '@/lib/format';
 import { useTheme, type Theme } from '@/components/layout';
 import { usePageTitle } from '@/lib/usePageTitle';
 import { COPY } from '@/content/copy';
@@ -64,6 +66,8 @@ export function SettingsPage() {
           </Card>
 
           <SecurityCard />
+
+          {user.role === 'admin' && <BackupsCard />}
         </div>
 
         <div className="min-w-0 space-y-6">
@@ -180,6 +184,155 @@ function SecurityCard() {
       <TwoFactorSetupModal open={modal === 'setup'} onClose={close} />
       <TwoFactorDisableModal open={modal === 'disable'} onClose={close} />
       <RecoveryCodesModal open={modal === 'codes'} onClose={close} />
+    </Card>
+  );
+}
+
+/* ───────────────────────────── Backups (admin) ───────────────────────────── */
+
+/** Settings and `npm run doctor` warn past this many hours without a backup (server: BACKUP_RULES.staleHours). */
+const BACKUP_STALE_HOURS = 36;
+const ICLOUD_LINE = 'Copy this folder to iCloud or Drive — a backup on the same laptop does not survive losing it.';
+
+/** `backup` from GET /health; `enabled` is false when the server runs with LM_BACKUP=0 (no nightly schedule). */
+type BackupInfo = NonNullable<HealthInfo['backup']> & { enabled?: boolean };
+
+const cmd = (text: string) => <code className="rounded bg-surface-2 px-1 py-0.5 font-mono text-xs text-fg">{text}</code>;
+
+function hoursSince(iso: string | null | undefined): number {
+  const t = iso ? Date.parse(iso) : Number.NaN;
+  return Number.isFinite(t) ? (Date.now() - t) / 3_600_000 : Number.POSITIVE_INFINITY;
+}
+
+/**
+ * Smart release 1.1 (p10): the backup status from GET /health, which carries `backup` for administrators only. Its own
+ * query (not useHealth, which is cached forever) so the card is fresh whenever Settings is opened.
+ */
+function BackupsCard() {
+  const q = useQuery({ queryKey: ['settings', 'backups'], queryFn: () => api<HealthInfo>('/health'), staleTime: 60_000 });
+  const [copied, setCopied] = useState(false);
+  const b = q.data?.backup as BackupInfo | undefined;
+  const age = hoursSince(b?.lastAt);
+  // a fresh install has no backup for its first minutes: only warn once it has been running for 36 h without one
+  const stale = !!b && (b.lastAt ? age > BACKUP_STALE_HOURS : hoursSince(q.data?.seededAt) > BACKUP_STALE_HOURS);
+  // started with LM_BACKUP=0: nothing runs by itself, so promise nothing and point at npm run backup instead
+  const off = b?.enabled === false;
+  const canCopy = typeof navigator !== 'undefined' && !!navigator.clipboard && typeof window !== 'undefined' && window.isSecureContext;
+
+  const copyPath = async () => {
+    if (!b) return;
+    try {
+      await navigator.clipboard.writeText(b.dir);
+      setCopied(true);
+      window.setTimeout(() => setCopied(false), 2000);
+    } catch {
+      setCopied(false);
+    }
+  };
+
+  return (
+    <Card data-testid="backups-card">
+      <CardHeader
+        title="Backups"
+        description={off ? 'Automatic backups are off on this server.' : 'A copy of the database every night while Linear Hub runs.'}
+        icon={<DatabaseBackup aria-hidden />}
+        actions={
+          off ? <Badge tone="warning" dot>Off</Badge> : b && !stale && b.lastAt ? <Badge tone="success" dot>Up to date</Badge> : undefined
+        }
+      />
+
+      {q.isLoading ? (
+        <div className="space-y-2" aria-busy>
+          <Skeleton className="h-4 w-48" />
+          <Skeleton className="h-4 w-72 max-w-full" />
+          <Skeleton className="h-4 w-40" />
+        </div>
+      ) : q.isError ? (
+        <p className="inline-flex flex-wrap items-center gap-2 text-sm text-danger">
+          {errorMessage(q.error, 'Could not load the backup status')}
+          <Button variant="outline" size="md" onClick={() => void q.refetch()} leftIcon={<RefreshCw aria-hidden />}>Try again</Button>
+        </p>
+      ) : !b ? (
+        <p className="text-sm text-muted">This server does not report backups. Update Linear Hub to 1.1 or later.</p>
+      ) : (
+        <>
+          {(stale || off) && (
+            <div
+              role={stale ? 'alert' : 'status'}
+              className="mb-4 flex gap-3 rounded-lg border border-warning/40 bg-warning-soft p-3 text-sm text-fg"
+              data-testid={off ? 'backups-off' : 'backups-warning'}
+            >
+              <TriangleAlert className="mt-0.5 h-4 w-4 shrink-0 text-warning" aria-hidden />
+              <div className="min-w-0">
+                <p className="font-medium text-warning">
+                  {off
+                    ? 'Automatic backups are off (LM_BACKUP=0)'
+                    : b.lastAt
+                      ? `No backup for ${age >= 48 ? `${Math.floor(age / 24)} days` : `${Math.round(age)} hours`}`
+                      : 'No backup yet'}
+                </p>
+                {off ? (
+                  <p className="mt-1 text-muted">
+                    This server makes no nightly copies{b.lastAt ? `; the last one was made ${formatRelative(b.lastAt)}` : ''}. On the laptop run{' '}
+                    {cmd('npm run backup')}, or start Linear Hub again without {cmd('LM_BACKUP=0')}.
+                  </p>
+                ) : (
+                  <p className="mt-1 text-muted">
+                    Backups only run while Linear Hub is running. Leave it running overnight, or on the laptop run {cmd('npm run backup')}.
+                  </p>
+                )}
+                {stale && <p className="mt-1 text-muted">{ICLOUD_LINE}</p>}
+              </div>
+            </div>
+          )}
+
+          <dl className="grid gap-x-6 gap-y-3 sm:grid-cols-2">
+            <div className="flex flex-col border-b border-border pb-2">
+              <dt className="text-xs font-medium text-muted">Last backup</dt>
+              <dd className="text-sm text-fg" data-testid="backups-last">
+                {b.lastAt ? (
+                  <>
+                    <span className="font-medium">{formatRelative(b.lastAt)}</span>
+                    <span className="text-muted"> · {formatDateTime(b.lastAt)}</span>
+                  </>
+                ) : off ? (
+                  'None yet — run npm run backup on the laptop'
+                ) : (
+                  'None yet — the first runs 10 minutes after the server starts'
+                )}
+              </dd>
+            </div>
+            <div className="flex flex-col border-b border-border pb-2">
+              <dt className="text-xs font-medium text-muted">Kept</dt>
+              <dd className="text-sm text-fg">{pluralise(b.count, 'backup')}</dd>
+              <dd className="text-xs text-muted">One a day for 30 days, then one a week for 8 weeks</dd>
+            </div>
+            {b.file && (
+              <div className="flex min-w-0 flex-col border-b border-border pb-2 sm:col-span-2">
+                <dt className="text-xs font-medium text-muted">Latest file</dt>
+                <dd className="break-all font-mono text-xs text-fg">{b.file}</dd>
+              </div>
+            )}
+            <div className="flex min-w-0 flex-col border-b border-border pb-2 sm:col-span-2">
+              <dt className="text-xs font-medium text-muted">Folder on the server laptop</dt>
+              <dd className="flex min-w-0 flex-wrap items-center gap-2">
+                <span className="min-w-0 flex-1 break-all font-mono text-xs text-fg" data-testid="backups-dir">{b.dir}</span>
+                {canCopy && (
+                  <Button variant="outline" size="md" onClick={() => void copyPath()} leftIcon={copied ? <Check aria-hidden /> : <Copy aria-hidden />}>
+                    {copied ? 'Copied' : 'Copy path'}
+                  </Button>
+                )}
+              </dd>
+            </div>
+          </dl>
+
+          {!stale && <p className="mt-3 text-xs text-muted">{ICLOUD_LINE}</p>}
+          <p className="mt-2 text-xs text-muted">
+            To go back to a backup, stop the server and run{' '}
+            <code className="rounded bg-surface-2 px-1 py-0.5 font-mono text-fg">npm run restore -- &lt;file&gt;</code> on the laptop.
+          </p>
+        </>
+      )}
     </Card>
   );
 }
