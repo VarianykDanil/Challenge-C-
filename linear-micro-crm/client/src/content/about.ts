@@ -1,7 +1,7 @@
 // Owned by Marketing & Content. Product story and facts for the About page and README.
 import type { Role } from '@lm/shared';
 
-export const APP_VERSION = '1.0.0';
+export const APP_VERSION = '1.1.0';
 
 export interface StackItem { name: string; detail: string }
 export interface RoleSummary { role: Role; title: string; description: string }

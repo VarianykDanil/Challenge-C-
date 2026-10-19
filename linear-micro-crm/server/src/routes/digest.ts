@@ -1,9 +1,9 @@
 /**
- * GET /me/digest?week=YYYY-MM-DD → WeekDigest — OWNED BY p9-week-in-review-digest.
- * Stub laid down by p1-foundation-contracts (mounted under /me, cached via CACHED_PATHS). The week handling is
- * already the contract: any date normalises to its Monday; the default is the last completed week; a week that has
- * not finished yet, or one before 2020, → 400. The stub answers the empty digest (title, no bullets); p9 fills
- * lib/smart/digest.ts. LM_SMART=0 → the empty digest.
+ * GET /me/digest?week=YYYY-MM-DD → WeekDigest — OWNED BY p9-week-in-review-digest (laid down by p1).
+ * Mounted under /me and cached per user through CACHED_PATHS (20 s, cleared by any write). Any date normalises to its
+ * Monday; the default is the last completed week; a week that has not finished yet, or one before 2020, → 400.
+ * The bullets come from lib/smart/digest.ts (facts from the tiles' own functions, worded by shared logic/digest.ts).
+ * LM_SMART=0 → the empty digest (title, no bullets, text '').
  */
 import { Router } from 'express';
 import { z } from 'zod';
