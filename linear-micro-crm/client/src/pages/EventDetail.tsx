@@ -1,17 +1,18 @@
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
-import { ArrowLeft, Ban, CalendarDays, Clock, MapPin, Pencil, PlusCircle, Trash2, Users } from 'lucide-react';
-import type { GaugeEntryWithMeta } from '@lm/shared';
+import { ArrowLeft, Ban, CalendarDays, CheckCircle2, Clock, MapPin, Pencil, PlusCircle, Trash2, Users } from 'lucide-react';
+import type { GaugeEntryWithMeta, UserWithTeam } from '@lm/shared';
 import { funnelRatios } from '@lm/shared';
-import { Badge, Button, Card, CardHeader, PageHeader, Skeleton, useToast } from '@/components/ui';
+import { Avatar, Badge, Button, Card, CardHeader, PageHeader, Skeleton, useToast } from '@/components/ui';
 import { FunnelChart } from '@/components/charts';
-import { useDeleteEvent, useDeleteGauge, useEvent, useUpdateEvent } from '@/api/hooks';
+import { useDeleteEvent, useDeleteGauge, useEvent, useUpdateEvent, useUsers } from '@/api/hooks';
 import { useCurrentUser } from '@/auth/AuthProvider';
 import { ConfirmDialog, ErrorState, EventStatusBadge, EventTypeBadge, ExportButton, KpiSkeletons, errorMessage } from '@/features/common';
-import { EventFormModal } from '@/features/events';
+import { DirectionsLink, EventForecastChip, EventFormModal, inRosterWindow } from '@/features/events';
 import { GaugeEntriesTable, LogGaugesModal, TotalsKpis, gaugeEntryCsvColumns } from '@/features/gauges';
 import { csvFilename } from '@/lib/csv';
-import { formatDate, formatNumber, formatTime } from '@/lib/format';
+import { todayISO } from '@/lib/dates';
+import { formatDate, formatNumber, formatTime, fullName } from '@/lib/format';
 import { usePageTitle } from '@/lib/usePageTitle';
 import { NotFoundPage } from './NotFound';
 import { ApiError } from '@/api/client';
@@ -28,6 +29,8 @@ export function EventDetailPage() {
 
   const [editOpen, setEditOpen] = useState(false);
   const [logOpen, setLogOpen] = useState(false);
+  // Whose day the Log gauges modal opens on (a "Not logged yet" chip picks a team member; otherwise yourself).
+  const [logUserId, setLogUserId] = useState<number | null>(null);
   const [editEntry, setEditEntry] = useState<GaugeEntryWithMeta | null>(null);
   const [deleteEntry, setDeleteEntry] = useState<GaugeEntryWithMeta | null>(null);
   const [deleteEventOpen, setDeleteEventOpen] = useState(false);
@@ -54,10 +57,27 @@ export function EventDetailPage() {
   };
   const canDeleteRow = (row: GaugeEntryWithMeta): boolean => isAdmin || (me.role === 'leader' && (row.teamId === me.teamId || row.userId === me.id));
 
+  const today = todayISO();
+  // Roster gaps (p6): for the admin or this team's leader only (the same rule as managing gauges), the active members
+  // of the event's team who have no entry yet, on a live or completed event from the last two days. Recruiters and
+  // other teams never get the list: the query does not even run for them. (Hooks stay above the early return.)
+  const showRoster = !!ev && canManageGauges && inRosterWindow(ev, today);
+  const teamQ = useUsers({ teamId: ev?.teamId ?? null, status: 'active' }, { enabled: showRoster });
+  const { notLogged, rosterSize } = useMemo(() => {
+    if (!ev || !teamQ.data) return { notLogged: [] as UserWithTeam[], rosterSize: 0 };
+    // people who had not started yet on the event's date are not expected to have logged it
+    const roster = teamQ.data.filter((u) => u.teamId === ev.teamId && u.startDate <= ev.date);
+    const logged = new Set(ev.entries.map((e) => e.userId));
+    const missing = roster.filter((u) => !logged.has(u.id)).sort((a, b) => fullName(a).localeCompare(fullName(b)));
+    return { notLogged: missing, rosterSize: roster.length };
+  }, [ev, teamQ.data]);
+
   if (q.isError && q.error instanceof ApiError && q.error.status === 404) return <NotFoundPage />;
 
   const ratios = ev ? ev.ratios ?? funnelRatios(ev.totals) : null;
   const myEntry = ev?.entries.find((e) => e.userId === me.id) ?? null;
+  // A rep with no entry yet on today's live or just-ended team event gets the plainest possible prompt.
+  const logToday = me.role === 'rep' && canLog && !myEntry && !!ev && ev.date === today && (ev.status === 'live' || ev.status === 'completed');
   // An event that already carries gauge entries cannot be deleted (the API answers 409): cancelling keeps the record.
   const hasEntries = (ev?.entries.length ?? 0) > 0;
   const canDelete = isAdmin && !hasEntries;
@@ -73,7 +93,7 @@ export function EventDetailPage() {
             <span className="flex flex-wrap items-center gap-x-3 gap-y-1">
               <span className="inline-flex items-center gap-1"><CalendarDays className="h-3.5 w-3.5" aria-hidden />{formatDate(ev.date)}</span>
               <span className="inline-flex items-center gap-1"><Clock className="h-3.5 w-3.5" aria-hidden />{formatTime(ev.startTime)} – {formatTime(ev.endTime)}</span>
-              <span className="inline-flex items-center gap-1"><MapPin className="h-3.5 w-3.5" aria-hidden />{ev.venue}, {ev.city}</span>
+              <span className="inline-flex items-center gap-1"><MapPin className="h-3.5 w-3.5" aria-hidden />{ev.venue}, {ev.city}<DirectionsLink variant="text" venue={ev.venue} city={ev.city} className="-my-1.5 ml-0.5" /></span>
               <span className="inline-flex items-center gap-1"><Users className="h-3.5 w-3.5" aria-hidden />{formatNumber(ev.repCount)} rep{ev.repCount === 1 ? '' : 's'}</span>
             </span>
           ) : undefined
@@ -82,8 +102,8 @@ export function EventDetailPage() {
           ev ? (
             <>
               {canLog && (
-                <Button onClick={() => { setEditEntry(myEntry); setLogOpen(true); }} leftIcon={<PlusCircle className="h-4 w-4" aria-hidden />}>
-                  {myEntry ? 'Update my gauges' : 'Log gauges'}
+                <Button onClick={() => { setEditEntry(myEntry); setLogUserId(null); setLogOpen(true); }} leftIcon={<PlusCircle className="h-4 w-4" aria-hidden />}>
+                  {myEntry ? 'Update my gauges' : logToday ? "Log today's gauges" : 'Log gauges'}
                 </Button>
               )}
               {canEdit && <Button variant="outline" onClick={() => setEditOpen(true)} leftIcon={<Pencil className="h-4 w-4" aria-hidden />}>Edit</Button>}
@@ -106,6 +126,19 @@ export function EventDetailPage() {
               <EventStatusBadge status={ev.status} />
               <span className="text-xs text-muted">Target {formatNumber(ev.targetSales)} sales</span>
             </div>
+          )}
+
+          {ev?.forecast && (ev.status === 'scheduled' || ev.status === 'live') && (
+            <EventForecastChip variant="detail" forecast={ev.forecast} targetSales={ev.targetSales} campaignCode={ev.campaignCode} type={ev.type} teamName={ev.teamName} className="max-w-2xl" />
+          )}
+
+          {ev && showRoster && (
+            <NotLoggedYet
+              loading={teamQ.isLoading}
+              people={notLogged}
+              teamSize={rosterSize}
+              onLog={(u) => { setEditEntry(null); setLogUserId(u.id); setLogOpen(true); }}
+            />
           )}
 
           {ev && ratios ? <TotalsKpis totals={ev.totals} ratios={ratios} daysHint={`${formatNumber(ev.repCount)} rep${ev.repCount === 1 ? '' : 's'} logged`} /> : <div className="grid grid-cols-2 gap-3 md:grid-cols-3 xl:grid-cols-6"><KpiSkeletons count={6} /></div>}
@@ -143,7 +176,7 @@ export function EventDetailPage() {
         </div>
       )}
 
-      {ev && canLog && <LogGaugesModal open={logOpen} onClose={() => { setLogOpen(false); setEditEntry(null); }} event={ev} entry={editEntry} defaultUserId={me.id} />}
+      {ev && canLog && <LogGaugesModal open={logOpen} onClose={() => { setLogOpen(false); setEditEntry(null); setLogUserId(null); }} event={ev} entry={editEntry} defaultUserId={logUserId ?? me.id} />}
       {ev && canEdit && <EventFormModal open={editOpen} onClose={() => setEditOpen(false)} event={ev} />}
 
       <ConfirmDialog
@@ -193,5 +226,49 @@ export function EventDetailPage() {
         }}
       />
     </>
+  );
+}
+
+interface NotLoggedYetProps {
+  loading: boolean;
+  people: UserWithTeam[];
+  teamSize: number;
+  onLog: (person: UserWithTeam) => void;
+}
+
+/** "Not logged yet": one tap on a person opens Log gauges for them; their chip goes once the entry is saved. */
+function NotLoggedYet({ loading, people, teamSize, onLog }: NotLoggedYetProps) {
+  if (loading) return <Skeleton className="h-16 max-w-2xl" />;
+  if (!teamSize) return null;
+  if (!people.length) {
+    return (
+      <p className="flex items-center gap-1.5 text-sm text-success">
+        <CheckCircle2 className="h-4 w-4 shrink-0" aria-hidden />
+        Everyone on the team has logged this event ({formatNumber(teamSize)} / {formatNumber(teamSize)}).
+      </p>
+    );
+  }
+  return (
+    <section aria-labelledby="not-logged-yet" className="rounded-xl border border-warning/40 bg-warning-soft/40 p-3">
+      <h2 id="not-logged-yet" className="text-sm font-semibold text-fg">
+        Not logged yet <span className="font-normal text-muted">· {formatNumber(teamSize - people.length)} / {formatNumber(teamSize)} logged</span>
+      </h2>
+      <p className="mt-0.5 text-xs text-muted">Tap a name to log their day for them.</p>
+      <ul className="mt-2 flex flex-wrap gap-2">
+        {people.map((u) => (
+          <li key={u.id}>
+            <button
+              type="button"
+              onClick={() => onLog(u)}
+              aria-label={`Log for ${fullName(u)}`}
+              className="inline-flex min-h-10 items-center gap-2 rounded-full border border-border bg-surface py-1 pl-1 pr-3 text-sm font-medium text-fg shadow-sm transition hover:border-border-strong hover:bg-surface-2 focus:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+            >
+              <Avatar name={fullName(u)} color={u.avatarColor} size="sm" />
+              <span>Log for {people.some((o) => o.id !== u.id && o.firstName === u.firstName) ? `${u.firstName} ${u.lastName.slice(0, 1)}.` : u.firstName}</span>
+            </button>
+          </li>
+        ))}
+      </ul>
+    </section>
   );
 }

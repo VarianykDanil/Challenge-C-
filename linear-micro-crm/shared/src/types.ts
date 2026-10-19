@@ -132,6 +132,11 @@ export interface SalesEventWithMeta extends SalesEvent {
    * live events that have enough history. The key is absent otherwise (and always absent with LM_SMART=0).
    */
   forecast?: EventForecast | null;
+  /**
+   * Smart release 1.1 (p6): how many of the event's own team have logged it, attached by GET /events and
+   * GET /events/:id to completed and live events dated today − 2 … today. Absent otherwise (and with LM_SMART=0).
+   */
+  roster?: EventRosterCount;
 }
 
 // ───────────────────────────── Gauges ─────────────────────────────
@@ -752,6 +757,16 @@ export interface EventForecast {
   flag: 'stretch' | 'at_risk' | null;
   /** A data-driven target for a new event; a suggestion only, never applied automatically. */
   suggestedTarget: number | null;
+}
+
+/**
+ * p6 — "4 / 7 logged". `members`: the team's active members who had started by the event date (the same people the
+ * event page lists); `logged`: how many of them have an entry. Admins and other teams' people who logged there are not
+ * counted, so logged ≤ members always.
+ */
+export interface EventRosterCount {
+  members: number;
+  logged: number;
 }
 
 /** p6 — GET /events/forecast. */

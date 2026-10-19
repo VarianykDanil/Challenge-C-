@@ -1,15 +1,17 @@
 // Create / edit a sales event (admin, or leader for their own team).
 import { useId, useState } from 'react';
-import { AlertTriangle } from 'lucide-react';
-import type { EventStatus, EventType, SalesEvent, SalesEventWithMeta } from '@lm/shared';
-import { EVENT_TYPE_LABELS } from '@lm/shared';
+import { AlertTriangle, Sparkles } from 'lucide-react';
+import type { EventForecast, EventStatus, EventType, SalesEvent, SalesEventWithMeta } from '@lm/shared';
+import { EVENT_TYPE_LABELS, repsNeededFor, scheduledFlag } from '@lm/shared';
 import { Button, Field, Input, Modal, Select, Textarea, useToast } from '@/components/ui';
 import { ApiError } from '@/api/client';
-import { useCampaigns, useCreateEvent, useTeams, useUpdateEvent, type EventInput } from '@/api/hooks';
+import { useCampaigns, useCreateEvent, useEventForecast, useTeams, useUpdateEvent, type EventInput } from '@/api/hooks';
 import { useCurrentUser } from '@/auth/AuthProvider';
 import { errorMessage } from '@/features/common';
 import { todayISO } from '@/lib/dates';
+import { formatNumber, pluralise } from '@/lib/format';
 import { EVENT_STATUS_LABELS, optionsFrom } from '@/lib/labels';
+import { ForecastFlag, forecastBasisLabel, forecastRange } from './EventForecastChip';
 
 export interface EventFormModalProps {
   open: boolean;
@@ -128,6 +130,13 @@ function EventForm({ onClose, event, onSaved }: EventFormModalProps) {
     }
   };
 
+  // Smart release 1.1 (p6): a data-driven suggested target once campaign, team and type are chosen. Only a suggestion:
+  // it fills the field when "Use" is tapped and never overwrites what was typed. Planned (scheduled) events only.
+  const suggest = !event || f.status === 'scheduled';
+  const forecastQ = useEventForecast({ campaignId: f.campaignId ? Number(f.campaignId) : null, teamId: f.teamId ? Number(f.teamId) : null, type: f.type }, { enabled: suggest });
+  const campaignCode = campaigns.data?.find((c) => String(c.id) === f.campaignId)?.code ?? '';
+  const teamName = teams.data?.find((t) => String(t.id) === f.teamId)?.name;
+
   const pending = create.isPending || update.isPending;
   const lockedHint = hasEntries ? 'Locked: gauges have been logged for this event.' : undefined;
 
@@ -169,6 +178,18 @@ function EventForm({ onClose, event, onSaved }: EventFormModalProps) {
         <Field label="Sales target" required htmlFor={`${uid}-target`} error={errors.targetSales}>
           <Input id={`${uid}-target`} type="number" min={0} inputMode="numeric" value={f.targetSales} onChange={(e) => set('targetSales')(e.target.value)} invalid={!!errors.targetSales} />
         </Field>
+        {suggest && f.campaignId && f.teamId && (
+          <TargetSuggestion
+            loading={forecastQ.isLoading}
+            failed={forecastQ.isError}
+            forecast={forecastQ.data?.forecast ?? null}
+            campaignCode={campaignCode}
+            teamName={teamName}
+            type={f.type}
+            target={f.targetSales}
+            onUse={(n) => set('targetSales')(String(n))}
+          />
+        )}
         {event && (
           <Field label="Status" htmlFor={`${uid}-status`}>
             <Select id={`${uid}-status`} value={f.status} onChange={(e) => set('status')(e.target.value as EventStatus)} options={optionsFrom(EVENT_STATUS_LABELS)} />
@@ -189,5 +210,58 @@ function EventForm({ onClose, event, onSaved }: EventFormModalProps) {
         <Button type="submit" loading={pending}>{event ? 'Save changes' : 'Create event'}</Button>
       </div>
     </form>
+  );
+}
+
+interface TargetSuggestionProps {
+  loading: boolean;
+  failed: boolean;
+  forecast: EventForecast | null;
+  campaignCode: string;
+  teamName?: string;
+  type: EventType;
+  /** The target as typed (a string while editing). */
+  target: string;
+  onUse: (target: number) => void;
+}
+
+/** "Suggested target: 14 — Use", the estimate behind it, and what the typed target needs. */
+function TargetSuggestion({ loading, failed, forecast: fc, campaignCode, teamName, type, target, onUse }: TargetSuggestionProps) {
+  if (loading) return <p className="self-end text-xs text-muted md:pb-2.5" aria-live="polite">Working out a suggested target…</p>;
+  if (failed) return null; // the form works the same without a suggestion
+  if (!fc || fc.suggestedTarget == null) {
+    // No reason is given: thin history, a team that rarely works, and suggestions switched off all land here.
+    return <p className="self-end text-xs text-muted md:pb-2.5" aria-live="polite">No suggested target for this team, campaign and type. Set the target as usual.</p>;
+  }
+  const typed = Number(target);
+  const typedOk = target.trim() !== '' && Number.isInteger(typed) && typed > 0;
+  const using = typedOk && typed === fc.suggestedTarget;
+  const reps = typedOk ? repsNeededFor(typed, fc.perRepRate) : null;
+  const flag = typedOk ? scheduledFlag(typed, fc.expectedSales) : null;
+  return (
+    <div className="rounded-lg border border-border bg-surface-2/60 px-3 py-2 text-sm" aria-live="polite">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <span className="inline-flex items-center gap-1.5 font-medium text-fg">
+          <Sparkles className="h-3.5 w-3.5 shrink-0 text-accent" aria-hidden />
+          Suggested target: {formatNumber(fc.suggestedTarget)}
+        </span>
+        {using ? (
+          <span className="text-xs text-muted">In use</span>
+        ) : (
+          <Button size="xs" variant="soft" className="min-h-10 sm:min-h-0" onClick={() => onUse(fc.suggestedTarget!)} aria-label={`Use the suggested target of ${fc.suggestedTarget}`}>
+            Use
+          </Button>
+        )}
+      </div>
+      <p className="mt-0.5 text-xs text-muted">
+        A suggestion only. Estimate about {formatNumber(Math.round(fc.expectedSales))} sales (range {forecastRange(fc)}) with the usual {pluralise(Math.max(1, Math.round(fc.expectedReps)), 'rep')}, from {pluralise(fc.basisDays, 'similar day')} ({forecastBasisLabel(fc, campaignCode, type, teamName)}).
+      </p>
+      {typedOk && reps != null && (
+        <p className="mt-1 flex flex-wrap items-center gap-1.5 text-xs text-muted">
+          A target of {formatNumber(typed)} needs about {pluralise(reps, 'rep')}.
+          <ForecastFlag flag={flag} />
+        </p>
+      )}
+    </div>
   );
 }

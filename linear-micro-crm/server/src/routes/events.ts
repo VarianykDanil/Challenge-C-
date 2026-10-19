@@ -7,7 +7,7 @@ import { addDays, nowHHMM, todayISO } from '../lib/dates.ts';
 import { badRequest, conflict, forbidden, notFound } from '../lib/errors.ts';
 import { canManageTeam, redactEntry } from '../lib/scope.ts';
 import { smartEnabled } from '../lib/smart/enabled.ts';
-import { eventForecasts, forecastFor } from '../lib/smart/eventForecast.ts';
+import { eventForecasts, eventRosters, forecastFor } from '../lib/smart/eventForecast.ts';
 import { idParam, isoDate, optionalIdQuery, optionalString, parseRange, positiveInt, targetSalesCount, timeHHMM } from '../lib/validate.ts';
 import { currentUser, requireRole } from '../middleware/auth.ts';
 
@@ -38,14 +38,21 @@ const forecastQuery = z.object({
 });
 
 /**
- * Smart release 1.1: attach `forecast` (p6) to the events that have one. Nothing is attached — not even the key —
- * when the kill switch is off or the builder has no forecast for an event, so existing payloads stay byte-identical.
+ * Smart release 1.1: attach `forecast` and `roster` (p6) to the events that have one. Nothing is attached — not even
+ * the key — when the kill switch is off or the builder has nothing for an event, so existing payloads stay
+ * byte-identical.
  */
 function withForecasts<T extends SalesEventWithMeta>(db: Db, events: T[], today: string): T[] {
   if (!events.length || !smartEnabled()) return events;
   const forecasts = eventForecasts(db, events, today);
-  if (!forecasts.size) return events;
-  return events.map((e) => (forecasts.has(e.id) ? { ...e, forecast: forecasts.get(e.id)! } : e));
+  const rosters = eventRosters(db, events, today);
+  if (!forecasts.size && !rosters.size) return events;
+  return events.map((e) => {
+    const forecast = forecasts.get(e.id);
+    const roster = rosters.get(e.id);
+    if (!forecast && !roster) return e;
+    return { ...e, ...(forecast ? { forecast } : {}), ...(roster ? { roster } : {}) };
+  });
 }
 
 /** Past → completed; today → live only once the start time has passed; otherwise scheduled. */
