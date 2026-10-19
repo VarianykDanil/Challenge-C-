@@ -3,7 +3,13 @@ import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react'
 import { useLocation } from 'react-router-dom';
 import type { UserWithTeam } from '@lm/shared';
 import clsx from 'clsx';
+import { GAUGE_ROLES } from '@/auth/RequireRole';
+import { ConfirmDialog } from '@/features/common/ConfirmDialog';
 import { ErrorBoundary } from '@/features/common/ErrorBoundary';
+// Smart release 1.1 (p7): imported by file path, not through the barrels, to keep the shell's first download small.
+import { OfflineBanner } from '@/features/common/OfflineBanner';
+import { OutboxBanner } from '@/features/gauges/OutboxBanner';
+import { getOutbox } from '@/features/gauges/outbox';
 import { FOCUSABLE } from '../ui/Modal';
 import { NAV_ITEMS } from './nav';
 import { Sidebar, SIDEBAR_COLLAPSED_WIDTH, SIDEBAR_WIDTH } from './Sidebar';
@@ -91,6 +97,15 @@ export function AppShell({ user, onLogout, children, title, fluid }: AppShellPro
 
   const sidebarWidth = collapsed ? SIDEBAR_COLLAPSED_WIDTH : SIDEBAR_WIDTH;
 
+  // p7: signing out with gauges still on this phone asks first. Nothing is deleted: they stay under this person's
+  // key and send after their next sign-in on this phone.
+  const [unsentOnSignOut, setUnsentOnSignOut] = useState(0);
+  const guardedLogout = useCallback(() => {
+    const unsent = getOutbox(user.id).length;
+    if (unsent > 0) setUnsentOnSignOut(unsent);
+    else onLogout();
+  }, [user.id, onLogout]);
+
   return (
     <div className="min-h-full bg-bg text-fg">
       <a
@@ -138,7 +153,18 @@ export function AppShell({ user, onLogout, children, title, fluid }: AppShellPro
         className="flex min-h-full flex-col transition-[padding] duration-200 ease-[cubic-bezier(0.16,1,0.3,1)] motion-reduce:transition-none lg:[padding-left:var(--sidebar-w)]"
         style={{ ['--sidebar-w' as string]: `${sidebarWidth}px` }}
       >
-        <Topbar user={user} items={items} onLogout={onLogout} onOpenMenu={() => setMobileOpen(true)} menuButtonRef={menuButtonRef} title={title} />
+        <Topbar user={user} items={items} onLogout={guardedLogout} onOpenMenu={() => setMobileOpen(true)} menuButtonRef={menuButtonRef} title={title} />
+        {/* p7: "Can't reach Linear Hub" and "N entries waiting to send" stay in view under the topbar. A banner that
+            throws hides itself (fallback null) rather than blanking the app. The wrapper is opaque (bg-bg) because the
+            banners' soft tints are translucent in dark mode, and scrolled content must not show through them. */}
+        <div className="sticky top-16 z-20 bg-bg">
+          <ErrorBoundary name="offline-banner" fallback={null}>
+            <OfflineBanner gaugeNote={GAUGE_ROLES.includes(user.role)} />
+          </ErrorBoundary>
+          <ErrorBoundary name="outbox-banner" fallback={null}>
+            <OutboxBanner user={user} />
+          </ErrorBoundary>
+        </div>
         <main
           id="main"
           tabIndex={-1}
@@ -149,6 +175,22 @@ export function AppShell({ user, onLogout, children, title, fluid }: AppShellPro
           </div>
         </main>
       </div>
+
+      <ConfirmDialog
+        open={unsentOnSignOut > 0}
+        onClose={() => setUnsentOnSignOut(0)}
+        onConfirm={() => {
+          setUnsentOnSignOut(0);
+          onLogout();
+        }}
+        title="Sign out?"
+        description={
+          unsentOnSignOut === 1
+            ? `1 entry hasn't been sent — it stays on this phone and sends next time you sign in as ${user.firstName}.`
+            : `${unsentOnSignOut} entries haven't been sent — they stay on this phone and send next time you sign in as ${user.firstName}.`
+        }
+        confirmLabel="Sign out"
+      />
     </div>
   );
 }

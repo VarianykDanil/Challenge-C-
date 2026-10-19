@@ -11,6 +11,49 @@ export class ApiError extends Error {
   }
 }
 
+/**
+ * The request never got an HTTP answer: no signal, the hotspot dropped, or the server is not running (fetch threw a
+ * TypeError). Every HTTP error response is still an ApiError, exactly as before. (Signal-proof logging, p7.)
+ */
+export class NetworkError extends Error {
+  /** The TypeError fetch threw. */
+  readonly original: unknown;
+  constructor(original?: unknown) {
+    super("Can't reach Linear Hub — check the hotspot or Wi-Fi and try again.");
+    this.name = 'NetworkError';
+    this.original = original;
+  }
+}
+
+export function isNetworkError(e: unknown): e is NetworkError {
+  return e instanceof NetworkError;
+}
+
+// A request that could not reach the server is already announced (lm:network → the offline banner). A caller that
+// does not catch it — signing out without signal, for one — must not add an "Uncaught (in promise)" error on top.
+// Only NetworkError is quietened; every other rejection still reaches the console.
+if (typeof window !== 'undefined') {
+  window.addEventListener('unhandledrejection', (e) => {
+    if (e.reason instanceof NetworkError) e.preventDefault();
+  });
+}
+
+/**
+ * Window event, `detail: { online }`: false when a request could not reach the server, true whenever any HTTP
+ * response arrives (whatever its status). The offline banner and the gauge outbox listen to it.
+ */
+export const NETWORK_EVENT = 'lm:network';
+export interface NetworkEventDetail { online: boolean }
+
+function announceNetwork(online: boolean): void {
+  if (typeof window === 'undefined') return;
+  try {
+    window.dispatchEvent(new CustomEvent<NetworkEventDetail>(NETWORK_EVENT, { detail: { online } }));
+  } catch {
+    /* a listener's problem never breaks the request */
+  }
+}
+
 /** A successful response with its status and headers (for `201 vs 200` and paging headers such as `X-Total-Count`). */
 export interface ApiResponse<T> {
   data: T;
@@ -23,12 +66,24 @@ export type ApiInit = RequestInit & { json?: unknown };
 /** Like `api()`, but keeps the response status and headers alongside the parsed body. */
 export async function apiRaw<T>(path: string, init: ApiInit = {}): Promise<ApiResponse<T>> {
   const { json, headers, ...rest } = init;
-  const res = await fetch(`/api${path}`, {
-    credentials: 'include',
-    headers: { ...(json !== undefined ? { 'Content-Type': 'application/json' } : {}), ...(headers ?? {}) },
-    body: json !== undefined ? JSON.stringify(json) : rest.body,
-    ...rest,
-  });
+  let res: Response;
+  try {
+    res = await fetch(`/api${path}`, {
+      credentials: 'include',
+      headers: { ...(json !== undefined ? { 'Content-Type': 'application/json' } : {}), ...(headers ?? {}) },
+      body: json !== undefined ? JSON.stringify(json) : rest.body,
+      ...rest,
+    });
+  } catch (e) {
+    // fetch rejects with a TypeError only when no HTTP answer came back. An abort (TanStack Query cancelling a query)
+    // is a DOMException and passes through untouched.
+    if (e instanceof TypeError) {
+      announceNetwork(false);
+      throw new NetworkError(e);
+    }
+    throw e;
+  }
+  announceNetwork(true);
   if (res.status === 204) {
     // Drain the (empty) body: an unread fetch body is reported by Chromium as an aborted request in DevTools.
     await res.text().catch(() => undefined);

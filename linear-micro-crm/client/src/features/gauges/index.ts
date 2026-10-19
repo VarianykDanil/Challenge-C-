@@ -6,3 +6,7 @@ export * from './RecentEntriesCard';
 export * from './TotalsKpis';
 export * from './CoachingInsights';
 export * from './csv';
+// Smart release 1.1 (p7-signal-proof-logging): the gauge outbox, its banner and the shift tally.
+export * from './outbox';
+export * from './OutboxBanner';
+export * from './TallyMode';
