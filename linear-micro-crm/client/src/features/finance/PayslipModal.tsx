@@ -1,6 +1,7 @@
 // Payslip breakdown for a single payroll run, with a "Print payslip" action that lays it out on A4.
-import { Printer } from 'lucide-react';
-import type { PayrollRunWithUser } from '@lm/shared';
+import { CheckCircle2, Info, Printer, TriangleAlert } from 'lucide-react';
+import clsx from 'clsx';
+import type { PayrollFlag, PayrollRunWithUser } from '@lm/shared';
 import { BRAND, POSITION_LABELS } from '@lm/shared';
 import { Badge, Button, Modal, Skeleton } from '@/components/ui';
 import { usePayslip } from '@/api/hooks';
@@ -16,6 +17,44 @@ export type PayrollRunMaybeAdjusted = PayrollRunWithUser & { adjustedAt?: string
 export function runAdjustedAt(run: PayrollRunWithUser): string | null {
   const v = (run as PayrollRunMaybeAdjusted).adjustedAt;
   return typeof v === 'string' && v ? v : null;
+}
+
+/** Smart release 1.1 (p3): the advisory checks attached to an unpaid run for admins (`undefined` = not checked). */
+export function runFlags(run: Pick<PayrollRunWithUser, 'flags'> | null | undefined): PayrollFlag[] | undefined {
+  return Array.isArray(run?.flags) ? run.flags : undefined;
+}
+
+/** The warning-level checks on a run (what earns the amber "Check" badge and the confirm step before paying). */
+export function warningFlags(run: Pick<PayrollRunWithUser, 'flags'> | null | undefined): PayrollFlag[] {
+  return (runFlags(run) ?? []).filter((f) => f.severity === 'warning');
+}
+
+/**
+ * "Checks before paying": every flag on the run, warnings first. Advisory only — nothing here blocks paying.
+ * `flags` = [] renders the all-clear line; undefined renders nothing (the run was not checked).
+ */
+export function PayrollChecksList({ flags, className, compact }: { flags: PayrollFlag[] | undefined; className?: string; compact?: boolean }) {
+  if (!flags) return null;
+  if (!flags.length) {
+    return (
+      <p className={clsx('flex items-center gap-2 text-xs text-success', className)}>
+        <CheckCircle2 className="h-4 w-4 shrink-0" aria-hidden /> Nothing unusual about this run
+      </p>
+    );
+  }
+  const ordered = [...flags].sort((a, b) => (a.severity === b.severity ? 0 : a.severity === 'warning' ? -1 : 1));
+  return (
+    <ul className={clsx('space-y-1.5', className)}>
+      {ordered.map((f) => (
+        <li key={f.code} className={clsx('flex items-start gap-2 leading-snug', compact ? 'text-xs' : 'text-sm')}>
+          {f.severity === 'warning'
+            ? <TriangleAlert className="mt-0.5 h-4 w-4 shrink-0 text-warning" aria-label="Check" />
+            : <Info className="mt-0.5 h-4 w-4 shrink-0 text-info" aria-label="Note" />}
+          <span className="min-w-0 text-fg">{f.text}</span>
+        </li>
+      ))}
+    </ul>
+  );
 }
 
 /** Recruiters are paid on hires: the payroll `sales` column holds their hire count (LOGIC.md §4). */
@@ -75,6 +114,9 @@ function PayslipBody({ run }: { run: PayrollRunWithUser }) {
   const unit = payUnit(run);
   const isRecruiter = unit === 'hire';
   const adjustedAt = runAdjustedAt(run) ?? (p ? runAdjustedAt(p) : null);
+  // Admin, unpaid runs only: the server attaches `flags` (the payslip's copy is the fresher one).
+  const unpaid = run.status === 'pending' || run.status === 'failed';
+  const checks = unpaid ? runFlags(p) ?? runFlags(run) : undefined;
   const lines: { label: string; value: number; hint?: string }[] = [
     { label: 'Base pay', value: run.basePay, hint: p ? `${formatNumber(run.daysWorked)} day${run.daysWorked === 1 ? '' : 's'} × ${formatGBP(p.plan.basePerDay, { cents: true })}` : `${formatNumber(run.daysWorked)} days` },
     { label: 'Commission', value: run.commission, hint: p ? `${payUnits(run, run.sales)} × ${formatGBP(p.plan.commissionPerSale, { cents: true })}` : payUnits(run, run.sales) },
@@ -120,6 +162,13 @@ function PayslipBody({ run }: { run: PayrollRunWithUser }) {
         <p className="rounded-lg border border-warning/40 bg-warning/10 p-3 text-xs text-warning print:hidden" role="note">
           This payslip was recalculated on {formatDateTime(adjustedAt)}, after it had been paid — gauges logged or corrected late changed the figures below. The difference is settled separately.
         </p>
+      )}
+      {checks && (
+        <section aria-labelledby="payslip-checks" className={clsx('rounded-lg border p-3 print:hidden', warningFlags({ flags: checks }).length ? 'border-warning/40 bg-warning/5' : 'border-border bg-surface-2/60')}>
+          <h4 id="payslip-checks" className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted">Checks before paying</h4>
+          <PayrollChecksList flags={checks} />
+          {checks.length > 0 && <p className="mt-2 text-xs text-muted">Advisory only — you can still mark this run paid.</p>}
+        </section>
       )}
       <div className="grid grid-cols-1 gap-5 md:grid-cols-5 print:grid-cols-5" data-print-keep>
         <table className="w-full min-w-0 text-sm md:col-span-3 print:col-span-3">

@@ -1,30 +1,98 @@
+import { useEffect, useRef } from 'react';
 import type { PayrollRunWithUser } from '@lm/shared';
-import { Avatar, Badge, Button, DataTable, type Column } from '@/components/ui';
+import { Avatar, Badge, Button, DataTable, Tooltip, type Column } from '@/components/ui';
 import { OnTimeBadge, PayrollStatusBadge, StopRowEvents } from '@/features/common';
 import { todayISO } from '@/lib/dates';
 import { formatDate, formatDateTime, formatGBP, formatNumber, formatRangeLabel } from '@/lib/format';
-import { runAdjustedAt } from './PayslipModal';
+import { runAdjustedAt, warningFlags } from './PayslipModal';
 
-export function PayrollRunsTable({ rows, loading, showUser, onRowClick, onMarkPaid, markingId, emptyMessage = 'No payroll runs in this range', className, bare }: {
+/** Row selection for bulk "Mark paid" (admin Runs to pay). Rows that cannot be selected show a disabled box. */
+export interface PayrollRunSelection {
+  selected: ReadonlySet<number>;
+  /** False for runs the current mode does not allow (e.g. failed transfers until "include failed transfers" is ticked). */
+  canSelect: (run: PayrollRunWithUser) => boolean;
+  onChange: (runs: PayrollRunWithUser[], checked: boolean) => void;
+  /** Why a row cannot be selected (tooltip / accessible description). */
+  disabledReason?: (run: PayrollRunWithUser) => string | undefined;
+}
+
+/** A native checkbox inside a 40 × 40 px tap target; supports the indeterminate (some selected) state. */
+function SelectBox({ checked, indeterminate, disabled, label, title, onChange }: { checked: boolean; indeterminate?: boolean; disabled?: boolean; label: string; title?: string; onChange: (checked: boolean) => void }) {
+  const ref = useRef<HTMLInputElement>(null);
+  useEffect(() => {
+    if (ref.current) ref.current.indeterminate = !!indeterminate && !checked;
+  }, [indeterminate, checked]);
+  return (
+    <label className="-my-2 -ml-2 inline-flex h-10 w-10 cursor-pointer items-center justify-center rounded-md hover:bg-surface-2 has-[:disabled]:cursor-not-allowed has-[:disabled]:hover:bg-transparent" title={title}>
+      <input
+        ref={ref}
+        type="checkbox"
+        className="focus-ring h-4 w-4 cursor-pointer rounded border-control-border accent-[var(--color-primary)] disabled:cursor-not-allowed disabled:opacity-40"
+        checked={checked}
+        disabled={disabled}
+        aria-label={label}
+        onChange={(e) => onChange(e.target.checked)}
+      />
+    </label>
+  );
+}
+
+export function PayrollRunsTable({ rows, loading, showUser, onRowClick, onMarkPaid, markingId, markPaidDisabled, emptyMessage = 'No payroll runs in this range', className, bare, selection, hideWeek }: {
   rows: PayrollRunWithUser[];
   loading?: boolean;
   showUser?: boolean;
   onRowClick?: (run: PayrollRunWithUser) => void;
   onMarkPaid?: (run: PayrollRunWithUser) => void;
   markingId?: number | null;
+  /** Disable every row's Mark paid (e.g. while a bulk Mark paid is running, so a single click cannot race the batch). */
+  markPaidDisabled?: boolean;
   emptyMessage?: string;
   className?: string;
   /** Render without the outer border (inside a Card with padded={false}). */
   bare?: boolean;
+  /** Adds a checkbox column for bulk "Mark paid" (admin). */
+  selection?: PayrollRunSelection;
+  /** Leave out the Week column (inside a week group, where every row is the same week). */
+  hideWeek?: boolean;
 }) {
   const today = todayISO();
   // Recruiters are paid on hires, which the payroll `sales` column holds: label the column by who is in the table.
   const recruiters = rows.filter((r) => r.position === 'recruiter').length;
   const salesHeader = rows.length > 0 && recruiters === rows.length ? 'Hires' : recruiters > 0 ? 'Sales / hires' : 'Sales';
   const mixed = recruiters > 0 && recruiters < rows.length;
-  const columns: Column<PayrollRunWithUser>[] = [
-    { key: 'week', header: 'Week', render: (r) => <span className="whitespace-nowrap font-medium text-fg">{formatRangeLabel(r.weekStart, r.weekEnd)}</span>, sortValue: (r) => r.weekStart },
-  ];
+  const columns: Column<PayrollRunWithUser>[] = [];
+  if (selection) {
+    const selectable = rows.filter(selection.canSelect);
+    const picked = selectable.filter((r) => selection.selected.has(r.id)).length;
+    columns.push({
+      key: 'select',
+      width: '48px',
+      header: selectable.length ? (
+        <SelectBox
+          checked={picked > 0 && picked === selectable.length}
+          indeterminate={picked > 0}
+          label={picked === selectable.length ? 'Clear the selection in this list' : `Select all ${formatNumber(selectable.length)} runs in this list`}
+          onChange={(checked) => selection.onChange(selectable, checked)}
+        />
+      ) : <span className="sr-only">Select</span>,
+      render: (r) => {
+        const can = selection.canSelect(r);
+        const reason = can ? undefined : selection.disabledReason?.(r);
+        return (
+          <StopRowEvents className="inline-flex">
+            <SelectBox
+              checked={can && selection.selected.has(r.id)}
+              disabled={!can}
+              title={reason}
+              label={`Select ${r.userName}, week ${formatRangeLabel(r.weekStart, r.weekEnd)}${reason ? ` (${reason})` : ''}`}
+              onChange={(checked) => selection.onChange([r], checked)}
+            />
+          </StopRowEvents>
+        );
+      },
+    });
+  }
+  if (!hideWeek) columns.push({ key: 'week', header: 'Week', render: (r) => <span className="whitespace-nowrap font-medium text-fg">{formatRangeLabel(r.weekStart, r.weekEnd)}</span>, sortValue: (r) => r.weekStart });
   if (showUser) columns.push({ key: 'user', header: 'Person', render: (r) => <span className="flex items-center gap-2"><Avatar name={r.userName} size="xs" /><span>{r.userName}<span className="block text-xs text-muted">{[r.employeeId, r.teamName].filter(Boolean).join(' · ')}</span></span></span>, sortValue: (r) => r.userName });
   columns.push(
     { key: 'days', header: 'Days', align: 'right', render: (r) => formatNumber(r.daysWorked), sortValue: (r) => r.daysWorked },
@@ -44,12 +112,21 @@ export function PayrollRunsTable({ rows, loading, showUser, onRowClick, onMarkPa
       render: (r) => {
         const owed = r.status === 'pending' || r.status === 'failed';
         const adjustedAt = runAdjustedAt(r);
+        const warnings = owed ? warningFlags(r) : [];
         return (
           <span className="flex flex-wrap items-center gap-1.5">
             <PayrollStatusBadge status={r.status} />
             {/* Pending runs and failed transfers past their due date are both overdue money. */}
             {owed && r.dueDate < today ? <Badge tone="danger">Overdue</Badge> : <OnTimeBadge value={r.onTime} labels={{ yes: 'On time', no: 'Late', none: r.status === 'pending' ? 'Awaiting' : 'Unpaid' }} />}
             {adjustedAt && <Badge tone="warning" title={`Recalculated ${formatDateTime(adjustedAt)}`}>Adjusted after payment</Badge>}
+            {/* p3: advisory checks — the tooltip lists them; opening the run shows them in "Checks before paying". */}
+            {warnings.length > 0 && (
+              <Tooltip side="left" content={<ul className="list-disc space-y-1 pl-3.5 text-left">{warnings.map((f) => <li key={f.code}>{f.text}</li>)}</ul>}>
+                <span tabIndex={0} className="focus-ring inline-flex rounded-full" aria-label={`Check before paying: ${warnings.map((f) => f.text).join('; ')}`} data-payroll-check="">
+                  <Badge tone="warning" variant="solid">Check</Badge>
+                </span>
+              </Tooltip>
+            )}
           </span>
         );
       },
@@ -61,7 +138,20 @@ export function PayrollRunsTable({ rows, loading, showUser, onRowClick, onMarkPa
       key: 'actions',
       header: <span className="sr-only">Actions</span>,
       align: 'right',
-      render: (r) => r.status === 'pending' || r.status === 'failed' ? <StopRowEvents className="inline-flex"><Button size="sm" variant="outline" loading={markingId === r.id} onClick={() => onMarkPaid(r)}>Mark paid</Button></StopRowEvents> : null,
+      render: (r) => r.status === 'pending' || r.status === 'failed' ? <StopRowEvents className="inline-flex"><Button size="sm" variant="outline" className="h-10 sm:h-8" loading={markingId === r.id} disabled={markPaidDisabled} onClick={() => onMarkPaid(r)}>Mark paid</Button></StopRowEvents> : null,
     });
-  return <DataTable columns={columns} rows={rows} rowKey={(r) => r.id} loading={loading} onRowClick={onRowClick} emptyMessage={emptyMessage} initialSort={{ key: 'week', dir: 'desc' }} className={className} bare={bare} />;
+  return (
+    <DataTable
+      columns={columns}
+      rows={rows}
+      rowKey={(r) => r.id}
+      loading={loading}
+      onRowClick={onRowClick}
+      emptyMessage={emptyMessage}
+      initialSort={hideWeek ? undefined : { key: 'week', dir: 'desc' }}
+      className={className}
+      bare={bare}
+      rowClassName={selection ? (r) => (selection.selected.has(r.id) ? 'bg-primary-soft/40' : undefined) : undefined}
+    />
+  );
 }

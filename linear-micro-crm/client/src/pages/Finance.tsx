@@ -1,14 +1,16 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useLocation } from 'react-router-dom';
-import { Plus, Trash2 } from 'lucide-react';
-import type { Expense, PayrollRunWithUser } from '@lm/shared';
+import { Check, ChevronDown, Info, Plus, Trash2, TriangleAlert } from 'lucide-react';
+import clsx from 'clsx';
+import type { Expense, PayForecast, PayrollRunWithUser } from '@lm/shared';
 import { EXPENSE_CATEGORY_LABELS } from '@lm/shared';
-import { Badge, Button, Card, CardHeader, DataTable, EmptyState, KpiTile, PageHeader, Tabs, useToast, type Column } from '@/components/ui';
+import { Badge, Button, Card, CardHeader, DataTable, EmptyState, KpiTile, PageHeader, ProgressBar, Tabs, Tooltip, useToast, type Column } from '@/components/ui';
 import { DonutChart, TrendChart } from '@/components/charts';
 import { useCampaigns, useDeleteExpense, useExpenses, useFinanceSummary, useMyFinance, usePayRun, usePayroll } from '@/api/hooks';
 import { useCurrentUser } from '@/auth/AuthProvider';
 import { ChartSkeleton, ColourChip, ConfirmDialog, ErrorState, ExportButton, KpiSkeletons, RangePicker, StopRowEvents, errorMessage, useRangeState } from '@/features/common';
-import { AddExpenseModal, PayrollRunsTable, PayslipModal, campaignFinanceCsvColumns, expenseCsvColumns, financeWeekCsvColumns, payrollRunCsvColumns, payrollRunsRange } from '@/features/finance';
+import { AddExpenseModal, BulkPayBar, FlaggedRunsList, PayrollRunsTable, PayslipModal, campaignFinanceCsvColumns, expenseCsvColumns, financeWeekCsvColumns, payrollRunCsvColumns, payrollRunsRange, useBulkMarkPaid, warningFlags, type PayrollRunSelection } from '@/features/finance';
+import { FORECAST_LABEL, bonusLine, forecastMethod, forecastNoRangeReason, forecastRange } from '@/features/smart/weekPayCopy';
 import { csvFilename, sortRows } from '@/lib/csv';
 import { todayISO } from '@/lib/dates';
 import { formatDate, formatDateShort, formatDecimal, formatGBP, formatNumber, formatPct, formatRangeLabel, formatRelative } from '@/lib/format';
@@ -92,6 +94,7 @@ function MyPay({ onOpen }: { onOpen: (r: PayrollRunWithUser) => void }) {
           </>
         )}
       </div>
+      {d?.forecast && <ThisWeekSoFar f={d.forecast} />}
       <Card>
         <CardHeader title="Earnings" description="Gross pay per week, split by pay component" />
         {!d ? <ChartSkeleton /> : trend.length && paySeries.length ? (
@@ -103,6 +106,74 @@ function MyPay({ onOpen }: { onOpen: (r: PayrollRunWithUser) => void }) {
         <PayrollRunsTable rows={d?.runs ?? []} loading={q.isLoading} onRowClick={onOpen} emptyMessage={`${COPY.empty.payroll.title} — ${COPY.empty.payroll.description}`} bare className="border-t border-border" />
       </Card>
     </div>
+  );
+}
+
+/** Sunday of the Mon–Sun week starting `monday` (ISO dates, calendar arithmetic only). */
+function sundayAfter(monday: string): string {
+  const d = new Date(`${monday}T12:00:00Z`);
+  d.setUTCDate(d.getUTCDate() + 6);
+  return d.toISOString().slice(0, 10);
+}
+
+/**
+ * Smart release 1.1 (p3): "This week so far" — the same estimate as the dashboard strip, with the workings. Reps and
+ * leaders only (the server sends forecast: null otherwise). Never the official figure: Friday's payslip is.
+ */
+function ThisWeekSoFar({ f }: { f: PayForecast }) {
+  // The range (a single figure when low = high), or why there is none: the card always says one or the other.
+  const note = forecastNoRangeReason(f) ?? `range ${forecastRange(f)}`;
+  const bonus = bonusLine(f);
+  const showBonus = f.bonusLikelihood !== 'none' && f.bonusThreshold > 0;
+  const method = `Based on ${forecastMethod(f)}. ${FORECAST_LABEL}.`;
+  return (
+    <Card data-week-pay-card="">
+      <CardHeader
+        title={<span className="inline-flex items-center gap-2">This week so far <Badge tone="info" size="sm">Estimate</Badge></span>}
+        description={`Week ${formatRangeLabel(f.weekStart, sundayAfter(f.weekStart))} · payslip on ${formatDate(f.payday)}`}
+        actions={(
+          <Tooltip side="left" content={method}>
+            <button type="button" aria-label={`How this estimate works: ${method}`} className="focus-ring -m-2 inline-flex h-10 w-10 items-center justify-center rounded-md text-muted hover:bg-surface-2 hover:text-fg">
+              <Info className="h-4 w-4" aria-hidden />
+            </button>
+          </Tooltip>
+        )}
+      />
+      <div className="grid grid-cols-1 gap-4 sm:grid-cols-[minmax(0,1fr)_minmax(0,1.6fr)] sm:items-end">
+        <div className="min-w-0">
+          <p className="text-xs text-muted">Likely gross</p>
+          <p className="kpi-number text-3xl font-semibold tabular-nums text-fg">about {formatGBP(f.likely)}</p>
+          <p className="mt-0.5 text-sm tabular-nums text-muted">{note}</p>
+        </div>
+        <dl className="grid grid-cols-3 gap-2 text-sm">
+          <div className="min-w-0 rounded-lg bg-surface-2 px-3 py-2">
+            <dt className="text-xs text-muted">Logged so far</dt>
+            <dd className="font-semibold tabular-nums text-fg">{formatGBP(f.soFar.gross)}</dd>
+          </div>
+          <div className="min-w-0 rounded-lg bg-surface-2 px-3 py-2">
+            <dt className="text-xs text-muted">Days · sales</dt>
+            <dd className="font-semibold tabular-nums text-fg">{formatNumber(f.soFar.days)} · {formatNumber(f.soFar.sales)}</dd>
+          </div>
+          <div className="min-w-0 rounded-lg bg-surface-2 px-3 py-2">
+            <dt className="text-xs text-muted">Event days left</dt>
+            <dd className="font-semibold tabular-nums text-fg">{formatNumber(f.remainingDays)}</dd>
+          </div>
+        </dl>
+      </div>
+      {showBonus && bonus && (
+        <div className="mt-4 space-y-1.5">
+          <ProgressBar
+            value={Math.min(f.soFar.sales, f.bonusThreshold)}
+            max={f.bonusThreshold}
+            size="sm"
+            tone={f.bonusLikelihood === 'reached' ? 'success' : 'primary'}
+            label={`${formatNumber(f.soFar.sales)} of ${formatNumber(f.bonusThreshold)} sales for the ${formatGBP(f.bonusAmount)} bonus`}
+          />
+          <p className={clsx('text-sm', f.bonusLikelihood === 'reached' ? 'font-medium text-success' : 'text-fg')}>{bonus}</p>
+        </div>
+      )}
+      <p className="mt-3 text-xs text-muted">{FORECAST_LABEL}.</p>
+    </Card>
   );
 }
 
@@ -208,6 +279,73 @@ function Company({ onOpen, scrollToRuns = false, onScrolled }: { onOpen: (r: Pay
     });
   };
 
+  // ── Smart release 1.1 (p3): advisory checks and bulk "Mark paid" ──
+  const today = todayISO();
+  const toPay = useMemo(() => pending.data ?? [], [pending.data]);
+  const bulk = useBulkMarkPaid();
+  const [selected, setSelected] = useState<ReadonlySet<number>>(() => new Set());
+  const [includeFailed, setIncludeFailed] = useState(false);
+  const [paidDate, setPaidDate] = useState(today);
+  const [confirmBulk, setConfirmBulk] = useState(false);
+  const [confirmRun, setConfirmRun] = useState<PayrollRunWithUser | null>(null);
+  /** Week groups the admin opened or closed; null = the default (newest week open). */
+  const [openWeeks, setOpenWeeks] = useState<ReadonlySet<string> | null>(null);
+  // Failed transfers join a bulk selection only after the explicit "Include failed transfers" tick.
+  const canSelect = useCallback((r: PayrollRunWithUser) => r.status === 'pending' || (includeFailed && r.status === 'failed'), [includeFailed]);
+  const selectedRuns = useMemo(() => toPay.filter((r) => selected.has(r.id) && canSelect(r)), [toPay, selected, canSelect]);
+  const flaggedRuns = useMemo(() => toPay.filter((r) => warningFlags(r).length > 0), [toPay]);
+  const failedCount = toPay.filter((r) => r.status === 'failed').length;
+  const flaggedSelected = selectedRuns.filter((r) => warningFlags(r).length > 0);
+  // Drop ids that left the list (paid elsewhere, refetched) or became unselectable (failed tick cleared).
+  useEffect(() => {
+    setSelected((prev) => {
+      const keep = new Set([...prev].filter((id) => toPay.some((r) => r.id === id && canSelect(r))));
+      return keep.size === prev.size ? prev : keep;
+    });
+  }, [toPay, canSelect]);
+  const changeSelection = useCallback((runs: PayrollRunWithUser[], checked: boolean) => {
+    setSelected((prev) => {
+      const next = new Set(prev);
+      for (const r of runs) if (checked) next.add(r.id); else next.delete(r.id);
+      return next;
+    });
+  }, []);
+  const selection: PayrollRunSelection = {
+    selected,
+    canSelect: (r) => !bulk.busy && canSelect(r),
+    onChange: changeSelection,
+    disabledReason: (r) => (r.status === 'failed' && !includeFailed ? 'tick "Include failed transfers" first' : bulk.busy ? 'marking paid' : undefined),
+  };
+  const toggleWeek = (weekStart: string, open: boolean, defaults: string[]) => setOpenWeeks((prev) => {
+    const next = new Set(prev ?? defaults);
+    if (open) next.add(weekStart); else next.delete(weekStart);
+    return next;
+  });
+  /** "Mark week paid": selects the week's pending runs (plus failed ones once ticked) and opens the group. */
+  const selectWeek = (weekStart: string, runs: PayrollRunWithUser[], defaults: string[]) => {
+    const pick = runs.filter(canSelect);
+    const all = pick.length > 0 && pick.every((r) => selected.has(r.id));
+    changeSelection(pick, !all);
+    if (!all) toggleWeek(weekStart, true, defaults);
+  };
+  /** A single Mark paid on a run with warning checks asks first (advisory: it never blocks). */
+  // Never while a bulk batch is running: the run may be later in the batch, and the race would report it as skipped.
+  const requestMarkPaid = (run: PayrollRunWithUser) => {
+    if (bulk.busy) return;
+    if (warningFlags(run).length) setConfirmRun(run);
+    else markPaid(run);
+  };
+  const payNow = async () => {
+    setConfirmBulk(false);
+    const batch = [...selectedRuns].sort((a, b) => a.weekStart.localeCompare(b.weekStart) || a.userName.localeCompare(b.userName));
+    // The server defaults to today; only send the date when the admin picked another one.
+    const outcome = await bulk.markPaid(batch, paidDate === today ? undefined : paidDate);
+    // Runs that did not go through stay selected so they can be retried.
+    setSelected(new Set(outcome.failed.map((f) => f.run.id)));
+  };
+  const requestBulkPay = () => (flaggedSelected.length ? setConfirmBulk(true) : void payNow());
+  const runsTableProps = { showUser: true, onRowClick: onOpen, onMarkPaid: requestMarkPaid, markingId, markPaidDisabled: bulk.busy, selection } as const;
+
   return (
     <div className="space-y-6">
       <RangePicker value={range} onChange={setRange} presets={['last_4_weeks', 'last_12_weeks', 'quarter', 'this_month', 'last_month']} />
@@ -266,24 +404,127 @@ function Company({ onOpen, scrollToRuns = false, onScrolled }: { onOpen: (r: Pay
         </>
       )}
 
-      <Card id="runs" padded={false} className="min-w-0 scroll-mt-20 overflow-hidden">
-        <div className="p-5 pb-3"><CardHeader title="Runs to pay" description={`Pending and failed runs — mark them paid once the transfer has gone${pending.data?.some((r) => r.status === 'failed') ? ' · failed transfers are flagged' : ''}`} className="mb-0" actions={<ExportButton filename={csvFilename('runs-to-pay')} rows={sortRows(pending.data ?? [], (r) => r.weekStart, 'desc')} columns={payrollRunCsvColumns(true)} disabled={pending.isLoading} />} /></div>
-        {pending.isError ? <ErrorState error={pending.error} onRetry={() => void pending.refetch()} className="m-5" /> : (pending.data?.length ?? 0) > GROUP_RUNS_ABOVE ? (
+      <Card id="runs" padded={false} className="min-w-0 scroll-mt-20 overflow-clip">
+        <div className="p-5 pb-3">
+          <CardHeader
+            title="Runs to pay"
+            description={(
+              <>
+                {flaggedRuns.length > 0 && (
+                  <span className="mb-0.5 flex items-center gap-1.5 text-sm font-medium text-warning" data-runs-need-a-look="">
+                    <TriangleAlert className="h-4 w-4 shrink-0" aria-hidden />
+                    {flaggedRuns.length === 1 ? '1 run needs a look' : `${formatNumber(flaggedRuns.length)} runs need a look`}
+                  </span>
+                )}
+                Pending and failed runs — mark them paid once the transfer has gone{failedCount > 0 ? ' · failed transfers are flagged' : ''}
+              </>
+            )}
+            className="mb-0"
+            actions={<ExportButton filename={csvFilename('runs-to-pay')} rows={sortRows(toPay, (r) => r.weekStart, 'desc')} columns={payrollRunCsvColumns(true)} disabled={pending.isLoading} />}
+          />
+          {failedCount > 0 && (
+            <label className="mt-2 inline-flex min-h-10 cursor-pointer items-center gap-2.5 text-sm text-fg">
+              <input
+                type="checkbox"
+                className="focus-ring h-4 w-4 cursor-pointer rounded border-control-border accent-[var(--color-primary)]"
+                checked={includeFailed}
+                disabled={bulk.busy}
+                onChange={(e) => setIncludeFailed(e.target.checked)}
+              />
+              Include failed transfers ({formatNumber(failedCount)})
+            </label>
+          )}
+        </div>
+        {pending.isError ? <ErrorState error={pending.error} onRetry={() => void pending.refetch()} className="m-5" /> : toPay.length > GROUP_RUNS_ABOVE ? (
           <div className="divide-y divide-border border-t border-border">
-            {groupByWeek(pending.data ?? []).map(([weekStart, runs], i) => (
-              <details key={weekStart} open={i === 0} className="group">
-                <summary className="focus-ring flex cursor-pointer select-none items-center justify-between gap-3 px-5 py-3 text-sm hover:bg-surface-2/60">
-                  <span className="font-medium text-fg">Week {formatRangeLabel(weekStart, runs[0]!.weekEnd)}</span>
-                  <span className="text-xs text-muted">{formatNumber(runs.length)} run{runs.length === 1 ? '' : 's'} · {formatGBP(runs.reduce((a, r) => a + r.gross, 0))}{runs.some((r) => r.status === 'failed') ? ` · ${formatNumber(runs.filter((r) => r.status === 'failed').length)} failed` : ''}<span className="ml-2 inline-block transition-transform group-open:rotate-180" aria-hidden>⌄</span></span>
-                </summary>
-                <PayrollRunsTable rows={runs} showUser onRowClick={onOpen} onMarkPaid={markPaid} markingId={markingId} bare className="border-t border-border" />
-              </details>
-            ))}
+            {(() => {
+              const groups = groupByWeek(toPay);
+              const defaults = groups.length ? [groups[0]![0]] : [];
+              return groups.map(([weekStart, runs]) => {
+                const open = (openWeeks ?? new Set(defaults)).has(weekStart);
+                const pick = runs.filter(canSelect);
+                const picked = pick.length > 0 && pick.every((r) => selected.has(r.id));
+                const failed = runs.filter((r) => r.status === 'failed').length;
+                const toCheck = runs.filter((r) => warningFlags(r).length > 0).length;
+                const label = formatRangeLabel(weekStart, runs[0]!.weekEnd);
+                return (
+                  <section key={weekStart} aria-label={`Week ${label}`}>
+                    <div className="flex items-center gap-2 pr-3 hover:bg-surface-2/60 sm:pr-5">
+                      <button
+                        type="button"
+                        aria-expanded={open}
+                        aria-controls={`runs-week-${weekStart}`}
+                        onClick={() => toggleWeek(weekStart, !open, defaults)}
+                        className="focus-ring-inset flex min-h-12 min-w-0 flex-1 flex-wrap items-center justify-between gap-x-3 gap-y-0.5 py-3 pl-5 text-left text-sm"
+                      >
+                        <span className="font-medium text-fg">Week {label}</span>
+                        <span className="flex items-center text-xs text-muted">
+                          {/* One text item, so it wraps as a sentence beside the chevron (pence, as in the bar). */}
+                          <span>
+                            {formatNumber(runs.length)} run{runs.length === 1 ? '' : 's'} · <span className="tabular-nums">{formatGBP(runs.reduce((a, r) => a + r.gross, 0), { cents: true })}</span>
+                            {failed > 0 ? ` · ${formatNumber(failed)} failed` : ''}
+                            {toCheck > 0 ? ` · ${formatNumber(toCheck)} to check` : ''}
+                          </span>
+                          <ChevronDown className={clsx('ml-1.5 h-4 w-4 shrink-0 transition-transform', open && 'rotate-180')} aria-hidden />
+                        </span>
+                      </button>
+                      <Button
+                        size="sm"
+                        variant={picked ? 'soft' : 'outline'}
+                        className="h-10 shrink-0 sm:h-8"
+                        aria-pressed={picked}
+                        disabled={!pick.length || bulk.busy}
+                        title={pick.length ? 'Selects this week\'s pending runs; confirm in the bar below' : failed > 0 && !includeFailed ? 'Tick "Include failed transfers" to select failed transfers' : 'Nothing in this week can be selected'}
+                        leftIcon={picked ? <Check className="h-4 w-4" aria-hidden /> : undefined}
+                        onClick={() => selectWeek(weekStart, runs, defaults)}
+                      >
+                        Mark week paid
+                      </Button>
+                    </div>
+                    {open && (
+                      <div id={`runs-week-${weekStart}`}>
+                        <PayrollRunsTable rows={runs} {...runsTableProps} hideWeek bare className="border-t border-border" />
+                      </div>
+                    )}
+                  </section>
+                );
+              });
+            })()}
           </div>
         ) : (
-          <PayrollRunsTable rows={pending.data ?? []} loading={pending.isLoading} showUser onRowClick={onOpen} onMarkPaid={markPaid} markingId={markingId} emptyMessage="Everyone is paid up" bare className="border-t border-border" />
+          <PayrollRunsTable rows={toPay} loading={pending.isLoading} {...runsTableProps} emptyMessage="Everyone is paid up" bare className="border-t border-border" />
         )}
+        <BulkPayBar
+          runs={selectedRuns}
+          flagged={flaggedSelected.length}
+          paidDate={paidDate}
+          onPaidDateChange={setPaidDate}
+          today={today}
+          progress={bulk.progress}
+          onPay={requestBulkPay}
+          onClear={() => setSelected(new Set())}
+        />
       </Card>
+      <ConfirmDialog
+        open={confirmBulk}
+        onClose={() => setConfirmBulk(false)}
+        title={flaggedSelected.length === 1 ? '1 selected run needs a look' : `${formatNumber(flaggedSelected.length)} selected runs need a look`}
+        description="These checks are advisory — you can still pay every selected run. Here is why each one stood out:"
+        confirmLabel={`Mark ${formatNumber(selectedRuns.length)} paid`}
+        onConfirm={() => void payNow()}
+      >
+        <FlaggedRunsList runs={flaggedSelected} />
+      </ConfirmDialog>
+      <ConfirmDialog
+        open={!!confirmRun}
+        onClose={() => setConfirmRun(null)}
+        title="This run needs a look"
+        description={confirmRun ? `${confirmRun.userName} · week ${formatRangeLabel(confirmRun.weekStart, confirmRun.weekEnd)} · ${formatGBP(confirmRun.gross, { cents: true })}. Advisory only — you can still mark it paid.` : undefined}
+        confirmLabel="Mark paid"
+        onConfirm={() => { if (confirmRun) markPaid(confirmRun); setConfirmRun(null); }}
+      >
+        {confirmRun && <FlaggedRunsList runs={[confirmRun]} hideHeading />}
+      </ConfirmDialog>
 
       <Card padded={false} className="min-w-0 overflow-hidden">
         <div className="flex items-start justify-between gap-3 p-5 pb-3">
