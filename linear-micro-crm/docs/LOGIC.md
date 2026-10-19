@@ -870,12 +870,18 @@ or an entry it behaves exactly as in 1.0.
   (taken from the event's entries), with the hint **First on the team without an entry yet**. The existing-entry
   lookup waits until that choice is made.
 * **Without signal**, the event picker and a leader's rep picker fall back to the lists already loaded this session
-  (the dashboard's upcoming events, event lists and pages, team lists). The hint then says so.
+  (the dashboard's upcoming events, event lists and pages, team lists). The hint then says so. A leader or admin
+  finishing their own tally (`defaultUserId` = themselves) with no team list loaded is offered just themselves, so
+  their own day can still be kept on the phone, as a rep's can.
 
 **The tally** (`features/gauges/TallyMode.tsx`, `tallyStore.ts`; key `lm-tally:<userId>:<eventId>:<date>`):
 
 * **Counts.** They are kept per (person, event, date), survive reloads and dropped signal, and never leave the phone
   until **Finish shift**. Unfinished tallies older than 14 days are dropped.
+* **Several tabs.** An open counter follows the store: it reads the stored counts again on every change (the storage
+  event, for another tab) and whenever its tab comes back into view or gets focus. A tap in a tab left open all shift
+  therefore adds to the counts taken in another tab, and never writes older ones over them. Without working storage
+  the counts in memory stay as they are.
 * **Which event.** The tally offers today's events (own team for reps and leaders; any team for admins) plus any
   event with an unfinished tally. It picks the event under way, then the one live event, then the only event;
   otherwise it asks.
@@ -904,19 +910,30 @@ or an entry it behaves exactly as in 1.0.
 * **Tiles.** Six, in funnel order. The whole tile is the +1 button (label, the count in tabular figures, a stripe in
   the campaign's colour). The −1 is its own 44 px button in the top-right corner, a sibling of the tile (not nested),
   so it never adds. Both are labelled with the current count ("Add one to Sales (now 2)"), reachable with Tab, and
-  work with Enter or Space. A +1 the funnel would refuse shows a grey **+1** chip. Taps buzz briefly where the phone
-  supports vibration (`navigator.vibrate`), and `touch-action: manipulation` stops quick double taps zooming the page.
+  work with Enter or Space. A +1 the funnel would refuse shows a grey **+1** chip. The chip sits at the right end of the
+  count's row; in a narrow, short tile (a container query: content at most 13rem wide and 8.75rem tall, so a phone
+  held upright with tiles up to about 164 px tall) it moves to the left of the count and the row sits at the bottom,
+  so the chip is never within about 30 px of the −1 (58 px at 360×640, 65 px at 375×667). Taps buzz briefly where the
+  phone supports vibration (`navigator.vibrate`), and `touch-action: manipulation` stops quick double taps zooming the
+  page.
 * **Layout.** 2 columns × 3 rows on a phone held upright, with the rows sharing the height under the header (tiles
   ≥ 96 px). 3 × 2 from 640 px wide or held sideways. When the screen is under 481 px tall (a phone held sideways),
-  the tiles go down to 80 px and the header and bar get tighter, so all six fit without scrolling. There is never a
-  horizontal scroll. The count is sized to its tile (container units; at least two digits' width, so 0–99 keep one
-  size). Checked at 375×667, 390×844, 844×390, 768×1024, 1024×768, 1024×1366 and 1440×900, light and dark.
+  the tiles go down to 80 px and the header and bar get tighter, so all six fit without scrolling. So do a small phone
+  held upright (`tiny`: portrait and at most 600 px tall, e.g. 320×568). There is never a horizontal scroll: the
+  **Count it through** label wraps inside its button. The count is sized to its tile in container units: up to half
+  the tile's height, and narrow enough for its digits plus the chip (`(100cqw − 3.5rem) / (0.66 × digits)`, between
+  1.5 rem and 9 rem). All six are sized for the largest count, at least two digits, so they stay one size and step
+  down together once, when a count reaches 100. Checked at 320×568, 360×640, 375×667, 375×812, 390×844, 412×915,
+  430×932, 667×375, 844×390, 768×1024, 1024×768, 1024×1366 and 1440×900, light and dark.
 * **Refused taps.** The hint replaces the bottom bar for 8 seconds, in the same box, so the tiles never move under a
   thumb. A +1 the funnel blocks adds **Count it through: +1 …** (`tallyThroughOffer`; one tap applies
   `tallyStepThrough`). The hint is also announced to screen readers, and × dismisses it. Any accepted tap clears it.
 * **Bottom bar** (sticky, above the iPhone home indicator via `env(safe-area-inset-bottom)`): "N sales from M stops ·
   1 in X", **Reset** (asks first) and a large **Finish shift**. Finish shift opens Log gauges prefilled exactly as on the
   card: same validation, same outbox, and the tally clears once it is saved or kept on the phone.
+* **Reset's confirm** takes the bar's place at the same height, so the tiles do not move: the safe **Keep counting**
+  where **Finish shift** was (and focused), the red **Reset to 0** at the far left where the summary was ("Clears all
+  six counts."), and nothing where the small **Reset** was. A second tap on either familiar spot never wipes the shift.
 * **Screen awake.** While the page is open it asks for a Screen Wake Lock where the browser has one (secure contexts
   only), takes it again when the tab comes back into view, and releases it on leaving. Without one (plain http over a
   hotspot) nothing happens and nothing is said. Errors are swallowed.
@@ -926,13 +943,17 @@ or an entry it behaves exactly as in 1.0.
   it shows the running stop count (`useStoredTallies`). Below `lg` the topbar has an icon button next to the bell
   (40 px, "Quick gauges"), hidden on `/quick` itself. Recruiters see none of it, and `/quick` gives them the usual
   not-allowed page.
+* **Opens without signal.** For admins, leaders and reps the shell fetches the page's code (with Log gauges') once
+  the app is idle after sign-in (`requestIdleCallback`, a 2-second timer in Safari; only when the browser is online).
+  Quick gauges then opens even when the signal has dropped since, with the events already loaded this session.
 
 **Edge cases and limits.**
 
 * **Browser offline, storage blocked.** The modal does not offer the phone. TanStack Query holds the save until the
   browser is back online, as in 1.0.
 * **No service worker or HTTPS (out of scope).** The outbox protects saves while the page stays open. A page whose
-  code was never downloaded cannot open without signal (it shows **This page hit a problem**).
+  code was never downloaded cannot open without signal (it shows **This page hit a problem**). Quick gauges is the
+  exception: its code is fetched ahead, on idle, after sign-in.
 * **The kill switch** (`LM_SMART=0`) does not turn the outbox off: it is a reliability feature and builds no smart
   payload.
 
@@ -1301,8 +1322,9 @@ with `npm run build` (minified, before gzip):
   `LazyTallyMode`; the light entry points (`TallyButton`, `TodayTallyLink`) live in `TallyLinks.tsx`.
 - **Quick gauges** (`pages/QuickGauges.tsx`) is its own page chunk. It shares a small `useTallyCounter` chunk with
   `TallyMode`. The sidebar's stop-count pill puts `tallyStore.ts` in the main chunk (imported by file path). Its day is
-  worked out with `localDayISO()`, not `lib/dates`, so date-fns stays out of the shell. Cost: main chunk 432.8 →
-  438.8 kB (134.5 → 136.2 kB gzip).
+  worked out with `localDayISO()`, not `lib/dates`, so date-fns stays out of the shell. The shell fetches the page's
+  chunk on idle after sign-in (see Quick gauges, §14.7), through a dynamic import, so it stays out of the main chunk.
+  Cost: main chunk 432.8 → 439.2 kB (134.5 → 136.4 kB gzip).
 - `EventForecastChip` is 2.3 kB and renders inside every event row, so it stays where it is.
 - Lazy-loading the smart components alone brought the main chunk to 481.6 kB, still over the 460 kB target, so the
   **sign-in page** and **About** are split too: someone already signed in, the usual case on a phone, never downloads

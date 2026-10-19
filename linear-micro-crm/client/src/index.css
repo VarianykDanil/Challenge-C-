@@ -8,6 +8,10 @@
 @custom-variant dark (&:where(.dark, .dark *));
 /* A short viewport: a phone held sideways (Quick gauges packs its six tiles onto one screen). */
 @custom-variant short (@media (max-height: 480px));
+/* A small phone held upright (320×568, iPhone SE first generation): Quick gauges' tiles and strips get tighter. */
+@custom-variant tiny (@media (max-height: 600px) and (orientation: portrait));
+/* Inside a Quick gauges tile (a size container): a narrow, short tile, where the +1 chip moves away from the −1. */
+@custom-variant tile-cramped (@container (max-width: 13rem) and (max-height: 8.75rem));
 
 /* ──────────────────────────── Light theme ──────────────────────────── */
 :root {

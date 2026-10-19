@@ -285,14 +285,19 @@ hand or an iPad on the stand.
 * **Your event is picked for you** the same way as the Tally card: the one you are already counting today, otherwise
   the one under way, otherwise your only event. If there are several, tap **Change** to pick another.
 * **Counting.** Tap anywhere on a tile to add one: Stops, To table, Presentations, Closes, Taps, Sales. The small
-  **−** in the corner of each tile takes one off, and never adds. A grey **+1** means that stage can't go higher yet.
+  **−** in the top corner of each tile takes one off, and never adds; the **+1** on the tile always sits well clear
+  of it. A grey **+1** means that stage can't go higher yet.
 * **Count it through.** If you tap **Sales** before the tap that led to it, Linear Hub says why ("Sales can't go
   above taps (2).") and offers **Count it through: +1 tap and sale**. One tap adds the sale and raises the earlier
   stages that need it, so the funnel stays in order.
 * **Same counts as the Tally card.** Start on the Gauges page and carry on here, or the other way round. The numbers
-  stay on your phone through reloads and lost signal until you finish.
+  stay on your phone through reloads and lost signal until you finish. With Linear Hub open in two tabs, both show
+  the same counts.
 * **Finish shift** at the bottom opens Log gauges with your counts filled in: check them, add your check-in or notes,
-  and save (without signal it is kept on the phone). The tally then clears. **Reset** asks before it clears anything.
+  and save (without signal it is kept on the phone, for leaders and administrators too). The tally then clears.
+* **Reset** asks first: **Keep counting** appears where **Finish shift** was, and the red **Reset to 0** on the
+  other side, so a quick second tap never clears your shift.
+* **No signal?** Once Linear Hub has opened with signal, Quick gauges still opens after the signal drops.
 * **Leaders and administrators** count their own shift here, just as on the Tally card. To log for someone else, use
   **Log gauges** as usual.
 
@@ -302,7 +307,8 @@ hand or an iPad on the stand.
   two down. The six tiles fill the screen, with **Finish shift** always in reach at the bottom.
 * **Add it to your Home Screen.** In Safari, open Linear Hub, tap **Share**, then **Add to Home Screen**. You get a
   Linear Hub icon that opens full screen, without the browser bars, like an app. On Android, in Chrome, use the **⋮**
-  menu, then **Add to Home screen**.
+  menu, then **Add to Home screen**. Use either the icon or the browser for the whole shift: on iPhone they keep
+  separate counts, and the icon has its own sign-in.
 * **The screen stays on** while Quick gauges is open, on phones and browsers that allow it. That needs the secure
   (https) address. Over a plain hotspot address it follows your phone's own auto-lock setting, so set auto-lock to a
   few minutes for the shift.

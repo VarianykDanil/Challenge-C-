@@ -4,11 +4,11 @@
 // Never import this from the shell: it is shared by two lazily loaded chunks and should stay out of the first download.
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { GaugeKey, GaugeTotals, SalesEventWithMeta } from '@lm/shared';
-import { EMPTY_TOTALS, tallyStep, tallyStepThrough, tallyThroughOffer, type TallyThroughOffer } from '@lm/shared';
+import { EMPTY_TOTALS, GAUGE_KEYS, tallyStep, tallyStepThrough, tallyThroughOffer, type TallyThroughOffer } from '@lm/shared';
 import { useCurrentUser } from '@/auth/AuthProvider';
 import { todayISO } from '@/lib/dates';
 import { useLoggableEvents } from './loggableEvents';
-import { clearTally, readTally, tallyStorageAvailable, tallyTotal, writeTally, type StoredTally } from './tallyStore';
+import { clearTally, readTally, subscribeTallies, tallyStorageAvailable, tallyTotal, writeTally, type StoredTally } from './tallyStore';
 
 /** Events the person can count: today's (own team for reps and leaders; admins any team), plus any unfinished tally. */
 export function useTallyEvents(stored: StoredTally[]) {
@@ -34,6 +34,8 @@ export function defaultEvent(options: SalesEventWithMeta[], stored: StoredTally[
   if (live.length === 1) return live[0]!;
   return todays.length === 1 ? todays[0]! : null;
 }
+
+const sameCounts = (a: GaugeTotals, b: GaugeTotals) => GAUGE_KEYS.every((k) => a[k] === b[k]);
 
 /** A short buzz where the phone supports it (Android Chrome); silently nothing elsewhere. */
 export const vibrate = (pattern: number | number[]) => {
@@ -87,12 +89,39 @@ export function useTallyCounter(event: SalesEventWithMeta, opts: TallyCounterOpt
   const [counts, setCounts] = useState<GaugeTotals>(() => readTally(me.id, event.id, event.date));
   const countsRef = useRef(counts);
   const [persisted, setPersisted] = useState(tallyStorageAvailable);
+  const persistedRef = useRef(persisted);
+  persistedRef.current = persisted;
   const [hint, setHint] = useState<string | null>(null);
   const [refused, setRefused] = useState<GaugeKey | null>(null);
   const [confirmReset, setConfirmReset] = useState(false);
   const [finishing, setFinishing] = useState(false);
   const onFinished = useRef(opts.onFinished);
   onFinished.current = opts.onFinished;
+
+  // Follow the store: another tab (a Quick gauges page left open all shift, or the Gauges page) may have counted since
+  // this one read it, and a tap here must add to those counts, never write stale ones over them. Re-read on every
+  // change of the store (the storage event from other tabs) and whenever this tab comes back into view. Without
+  // working storage there is nothing reliable to read back, so the counts in memory stay.
+  useEffect(() => {
+    const sync = () => {
+      if (!persistedRef.current) return;
+      const stored = readTally(me.id, event.id, event.date);
+      if (sameCounts(stored, countsRef.current)) return;
+      countsRef.current = stored;
+      setCounts(stored);
+    };
+    const onVisible = () => {
+      if (document.visibilityState === 'visible') sync();
+    };
+    const unsubscribe = subscribeTallies(sync);
+    window.addEventListener('focus', sync);
+    document.addEventListener('visibilitychange', onVisible);
+    return () => {
+      unsubscribe();
+      window.removeEventListener('focus', sync);
+      document.removeEventListener('visibilitychange', onVisible);
+    };
+  }, [me.id, event.id, event.date]);
 
   useEffect(() => {
     if (!hint) return;

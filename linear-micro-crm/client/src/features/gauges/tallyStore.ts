@@ -55,7 +55,8 @@ function onStorage(e: StorageEvent): void {
   if (e.key === null || e.key.startsWith(PREFIX)) changed();
 }
 
-function subscribe(listener: () => void): () => void {
+/** Calls `listener` whenever a tally changes: written on this page, or in another tab (the storage event). */
+export function subscribeTallies(listener: () => void): () => void {
   listeners.add(listener);
   if (listeners.size === 1 && typeof window !== 'undefined') window.addEventListener('storage', onStorage);
   return () => {
@@ -123,7 +124,7 @@ export function getStoredTallies(userId: number): StoredTally[] {
 const EMPTY: StoredTally[] = [];
 
 export function useStoredTallies(userId: number | null | undefined): StoredTally[] {
-  return useSyncExternalStore(subscribe, () => (userId ? getStoredTallies(userId) : EMPTY), () => EMPTY);
+  return useSyncExternalStore(subscribeTallies, () => (userId ? getStoredTallies(userId) : EMPTY), () => EMPTY);
 }
 
 export function readTally(userId: number, eventId: number, date: string): GaugeTotals {

@@ -173,10 +173,13 @@ function LogGaugesForm({ onClose, event, defaultUserId, entry, onSaved, prefill,
   );
   const repOptions = useMemo(() => {
     if (!canPickRep) return [me];
+    // A leader or admin finishing their own tally (defaultUserId = themselves) without signal and without a team list
+    // seen this session: they can still keep their own day on the phone, as a rep can.
+    if (!members && usersOffline && defaultUserId === me.id) return [me];
     const list = members ?? [];
     // Admins may log their own field day at any team's event, so keep them selectable.
     return me.role === 'admin' && list.length && !list.some((u) => u.id === me.id) ? [...list, me] : list;
-  }, [canPickRep, members, me]);
+  }, [canPickRep, members, me, usersOffline, defaultUserId]);
   // Editing a supplied entry: its owner is the rep, whoever the viewer is (admins and own-team leaders correct reps' days).
   const repValid = entry ? userId === entry.userId : userId != null && repOptions.some((u) => u.id === userId);
   // Keep state and the visible option in sync: never submit a rep the dropdown is not showing. A preselected person

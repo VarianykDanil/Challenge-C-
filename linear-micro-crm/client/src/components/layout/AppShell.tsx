@@ -97,6 +97,24 @@ export function AppShell({ user, onLogout, children, title, fluid }: AppShellPro
 
   const sidebarWidth = collapsed ? SIDEBAR_COLLAPSED_WIDTH : SIDEBAR_WIDTH;
 
+  // Quick gauges is the field screen, and pages are lazy chunks with no service worker: fetch its code (and Log
+  // gauges') once the app is idle after sign-in, so it still opens after the signal drops. The shell stays the same
+  // size; the browser keeps the module, and the page's own lazy import then resolves from it.
+  const canGauge = GAUGE_ROLES.includes(user.role);
+  useEffect(() => {
+    if (!canGauge || !navigator.onLine) return;
+    const load = () => {
+      import('@/pages/QuickGauges').catch(() => { /* fetched again when the page opens */ });
+    };
+    // Safari has no requestIdleCallback: a short timer instead.
+    if (typeof window.requestIdleCallback === 'function') {
+      const id = window.requestIdleCallback(load, { timeout: 5000 });
+      return () => window.cancelIdleCallback(id);
+    }
+    const id = setTimeout(load, 2000);
+    return () => clearTimeout(id);
+  }, [canGauge]);
+
   // p7: signing out with gauges still on this phone asks first. Nothing is deleted: they stay under this person's
   // key and send after their next sign-in on this phone.
   const [unsentOnSignOut, setUnsentOnSignOut] = useState(0);
