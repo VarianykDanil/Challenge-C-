@@ -98,19 +98,40 @@ export interface PitchAnnotationRule extends PitchAnnotation {
   pattern: RegExp;
 }
 
-/** A parsed piece of the script. `line` is the 1-based source line it starts on. */
+/**
+ * A parsed piece of the script. `line` is the 1-based source line it starts on. `step` is the step of the five steps
+ * the piece belongs to (set by parsePitchScript on every line, direction and pause; see shared/src/logic/pitchScript.ts).
+ */
 export type PitchBlock =
   | { kind: 'line'; line: number; text: string; segments: PitchSegment[]; step?: PitchStepKey; annotations: PitchAnnotation[] }
-  | { kind: 'direction'; line: number; text: string }
-  | { kind: 'pause'; line: number; seconds: number | null; text: string }
+  | {
+      kind: 'direction';
+      line: number;
+      text: string;
+      step?: PitchStepKey;
+      annotations?: PitchAnnotation[];
+      /** Set when the direction names a step, e.g. "(Short story)": the step starts here (the page shows a step heading instead). */
+      stepMarker?: PitchStepKey;
+    }
+  | { kind: 'pause'; line: number; seconds: number | null; text: string; step?: PitchStepKey; annotations?: PitchAnnotation[] }
   | { kind: 'break'; line: number }
-  | { kind: 'branch'; line: number; question: string | null; branches: PitchBranch[] };
+  | { kind: 'branch'; line: number; question: string | null; branches: PitchBranch[]; step?: PitchStepKey };
 
 export interface PitchBranch {
   /** 'yes' / 'no' from "Yes -" / "No -". */
   answer: 'yes' | 'no';
   label: string;
   blocks: PitchBlock[];
+}
+
+/** One step of the five in a parsed script: how long it reads aloud (estimate) against the pack's target. */
+export interface PitchStepEstimate extends PitchStepTarget {
+  /** Read-aloud estimate in whole seconds (the longest branch of each Yes / No), including pauses. */
+  seconds: number;
+  /** Spoken lines tagged with this step (every branch counted). */
+  lines: number;
+  /** The 1-based source line where the step starts, or null when the script has no line in it. */
+  firstLine: number | null;
 }
 
 /** parsePitchScript(body) */
@@ -121,14 +142,42 @@ export interface PitchScript {
   wordCount: number;
   /** Read-aloud estimate including pauses. */
   estimatedSeconds: number;
+  /** The five steps in order, each with its estimate and the pack's target (PITCH_STEP_TARGETS). */
+  steps: PitchStepEstimate[];
+  /** The speaking rate behind the estimates (PITCH_WORDS_PER_MINUTE). */
+  wordsPerMinute: number;
 }
+
+/** How a fact-check note reads: the figure checks out, the office should check it, or a general note. */
+export type PitchFactTone = 'verified' | 'check' | 'info';
 
 /** One fact-check note, matched to the script lines it concerns (parsePitchFacts). */
 export interface PitchFact {
   /** The quoted words the note is about, or null for a general note. */
   quote: string | null;
+  /** Every leading quote of the note (a note may cover two phrases); `quote` is the first. */
+  quotes: string[];
   note: string;
+  /** "Suggested wording: "…"" from the note, shown on its own; null when the note has none. */
+  suggestion: string | null;
+  tone: PitchFactTone;
   sources: string[];
   /** 1-based script lines the quote matches. */
   lines: number[];
+}
+
+/** Memorise mode: one flashcard per spoken line (pitchCards). */
+export interface PitchCard {
+  /** Stable per line text (pitchLineKey), ":2" etc. when the same words come back; progress is saved under it. */
+  key: string;
+  /** 1-based source line. */
+  line: number;
+  /** The words as said aloud, the name slot as "(Name)". */
+  text: string;
+  segments: PitchSegment[];
+  step: PitchStepKey;
+  /** Set for a line inside a Yes / No branch. */
+  branch: { answer: 'yes' | 'no'; label: string; question: string | null } | null;
+  /** The line said just before, shown as the cue (null for the first line). */
+  cue: string | null;
 }
