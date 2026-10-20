@@ -1,7 +1,7 @@
 // Release 1.2 — L1 learning-pack hooks — OWNED BY L1 (laid down by r2-foundation). Endpoints: server/src/routes/learning.ts.
 // Every key starts with 'learning', so invalidating ['learning'] refreshes all of them.
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import type { LearningProgress, LessonKey, LessonProgress, LessonQuizInput, LessonQuizResult, Progression, TeachbackInput, TeachbackSignoffInput, TeamLearning } from '@lm/shared';
+import type { LearningProgress, LessonKey, LessonProgress, LessonQuizInput, LessonQuizResult, Progression, ProgressionMilestoneInput, ProgressionMilestoneKey, TeachbackInput, TeachbackSignoffInput, TeamLearning } from '@lm/shared';
 import { api, qs } from './client';
 
 export const learningKeys = {
@@ -65,6 +65,16 @@ export function useSignOffTeachback() {
   return useMutation({
     mutationFn: ({ userId, lessonKey, ...input }: TeachbackSignoffInput & { userId: number; lessonKey: LessonKey }) =>
       api<LessonProgress>(`/learning/progress/${userId}/${lessonKey}/signoff`, { method: 'POST', json: input }),
+    onSuccess: invalidate,
+  });
+}
+
+/** PUT /learning/milestones/:userId/:key (admin) — tick or count one of the criteria the office confirms by hand. */
+export function useSetMilestone() {
+  const invalidate = useInvalidateLearning();
+  return useMutation({
+    mutationFn: ({ userId, key, ...input }: ProgressionMilestoneInput & { userId: number; key: ProgressionMilestoneKey }) =>
+      api<Progression>(`/learning/milestones/${userId}/${key}`, { method: 'PUT', json: input }),
     onSuccess: invalidate,
   });
 }

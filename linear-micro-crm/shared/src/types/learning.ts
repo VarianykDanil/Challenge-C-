@@ -54,6 +54,9 @@ export const LESSON_ANCHORS = {
 /** How the hub groups the lesson cards (L1 decides the mapping from LessonKey to group). */
 export type LessonGroup = 'fundamentals' | 'in-the-field' | 'objections' | 'attitude' | 'leadership' | 'tasks';
 
+/** The hub's group order (the pack's checklist blocks, top to bottom; the practical tasks last). */
+export const LESSON_GROUPS: LessonGroup[] = ['fundamentals', 'in-the-field', 'attitude', 'objections', 'leadership', 'tasks'];
+
 /** Where one person is on one lesson. */
 export type LessonState = 'new' | 'learned' | 'teachback_sent' | 'taught';
 
@@ -123,11 +126,24 @@ export interface TeamLearningRow {
   lessons: Pick<LessonProgress, 'lessonKey' | 'learnedAt' | 'teachbackAt' | 'taughtSignedOffAt' | 'state'>[];
 }
 
+/** One teach-back written and waiting for a sign-off (the checklist page's queue for leaders and admins). */
+export interface TeachbackAwaiting {
+  userId: number;
+  userName: string;
+  avatarColor: string;
+  lessonKey: LessonKey;
+  /** The person's own words (null when they asked for an in-person sign-off without writing one). */
+  teachbackText: string | null;
+  teachbackAt: string;
+}
+
 /** GET /learning/team — leader: own team; admin: everyone active; rep / recruiter: 403. */
 export interface TeamLearning {
   rows: TeamLearningRow[];
   /** LESSON_KEYS.length */
   total: number;
+  /** L1: teach-backs waiting for a sign-off from this viewer (never the viewer's own), newest first. */
+  pending?: TeachbackAwaiting[];
 }
 
 /** The pack's career ladder (pre-management structure, then post-management). */
@@ -167,6 +183,52 @@ export interface ProgressionCriterion {
   manual?: boolean;
 }
 
+/**
+ * Conditions the office ticks by hand (no data behind them): PUT /learning/milestones/:userId/:key (admin). The value
+ * is a count for the "N people / offices" ones and 0 / 1 for the rest (targets in PROGRESSION_MILESTONES, shared logic).
+ */
+export type ProgressionMilestoneKey =
+  | 'trained_leaders'
+  | 'trained_personalities'
+  | 'four_plus_one'
+  | 'consistency'
+  | 'team_profitable'
+  | 'ready'
+  | 'mentored_office'
+  | 'first_gen_offices_4'
+  | 'wire_50k'
+  | 'first_gen_offices_7'
+  | 'wire_75k';
+
+export const PROGRESSION_MILESTONE_KEYS: ProgressionMilestoneKey[] = [
+  'trained_leaders',
+  'trained_personalities',
+  'four_plus_one',
+  'consistency',
+  'team_profitable',
+  'ready',
+  'mentored_office',
+  'first_gen_offices_4',
+  'wire_50k',
+  'first_gen_offices_7',
+  'wire_75k',
+];
+
+/** PUT /learning/milestones/:userId/:key — admin only; answers the updated Progression. */
+export interface ProgressionMilestoneInput {
+  /** Whole number 0–99 (a tick is 1, an untick 0). */
+  value: number;
+}
+
+/** One Mon–Sun week of the tracker's window: oldest first, the last one is this week so far (zero-filled). */
+export interface ProgressionWeek {
+  weekStart: string;
+  /** The person's own logged sales that week. */
+  sales: number;
+  /** Sales logged by everyone on the person's current team (them included); null when they have no team. */
+  teamSales: number | null;
+}
+
 /** A requirement is met when ANY of its options is (e.g. 14 sales in a week OR 12 two weeks running). */
 export interface ProgressionRequirement {
   key: string;
@@ -187,4 +249,12 @@ export interface Progression {
   requirements: ProgressionRequirement[];
   /** One sentence for the dashboard card, e.g. "Your next level: 12 of 14 sales this week; 9 of 21 lessons learned". */
   headline: string;
+  /** L1: the weeks behind the sales criteria (PROGRESSION_RULES.windowWeeks, oldest first, this week last). */
+  weeks?: ProgressionWeek[];
+  /** L1: the person's COD pack counts (as GET /learning/progress). */
+  learned?: number;
+  taught?: number;
+  total?: number;
+  /** L1: false while the smart kill switch is on (LM_SMART=0): requirements [], weeks [], headline ''. */
+  enabled?: boolean;
 }
