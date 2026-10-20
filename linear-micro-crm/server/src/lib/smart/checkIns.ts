@@ -9,7 +9,8 @@
  * 7 SQL statements whatever the team size (none with LM_SMART=0, 1 when nobody is in scope):
  *   1. the people (users ⨝ teams)
  *   2. weeklyHistory: 16 completed weeks + this week, one grouped statement
- *   3. recorded check-ins over 8 weeks (the people's own, and every check-in at their teams' events)
+ *   3. recorded check-ins over 8 weeks (the people's own, and every check-in at their teams' events); since 1.2 a
+ *      day's one-tap shift check-in (check_ins, U4) stands in for the gauge entry's own time when there is one
  *   4. the teams' completed event dates over 10 weeks
  *   5. the people's gauge dates over 10 weeks
  *   6. ensurePayrollMaterialised: MAX(week_start) of payroll_runs — the finance routes' guard. Only when last
@@ -33,6 +34,7 @@ import { all, placeholders, type Db, type Param } from '../../db/connection.ts';
 import { ensurePayrollMaterialised } from '../../db/maintenance.ts';
 import { addDays, mondayOf } from '../dates.ts';
 import { weeklyHistory } from '../history.ts';
+import { CHECKED_IN_AT_SQL, SHIFT_CHECK_IN_JOIN } from '../shiftCheckIns.ts';
 import { smartEnabled } from './enabled.ts';
 
 export interface CheckInScope {
@@ -118,10 +120,11 @@ export function checkInList(db: Db, scope: CheckInScope, today: string): CheckIn
   const whose = teamIds.length ? `(e.team_id IN (${placeholders(teamIds.length)}) OR g.user_id IN (${idList}))` : `g.user_id IN (${idList})`;
   const checkIns = all<CheckInRow>(
     db,
-    `SELECT g.user_id AS userId, e.team_id AS teamId, g.date, e.start_time AS startTime, g.checked_in_at AS checkedInAt
-     FROM gauge_entries g JOIN events e ON e.id = g.event_id
-     WHERE g.date >= ? AND g.date < ? AND g.checked_in_at IS NOT NULL AND ${whose}
-     ORDER BY g.date DESC, g.checked_in_at DESC, g.id DESC`,
+    // Release 1.2 (U4): the one-tap check-in when there is one, else the gauge entry's own time.
+    `SELECT g.user_id AS userId, e.team_id AS teamId, g.date, e.start_time AS startTime, ${CHECKED_IN_AT_SQL} AS checkedInAt
+     FROM gauge_entries g JOIN events e ON e.id = g.event_id ${SHIFT_CHECK_IN_JOIN}
+     WHERE g.date >= ? AND g.date < ? AND ${CHECKED_IN_AT_SQL} IS NOT NULL AND ${whose}
+     ORDER BY g.date DESC, ${CHECKED_IN_AT_SQL} DESC, g.id DESC`,
     [lateFrom, today, ...teamIds, ...ids],
   );
 

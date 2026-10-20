@@ -13,6 +13,7 @@ import { useEvent, useGauges, useUpdateGauge, useUpsertGauge, useUsers } from '@
 import { useCurrentUser } from '@/auth/AuthProvider';
 import { errorDetails, errorMessage, ErrorBoundary, RatioCell } from '@/features/common';
 import { EntityHistory } from '@/features/audit/EntityHistory';
+import { useShiftCheckIn } from '@/features/checkins/useShiftCheckIn';
 import { isoToLocalInput, nowLocalInput, todayISO } from '@/lib/dates';
 import { formatDate, formatDateShort, formatStopsPerSale, formatTime, fullName } from '@/lib/format';
 import { BENCHMARK_KEYS, RATIO_LABELS } from '@/lib/ratios';
@@ -143,6 +144,8 @@ function LogGaugesForm({ onClose, event, defaultUserId, entry, onSaved, prefill,
   // The check-in / note the prefill (or the outbox item) carried; undefined → keep the stored entry's.
   const carried = useRef<{ checkIn?: string; notes?: string }>(usePrefill ? { checkIn: prefill!.checkedInAt ? isoToLocalInput(prefill!.checkedInAt) : undefined, notes: prefill!.notes || undefined } : {});
   const userTyped = useRef(false);
+  // Release 1.2 (U4): the check-in field itself was set by hand (Now, the chip or typing), so a one-tap check-in never replaces it.
+  const checkInTouched = useRef(false);
 
   // Event picker: the last three weeks up to today (reps and leaders: own team only). Cancelled events are not offered.
   // Without signal the events already seen this session stand in (see loggableEvents.ts).
@@ -285,8 +288,32 @@ function LogGaugesForm({ onClose, event, defaultUserId, entry, onSaved, prefill,
   const lookupBlocks = lookupPending || lookupFailed || (lookupOffline && !canKeepOnPhone);
   const canSubmit = eventId != null && userId != null && !!date && repValid && !blocked && warnings.length === 0 && !saving && !lookupBlocks && !autoRepPending;
 
+  // Release 1.2 (U4): the person's one-tap check-in for this event and day (on Linear Hub, or waiting on this phone)
+  // fills an empty "Checked in at" — never a time that was typed or is already stored — and is named under the field.
+  const shiftCheckIn = useShiftCheckIn({ eventId, date, startTime: selectedEvent?.startTime, userId, meId: me.id, enabled: lookupEnabled || !!entry }).current;
+  const shiftCheckInValue = shiftCheckIn ? isoToLocalInput(shiftCheckIn.checkedInAt) : '';
+  const checkInKey = `${eventId}|${userId}|${date}`;
+  // What this effect filled in, and for whom: picking another person or event takes the previous one's tap out again.
+  const autoCheckIn = useRef<{ key: string; value: string } | null>(null);
+  useEffect(() => {
+    if (checkInTouched.current || lookupPending) return;
+    const auto = autoCheckIn.current;
+    if (auto && auto.key !== checkInKey) {
+      autoCheckIn.current = null;
+      // A stored entry for the new choice sets its own time (the effect above); otherwise swap in the new tap or clear.
+      if (checkIn === auto.value && !existing) {
+        setCheckIn(shiftCheckInValue);
+        if (shiftCheckInValue) autoCheckIn.current = { key: checkInKey, value: shiftCheckInValue };
+      }
+      return;
+    }
+    if (!shiftCheckInValue || checkIn || existing?.checkedInAt) return;
+    setCheckIn(shiftCheckInValue);
+    autoCheckIn.current = { key: checkInKey, value: shiftCheckInValue };
+  }, [checkInKey, shiftCheckInValue, checkIn, lookupPending, existing]);
+
   // Smart default 2: "Checking in? Use now" around the start of today's event; it never fills itself.
-  const showCheckInChip = smart && !!selectedEvent && selectedEvent.date === today && prefilledId == null && !checkIn && inCheckInWindow(selectedEvent.startTime, nowHHMM);
+  const showCheckInChip = smart && !!selectedEvent && selectedEvent.date === today && prefilledId == null && !checkIn && !shiftCheckIn && inCheckInWindow(selectedEvent.startTime, nowHHMM);
 
   const repName = () => {
     if (entry) return entry.userName;
@@ -373,6 +400,10 @@ function LogGaugesForm({ onClose, event, defaultUserId, entry, onSaved, prefill,
         : lookupOffline
           ? "No signal — Linear Hub checks this day for an earlier entry before it's sent."
           : 'Gauges are logged against the event date.';
+  const eventStartHint = selectedEvent ? `Event starts ${selectedEvent.startTime} · 5 min grace` : 'Optional';
+  const checkInHint = shiftCheckIn
+    ? `${shiftCheckIn.label.replace('Checked in', 'One-tap check-in')}${shiftCheckIn.where === 'phone' ? ' (saved on this phone)' : ''} — punctuality uses it · ${eventStartHint}`
+    : eventStartHint;
   const submitLabel = keepOnPhone ? 'Save on this phone' : prefilledId ? 'Update gauges' : lookupPending || autoRepPending ? 'Checking for an existing entry…' : 'Save gauges';
   const eventPlaceholder = loggable.isLoading ? 'Loading events…' : events.length ? 'Choose an event' : loggable.offline ? 'No signal — no events loaded yet' : 'No events in the last three weeks';
   const eventHint = autoEventId != null && eventId === autoEventId ? "Today's event selected" : loggable.fromCache && !event && !entry ? 'No signal — showing events already loaded on this phone' : undefined;
@@ -465,16 +496,16 @@ function LogGaugesForm({ onClose, event, defaultUserId, entry, onSaved, prefill,
       </div>
 
       <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
-        <Field as="div" label="Checked in at" className="min-w-0" hint={selectedEvent ? `Event starts ${selectedEvent.startTime} · 5 min grace` : 'Optional'}>
+        <Field as="div" label="Checked in at" className="min-w-0" hint={checkInHint}>
           <div className="flex gap-2">
-            <Input id={`${uid}-checkin`} aria-label="Checked in at" type="datetime-local" value={checkIn} onChange={(e) => { userTyped.current = true; setCheckIn(e.target.value); }} className="min-w-0" />
-            <Button type="button" variant="outline" aria-label="Set check-in time to now" onClick={() => { userTyped.current = true; setCheckIn(nowLocalInput()); }}>Now</Button>
+            <Input id={`${uid}-checkin`} aria-label="Checked in at" type="datetime-local" value={checkIn} onChange={(e) => { userTyped.current = true; checkInTouched.current = true; setCheckIn(e.target.value); }} className="min-w-0" />
+            <Button type="button" variant="outline" aria-label="Set check-in time to now" onClick={() => { userTyped.current = true; checkInTouched.current = true; setCheckIn(nowLocalInput()); }}>Now</Button>
           </div>
           {showCheckInChip && (
             <button
               type="button"
               data-checkin-chip
-              onClick={() => { userTyped.current = true; setCheckIn(nowLocalInput()); }}
+              onClick={() => { userTyped.current = true; checkInTouched.current = true; setCheckIn(nowLocalInput()); }}
               className="focus-ring mt-2 inline-flex min-h-10 items-center gap-2 rounded-full border border-primary/30 bg-primary-soft px-4 text-sm font-medium text-primary transition-colors hover:bg-primary/15 active:bg-primary/20"
             >
               <Clock className="h-4 w-4 shrink-0" aria-hidden />

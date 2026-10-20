@@ -51,6 +51,7 @@ import { recruitmentSummary } from '../../routes/recruitment.ts';
 import { addDays, nowISO } from '../dates.ts';
 import { GAUGE_FROM, GAUGE_PAYOUT_SQL, rankedBoard, ratiosOf, totalsFor, type TotalsWithDays } from '../metrics.ts';
 import { weekPayFor } from '../pay.ts';
+import { CHECKED_IN_AT_SQL, SHIFT_CHECK_IN_JOIN } from '../shiftCheckIns.ts';
 import { checkInList } from './checkIns.ts';
 import { smartEnabled } from './enabled.ts';
 import { eventForecasts } from './eventForecast.ts';
@@ -158,8 +159,9 @@ function leaderFacts(db: Db, me: UserWithTeam, teamId: number, w: Week, today: s
   const { funnel } = funnelFor(db, w, (where) => where.add('u.team_id = ?', teamId));
   const checkedIn = all<{ eventDate: string; startTime: string; checkedInAt: string }>(
     db,
-    `SELECT e.date AS eventDate, e.start_time AS startTime, g.checked_in_at AS checkedInAt ${GAUGE_FROM}
-     WHERE u.team_id = ? AND g.date BETWEEN ? AND ? AND g.checked_in_at IS NOT NULL`,
+    // Release 1.2 (U4): the one-tap check-in when there is one, else the gauge entry's own time.
+    `SELECT e.date AS eventDate, e.start_time AS startTime, ${CHECKED_IN_AT_SQL} AS checkedInAt ${GAUGE_FROM} ${SHIFT_CHECK_IN_JOIN}
+     WHERE u.team_id = ? AND g.date BETWEEN ? AND ? AND ${CHECKED_IN_AT_SQL} IS NOT NULL`,
     [teamId, w.monday, w.sunday],
   );
   const punctuality = punctualitySummary(checkedIn);

@@ -18,6 +18,7 @@ import {
 import { all, type Db } from '../db/connection.ts';
 import { Where } from '../db/queries.ts';
 import { eachDay, eachMonday, formatShort, formatWeek, mondayOf } from './dates.ts';
+import { CHECKED_IN_AT_SQL, SHIFT_CHECK_IN_JOIN } from './shiftCheckIns.ts';
 
 /** Gauge entries joined to users, events and campaigns: filter on g.*, u.*, e.*, c.*, t.* */
 export const GAUGE_FROM = `
@@ -100,11 +101,15 @@ export function trendFor(db: Db, where: Where, from: string, to: string, granula
   return [...byKey.values()];
 }
 
-/** Share of recorded check-ins that were on time (null when nothing was recorded). */
+/**
+ * Share of recorded check-ins that were on time (null when nothing was recorded). Release 1.2 (U4): a logged day's
+ * check-in is the one-tap shift check-in when there is one, else the gauge entry's own time (lib/shiftCheckIns.ts).
+ */
 export function punctualityFor(db: Db, where: Where): number | null {
   const rows = all<{ eventDate: string; startTime: string; checkedInAt: string | null }>(
     db,
-    `SELECT e.date AS eventDate, e.start_time AS startTime, g.checked_in_at AS checkedInAt ${GAUGE_FROM} ${where} AND g.checked_in_at IS NOT NULL`,
+    `SELECT e.date AS eventDate, e.start_time AS startTime, ${CHECKED_IN_AT_SQL} AS checkedInAt ${GAUGE_FROM} ${SHIFT_CHECK_IN_JOIN}
+     ${where} AND ${CHECKED_IN_AT_SQL} IS NOT NULL`,
     where.params,
   );
   const rate = punctualityRate(rows);

@@ -5,15 +5,37 @@
  *
  * Endpoints (server/src/routes/checkins.ts, owned by U4):
  *  - POST   /checkins  ShiftCheckInInput → 201 ShiftCheckIn (or 200 with the existing one: idempotent on user+event+date)
- *  - DELETE /checkins/:id → 204 (self within 2 minutes; leader of the team / admin any time)
- *  - GET    /checkins?eventId= → ShiftCheckInList (leader / admin: the event's team in scope; rep: own only)
+ *  - DELETE /checkins/:id → 204 (self within 2 minutes; leader of the person's team / admin any time)
+ *  - GET    /checkins?eventId= → ShiftCheckInList (admin: everyone; leader: their team and themself; others: own only)
  * A check-in never creates a gauge row and never counts as a day worked.
  */
 
+/**
+ * How the check-in reached Linear Hub: 'button' (dashboard or event page), 'quick' (Quick gauges), 'offline' (tapped
+ * without signal and sent later by the phone, with the time it was tapped). 'leader' is reserved (not written in 1.2).
+ */
 export type ShiftCheckInSource = 'button' | 'quick' | 'offline' | 'leader';
+
+/** The sources POST /checkins accepts. */
+export const SHIFT_CHECK_IN_SOURCES = ['button', 'quick', 'offline'] as const;
 
 /** How long the person may undo their own check-in. */
 export const SHIFT_CHECK_IN_UNDO_MS = 2 * 60_000;
+
+/** Extra time the server allows on an undo, for the request's trip over a slow hotspot. */
+export const SHIFT_CHECK_IN_UNDO_GRACE_MS = 15_000;
+
+/**
+ * A check-in kept on the phone may be sent up to this many days after the event (a phone that stayed without signal
+ * over a weekend); older ones are refused and the phone shows why.
+ */
+export const SHIFT_CHECK_IN_REPLAY_DAYS = 7;
+
+/** A phone clock up to this far ahead of Linear Hub's is treated as "now" rather than refused as a future time. */
+export const SHIFT_CHECK_IN_CLOCK_SKEW_MS = 5 * 60_000;
+
+/** Most check-ins one phone keeps waiting (per signed-in person). */
+export const SHIFT_CHECK_IN_QUEUE_LIMIT = 20;
 
 export interface ShiftCheckIn {
   id: number;
@@ -24,7 +46,7 @@ export interface ShiftCheckIn {
   /** Naive Europe/London wall-clock time, the same format as GaugeEntry.checkedInAt. */
   checkedInAt: string;
   source: ShiftCheckInSource;
-  /** ISO timestamp the row was written (real clock). */
+  /** ISO timestamp the row was written (the business clock, which ticks with real time). */
   createdAt: string;
   /** Whole minutes after the event start (0 when early or on time: shared `minutesLate`); null when unknown. */
   minutesLate: number | null;
@@ -32,13 +54,22 @@ export interface ShiftCheckIn {
   onTime: boolean;
   /** Until when the person may undo it themself (ISO), null once that has passed or for someone else's row. */
   undoUntil: string | null;
+  /**
+   * Milliseconds of the undo window left when the server answered (0 when none). Clients count down from the moment
+   * the answer arrived, so a phone clock that is minutes out never shows Undo too long or too briefly.
+   */
+  undoMsLeft?: number;
 }
 
 export interface ShiftCheckInInput {
   eventId: number;
-  /** Default: the business date. */
+  /** Default: the date of `checkedInAt` when given, else the business date. Must be the event's date. */
   date?: string;
-  /** Default: the business clock now; a replayed offline check-in sends the time it was tapped. Never in the future. */
+  /**
+   * Default: the business clock now; a replayed offline check-in sends the time it was tapped (naive wall-clock time,
+   * like Log gauges' "Checked in at"). Never in the future (a phone up to 5 minutes ahead counts as now), on the
+   * event's date, and not after the event's end time.
+   */
   checkedInAt?: string;
   source?: ShiftCheckInSource;
 }
