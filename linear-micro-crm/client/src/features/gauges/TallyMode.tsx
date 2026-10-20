@@ -68,7 +68,7 @@ function TallyPanel({ request, onClose }: { request: TallyRequest; onClose: () =
                     <span className="mt-0.5 block" data-tally-help><TallyHelp /></span>
                   </>
                 ) : (
-                  'Tap +1 as it happens. The counts stay on this phone until you finish the shift.'
+                  'Tap +1 on the furthest stage each person reached. The counts stay on this phone until you finish the shift.'
                 )}
               </p>
             </div>

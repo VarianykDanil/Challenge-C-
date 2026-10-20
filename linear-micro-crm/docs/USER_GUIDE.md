@@ -275,9 +275,11 @@ link. It opens Google Maps (the Maps app on a phone) at the venue.
 
   Every row that went up flashes for a moment, so you can see what the tap counted. Taps can come in any order, so a
   **+1** is never greyed out (only at the daily maximum of 2,000 stops).
-* **Tapped the wrong one?** The small **−** takes that person off again: the same stages go back down by 1. If later
-  stages still need them, it says what to do instead, for example "Can't take one off closes: 2 people got as far as
-  taps. Take one off Taps first."
+* **Tapped the wrong one?** The small **−** takes that person off again: the same stages go back down by 1. If
+  everyone counted on that stage went further, there is nobody who stopped there to take off, so it names the tile
+  that does bring it down, for example "Can't take one off Closes: all 2 people who got to closes went on to taps.
+  Take one off Taps instead (Closes comes down with it)." One tap on that tile does it. If that person did get part
+  of the way, **+1** them again on the furthest stage they really reached.
 * **Your counts are safe** on the phone through reloads and lost signal. The **Tally** button shows today's stop
   count, and the dashboard says **Carry on counting**. An unfinished tally is dropped after 14 days.
 * **Finish shift** opens Log gauges with your counts filled in: check them, add your check-in or notes, and save
@@ -302,8 +304,9 @@ hand or an iPad on the stand.
   presentation; a tap adds one to Stops through Taps; a sale adds one to all six. Every tile that went up flashes for
   a moment. The help line under the event repeats the rule.
 * **Taking one off.** The small **−** in the top corner of each tile takes that person off again, and never adds; the
-  **+1** on the tile always sits well clear of it. If someone counted further on still needs that stage, the bar at the
-  bottom says which tile to take one off first. Taps can come in any order, so the **+1** is only grey at the daily
+  **+1** on the tile always sits well clear of it. If everyone counted on that stage went further, the bar at the
+  bottom names the tile to take one off instead, which brings that stage down with it (for example **Taps** instead
+  of **Closes** when both closes went on to a tap). Taps can come in any order, so the **+1** is only grey at the daily
   maximum (2,000 stops).
 * **Same counts as the Tally card.** Start on the Gauges page and carry on here, or the other way round. The numbers
   stay on your phone through reloads and lost signal until you finish. With Linear Hub open in two tabs, both show

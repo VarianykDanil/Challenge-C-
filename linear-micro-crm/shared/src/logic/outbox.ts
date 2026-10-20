@@ -155,17 +155,7 @@ export function firstMemberWithoutEntry(members: readonly PickerMember[], logged
 
 // ───────────────────────────── Tally ─────────────────────────────
 
-/** Lower-case stage names for hints ("Can't take one off presentations: …"). */
-const STAGE: Record<GaugeKey, string> = {
-  stops: 'stops',
-  table: 'to table',
-  presentations: 'presentations',
-  closes: 'closes',
-  taps: 'taps',
-  sales: 'sales',
-};
-
-/** How far a person got, for hints ("3 people got as far as closes"). */
+/** How far a person got, for hints ("all 2 people who got to closes went on to taps"). */
 const FAR: Record<GaugeKey, string> = {
   stops: 'a stop',
   table: 'the table',
@@ -174,6 +164,12 @@ const FAR: Record<GaugeKey, string> = {
   taps: 'taps',
   sales: 'sales',
 };
+
+/** The people counted on a stage, for hints: "all 2 people who got to closes", "the 1 person you stopped". */
+function counted(key: GaugeKey, n: number): string {
+  const who = n === 1 ? 'the 1 person' : `all ${n} people`;
+  return key === 'stops' ? `${who} you stopped` : `${who} who got to ${FAR[key]}`;
+}
 
 /** 2000 → "2,000" (fixed, so a hint never depends on the phone's locale). */
 const thousands = (n: number) => String(n).replace(/\B(?=(\d{3})+(?!\d))/g, ',');
@@ -187,9 +183,12 @@ export type TallyStepResult = { ok: true; counts: GaugeTotals } | { ok: false; c
  * one to all six. The stages after `key` never move.
  *
  * −1 takes that one person off again: every stage from Stops down to `key` goes down by 1, so it is the exact inverse
- * of the +1. It is refused when `key` is 0, or when it would leave `key` below the stage after it (those people got
- * past `key` too, so one of them has to come off first). A +1 is refused only when a stage it would raise is at the
- * daily maximum. A refused tap returns the same counts object and one short hint naming what to do instead.
+ * of the +1. It is refused when `key` is 0, or when `key` equals the stage after it: then nobody's furthest stage was
+ * `key` (everyone counted there went on further), so there is no such person to take off. The hint then names the
+ * tile that does lower `key`: the first stage after it that was somebody's furthest (its count is above the next
+ * one's), whose −1 takes that person off every stage from Stops to it, `key` included, and is always accepted. A +1 is
+ * refused only when a stage it would raise is at the daily maximum. A refused tap returns the same counts object and
+ * one short hint saying what to do instead.
  *
  * Given a valid funnel (stops ≥ to table ≥ presentations ≥ closes ≥ taps ≥ sales) the result is a valid funnel, and
  * every valid funnel is a sum of people's outcomes, so no order of taps is ever needed. Pure and deterministic; the
@@ -203,18 +202,23 @@ export function tallyPerson(counts: GaugeTotals, key: GaugeKey, delta: 1 | -1, m
     if (full) return { ok: false, counts, hint: `${GAUGE_LABELS[full]} is at the daily maximum of ${thousands(max)}.` };
   } else {
     if (counts[key] <= 0) return { ok: false, counts, hint: `${GAUGE_LABELS[key]} is already 0.` };
-    const after = GAUGE_KEYS[i + 1];
-    if (after && counts[key] - 1 < counts[after]) {
-      const n = counts[after];
-      return {
-        ok: false,
-        counts,
-        hint: `Can't take one off ${STAGE[key]}: ${n} ${n === 1 ? 'person' : 'people'} got as far as ${FAR[after]}. Take one off ${GAUGE_LABELS[after]} first.`,
-      };
-    }
     // Only reachable with counts that are not a funnel (never stored: normaliseTally): never go below 0.
     const empty = stages.find((k) => counts[k] <= 0);
     if (empty) return { ok: false, counts, hint: `${GAUGE_LABELS[empty]} is already 0.` };
+    const after = GAUGE_KEYS[i + 1];
+    if (after && counts[key] - 1 < counts[after]) {
+      // The first stage after `key` that was somebody's furthest. It exists (Sales ends the funnel at 0 after it), every
+      // stage from Stops to it is above 0, and it is above the stage after it, so its −1 is accepted and lowers `key`.
+      const at = (j: number) => counts[GAUGE_KEYS[j]!];
+      let j = i + 1;
+      while (j < GAUGE_KEYS.length - 1 && at(j) <= at(j + 1)) j++;
+      const to = GAUGE_KEYS[j]!;
+      return {
+        ok: false,
+        counts,
+        hint: `Can't take one off ${GAUGE_LABELS[key]}: ${counted(key, counts[key])} went on to ${FAR[to]}. Take one off ${GAUGE_LABELS[to]} instead (${GAUGE_LABELS[key]} comes down with it).`,
+      };
+    }
   }
   const next: GaugeTotals = { ...counts };
   for (const k of stages) next[k] += delta;

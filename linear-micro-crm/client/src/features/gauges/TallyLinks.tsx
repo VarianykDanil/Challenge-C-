@@ -93,7 +93,7 @@ export function TodayTallyLink({ events }: TodayTallyLinkProps) {
         <span className="block text-sm font-semibold text-primary">{counting ? 'Carry on counting' : 'Count your shift'}</span>
         <span className="block truncate text-xs text-muted">
           {target ? `${target.name} · ${formatTime(target.startTime)}` : `${todays.length} events today`}
-          {counting ? ` · ${counting.counts.stops} stops, ${counting.counts.sales} sales so far` : ' · tap +1 as it happens'}
+          {counting ? ` · ${counting.counts.stops} stops, ${counting.counts.sales} sales so far` : ' · one tap per person'}
         </span>
       </span>
       <ArrowRight className="h-4 w-4 shrink-0 text-primary" aria-hidden />

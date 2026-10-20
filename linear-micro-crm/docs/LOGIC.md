@@ -811,7 +811,7 @@ rule, the funnel check, the paid-week lock and the check-in rules still apply to
 | `inCheckInWindow(start, now)` | `now` within [start − 60 min, start + 90 min], both ends included; no wrap past midnight. |
 | `preselectTodayEvent(events, today, teamId)` | The one own-team event dated today whose status is `live` or `completed`; null when there are none or several, or no team. |
 | `firstMemberWithoutEntry(members, loggedIds)` | The first member in list order who is active, not a recruiter and has no entry for the event. |
-| `tallyPerson(counts, key, ±1)` | One tap counts **one person at the furthest stage they reached**. +1 on stage K adds 1 to every stage from Stops down to K; the stages after K never move. So Stops +1 adds a stop only, Presentations +1 adds a stop, a table and a presentation, Taps +1 adds one to Stops through Taps, and Sales +1 adds one to all six. −1 on K takes that person off again (every stage from Stops to K down by 1), so it is the exact inverse of the +1. A −1 is refused when K is 0 ("Sales is already 0.") or when it would leave K below the stage after it, whose people also passed K: "Can't take one off closes: 2 people got as far as taps. Take one off Taps first." A +1 is refused only when a stage it would raise is at the daily maximum (2,000), naming that stage: "Stops is at the daily maximum of 2,000." A refused tap returns the same counts and one hint. Every accepted tap keeps the funnel (stops ≥ to table ≥ presentations ≥ closes ≥ taps ≥ sales) by construction, and every valid funnel is a sum of people's outcomes, so no order of taps is ever needed and no +1 is ever blocked for order. Counts that are not a funnel (never stored: `normaliseTally`) never go below 0. Pure and deterministic; the input is never changed. Replaces 1.1.0's `tallyStep` (a +1 changed only its own row and was refused above the stage before it), `tallyStepThrough` and `tallyThroughOffer` (**Count it through**). Stored tallies are funnels already, so they carry over unchanged. |
+| `tallyPerson(counts, key, ±1)` | One tap counts **one person at the furthest stage they reached**. +1 on stage K adds 1 to every stage from Stops down to K; the stages after K never move. So Stops +1 adds a stop only, Presentations +1 adds a stop, a table and a presentation, Taps +1 adds one to Stops through Taps, and Sales +1 adds one to all six. −1 on K takes that person off again (every stage from Stops to K down by 1), so it is the exact inverse of the +1. A −1 is refused when K is 0 ("Sales is already 0.") or when K equals the stage after it: then nobody's furthest stage was K (everyone counted on K went further), so there is no such person to take off. The hint names the tile that does lower K: the first stage J after K whose count is above the next stage's (Sales counts as above the 0 after it), so somebody's furthest stage was J. A −1 on J is always accepted and takes that person off Stops through J, K included: "Can't take one off Closes: all 2 people who got to closes went on to taps. Take one off Taps instead (Closes comes down with it)." With [9, 6, 5, 3, 2, 2] a −1 on Taps names Sales (both taps went on to a sale). Following the hint once lowers K by exactly 1 (tested over 400 funnels), and J is the nearest tile that can, so it takes off as little as possible. A +1 is refused only when a stage it would raise is at the daily maximum (2,000), naming that stage: "Stops is at the daily maximum of 2,000." A refused tap returns the same counts and one hint. Every accepted tap keeps the funnel (stops ≥ to table ≥ presentations ≥ closes ≥ taps ≥ sales) by construction, and every valid funnel is a sum of people's outcomes, so no order of taps is ever needed and no +1 is ever blocked for order. Counts that are not a funnel (never stored: `normaliseTally`) never go below 0. Pure and deterministic; the input is never changed. Replaces 1.1.0's `tallyStep` (a +1 changed only its own row and was refused above the stage before it), `tallyStepThrough` and `tallyThroughOffer` (**Count it through**). Stored tallies are funnels already, so they carry over unchanged. |
 | `normaliseTally(raw)` | Stored counts → whole numbers 0…2,000, then each stage lowered to the one above if needed. Never throws. |
 
 **The outbox** (`client/src/features/gauges/outbox.ts`; one localStorage key per signed-in person,
@@ -931,17 +931,17 @@ or an entry it behaves exactly as in 1.0.
   phone supports vibration (`navigator.vibrate`), and `touch-action: manipulation` stops quick double taps zooming the
   page.
 * **Layout.** 2 columns × 3 rows on a phone held upright, with the rows sharing the height under the header (tiles
-  ≥ 96 px). 3 × 2 from 640 px wide or held sideways. When the screen is under 481 px tall (a phone held sideways),
-  the tiles go down to 80 px and the header and bar get tighter, so all six fit without scrolling. So do a small phone
-  held upright (`tiny`: portrait and at most 600 px tall, e.g. 320×568). The help line sits just under the event
-  header (11 px, two lines on a phone); held sideways it moves into the header, to the right of the event, so it takes
-  no height. To make room for it, the phone header is 48 px (56 px from 640 px) and tiles on a phone held upright may
-  go down to 88 px, so all six still fit on a 360×640 screen. There is never a horizontal scroll: the hint wraps inside
-  the bar. The count is sized to its tile in container units: up to half the tile's height, no taller than the room
-  left under the label and the "what a tap adds" line (`(100cqh − --tile-head) / 1.05`, with `--tile-head` set per
-  layout: 2.25 rem in a cramped phone tile, 2.5 rem otherwise on a phone, 2.375 / 2.625 rem from 640 px, 1.5 rem held
-  sideways), and narrow enough for its digits plus the chip (`(100cqw − 3.5rem) / (0.66 × digits)`), between 1.5 rem
-  and 9 rem. All six are sized for the largest count, at least two digits, so they stay one size and step down
+  ≥ 88 px). 3 × 2 from 640 px wide (tiles ≥ 96 px) or held sideways. When the screen is under 481 px tall (a phone held
+  sideways), the tiles go down to 80 px and the header and bar get tighter, so all six fit without scrolling. So do a
+  small phone held upright (`tiny`: portrait and at most 600 px tall, e.g. 320×568). The help line sits just under the
+  event header (11 px, two lines on a phone); held sideways it moves into the header, to the right of the event, so it
+  takes no height. To make room for it, the phone header is 48 px (56 px from 640 px) and tiles on a phone held upright
+  have the 88 px floor (not 96 px), so all six still fit on a 360×640 screen. There is never a horizontal scroll: the
+  hint wraps inside the bar. The count is sized to its tile in container units: up to half the tile's height, no taller
+  than the room left under the label and the "what a tap adds" line (`(100cqh − --tile-head) / 1.05`, with `--tile-head`
+  set per layout: 2.25 rem in a cramped phone tile, 2.5 rem otherwise on a phone, 2.375 / 2.625 rem from 640 px, 1.5 rem
+  held sideways), and narrow enough for its digits plus the chip (`(100cqw − 3.5rem) / (0.66 × digits)`), between
+  1.5 rem and 9 rem. All six are sized for the largest count, at least two digits, so they stay one size and step down
   together once, when a count reaches 100. Checked at 320×568, 360×640, 375×667, 375×812, 390×844, 412×915, 667×375,
   844×390, 768×1024, 1024×768, 1024×1366 and 1440×900, light and dark. At 320 px "Presentations" is cut short with an
   ellipsis (it was before; every "what a tap adds" line fits).

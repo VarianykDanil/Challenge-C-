@@ -79,7 +79,7 @@ export function QuickGaugesPage() {
               </p>
             </div>
           ) : (
-            <p className="text-xs text-muted">Tap a tile as it happens. The counts stay on this phone until you finish the shift.</p>
+            <p className="text-xs text-muted">Tap the furthest stage each person reached. The counts stay on this phone until you finish the shift.</p>
           )}
         </div>
         {/* Held sideways there is no height to spare under the header, but room across it: the help line sits here. */}
