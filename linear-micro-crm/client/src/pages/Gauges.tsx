@@ -85,9 +85,11 @@ export function GaugesPage() {
       <ErrorBoundary name="tally" title="The tally hit a problem" className="mb-5" resetKeys={[tally]}>
         <LazyTallyMode request={tally} onClose={() => setTally(null)} />
       </ErrorBoundary>
-      <div className="mb-5 flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
-        {tabs.length > 1 ? <Tabs items={tabs} value={scope} onChange={(v) => setScope(v as Scope)} /> : <span />}
-        <RangePicker value={range} onChange={setRange} />
+      {/* The tabs and the range presets share a row only when both fit (about 1280 px with the sidebar open); otherwise
+          the presets wrap onto their own line (U5 layout fix: at 1024 px they used to push the page sideways). */}
+      <div className="mb-5 flex flex-wrap items-center justify-between gap-x-6 gap-y-3">
+        {tabs.length > 1 && <Tabs items={tabs} value={scope} onChange={(v) => setScope(v as Scope)} className="w-full lg:w-auto" />}
+        <RangePicker value={range} onChange={setRange} className={tabs.length > 1 ? undefined : 'lg:ml-auto'} />
       </div>
 
       {scope === 'me' && <MyPerformance userId={me.id} range={range} />}

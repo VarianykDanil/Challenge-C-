@@ -32,10 +32,13 @@ export function RangePicker({ value, onChange, presets = PERFORMANCE_PRESETS, al
     setDraft(next);
     if (next.from && next.to && next.from <= next.to) onChange({ ...value, preset: 'custom', ...next });
   };
+  // Release 1.2 (U5 layout fix): min-w-0 + max-w-full on the root and the pill wrapper let a flex or wrapping parent
+  // shrink the picker to the room it has (the pills then scroll inside the control) instead of the pills' full width
+  // pushing the page sideways. Parents that share a row with it wrap it onto its own line when it does not fit.
   return (
-    <div className={`flex flex-wrap items-center gap-3 ${className ?? ''}`}>
+    <div className={`flex min-w-0 max-w-full flex-wrap items-center gap-3 ${className ?? ''}`}>
       {/* On phones the pills scroll inside the control; the fading right edge says there is more. */}
-      <div className="relative inline-flex max-w-full after:pointer-events-none after:absolute after:inset-y-0 after:right-0 after:w-8 after:rounded-r-lg after:bg-linear-to-l after:from-bg after:to-transparent sm:after:hidden">
+      <div className="relative inline-flex min-w-0 max-w-full after:pointer-events-none after:absolute after:inset-y-0 after:right-0 after:w-8 after:rounded-r-lg after:bg-linear-to-l after:from-bg after:to-transparent sm:after:hidden">
         <SegmentedControl<RangePreset | 'custom'>
           aria-label="Date range"
           size="sm"

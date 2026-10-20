@@ -10,6 +10,7 @@ import { isTodayISO, todayISO } from '@/lib/dates';
 import { formatDayHeading, pluralise } from '@/lib/format';
 import { EVENT_STATUS_LABELS, optionsFrom } from '@/lib/labels';
 import { usePageTitle } from '@/lib/usePageTitle';
+import { useActionParam } from '@/lib/useActionParam';
 import { COPY } from '@/content/copy';
 
 export function EventsPage() {
@@ -21,6 +22,8 @@ export function EventsPage() {
   const [campaignId, setCampaignId] = useState('');
   const [status, setStatus] = useState<EventStatus | ''>('');
   const [createOpen, setCreateOpen] = useState(false);
+  // Deep link (1.2 search palette): /events?new=1 opens New event for those who may create one.
+  useActionParam(['new'], (p) => { if (p.new === '1' && canCreate) setCreateOpen(true); });
   const [showAllDays, setShowAllDays] = useState(false);
 
   const teams = useTeams();

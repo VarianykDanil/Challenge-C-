@@ -1,5 +1,5 @@
 // Topbar — owned by the Product Designer.
-import { useEffect, useId, useMemo, useRef, useState, type KeyboardEvent as ReactKeyboardEvent, type ReactNode, type RefObject } from 'react';
+import { useEffect, useRef, useState, type ReactNode, type RefObject } from 'react';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
 import { BellOff, ChevronDown, ChevronRight, Circle, Globe, Info, LogOut, Menu as MenuIcon, Moon, Search, Settings, Sun, SunMoon } from 'lucide-react';
 import clsx from 'clsx';
@@ -11,6 +11,7 @@ import { ErrorBoundary } from '@/features/common/ErrorBoundary';
 import { NotificationsBell } from './NotificationsBell';
 import { ThemeToggle, useTheme } from './theme';
 import { NAV_ICONS } from './Sidebar';
+import { QuickSearch } from '@/features/office/QuickSearch';
 import type { NavItem } from './nav';
 
 export interface TopbarProps {
@@ -35,139 +36,6 @@ export function matchNavItem(items: NavItem[], pathname: string): NavItem | unde
   return items
     .filter((i) => (i.to === '/' ? pathname === '/' : pathname === i.to || pathname.startsWith(`${i.to}/`)))
     .sort((a, b) => b.to.length - a.to.length)[0];
-}
-
-interface QuickNavProps {
-  items: NavItem[];
-  className?: string;
-  /** Ref to the input so the topbar can focus it on ⌘K. */
-  inputRef?: RefObject<HTMLInputElement | null>;
-  /** Focus the input on mount (popover mode). */
-  autoFocus?: boolean;
-  /** Render the result list in flow (inside a popover) instead of floating under the field. */
-  embedded?: boolean;
-  /** Called after a page was chosen. */
-  onNavigate?: () => void;
-  /** Called on Escape with an empty query (popover mode closes and refocuses its button). */
-  onDismiss?: () => void;
-}
-
-/**
- * Quick navigation: a combobox that filters the pages this user can open and navigates on Enter.
- * ⌘K / Ctrl+K (handled by the Topbar) focuses it from anywhere.
- */
-function QuickNav({ items, className, inputRef: inputRefProp, autoFocus, embedded, onNavigate, onDismiss }: QuickNavProps) {
-  const id = useId();
-  const navigate = useNavigate();
-  const ownRef = useRef<HTMLInputElement>(null);
-  const inputRef = inputRefProp ?? ownRef;
-  const [query, setQuery] = useState('');
-  const [open, setOpen] = useState(false);
-  const [active, setActive] = useState(0);
-
-  const matches = useMemo(() => {
-    const q = query.trim().toLowerCase();
-    return q ? items.filter((i) => i.label.toLowerCase().includes(q) || i.to.slice(1).startsWith(q)) : items;
-  }, [items, query]);
-
-  useEffect(() => { setActive(0); }, [query]);
-  useEffect(() => { if (autoFocus) inputRef.current?.focus(); }, [autoFocus, inputRef]);
-
-  const listId = `${id}-list`;
-  const optionId = (i: number) => `${id}-opt-${i}`;
-
-  const go = (item: NavItem | undefined) => {
-    if (!item) return;
-    setQuery('');
-    setOpen(false);
-    inputRef.current?.blur();
-    navigate(item.to);
-    onNavigate?.();
-  };
-
-  const onKeyDown = (e: ReactKeyboardEvent<HTMLInputElement>) => {
-    switch (e.key) {
-      case 'ArrowDown': e.preventDefault(); setOpen(true); setActive((a) => (matches.length ? (a + 1) % matches.length : 0)); break;
-      case 'ArrowUp': e.preventDefault(); setOpen(true); setActive((a) => (matches.length ? (a - 1 + matches.length) % matches.length : 0)); break;
-      case 'Enter': e.preventDefault(); go(matches[active]); break;
-      case 'Escape':
-        e.preventDefault();
-        if (query) setQuery('');
-        else if (onDismiss) onDismiss();
-        else { setOpen(false); inputRef.current?.blur(); }
-        break;
-      case 'Tab': setOpen(false); break;
-    }
-  };
-
-  return (
-    <div
-      className={clsx('relative', className)}
-      onBlur={(e) => { if (!e.currentTarget.contains(e.relatedTarget as Node | null)) setOpen(false); }}
-    >
-      <label htmlFor={`${id}-input`} className="sr-only">Go to page</label>
-      <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted" aria-hidden />
-      <input
-        ref={inputRef}
-        id={`${id}-input`}
-        type="text"
-        role="combobox"
-        aria-expanded={open}
-        aria-controls={listId}
-        aria-autocomplete="list"
-        aria-activedescendant={open && matches[active] ? optionId(active) : undefined}
-        aria-keyshortcuts="Meta+K Control+K"
-        autoComplete="off"
-        spellCheck={false}
-        placeholder="Go to page…"
-        value={query}
-        onChange={(e) => { setQuery(e.target.value); setOpen(true); }}
-        onFocus={() => setOpen(true)}
-        onKeyDown={onKeyDown}
-        className="focus-ring h-9 w-full rounded-lg border border-control-border bg-surface pl-9 pr-14 text-sm text-fg shadow-card transition-colors placeholder:text-subtle hover:border-muted focus:border-primary"
-      />
-      {!embedded && (
-        <kbd className="pointer-events-none absolute right-2 top-1/2 hidden -translate-y-1/2 items-center gap-0.5 rounded-md border border-border bg-surface-2 px-1.5 py-0.5 font-sans text-[10px] font-medium text-muted lg:inline-flex" aria-hidden>
-          ⌘K
-        </kbd>
-      )}
-      {open && (
-        <ul
-          id={listId}
-          role="listbox"
-          aria-label="Pages"
-          className={clsx(
-            'scrollbar-thin max-h-80 overflow-y-auto text-sm',
-            embedded ? 'mt-1.5' : 'absolute left-0 right-0 top-full z-40 mt-1.5 animate-scale-in rounded-xl border border-border bg-surface p-1 shadow-pop',
-          )}
-        >
-          {matches.length === 0 ? (
-            <li role="option" aria-selected={false} aria-disabled className="px-2.5 py-2 text-muted">No pages match “{query.trim()}”</li>
-          ) : (
-            matches.map((m, i) => {
-              const Icon = NAV_ICONS[m.icon] ?? Circle;
-              return (
-                <li
-                  key={m.to}
-                  id={optionId(i)}
-                  role="option"
-                  aria-selected={i === active}
-                  onMouseEnter={() => setActive(i)}
-                  onMouseDown={(e) => e.preventDefault()} // keep focus in the input so blur does not close the list first
-                  onClick={() => go(m)}
-                  className={clsx('flex cursor-pointer items-center gap-2.5 rounded-lg px-2.5 py-2 text-fg', i === active && 'bg-surface-2')}
-                >
-                  <Icon className="h-4 w-4 shrink-0 text-muted" aria-hidden />
-                  <span className="flex-1 truncate">{m.label}</span>
-                  {m.section && <span className="text-[11px] text-muted">{SECTION_LABELS[m.section]}</span>}
-                </li>
-              );
-            })
-          )}
-        </ul>
-      )}
-    </div>
-  );
 }
 
 export function Topbar({ user, items, onLogout, onOpenMenu, menuButtonRef, title, hasNotifications = false, onNotifications }: TopbarProps) {
@@ -239,7 +107,7 @@ export function Topbar({ user, items, onLogout, onOpenMenu, menuButtonRef, title
       </div>
 
       {/* The field may shrink (to 10rem) before the page name does; it never pushes the breadcrumb out. */}
-      <QuickNav items={items} inputRef={inlineSearchRef} className="hidden w-64 min-w-[10rem] shrink lg:block xl:w-72" />
+      <QuickSearch user={user} items={items} inputRef={inlineSearchRef} className="hidden w-64 min-w-[10rem] shrink lg:block xl:w-72" />
 
       <div className="flex shrink-0 items-center gap-1">
         <div className="relative lg:hidden">
@@ -247,7 +115,7 @@ export function Topbar({ user, items, onLogout, onOpenMenu, menuButtonRef, title
             ref={searchButtonRef}
             type="button"
             onClick={() => setSearchOpen((o) => !o)}
-            aria-label="Go to page"
+            aria-label="Search or go to a page"
             aria-haspopup="dialog"
             aria-expanded={searchOpen}
             aria-keyshortcuts="Meta+K Control+K"
@@ -258,11 +126,11 @@ export function Topbar({ user, items, onLogout, onOpenMenu, menuButtonRef, title
           {searchOpen && (
             <div
               role="dialog"
-              aria-label="Go to page"
-              className="absolute right-0 top-full z-40 mt-2 w-[min(20rem,calc(100vw-2rem))] animate-scale-in rounded-xl border border-border bg-surface p-2 shadow-pop"
+              aria-label="Search or go to a page"
+              className="absolute right-0 top-full z-40 mt-2 w-[min(22rem,calc(100vw-2rem))] animate-scale-in rounded-xl border border-border bg-surface p-2 shadow-pop"
               onBlur={(e) => { if (!e.currentTarget.contains(e.relatedTarget as Node | null)) closeSearch(false); }}
             >
-              <QuickNav items={items} autoFocus embedded onNavigate={() => closeSearch(false)} onDismiss={() => closeSearch(true)} />
+              <QuickSearch user={user} items={items} autoFocus embedded onNavigate={() => closeSearch(false)} onDismiss={() => closeSearch(true)} />
             </div>
           )}
         </div>
