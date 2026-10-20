@@ -15,35 +15,224 @@ Step-by-step for everyone at Linear MCR, by role. Start with **Everyone**, then 
 ## What's new in 1.2
 
 Linear Hub 1.2 adds a **Learning** page for the COD pack and your campaign pitches, and a set of upgrades for the
-field and the office. Each part below is filled in as it is finished.
+field and the office.
 
 ### Learning pack: COD pack lessons, the Learn / Teach checklist and the progression tracker
 
-_To be merged from `docs/r2/L1-learning-pack.md` (section "User guide")._
+**Learning** (sidebar, everyone) opens the Learning page:
+
+- **Your COD pack**: how many lessons you have learned and taught back, and a button to carry on (**Continue: …**, or
+  **Teach back: …** once everything is learned).
+- **Field cards**: **5 steps to a conversation** and **The six objections**, each one phone screen with the line to
+  say, for a quick look between stops. Tap a line to open that part of the lesson.
+- Campaign pitches (from the pitch studio) sit above the lessons.
+- **The COD pack**: 21 lessons grouped like the pack's leadership checklist, each with its state (**Not started**,
+  **Learned**, **Teach-back sent**, **Taught**). Search finds a lesson by any word in it ("GIFGUP", "no time", "pause").
+
+A lesson shows a summary and the key points, the lesson itself with the pack's pictures, then:
+
+1. **Self-check**: three questions. Get all three right (**Check my answers**) and the lesson is learned. Got one wrong?
+   The explanation shows under each question; **Try again** as often as you like.
+2. **Teach it back**: write the theory in your own words and **Send to my leader** (people without a team leader
+   send it to the office). Only you, your team leader and the office can read it. You can **Rewrite it** later. If you
+   teach it at the whiteboard instead, your leader can sign it off in person.
+3. **Signed off**: your leader ticks it and the lesson shows **Taught**.
+
+"Run an impact" and "Go on a roadtrip" are practical tasks: tap **I've done this**, then say how it went.
+
+**Progress** (from the Learning page, **Checklist and progress**):
+
+- **Reps and recruiters**: your leadership checklist (Learn and Teach ticks for every lesson) and the progression
+  tracker: your level, the next one and each criterion with your real numbers (for example "12 of 14 sales this week",
+  "9 of 21 lessons learned"), a chart of your sales per week for the last 12 weeks against the 14 and 12 lines, and
+  the whole ladder from entry level to national consultant. Recruiters see the checklist only (they are outside the
+  field ladder).
+- **Leaders**: **Me** shows your own; **My team** shows the teach-backs **Waiting for your sign-off** (read them and
+  tap **Sign off**), everyone's Learn / Taught counts, and on a tablet or computer the whole checklist grid. Open a
+  person to tick their Teach column (**Sign off**; tap a green **Taught** to withdraw it) and see their progression.
+- **Admins**: **Everyone** instead of My team, and on a person's progression the criteria the office confirms by hand
+  (marked **Office**) have a switch or a count to set, e.g. **4 + 1 or 3 + 2** or people trained to leadership.
+
+**Dashboard** (reps and leaders): a one-line card under the week's pay estimate, e.g. "Your next level: 12 of 14 sales
+this week; 9 of 21 lessons learned". Tap it for the Progress page.
 
 ### Pitch studio: campaign pitches, annotations and practice modes
 
-_To be merged from `docs/r2/L2-learning-pitch.md` (section "User guide")._
+**Learning → Pitches.** At the top of the Learning page there is a card for every active campaign (and any inactive
+one that has a pitch). A campaign with a pitch shows its title and when it was last updated; tap it to open the pitch.
+Admins and leaders see **Write the pitch** on a campaign without one; everyone else sees "Not written yet".
 
-### Sign-in PIN, stronger sessions and the deploy guide
+**Opening a pitch from the field.** On **Quick gauges** a microphone button next to the event opens that campaign's
+pitch; on an event's page the **Pitch** button does the same. Both only appear when the campaign has a pitch.
 
-_To be merged from `docs/r2/U1-sign-in-pin.md` (section "User guide")._
+**The pitch page** (`/learning/pitch/BCN`) shows the campaign, the title, how many lines it has, about how long it
+reads aloud and who updated it last. Choose how to practise:
+
+- **Read**: the script in large type, in its five steps (Introduction, Short story, Presentation, Close,
+  Consolidation), each with the pack's target time and the script's estimate. Stage directions are grey italics,
+  pauses are a row of dots ("Pause · 1 s"), **Name** marks where their name goes and **Close** marks the close. When
+  they answer a question, "If yes" and "If no" sit side by side (tabs on a phone). Under each line, small chips name
+  the COD pack theory it uses (**Pre-emptive strike**, **Group effect**, **Greed** …); tap one to see why it works and
+  **Open the lesson**. Turn **Show the theory** off for a clean script.
+- **Check the figures.** Where the fact check has a note on a line, it sits beside the line on a wide screen and under
+  it on a phone (tap **Check the figures**): what the charity actually says, a suggested accurate wording and the
+  source. A green **Figure checked** note means it matches. The script itself is never changed by the check: the office
+  decides the final wording.
+- **Step timer**: tap **Start** as you begin, **Next step** as you move from the introduction to the short story and
+  on, then **Finish** (or **Stop**). Each step shows your time against the target (introduction 7–10 s, short story
+  10–15 s). On a phone it shrinks to one line that stays at the top while you read down. Nothing is saved.
+- **Teleprompter**: the script on a dark panel that scrolls by itself past a reading line. **Play**/**Pause**, **−**
+  and **+** to change the speed (words a minute, kept on the phone), the circle arrow to go back to the start, and the
+  corner button for full screen. Turn the phone sideways for the widest lines. On a keyboard: Space plays and pauses,
+  the arrow keys change the speed, F goes full screen, Esc leaves it. The screen stays awake while it plays.
+- **Memorise**: flashcards, one line at a time. You see the line before as the cue; say the next line, then tap to
+  check and mark it **Known** or **Again**. "Lines you know" counts up; **Only lines still to learn** skips the ones you
+  know; **Start over** clears it. Progress is saved on this device only.
+
+**Writing and editing (admins and leaders).** **Edit** on a pitch (or **Write the pitch**) opens the editor: a title,
+the script, and the fact-check notes, with a live **Preview** beside it (a **Write**/**Preview** switch on phones and
+tablets). **How to write the script** lists the format: one spoken line per line; `(Pause - 1 Second)` for a pause;
+`(Name)` for their name; `(Close)` for the close; `Yes -` and `No -` for the answers to a question; `(Short story)`,
+`(Presentation)` and so on to start a step. **Start from a template** fills an empty script with a skeleton in that
+format. Fact-check notes go one per line starting with "- ", with the words they are about in double quotes and a
+colon; links become sources. **Save pitch** publishes it to everyone straight away; **Cancel** asks before throwing
+changes away. Every save records who made it, and the audit trail keeps the history.
+
+Recruiters and reps read every pitch and practise with all three modes; they cannot edit.
+
+### Sign-in PIN and stronger sessions
+
+**Everyone — your PIN (Settings → Security → Sign-in PIN).** Tap **Set a PIN**, type 4 to 6 digits twice and save.
+Avoid 1234, 0000, the most common PINs and the digits of your employee ID; the screen tells you which rule a PIN breaks.
+From then on, signing in asks for your email and employee ID, then your PIN. Setting or changing your PIN signs you
+out on your other phones and laptops. **Change PIN** asks for the current one; **Remove** (when your administrator
+does not require PINs) takes you back to email and employee ID only.
+
+**Signing in.** After your email and employee ID, the "Enter your PIN" screen appears if you have one. Ten wrong PINs in
+a row lock it: ask an administrator to reset it, then sign in with your email and employee ID and choose a new PIN.
+If you are away from Linear Hub for longer than the sign-out time (12 hours unless your administrator changed it), you
+sign in again.
+
+**When your administrator requires a PIN.** The next time you open Linear Hub you see **Create your PIN** instead of the
+app. Type a PIN twice and tap **Save PIN**; you carry on where you were. **Sign out** is there if you are on someone
+else's phone.
+
+**Administrators — Settings → Security → Sign-in rules.**
+- **Require a PIN for everyone.** Set your own PIN first (the switch says so). Everyone without a PIN, including people
+  signed in right now, creates one before they can carry on. Demo accounts too.
+- **Require two-step verification for administrators.** Turn on your own two-step verification first. Other
+  administrators without it are signed out and set it up when they next sign in; while the rule is on, administrators
+  cannot turn their own two-step off.
+- **Sign out after inactivity.** 1 to 72 hours (12 by default). Shorter is safer for shared phones.
+
+**Administrators — resetting a PIN (Team → person → Edit profile → Sign-in PIN).** The badge shows **PIN set**, **No PIN**
+or **Locked**. **Reset PIN** clears it and its lock and signs them out everywhere; they sign in with their email and
+employee ID and choose a new PIN (straight away, if a PIN is required).
+
+**Leaders, recruiters and reps** see only their own PIN card; the rules and resets are for administrators.
+
+**Putting Linear Hub online.** `docs/DEPLOY.md`: a small UK/EU server with Caddy (automatic HTTPS) or Fly.io / Render,
+with costs, backups off the server and a go-live checklist.
 
 ### Bulk gauge entry with WhatsApp paste
 
-_To be merged from `docs/r2/U2-bulk-entry.md` (section "User guide")._
+**Leaders** — open **Gauges** and press **Bulk entry** (next to **Tally**).
+
+1. Today's event for your team is already chosen; pick another from **Event** if you need to (the last three weeks).
+2. Everyone on your team has a row. People who already logged show their numbers with a green **Logged** badge.
+   Type the six numbers for anyone else (a blank counts as 0) and their check-in time. **Enter** jumps down to the
+   next person in the same column on a keyboard. Use **Not saved yet** to see only the people still to do.
+3. Or press **Paste from WhatsApp** and paste the numbers from the team chat — one person per line, like
+   `Jordan 65 22 11 5 3 3`, `Jordan L - 65/22/11/5/3/3` or `amelia: 40 12 6 2 1 1 in 9:58`. You can paste a whole chunk
+   of the chat: timestamps, emojis and chat lines are skipped, and a message with no name uses the sender. Each line
+   shows what was read. If a name matches two people, or nobody, choose the person from the list. Lines with a problem
+   (say, more to table than stops) are marked in amber. Press **Fill N rows** to put them in the table.
+4. Check the rows: anything marked in red needs fixing first. The bar at the bottom says how many are new and how
+   many will update. Press **Save N people**. Everything saves together, or nothing does — if Linear Hub refuses a
+   row, it is marked with the reason and nothing is saved until it is fixed.
+
+If the signal drops, your numbers stay on this phone; open **Bulk entry** again and they are back on the sheet
+(**Discard them** throws them away). A week that has already been paid cannot be changed by a leader — ask an
+administrator.
+
+**Administrators** — the same page, for any team's events (the event list shows the team), and for paid weeks: the
+change goes through and the payslip is marked "adjusted after payment".
+
+**Reps and recruiters** do not see **Bulk entry**; reps keep logging their own day with **Log gauges** or the tally.
 
 ### Audit trail and announcement read receipts
 
-_To be merged from `docs/r2/U3-audit-trail.md` (section "User guide")._
+#### Administrators
+
+- **Audit** (sidebar, under Manage) lists every change, newest first, grouped by day: who made it, at what time, a
+  sentence saying what happened and a tag for the kind of record. Tap a row to see exactly which fields changed, with
+  the old value struck through and the new one beside it, plus the route and the IP address it came from.
+- Narrow the list with **Search** (words in the sentence, e.g. "marked paid" or a name), **Person**, **Record** (pay
+  run, gauge entry, person, candidate …) and **From** / **To** dates. **Show sign-ins** adds sign-ins and sign-outs,
+  which are hidden by default so the page is about changes. **Clear filters** starts again. **Newer** and **Older** move
+  through the pages, 50 changes at a time. The filters are part of the page address, so a view can be bookmarked.
+- On a payslip (Finance → open a pay run) the **History** section at the bottom lists that run's changes: marked paid,
+  recalculated after a gauge change (with the old and new gross), adjusted after payment. **Open in the audit trail**
+  shows the same rows on the Audit page. An open gauge entry has the same **History** section.
+- Under each announcement on the dashboard, **Read by 27 of 28** shows how many active people have read it; tap it to
+  see their names.
+
+#### Leaders
+
+- When you open one of your team's gauge entries to edit it (event page → **Edit**), the **History** section under the
+  form shows who logged or changed it, when, and what changed. You do not see the IP address, pay runs or anyone
+  else's records.
+- Under announcements you wrote, **Read by 12 of 33** shows how many active people have read it, and tapping it shows
+  who. You do not see these figures for other people's announcements.
+
+#### Reps and recruiters
+
+- Nothing new to do. When an announcement has been on your screen for a moment it counts as read, so whoever posted
+  it knows it reached you. You do not see who else has read it, and there is no Audit page or History section for you.
 
 ### One-tap shift check-in
 
-_To be merged from `docs/r2/U4-check-ins.md` (section "User guide")._
+**Reps and leaders**
 
-### Search palette, payroll export and the RangePicker layout fix
+- On the **Dashboard**, each of today's events in *Upcoming events* has a **Check in** button, with "Starts 15:30 · 5
+  min grace" next to it. Tap it when you arrive. It changes to "Checked in 15:02 · on time" (green) or "· 6 min late"
+  (amber). It does not log any gauges, and it is not a day worked.
+- Tapped by mistake? **Undo** stays next to it for 2 minutes. After that, ask your team leader to remove it.
+- On **Quick gauges**, the button sits in the event strip at the top. On a phone it is a pin icon. Once you are checked
+  in it shows a tick (green on time, amber late) and, on wider screens, the time. Tap the tick to see the time again,
+  with **Undo** while it is still allowed.
+- **No signal?** Tap **Check in** anyway. The phone keeps the time you tapped and shows "saved on this phone". A line
+  under the top bar says "1 check-in waiting to send". It sends by itself when the signal is back, or tap **Send now**.
+  If Linear Hub refuses it (say the event was cancelled), the line explains why. Tap **×** to dismiss it.
+- On an event's page you see **Your check-in**: the button today, or "You checked in 09:24 · on time" afterwards.
+- When you **Log gauges**, **Checked in at** is already filled with your check-in time. You can still change it.
+- The **Check in** button only appears on the day of the event, until the event ends.
 
-_To be merged from `docs/r2/U5-office-tools.md` (section "User guide")._
+**Team leaders and admins**
+
+- Each event's page has a **Roll call**: who has checked in and when, earliest first, with "on time" or "11 min late".
+  Today's events also list who has **not checked in yet**. The heading counts them, e.g. "6 / 8 checked in · 1 late".
+- A phone icon with "sent later" marks a check-in that was tapped without signal and sent afterwards, with the time it
+  was tapped.
+- **Remove (×)** takes a check-in away at any time. For example, someone checked in from the wrong place. Punctuality
+  for that day then goes back to the time on their gauges, if any. Gauges and pay are not affected.
+- Your own **Check in** button is in the roll call's header until you have checked in.
+- Punctuality on dashboards, profiles, the week in review and the **Check in with…** list now uses check-in times
+  where there are any.
+
+**Recruiters** see no check-in buttons or roll calls.
+
+### Search, payroll export and a layout fix
+
+- **Search (⌘K or Ctrl+K).** The field at the top of every page now finds people, events, candidates and campaigns as
+  well as pages. Type two letters or more. Use the arrow keys and Enter, or tap a result. It also offers **Log gauges**,
+  **New event** (leaders and admins) and **Mark week paid** (admins). On a phone, tap the magnifier in the top bar.
+  You only find what you could open anyway: reps see their own team's events and no candidates.
+- **Export for payroll (admins).** Finance → Company → Runs to pay → **Export for payroll**. Pick the week and **Xero
+  Payroll** or **Sage Payroll**: you get a CSV of that week's unpaid runs to import. It never changes a run; mark the
+  runs paid as usual once the transfer has gone.
+- **Gauges at 1024 px.** The date presets move under the tabs when there is not room for both, so the page no longer
+  scrolls sideways on a small laptop or an iPad held sideways.
 
 ---
 

@@ -1,6 +1,6 @@
 {
   "name": "linear-micro-crm",
-  "version": "1.1.0",
+  "version": "1.2.0",
   "private": true,
   "description": "Linear Micro CRM \u2014 field sales gauges, recruitment pipeline and finance in one platform.",
   "workspaces": [

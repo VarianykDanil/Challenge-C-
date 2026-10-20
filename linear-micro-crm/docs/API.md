@@ -587,35 +587,303 @@ Cached per user (20 s, cleared by any write): `/learning/progress`, `/learning/t
 | U2 bulk-entry | `POST /gauges/bulk` (leader: own team; admin) |
 | U3 audit-trail | `GET /audit` (admin), `GET /audit/:entity/:entityId`, `POST /announcements/:id/read`, `GET /announcements/reads` |
 | U4 check-ins | `POST /checkins`, `DELETE /checkins/:id`, `GET /checkins?eventId=` |
-| U5 office-tools | `GET /search?q=`, `GET /finance/payroll/export?weekStart=&format=xero\|sage` (admin) |
+| U5 office-tools | `GET /search?q=`, `GET /finance/payroll/export?weekStart=&format=xero\|sage[&runs=unpaid\|all]` (admin) |
 
 ### Learning pack: COD pack lessons, the Learn / Teach checklist and the progression tracker (L1)
 
-_To be merged from `docs/r2/L1-learning-pack.md` (section "API")._
+All under `/api/learning`, mounted with `requireAuth` (anonymous → 401). The three GET prefixes are in `CACHED_PATHS`
+(20 s per user and URL, cleared by any write). Lesson keys are the 21 `LESSON_KEYS`; an unknown key → 404 "Lesson not
+found". Validation errors → 400 `{ error: 'Validation failed', details }`.
+
+| Method and path | Who | Body → answer |
+| --- | --- | --- |
+| `GET /learning/progress[?userId=]` | everyone (own); `?userId`: a leader for their own team, an admin for anyone; others 403. Unknown person 404, bad id 400 | `LearningProgress`: one `LessonProgress` per lesson in checklist order, `learned`, `taught`, `total` (21) |
+| `POST /learning/progress/:lessonKey/quiz` | everyone, for themselves | `{ score, total }` (whole numbers, 1 ≤ total ≤ 10, score ≤ total) → `LessonQuizResult { passed, progress }` |
+| `POST /learning/progress/:lessonKey/teachback` | everyone, for themselves, once the self-check passed (else 409 "Pass the self-check first, then teach it back") | `{ text }` (trimmed, 20–4000 characters) → `LessonProgress` (state `teachback_sent`) |
+| `POST /learning/progress/:userId/:lessonKey/signoff` | the leader of that person's team, or an admin; never your own (403 "Someone else signs off your own teach-back"); another team 403 | `{ signedOff?: boolean = true }` → `LessonProgress`. `false` withdraws the sign-off |
+| `GET /learning/team` | leader (own team, active people) or admin (everyone active, recruiters included); rep / recruiter 403 | `TeamLearning { rows, total, pending }` — `pending` (new, optional): teach-backs waiting for a sign-off, never the viewer's own, newest first, with the text |
+| `GET /learning/progression/:userId` | self; a leader for their own team; an admin for anyone | `Progression` (see Logic), plus the new optional `weeks`, `learned`, `taught`, `total`, `enabled` |
+| `PUT /learning/milestones/:userId/:key` (new) | admin only | `{ value }` (whole number 0–99) → the person's updated `Progression`. Unknown key 404 |
+
+Teach-back text only ever reaches the person, the leader of their team and admins: those are the only callers these
+routes let read a person's progress or the team queue. Nothing here writes a gauge row or a payroll run (tested).
+
+New shared types (additive): `LESSON_GROUPS`, `TeachbackAwaiting`, `TeamLearning.pending?`, `ProgressionMilestoneKey`,
+`PROGRESSION_MILESTONE_KEYS`, `ProgressionMilestoneInput`, `ProgressionWeek`, `Progression.weeks? / learned? / taught? /
+total? / enabled?`. Client hook added: `useSetMilestone()` in `client/src/api/learning.ts`.
+
+Database (`extensions/learning.ts`, two new tables, so `upgrade` changes nothing):
+
+- `learning_progress(user_id, lesson_key, learned_at, quiz_score, quiz_total, teachback_text, teachback_at,
+  taught_signed_off_by, taught_signed_off_at, updated_at, PRIMARY KEY(user_id, lesson_key))`, with a partial index on
+  teach-backs waiting for a sign-off.
+- `learning_milestones(user_id, milestone_key, value, set_by, set_at, PRIMARY KEY(user_id, milestone_key))`: the
+  criteria the office ticks by hand.
+- Demo seed (fresh demo databases only, its own random stream, never a core table): every active person gets progress
+  by position — leaders, crew leaders, assistant owners and owners have the whole pack learned and taught; field reps
+  6–16 learned with some taught and up to two teach-backs waiting; trainees 2–6; recruiters 3. The demo rep Jordan
+  Lee (LM-0010) has 9 learned, 4 taught and 2 teach-backs waiting for Amelia. Crew leaders have "Show consistency"
+  ticked; about half the team leaders have one person confirmed as trained to leadership.
 
 ### Pitch studio: campaign pitches, annotations and practice modes (L2)
 
-_To be merged from `docs/r2/L2-learning-pitch.md` (section "API")._
+All three routes are mounted behind `requireAuth` (anonymous → 401). Pitches are company-wide training material
+(campaigns are not team-scoped), so **every signed-in role reads every pitch**; only admins and leaders write.
+Types: `shared/src/types/pitches.ts`. Both GETs go through the response cache (`/pitches` is in `CACHED_PATHS`, which
+covers `/pitches/:campaignCode` too); every PUT bumps the data version, so the next read is fresh.
+
+| Method and path | Who | Answer |
+| --- | --- | --- |
+| `GET /pitches` | every role | `PitchListItem[]`: one row per campaign, active campaigns first, then by name: `{ campaignId, campaignCode, campaignName, campaignColor, campaignActive, hasPitch, title, updatedAt }` (`title` and `updatedAt` null without a pitch) |
+| `GET /pitches/:campaignCode` | every role | `CampaignPitch`: `{ id, campaignId, campaignCode, campaignName, campaignColor, title, body, facts, updatedBy, updatedByName, updatedAt }`. The code is case-insensitive. **404 `Campaign not found`** for an unknown or malformed code (not 2–6 letters or digits), **404 `Pitch not found`** when the campaign has no pitch yet |
+| `PUT /pitches/:campaignCode` | admin, leader (others 403) | Body `PitchUpsertInput` `{ title, body, facts? }`. **201** with the `CampaignPitch` when it creates the pitch, **200** when it replaces it. 404 `Campaign not found`; 400 `Validation failed` with details |
+
+PUT rules:
+
+- `title`: inner whitespace collapsed, trimmed, 1–120 characters (`PITCH_TITLE_MAX`).
+- `body`: CRLF/CR become LF, trimmed, 1–20,000 characters (`PITCH_BODY_MAX`). Stored exactly as written otherwise: the
+  server never rewrites the script.
+- `facts`: CRLF normalised, trimmed, at most 10,000 characters (`PITCH_FACTS_MAX`). **Left out keeps the saved notes**;
+  `null` or blank clears them.
+- `updated_by` is the caller, `updated_at` the business clock (`nowISO()`). One row per campaign (`campaign_id` is
+  unique): a PUT is an upsert. U3's audit middleware records each edit; nothing here writes the audit log itself.
+- A pitch never creates gauge rows or payroll runs (route test).
+
+Database (`server/src/db/extensions/pitches.ts`):
+
+```sql
+CREATE TABLE IF NOT EXISTS campaign_pitches (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  campaign_id INTEGER NOT NULL UNIQUE REFERENCES campaigns(id) ON DELETE CASCADE,
+  title TEXT NOT NULL,
+  body TEXT NOT NULL,
+  facts TEXT,
+  updated_by INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  updated_at TEXT NOT NULL
+);
+```
+
+The BCN pitch (title "The BCN pitch", `BCN_PITCH_BODY`, `BCN_PITCH_FACTS`, saved by the owner) goes in:
+
+- on a **fresh demo seed** by the extension's `seed` (BCN campaign from `ctx.campaigns`, owner from `ctx.users`,
+  `ctx.nowIso`), which also records the meta flag `ext:pitches:bcn`;
+- on an **existing database** by `upgrade`, once: when the flag is missing and a campaign with code BCN exists, it
+  inserts with `INSERT OR IGNORE` (an office-edited pitch is never replaced), sets the flag and reports
+  `pitches:campaign_pitches.bcn` only when a row went in. On a fresh install `upgrade` runs before the seed on an empty
+  campaigns table, finds no BCN campaign and skips without setting the flag, so the first restart after a fresh seed
+  reports nothing (r2-contracts test). Other campaigns get no pitch.
 
 ### Sign-in PIN, stronger sessions and the deploy guide (U1)
 
-_To be merged from `docs/r2/U1-sign-in-pin.md` (section "API")._
+All in `server/src/routes/auth.ts`; types in `shared/src/types/pin.ts`.
+
+| Method | Path | Who | Body → answer |
+| --- | --- | --- | --- |
+| POST | `/auth/login` | anyone | `{ email, employeeId, pin? }` → `200 { user }` / `200 TwoFactorChallenge` as before. For an account **with a PIN**: no PIN → `200 LoginPinChallenge { requiresPin: true, attemptsLeft }` and no cookie (step two, like the two-step challenge); wrong PIN → `401`, locked → `423`, both with `LoginPinRequired` (below). A PIN sent for an account without one is ignored. |
+| GET | `/auth/pin` | signed in | → `PinStatus { hasPin, setAt, required, locked }` (yours) |
+| POST | `/auth/pin` | signed in | `{ pin, currentPin? }` → `204`. Sets a first PIN, or changes it (`currentPin` required once you have one). Signs out every **other** session of yours. `400` with `details: [{ path: 'pin' \| 'currentPin', message }]` for a refused PIN, a missing or wrong current PIN, or the same PIN again; `423` when your PIN is locked; `429` after 6 wrong current PINs in 15 minutes. |
+| POST | `/auth/pin/remove` | signed in | `{ currentPin }` → `204`. `409` while a PIN is required for everyone, or when you have none; wrong PIN as above. |
+| GET | `/auth/pin/:userId` | admin | → `PinStatus` of anyone (never the PIN or hash); `404` unknown user, `400` bad id |
+| POST | `/auth/pin/reset/:userId` | admin | → `204`: clears the PIN and its lock, signs the person out everywhere. `400` for yourself (use Settings), `404` unknown. |
+| GET | `/auth/security-settings` | admin | → `SecuritySettings { requirePin, requireAdminTwoFactor, sessionIdleHours }` (defaults `false, false, 12`) |
+| PUT | `/auth/security-settings` | admin | `Partial<SecuritySettings>` (strict: unknown keys `400`; `sessionIdleHours` a whole number 1–72) → the full settings. `409` when switching on `requirePin` without your own PIN, or `requireAdminTwoFactor` without your own two-step verification. Switching `requireAdminTwoFactor` on signs out every other administrator who has not set up two-step verification. |
+| POST | `/auth/2fa/disable` | signed in | unchanged, plus `409` for an administrator while two-step verification is required for administrators |
+
+`LoginPinRequired` (401 / 423):
+
+```json
+{ "error": "That PIN is not right", "requiresPin": true,
+  "details": { "requiresPin": true, "reason": "wrong", "attemptsLeft": 9 } }
+```
+
+`reason` is `wrong` or `locked` (`attemptsLeft` is absent when locked). The flags are repeated in `details` because
+the client's `ApiError` keeps only `error` and `details`. A wrong employee ID still answers the plain
+`401 Invalid email or employee ID` and never mentions a PIN. The PIN challenge is a 200 so the everyday sign-in of a
+person with a PIN logs no failed request in the browser console.
+
+`/auth/me` and the login responses' `user` now carry the caller's own `hasPin`, `pinSetupRequired` and
+`twoFactorSetupRequired` (the optional fields the foundation added to `UserWithTeam`). No other user row carries them.
+
+**The gate** (`pinSetupGate` in `server/src/middleware/auth.ts`, mounted after `authenticate`):
+
+- While `pinSetupRequired`: every `/api` request answers `403 { "error": "Create your PIN to carry on", "pinSetupRequired": true }`
+  except `/health`, `/auth/me`, `/auth/logout`, `/auth/login`, `/auth/login/2fa`, `/auth/demo-accounts` and
+  `/auth/pin` (GET and POST). The client's `PIN_SETUP_REQUIRED_EVENT` fires on that body.
+- Then, while `twoFactorSetupRequired` (an admin, when required): the same list plus `/auth/2fa`, `/auth/2fa/setup`
+  and `/auth/2fa/enable`; everything else answers `403 { "error": "Set up two-step verification to carry on", "twoFactorSetupRequired": true }`.
+- Anonymous requests pass through (requireAuth answers them). Paths are compared lower-cased without trailing slashes,
+  and anything not listed stays closed.
+
+Database (`server/src/db/extensions/pin.ts`, columns only): `users.pin_hash`, `users.pin_set_at`,
+`users.pin_failed_attempts` (default 0), `sessions.last_seen_at`. Settings are the `meta` keys `ext:pin:require-pin`,
+`ext:pin:require-admin-2fa` and `ext:pin:session-idle-hours`, written only by the PUT above (absent → default). No seed
+rows: the demo accounts have no PIN.
 
 ### Bulk gauge entry with WhatsApp paste (U2)
 
-_To be merged from `docs/r2/U2-bulk-entry.md` (section "API")._
+#### `POST /gauges/bulk` (admin, leader)
+
+Body `BulkGaugeInput`:
+
+```json
+{
+  "eventId": 523,
+  "date": "2026-10-20",
+  "rows": [
+    { "userId": 10, "stops": 65, "table": 22, "presentations": 11, "closes": 5, "taps": 3, "sales": 3, "checkedInAt": "2026-10-20T09:58" },
+    { "userId": 13, "stops": 33, "table": 11, "presentations": 6, "closes": 3, "taps": 2, "sales": 2 }
+  ]
+}
+```
+
+- `rows`: 1–100 (`BULK_MAX_ROWS`). Each row is a `POST /gauges` body without `id`, `eventId` and `date`: the six
+  counts (whole numbers 0–2,000), optional `checkedInAt` (same format and rule as a single entry; omitted keeps a stored
+  value, `null` clears it) and optional `notes` (same: omitted keeps, `null` clears).
+- **200** `BulkGaugeResult` `{ created, updated, entries: GaugeEntryWithMeta[] }` — the saved entries in row order.
+  An existing entry for (event, person, date) is updated in place, never duplicated.
+- **400** `{ error: "2 rows need fixing — nothing was saved", details: { rows: BulkRowError[] } }` when any row is
+  refused. `BulkRowError` is `{ index, userId, errors: string[] }` (`index` into `rows`); every bad row is reported,
+  not just the first. Nothing is written.
+- Event-wide problems answer once, with the status a single entry gets: **404** no such event; **403** a leader and
+  another team's event ("Leaders can only record gauges at their own team's events"); **409** a cancelled event;
+  **400** an event that has not started yet, or a `date` that is not the event's date; **400** `Validation failed`
+  for a malformed body (no rows, more than 100, a missing `eventId`).
+- Reps and recruiters get **403**; anonymous **401**.
+- Role scoping: a leader may write their own team's events, for members of their own team and themselves; an
+  administrator any event and anyone (same as `assertCanWriteGauge`).
+- Not cached (a write). The write middleware bumps the data version once per request, so every cached aggregate
+  (`/me/dashboard`, `/leaderboard`, `/gauges/summary` …) refreshes once.
 
 ### Audit trail and announcement read receipts (U3)
 
-_To be merged from `docs/r2/U3-audit-trail.md` (section "API")._
+All routes are behind `requireAuth` (anonymous → 401). Types: `shared/src/types/audit.ts`. None is in the response
+cache (they are admin views or per-author lists, and any write clears the cache anyway).
+
+#### `GET /audit` (admin; everyone else 403) → `AuditPage`
+
+`{ rows: AuditEntryDetail[], total }`, newest first (`at DESC, id DESC`). Query parameters, all optional:
+
+| Param | Meaning |
+| --- | --- |
+| `userId` | Only rows made by this person. |
+| `entity` | One of `payroll_run`, `gauge_entry`, `user`, `candidate`, `event`, `campaign`, `pitch`, `settings`, `announcement`, `expense`, `learning`, `check_in` (400 otherwise). |
+| `entityId` | Only rows about this record (use with `entity`). |
+| `from`, `to` | `YYYY-MM-DD`, inclusive London calendar days (`from` after `to` → 400). |
+| `q` | Words in the summary, case-insensitive; `%` and `_` are literal. Up to 100 characters. |
+| `signIns` | `0` leaves out sign-ins and sign-outs (`POST /auth/login`, `/auth/login/2fa`, `/auth/logout`); `1` or absent keeps them. Anything else → 400. |
+| `limit`, `offset` | Paging: `limit` 1–200 (default 50; 0 or negative → 400), `offset` ≥ 0. `total` counts every matching row. |
+
+`AuditEntryDetail`: `id`, `at` (UTC ISO, real clock), `userId`, `userName` (null for a row without a person),
+`action` (method and route pattern, e.g. `POST /finance/payroll/:id/pay`), `entity` and `entityId` (null for routes
+the registry does not describe), `summary`, `ip` (admins only, null for anyone else), `before` and `after` (the stored
+snapshots, or null) and `diff` (`AuditFieldChange[]`, computed when read by the shared `auditDiff`).
+
+#### `GET /audit/:entity/:entityId` → `AuditEntryDetail[]`
+
+The newest 100 rows about one record. Admin: any entity. Leader: `gauge_entry` only, and only entries of a person on
+their own team or their own entries (a deleted entry is judged by the person in its last snapshot); anything else 403.
+Reps and recruiters 403. Unknown entity or non-numeric id → 400. `ip` is null for leaders. An id with no rows → `[]`.
+
+#### `POST /announcements/:id/read` → 204
+
+Marks the announcement read by the caller. Idempotent: the first read time is kept. 404 for an unknown announcement,
+400 for a non-numeric id. Any signed-in role. Read receipts are not audit rows (they have their own table).
+
+#### `GET /announcements/reads[?ids=1,2,3]` → `AnnouncementReadStats[]`
+
+Admins get every announcement, everyone else only the ones they wrote (a rep gets `[]`). Without `ids`: the 50 newest,
+pinned first, the order the dashboard lists them; with `ids` (up to 100, positive integers, else 400) only those.
+Each item: `announcementId`, `readCount`, `audience`, and `readers` (`{ userId, name, readAt }`, newest read first).
+Names are always included because only the author and admins ever receive a row. Two queries in all.
+
+#### Recording (no new endpoint)
+
+`auditMiddleware(db)` (`server/src/lib/audit.ts`) sits on the `/api` router after `authenticate` and the PIN gate.
+For every `POST`, `PUT`, `PATCH` and `DELETE` that is answered 2xx it writes one row (more for gauge writes, see
+Logic). Reads (`GET`, `HEAD`, `OPTIONS`) pass straight through, so read throughput is unchanged. Failed requests
+(4xx, 5xx) write nothing. An audit failure is logged to the console and never changes the response.
+`recordAudit(db, entry)` writes an explicit row (e.g. from a maintenance job). Route files were not edited.
 
 ### One-tap shift check-in (U4)
 
-_To be merged from `docs/r2/U4-check-ins.md` (section "API")._
+All three routes are mounted at `/api/checkins` behind `requireAuth`. Anonymous callers get 401. Types live in
+`shared/src/types/checkins.ts` and rules in `shared/src/logic/shiftCheckIn.ts`.
 
-### Search palette, payroll export and the RangePicker layout fix (U5)
+#### `POST /checkins`: check in
 
-_To be merged from `docs/r2/U5-office-tools.md` (section "API")._
+Body `ShiftCheckInInput`: `{ eventId, date?, checkedInAt?, source? }`.
+
+- **Who:** reps and leaders at their own team's events. Admins can check in at any event (the same rule as gauges).
+  Recruiters get 403.
+- **Live tap** (no `checkedInAt`): the server stamps the business clock (`toBusinessISO(businessNow())`, naive London
+  wall-clock time). It only works on the event's date, up to the event's end time.
+- **Offline replay** (`checkedInAt` given; `source` defaults to `'offline'`): the phone sends the time it was tapped.
+  That time must be on the event's date and not after the event's end. It cannot be in the future either, but a phone
+  clock up to 5 minutes ahead is taken as now. The event must be no more than 7 days ago. Zoned input is converted to
+  London wall-clock time, as for gauges.
+- `date` defaults to the date of `checkedInAt`, or else the business date. It must be the event's date.
+- `source` is one of `'button' | 'quick' | 'offline'`. `'leader'` is reserved and refused.
+- **Idempotent:** the key is `(user, event, date)`. A first check-in answers **201** `ShiftCheckIn`. If one already
+  exists, the answer is **200** with that row, whatever time the request carries: the first check-in stands. A phone
+  that replays a tap whose answer was lost is simply told "done".
+- **Errors:** 400 for validation and time rules (the messages are worded for people, e.g. "Check-in closed at 17:00,
+  when the event ended"). 403 for the wrong team or a recruiter. 404 for an unknown event. 409 for a cancelled event.
+
+#### `DELETE /checkins/:id`: undo or remove
+
+- The person can undo their own check-in within **2 minutes** of `createdAt`. The server allows 15 seconds of grace
+  for a slow request. After that it answers 403 "The 2 minutes to undo a check-in have passed — ask your team leader
+  to remove it".
+- The leader of the person's team (themselves included) and admins can remove one at any time.
+- A caller who cannot see the row gets 404, so the API never reveals that it exists. Success is 204.
+
+#### `GET /checkins?eventId=`: the event's check-ins
+
+Answers `ShiftCheckInList` `{ eventId, checkIns }`, earliest first. 400 without `eventId`, 404 for an unknown event.
+
+- **Scope:** an admin sees everyone. A leader sees their own team's people and themselves. Anyone else sees only their
+  own. This is the same rule as check-in times on gauge entries (`canSeeEntryDetails`).
+- **Not cached:** it is one indexed query, not an aggregate.
+
+#### `ShiftCheckIn`
+
+| Field | Meaning |
+| --- | --- |
+| `id`, `userId`, `userName`, `eventId`, `date` | The row. |
+| `checkedInAt` | Naive London wall-clock time, `YYYY-MM-DDTHH:MM:SS`. Same format as `GaugeEntry.checkedInAt`. |
+| `source` | `'button'` (dashboard or event page), `'quick'` (Quick gauges), `'offline'` (sent later by the phone). |
+| `createdAt` | ISO instant the row was written (business clock). |
+| `minutesLate` | Whole minutes after the start, rounded up; 0 when early. |
+| `onTime` | Within the 5-minute grace. |
+| `undoUntil` | ISO time until which the caller can undo **their own** row; otherwise null. |
+| `undoMsLeft` | New. Milliseconds of the caller's undo window left when the server answered; 0 when there is none. Clients count down from when the answer arrived, so a wrong phone clock never matters. |
+
+Every write bumps the response cache's data version (as every write does), so `/me/dashboard` and the digest show the
+new punctuality straight away.
+
+### Search palette and payroll export (U5)
+
+`GET /search?q=` → `SearchResponse { q, results: SearchResult[] }` (shared/src/types/search.ts). Any signed-in role.
+A query shorter than 2 characters (after trimming, at most 60 kept, at most 5 words) answers no results and runs no
+SQL. At most 20 results: people 6, events 6, candidates 5, campaigns 3. Each result has `kind`, `id`, `title`,
+`subtitle`, `href` (the in-app page it opens), optional `color` and `rank` (0 the title starts with the whole query,
+1 a word of it does, 2 it only contains the words). Cached per user for 20 s; any write clears it.
+
+Scoping, the same rules as the pages a result opens:
+
+| Kind | admin | leader | recruiter | rep |
+| --- | --- | --- | --- | --- |
+| People | everyone, including leavers; also matches the employee ID | active people | active people | active people |
+| Events | every team | every team | every team | own team only |
+| Candidates | yes | yes | yes | none |
+| Campaigns | all → /campaigns | all → /campaigns | active → the campaign's pitch | active → the campaign's pitch |
+
+E-mail matches on the part before the @ only. LIKE wildcards in the query are escaped.
+
+`GET /finance/payroll/export?weekStart=YYYY-MM-DD&format=xero|sage[&runs=unpaid|all]` → `text/csv` attachment, admin
+only (others 403). `weekStart` must be a Monday (400 otherwise); `runs=unpaid` (default) exports pending runs and
+failed transfers, `runs=all` every run of the week. Sorted by surname then first name. `X-Total-Count` = rows;
+`Cache-Control: no-store`. A week without runs answers the header line alone. Each export is written to the audit trail.
 
 ## Seed & demo accounts
 The server seeds `server/data/linear.sqlite` on first start (or `npm run seed` to reset) with deterministic

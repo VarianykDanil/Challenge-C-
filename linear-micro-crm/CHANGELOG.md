@@ -7,8 +7,35 @@ response field is renamed or removed, and new fields are optional.
 
 ## [Unreleased]
 
+Nothing yet. What comes next is in [docs/ROADMAP.md](docs/ROADMAP.md).
+
+## [1.2.0] - 2026-10-20
+
 ### Added
 
+- **Learning page** (everyone). The COD pack as 21 lessons, each with the pack's pictures, a three-question
+  self-check and a teach-back your leader reads and signs off; field cards for the 5 steps and the six objections;
+  the leadership checklist (Learn / Teach) and the progression tracker with your real numbers. Leaders see their
+  team's teach-backs waiting for sign-off; admins confirm the office-only criteria. A one-line "next level" card on
+  the dashboard.
+- **Pitch studio** (Learning → Pitches): a pitch per campaign, starting with the Breast Cancer Now pitch as written.
+  Read it with the COD theory each line uses, time each step against the pack's targets, practise on a teleprompter
+  or with flashcards. Fact-check notes sit beside a line without changing it. Admins and leaders write and edit
+  pitches; Quick gauges and event pages open the campaign's pitch.
+- **Sign-in PIN** (Settings → Security): an optional 4–6 digit PIN after email and employee ID, locked after ten
+  wrong tries; admins can require a PIN for everyone, require two-step verification for admins, set the sign-out time
+  and reset a person's PIN. `docs/DEPLOY.md` explains putting Linear Hub online.
+- **Bulk entry** (leaders, admins): the whole team's gauges for an event on one sheet, or pasted straight from the
+  WhatsApp chat; everything saves together or nothing does, and it keeps working offline until saved.
+- **Audit trail** (admins): every change with who, when, what changed and from where, with filters; a **History**
+  section on payslips and gauge entries; "Read by N of M" under announcements.
+- **One-tap check-in** (reps, leaders): **Check in** on today's events, on time or late against the start and grace,
+  with 2 minutes to undo and an offline queue; a roll call on the event page for leaders and admins. A check-in never
+  creates gauges or pay; punctuality uses it where there is one.
+- **Search** (⌘K / Ctrl+K): the top bar finds people, events, candidates and campaigns (only what you could open)
+  and offers actions: Log gauges, New event, Mark week paid.
+- **Export for payroll** (admins, Finance → Runs to pay): a week's unpaid runs as a CSV for Xero Payroll or Sage
+  Payroll, formula-safe, never changing a run.
 - `npm run latest`: update in one command (stop, pull, install, build, start or restart the background service). It
   stops rather than touch your own edits, and resets only npm's package-lock.json rewrite.
 - `npm start` installs changed dependencies (`npm ci`) and rebuilds stale screens first, naming the file that changed,
@@ -37,7 +64,8 @@ response field is renamed or removed, and new fields are optional.
   sliver showed. They now draw above the page and show in full. They appear on mouse hover and keyboard focus only (a
   click or tap no longer leaves one stuck open), and Escape or scrolling hides them.
 
-What comes next is in [docs/ROADMAP.md](docs/ROADMAP.md).
+- Gauges (admin, 1024 px): the date-range presets pushed the page sideways. They now move under the tabs when both do
+  not fit.
 
 ## [1.1.0] - 2026-10-19
 

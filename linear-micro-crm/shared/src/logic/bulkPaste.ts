@@ -4,7 +4,7 @@
  * emojis, timestamps and extra words) into rows matched against the team (fuzzy first / full name, ambiguous names
  * flagged for a choice), each with its six gauges and the funnel problems to show. Types: shared/src/types/bulk.ts.
  *
- * How a line is read (docs/r2/U2-bulk-entry.md has the full rules):
+ * How a line is read (docs/LOGIC.md §15.4 has the full rules):
  *  1. A WhatsApp export prefix ("[20/10/2026, 17:42:13] Jordan Lee: …", "20/10/2026, 17:42 - Jordan Lee: …",
  *     "[17:42, 20/10/2026] Jordan Lee: …") is removed and its sender remembered for the following lines of the same
  *     message. Emojis, WhatsApp formatting (*bold*, _italic_, ~strike~) and invisible marks are dropped.

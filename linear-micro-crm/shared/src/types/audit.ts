@@ -6,7 +6,7 @@
  *  - GET  /audit/:entity/:entityId → AuditEntryDetail[] (admin; a leader for their own team's gauge entries)
  *  - POST /announcements/:id/read  → 204 (any signed-in user; idempotent)
  *  - GET  /announcements/reads[?ids=]  → AnnouncementReadStats[] (admin: every announcement; others: the ones they wrote)
- * Recorded by lib/audit.ts (every successful write; snapshots for the routes in lib/auditSpecs.ts). Docs: docs/r2/U3-audit-trail.md.
+ * Recorded by lib/audit.ts (every successful write; snapshots for the routes in lib/auditSpecs.ts). Docs: docs/LOGIC.md §15.5.
  * Snapshots never contain PINs, two-step secrets, recovery codes, session tokens or passwords (keys are redacted).
  */
 

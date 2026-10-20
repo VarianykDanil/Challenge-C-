@@ -1360,32 +1360,534 @@ Learning (the COD pack and campaign pitches) and field and office upgrades. The 
 the contracts each package fills: database extensions run by `createSchema` and the seed (`server/src/db/extensions`),
 shared types (`shared/src/types/*.ts`) and pure logic modules (`shared/src/logic`), stub routes, client pages and
 slots. Every new payload is built from data the caller may already see; nothing in 1.2 creates a gauge row or a
-payroll run as a side effect. Each subsection below is merged from the package's fragment in `docs/r2/`.
+payroll run as a side effect.
+
+### 15.0 Database extensions (`server/src/db/extensions/`)
+
+Each package with tables owns one file exporting `export const extension: DbExtension = { name, sql, upgrade, seed? }`
+(contract in `extensions/types.ts`): `learning.ts` (L1), `pitches.ts` (L2), `pin.ts` (U1), `audit.ts` (U3),
+`checkins.ts` (U4). `extensions/index.ts` (foundation) lists them in the fixed order learning, pitches, pin, audit,
+checkins.
+
+- `createSchema(db)` runs the core schema and core column upgrades, then for every extension its `sql`
+  (`CREATE TABLE IF NOT EXISTS …`) and `upgrade(db)`. It returns the core column names followed by the extensions'
+  changes as `<extension>:<name>` (e.g. `pin:users.pin_hash`). A second run returns `[]`. The smoke test's schema
+  upgrade check compares core columns only (names without a colon).
+- `upgrade(db)` adds columns to existing tables with `addColumnIfMissing(db, table, column, ddl)` and runs one-off data
+  steps an already-seeded database needs, guarded with `metaFlag` / `setMetaFlag` (`ext:<name>:<step>`).
+- **Order on a fresh install.** `index.ts` and `resetAndSeed` both call `createSchema(db)` before `seed(db)`, so on a
+  new database every `upgrade()` runs on EMPTY core tables (no users, campaigns or events yet) and `seed()` runs
+  after. A data step in `upgrade` therefore skips, without setting its meta flag, when the rows it needs are missing
+  (L2: no BCN campaign yet), and sets the flag only after it has run against them; writes with `INSERT OR IGNORE` /
+  `ON CONFLICT DO NOTHING` on a unique key so it never conflicts with `seed()`; and reports a name only when it
+  actually inserted or changed rows, so the first restart after a fresh seed returns `[]`. Rows that both an existing
+  and a fresh database need (the BCN pitch) go in both `upgrade` and `seed`.
+- `seed(db, ctx)` runs at the end of a fresh demo seed, inside the seed transaction, after every core row exists.
+  `ctx` (`SeedContext`): `today`, `nowIso`, `users`, `teams`, `campaigns` (with `code`, e.g. 'BCN'), `events`, and
+  `rng(salt)` — a random stream of the extension's own, so the core demo data stays byte-for-byte the same: never
+  insert, update or delete a row of a core table (an extension may write its own `ext:%` keys in `meta`). Never
+  insert gauge rows or payroll runs.
 
 ### 15.1 Learning pack: COD pack lessons, the Learn / Teach checklist and the progression tracker (L1)
 
-_To be merged from `docs/r2/L1-learning-pack.md` (section "Logic")._
+`shared/src/logic/learning.ts` (pure, tested in `learning.test.ts`):
+
+- **Lesson state** (`lessonStateOf`): signed off → `taught`; a written teach-back → `teachback_sent`; the self-check
+  passed → `learned`; else `new`. A sign-off counts even with nothing written (the leader heard it at the whiteboard).
+- **Self-check** (`quizPassed`): learned only when every answer is right (`score === total`, total ≥ 1). The first pass
+  sets `learned_at`; a later retake records the new score but never takes "learned" away. The two practical tasks
+  ("Run an impact", "Go on a roadtrip") have no questions: **I've done this** posts 1 of 1.
+- **Groups** (`LESSON_GROUP_OF`, `LESSON_GROUPS`): the pack checklist's blocks — fundamentals (5 steps, working habits,
+  law of averages, impulse factors), in the field (green light, gumball + ABC days, can / can't controls, buying signs,
+  strategic pause, pre-emptive strike), attitude (bamboo, attitude regain + attitude muscle), objections (bullet
+  theory, straight line theory), leadership (3 core principles, pre- and post-management criteria, direct vs indirect,
+  assuming the role, theory of teachback) and tasks. Checklist rows that share a lesson: ABC days → gumball theory,
+  attitude muscle → attitude regain, pre- / post-management criteria → progression structure.
+- **Career level from position** (`careerLevelFor`): trainee and field rep → entry level; team leader → leadership;
+  crew leader → campaign manager; assistant owner → assistant director; owner → senior director; recruiter → none (the
+  office sits outside the field ladder). The ladder continues to promoting owner, regional and national consultant.
+- **Progression** (`progressionFrom`, rules in `PROGRESSION_RULES`): the server gathers the person's own sales and their
+  current team's sales per Mon–Sun week for the last **12 weeks** (this week so far last, rows dated up to today, one
+  grouped query), their learned / taught counts and the office's ticks. A requirement is met when **any** of its
+  options is; the next level needs **every** requirement.
+  - Entry → leadership: **sales** — 14 sales in any one week of the window, **or** 12+ in two consecutive weeks;
+    **learn the COD pack** — 21 of 21 learned; **teach it back** — 21 of 21 signed off.
+  - Leadership → campaign manager: **3 people trained from entry level to leadership** — met by either the active
+    people on their team (other than them) at Team Leader or above (an approximation: there is no promotion history),
+    or the count the office confirms; **prove you can train different personalities** — office tick.
+  - Campaign manager → assistant director: **"4 + 1 or 3 + 2"** — office tick; **team generates 100 sales two weeks
+    in a row** — two consecutive weeks of 100+ sales logged by everyone on their current team (no team → not met, "No
+    team yet"); **show consistency** — office tick.
+  - Assistant director → senior director: team is profitable, you're ready (office ticks). Senior director → promoting
+    owner: mentor someone to their own office. Then 4 first-generation offices and a £50,000 wire 4 weeks running; 7
+    offices and £75,000 8 weeks running (office counts and ticks).
+  - Details carry the numbers: "12 of 14 sales this week; best recent week 13", "Reached: 15 sales the week of 5 Oct",
+    "Last week 8, this week 12 of 12 sales", "Reached: 12 then 13 sales (weeks of 5 Oct and 12 Oct)", "2 of 3
+    confirmed by the office". Option progress (`current` / `target`): this week's sales; the run of qualifying weeks
+    (0–2) ending this week, or last week while this week is still short.
+  - **Headline** (the dashboard card): unmet data requirements first, then the office ones, at most two phrases:
+    "Your next level: 12 of 14 sales this week; 9 of 21 lessons learned" (a leader looking at someone reads "Next
+    level: …"). Everything met: "Every criterion for Leadership is met: time to talk about the step up." Top of the
+    ladder: "You're at the top of the ladder: …". Recruiters: "Recruiters sit outside the field ladder; every lesson is
+    still open to you." Deterministic; never NaN / undefined.
+- **Kill switch**: the tracker is a smart builder. With `LM_SMART=0`, `GET /learning/progression` answers the level and
+  next level with `requirements: []`, `weeks: []`, `headline: ''`, `enabled: false`; the dashboard card hides and the
+  Progress page says the tracker is switched off. Lessons, self-checks, teach-backs and the checklist keep working.
+
+Content (`client/src/content/learning/*.ts`): every lesson keeps the pack's wording; only obvious typos are fixed
+(excitment, consolodation, uou / omn, sgns, postitve, garuntee, arrises, minimim, politcs, compeition, dependant, liason,
+comission, and the consolidation step printed as "3."). Two short explanatory notes are marked as such in muted text:
+"SW3 = N: some will, some won't, so what… next" and the law of averages line read across the six gauges. The pack
+prints no overturn for **direct debit**; the lesson says so and asks for the campaign's own. The illustrations are
+cropped from 220 dpi renders (white turned to transparency, framed panels kept opaque, 7–67 kB each, 360 kB in all)
+into `client/public/cod-pack/` — not `public/learning/`, because a folder named like the `/learning` page makes the
+production server redirect `/learning` to `/learning/` on a reload. Section anchors match `LESSON_ANCHORS`
+(`/learning/pack/bullet-theory#no-time`), so L2's annotation chips and the field cards land on the right part.
 
 ### 15.2 Pitch studio: campaign pitches, annotations and practice modes (L2)
 
-_To be merged from `docs/r2/L2-learning-pitch.md` (section "Logic")._
+Pure, in `shared/src/logic/pitchScript.ts` and `shared/src/logic/pitchAnnotations.ts` (tests in
+`shared/src/logic/pitchScript.test.ts`, on the owner's BCN pitch word for word and on synthetic scripts).
+The modules have no top-level calls, so the client bundles them with the pitch page only (main chunk unchanged).
+
+#### Script format (`parsePitchScript(body)` → `PitchScript`)
+
+Plain text, one spoken line per line; a blank line separates paragraphs (`break` blocks, never two in a row, none at
+either end). Line numbers are the 1-based source lines.
+
+- A line that is only brackets is a **stage direction** (`direction` block): `(Slow smile and cautious)`.
+- `(Pause)`, `(Pause - 1 Second)`, `(Pause 2s)`, `(Long pause)`, `(Pause for effect)` is a **pause beat** (`pause`
+  block); its length is the first number (seconds), or null (counted as 1 s, `PITCH_DEFAULT_PAUSE_SECONDS`).
+- `(Name)` is the person's **name slot**; `(Close)` is the **close marker**.
+- Brackets inside a spoken line become inline segments in order (`text`, `name`, `close`, `pause`, `direction`):
+  `Pretty amazing right!! (Close)` → text + close; `… have you got some for me? (Smile and laugh)` → text + direction.
+  An unbalanced bracket stays text.
+- `(Introduction)`, `(Short story)`, `(Presentation)`, `(Consolidation)` (or `(Step 3: presentation)`) on its own line
+  **starts that step**; the page shows a step heading instead of the direction (`stepMarker`). A lone `(Close)` line is
+  a close beat and starts the close step.
+- A line starting **`Yes -`** or **`No -`** (also `Yes:`, en/em dash; never `No-one`) starts a **branch** for the
+  answer to the previous question (`branch` block with `question` = the last spoken line, `branches` Yes/No). A branch
+  runs until the other answer's line, or until an end line `(Both)` / `(Back to the pitch)` / `(End of branch)` (not
+  shown). The last branch otherwise ends at the end of its first paragraph. The same answer again starts a new
+  question's branches. Text after `No -` on the same line is the branch's first line.
+
+#### Steps and timing
+
+- The five steps of the COD pack (`PITCH_STEP_TARGETS`): Introduction 7–10 s, Short story 10–15 s, Presentation,
+  Close, Consolidation (no set time for the last three).
+- Each spoken line is tagged with a step. The first spoken line is always the Introduction. After that a step starts at
+  an explicit marker, or at a cue (`PITCH_STEP_CUES`): Short story at "what we do", "who we are", "we're from", "we
+  help/support/fund/provide/raise"; Presentation at "survival rate", "as of 19xx/20xx", "since 19xx/20xx", "the
+  problem", "the solution", "unfortunately", "obviously"; Close at the `(Close)` marker, "I'm sure we can count on",
+  "can we count on", "shall we get you", "let's get you signed up"; Consolidation at "welcome call", "welcome pack",
+  "thank you for signing/joining", "at least 2 years". **Cues only move forward**: a later "unfortunately" never takes
+  the close back to the presentation. Branches start at the step before them; after them the furthest step wins.
+- Read-aloud estimate: words at **150 words a minute** (`PITCH_WORDS_PER_MINUTE`; numbers count as words, emoji and
+  punctuation do not) plus every pause, along the **longest path** (per Yes/No question only the longer branch).
+  `steps[]` gives each step's whole seconds, spoken lines and first line; `estimatedSeconds` the total;
+  `lineCount`/`wordCount` count every spoken line with words (both branches).
+- `pitchStepVerdict(seconds, target)`: `under` / `within` / `over` against the target (inclusive), `none` without a
+  target or when the step is empty.
+- The seeded BCN pitch: 19 spoken lines; Introduction (lines 1, 4, 9) about 22 s, Short story (from "What we do",
+  line 11, through the Yes/No and "Our mission") about 25 s, Presentation (from "As of 1980", line 24) about 14 s,
+  Close (from the owner's "(Close)" on line 28) about 52 s, no Consolidation: about 1 min 52 s in all. The page shows
+  the introduction and short story as "Longer than 7–10 s" / "Longer than 10–15 s" (an estimate; the step timer
+  measures the real thing).
+
+#### Annotations (`PITCH_ANNOTATION_RULES`, `annotatePitchLine`)
+
+Phrase patterns → the COD pack theory, a one-line why and the L1 lesson it links to
+(`/learning/pack/:lessonKey#anchor`; every key and anchor is checked against `LESSON_KEYS` / `LESSON_ANCHORS`).
+Matching is case-insensitive on the line as written (brackets included), with curly quotes straightened; a theory
+appears once per line, in rule order.
+
+| Chip | Matches (examples) | Lesson |
+| --- | --- | --- |
+| Hook | a line opening "Over/Nearly/About 1000 …", "every 43 minutes" | five-steps#introduction |
+| Strategic pause | `(Pause …)` | strategic-pause |
+| Pre-emptive strike | "I know that's …", "I know you're …", "I can see you're …" | pre-emptive-strike |
+| Indifference | "no pressure", "take it or leave it" | impulse-factors#indifference |
+| Short story | "what we do", "who we are", "our mission", "why we are here" | five-steps#short-story |
+| Problem and solution | "survival rate", "our goal", "this close" | five-steps#presentation |
+| Close | `(Close)` | five-steps#close |
+| Buzzwords | "unfortunately", "obviously", "however" | five-steps#presentation |
+| Past tense | "said they'd love", "who have stopped" | five-steps#presentation |
+| Group effect | "people like yourself", "everyone", "we all", "as well" | impulse-factors#group-effect |
+| Greed | "something small", "wouldn't miss", "a few quid", "a tenner", "£10 a month" | impulse-factors#greed |
+| Power of suggestion | "I'm sure" | impulse-factors#power-of-suggestion |
+| Fear of loss | "I would need to check", "if you qualify" | impulse-factors#fear-of-loss |
+| Qualifying question | "You live/bank in the UK", "over the age of", "cheeky question" | impulse-factors#fear-of-loss |
+| Consolidation | "welcome call", "at least 2 years" | five-steps#consolidation |
+| Smile (directions only) | a stage direction with "smile" | five-steps#introduction |
+
+#### Fact-check notes (`parsePitchFacts(facts, body)` → `PitchFact[]`)
+
+- One note per bullet (`- `, `* `, `• `, `1.`); wrapped lines join their bullet; without bullets each paragraph is a
+  note.
+- Leading quotes (`"…"` or `“…”`, several joined by "and") are what the note is about (`quotes`, `quote` = the first);
+  the note is the rest after the colon. URLs become `sources` and leave the note ("Source:" and empty brackets go
+  too); `Suggested wording: "…"` becomes `suggestion`. The first letter is capitalised.
+- `tone`: `info` without a quote (a general note), `verified` when the note starts "Matches", "Confirmed", "Correct",
+  "Verified", "Accurate" or "True", else `check`.
+- `lines`: the body lines a quote matches, ignoring case, punctuation, apostrophes and emoji; `...`/`…` in a quote
+  stands for left-out words (fragments in order); a quote may span up to three lines.
+- The script itself is never changed to match a note: the notes sit beside it ("Check the figures"), and the office
+  approves final figures (the BCN general note quotes the Fundraising Regulator's code).
+
+#### Flashcards (`pitchCards(script)`)
+
+One card per spoken line with words, in reading order: the cue is the line said just before (a branch line's cue is
+the question, never the other branch), branch lines carry their answer. Keys are `pitchLineKey(text)` (FNV-1a of the
+straightened, lower-cased words, base 36; `:2`, `:3` for repeats), so editing one line resets only that card.
+Progress lives on the device: `localStorage['lm-pitch-memorise:<userId>:<CAMPAIGN>'] = { v: 1, known: [keys] }`
+(every storage call wrapped). Other per-device choices: `lm-pitch-mode`, `lm-pitch-theory`, `lm-pitch-prompter-wpm`.
 
 ### 15.3 Sign-in PIN, stronger sessions and the deploy guide (U1)
 
-_To be merged from `docs/r2/U1-sign-in-pin.md` (section "Logic")._
+**Hashing** (`server/src/lib/pin.ts`). scrypt from `node:crypto`, N = 2^14, r = 8, p = 1, a fresh 16-byte random salt,
+32-byte key, stored as `scrypt$16384$8$1$<salt>$<key>` (base64) so the cost can be raised later without a migration.
+It runs on the libuv thread pool (no event-loop stall) and is compared with `timingSafeEqual`. A malformed PIN or
+hash is a mismatch. Nothing logs or returns a PIN or hash.
+
+**PIN rules** (`shared/src/logic/pin.ts`, the same on the phone and the server, checked in this order):
+`format` 4–6 ASCII digits → `repeated` one digit only (0000, 777777) → `sequence` a run up or down by one (0123, 9876,
+543210; 7890 is not a run) → `common` one of 27 most-guessed PINs that the first rules miss (1212, 1004, 2000, 6969,
+2580, 123123, 159753, …) → `employee-id` the PIN contains, or is contained in, the digits of your employee ID when
+they are at least four long (LM-0042 refuses 0042 and 004299). The first broken rule's message is the refusal.
+
+**Sign-in with a PIN.** After the email and employee ID match (and the account is not `left`):
+
+1. The PIN is locked (`pin_failed_attempts ≥ 10`) → `423 locked` (counted against the login limiter).
+2. No PIN sent → `200 { requiresPin: true, attemptsLeft }`, no cookie (counted against the login limiter, so the
+   answer cannot be used to test email and employee ID pairs faster than a wrong ID).
+3. Otherwise the attempt is counted **before** the hash is awaited — a login-limiter failure and `pin_failed_attempts + 1`
+   — so a burst of parallel guesses meets both limits one request at a time. A right PIN resets the count to 0 (and
+   the login counters once the sign-in completes, after the two-step code if the account has one); a wrong one
+   answers `401 wrong` with `attemptsLeft = 10 − count`, or `423` on the tenth.
+
+Rate limits are the login's own: 8 failures per (source address, email) in 15 minutes, 20 per email from anywhere,
+then `429`. The PIN lock is separate and persistent: 10 wrong PINs **in a row**, across every device and restart,
+lock it until an administrator resets it (a forgotten PIN takes the same route). Wrong current PINs in Settings count
+towards the same lock, plus 6 per user in 15 minutes → `429`.
+
+Worked example: a stranger who knows a rep's email and employee ID can try at most 8 PINs from one address in 15
+minutes before `429`, and 10 in total before the PIN locks: about a 1-in-1,000 chance against a 4-digit PIN that passes
+the rules. The rep then asks an admin for a reset. Without the lock the login limiter alone would allow 20 guesses per
+15 minutes from rotating addresses, nearly 2,000 a day.
+
+**Require a PIN for everyone.** `pinSetupRequired = requirePin && !hasPin`, recomputed on every request from the
+session's user row (no stale flag). Sign-in still succeeds for someone without a PIN; the gate then holds them at
+"Create your PIN". An open session meets the gate on its next request. Setting a PIN lifts it at once.
+
+**Require two-step for administrators.** `twoFactorSetupRequired = requireAdminTwoFactor && role = admin && two-step
+not on`. Switching it on needs your own two-step on (409 otherwise) and signs out the other administrators without it,
+so they meet the setup step at their next sign-in. While it holds, an administrator cannot turn two-step off (409); an
+administrator's lost-device reset (`POST /users/:id/2fa/reset`) still works and they set it up again at sign-in.
+
+**Sessions.** A session ends when it is 14 days old (unchanged) **or** idle for longer than the admin's
+`sessionIdleHours` (default 12, 1–72), measured on the real clock from `sessions.last_seen_at` (else `created_at`). The
+check is strict (exactly on the limit is still alive). `authenticate` deletes an idle session on sight (→ 401) and
+refreshes `last_seen_at` at most once a minute (`LAST_SEEN_RESOLUTION_MS`), so the timeout costs one small write a
+minute per active session, not one per request. The 15-minute sweep (`purgeExpiredSessions`) also deletes idle
+sessions. Setting or changing a PIN signs out your other sessions; an admin PIN reset signs the person out everywhere.
+When the column is first added, sessions opened before 1.2 count as seen at the upgrade, so the new timeout does not
+sign everyone out at once.
+
+**Settings reads** are cached per database and dropped whenever the data version moves (every write request bumps
+it), so a change applies on the very next request and a read-only request costs no extra query.
+
+**Client.**
+- `pages/Login.tsx`: a PIN step between the credentials and the two-step code (masked digits-only field with a show
+  button, password-manager friendly). Wrong PIN → "That PIN isn't right" plus "N tries left before your PIN locks" when
+  3 or fewer remain; locked or `429` → the field stays disabled with the reason until Back.
+- `auth/PinSetupGate.tsx` (around the signed-in shell) shows the lazy full-screen steps from `auth/PinSetupStep.tsx`:
+  "Create your PIN" (PIN twice, the shared rules as you go) and, for administrators, "Set up two-step verification"
+  (the Settings setup modal). Once that modal opens, the step stays until it closes, so the recovery codes are never
+  swept away when /auth/me stops asking. It listens for `PIN_SETUP_REQUIRED_EVENT` and re-reads /auth/me (one request
+  at a time).
+- `auth/AuthProvider.tsx`: a signed-in tab coming back to the front re-reads /auth/me (at most once a minute), so an
+  idle-expired or reset session shows the sign-in page straight away.
+- `features/settings/PinSettings.tsx` (Settings → Security) and `PinResetSection.tsx` (Team → edit person).
+- Main chunk 445 kB, under the 460 kB budget: the gate is small and the steps, Settings and Login are lazy chunks.
 
 ### 15.4 Bulk gauge entry with WhatsApp paste (U2)
 
-_To be merged from `docs/r2/U2-bulk-entry.md` (section "Logic")._
+#### Server (`routes/bulkGauges.ts`)
+
+A bulk row is exactly a `POST /gauges` row. The rules are the single-entry functions, imported, not copied:
+`gaugeBody` (field validation), `assertCanWriteGauge` (scope), `assertGaugeIntegrity` (event started, not cancelled,
+date = event date, active member of the event's team — admins exempt from the team rule), `validateGaugeFunnel`
+(stops ≥ to table ≥ presentations ≥ closes ≥ taps ≥ sales, each ≤ 2,000), `assertWeekUnpaidFor` (paid-week lock,
+admins pass), `checkInFor` (a check-in can never be in the future, on the business clock) and `rateSnapshot`.
+
+1. The event-wide rules run once (a stand-in member of the event's team, so only the event rules can fail).
+2. Every row is then checked and its problems collected: field errors ("Stops: Number must be less than or equal to
+   2000"), the same person twice ("This person is already on row 1"), "Person not found", the first scope refusal,
+   the funnel warnings, the paid-week message and a future check-in. One grouped query loads the people.
+3. Any problem → 400 with every row's problems; nothing is written.
+4. Otherwise, in **one transaction**: existing entries for the event and date (one query) are updated in place
+   (submitted time refreshed, rate snapshot kept), new ones inserted with the campaign payout and pay-plan commission
+   snapshot (`rateSnapshot`, memoised per pay plan), then the week's payroll runs follow: the people affected by every
+   row (`affectedPayUsers`: the rows' owners, their team's leaders for the override, no-team seniors at the event) are
+   collected and `syncPayrollRun(…, { flagPaid: true })` runs **once per person** — the same result as one
+   `syncPayrollForEntry` per row (a test compares the runs with the same rows sent one by one). A week still in
+   progress is left alone; a paid run is never recomputed but is flagged "adjusted after payment" when an admin
+   changes it. No forecast, no extra gauge row.
+
+#### The WhatsApp parser (`shared/src/logic/bulkPaste.ts`, pure and deterministic)
+
+`parseBulkPaste(text, members)` → `{ lines: ParsedPasteLine[], ignored }`; `resolvePaste(lines, choices, members)`
+applies the leader's choices; `pasteFills(lines)` gives one row per person; `pasteFunnelIssues(totals)` words the
+funnel rule in plain English.
+
+- **WhatsApp exports.** `[20/10/2026, 17:42:13] Jordan Lee: …` (iOS), `20/10/2026, 17:42 - Jordan Lee: …` (Android) and
+  `[17:42, 20/10/2026] Jordan Lee: …` (desktop copy) lose their prefix; the sender is remembered for the following
+  lines of the same message (until the next prefix). A system line ("Messages and calls are end-to-end encrypted")
+  has no sender. Bidi marks, zero-width characters, every kind of space, emojis (with skin tones and flags) and
+  WhatsApp formatting (`*bold*`, `_italic_`, `~strike~`) are dropped; keycap digits read as digits (4️⃣0️⃣ → 40).
+- **Check-in time.** The first time on the line is the check-in, as "HH:mm": `9:58`, `09:58`, `9.58am`, `10am`,
+  `12:30pm`. A dot needs am/pm ("9.55" alone is two numbers). Without am/pm, 1:00–6:59 is the afternoon (`1:05` →
+  13:05: nobody checks in for a field shift then). A run like `65:22:11:5:3:3` is never a time.
+- **Dates** (`20/10`, `20/10/26`, `20.10.2026`, `2026-10-20`) are dropped. A run of four or more numbers
+  (`65/22/11/5/3/3`) is never a date.
+- **Not gauges:** numbers stuck to letters (`2nd`, `x2`), money (`£10`), percentages (`14%`), numbers longer than six
+  digits (phone numbers).
+- **Chatter.** A line with fewer than three gauge numbers is ignored and counted in `ignored` (blank lines are not).
+- **Several people on a line** (`Jordan 65 22 11 5 3 3, Amelia 40 12 6 2 1 1`) split where a team member's first or last
+  name follows three or more numbers, but only when the numbers already had a name in front (`65 22 11 5 3 3 Jordan`
+  is one person named at the end). Keys: `4.1`, `4.2`.
+- **Numbers.** Exactly six → funnel order. With three or more gauge words (`stops`, `table`/`tbl`, `pres`/`pitch`,
+  `closes`/`cls`, `taps`, `sales`/`dd`/`signups`, singular or plural, glued or not: `65stops`), each number goes to its
+  word, number-first (`65 stops`) or word-first (`stops: 65`), whichever pairs more, skipping filler (`22 to table`).
+  If the words do not account for all six but six plain numbers are there, the plain order wins (the words were chat).
+  Otherwise "Found 5 numbers, need 6" or "Missing taps".
+- **Funnel problems** are kept on the line with its numbers: "To table (22) is more than stops (10)", "Stops (2500) is
+  over the 2,000 a day limit".
+- **The name** is the words before the numbers (after them when the line starts with numbers), with filler such as
+  "gauges", "for", "today", "in", "checked" left out. No name at all → the WhatsApp sender. A name that matches nobody is
+  never swapped for the sender: the leader chooses ("No one called “Jrdn” on this team — choose who it is").
+- **Matching** (accents, apostrophes and hyphens ignored: Zoë = Zoe, O'Brien = OBrien, Mary Jane = Mary-Jane). Each
+  member is scored and the top score wins: 100 first + last name · 90 first name + last initial (`Jordan L`) · 85 first
+  + near-miss last · 70 first name · 65 near-miss first + last · 60 last name only · 55 near-miss first + last initial ·
+  40 near-miss first. A near miss is a typo or swap (one edit, names of four letters or more: Jordon, Aemlia) or a short
+  form of at least three letters (Sam → Samuel, Jord → Jordan); filler words never near-miss ("the" is not Theo).
+  Several members on the top score → ambiguous ("2 people match “Jordan” — choose one"); a single near-miss match is
+  flagged `guess` ("Best guess for “Calum”").
+- **Repeats.** The last complete line for a person wins (`replacedBy` marks the earlier ones); an incomplete line
+  replaces nothing. `resolvePaste` accepts a choice for an ambiguous line only among its matches, and anyone on the
+  team for an unknown name; `null` goes back to the parser's own match.
+
+#### Client (`/gauges/bulk`)
+
+- Event picker: the Log gauges list (last three weeks up to today, not cancelled; own team for a leader, every team for
+  an admin, with the team name). Today's own-team event is preselected when there is exactly one
+  (`preselectTodayEvent`); `?eventId=` deep-links one (own team for a leader). A future or not-started event shows why
+  and cannot be saved.
+- Rows: the event team's active members (no recruiters), first name order, prefilled from the entries already logged
+  for that date. Statuses: **Logged** (saved, unchanged), **Update** (saved, changed), **New** (not saved, has a number),
+  **Not logged**. Blank cells count as 0. Only New and Update rows are sent; an Update sends its check-in only when it
+  changed (so a stored one is never cleared by accident) and never touches notes. Funnel problems and a check-in later
+  than now (today's event) are shown on the row before saving and block Save; the server's answer is mapped back to
+  the rows by index.
+- Unsaved numbers are kept on the phone per person and event (`localStorage` `lm-bulk-draft:<userId>:<eventId>`, every
+  call wrapped, kept 3 days) and come back after a reload or a lost signal, with **Discard them**. A save without
+  signal keeps them and says nothing was saved.
+- After a save the page waits for the event's entries, then clears the edits and the draft and closes the paste box.
 
 ### 15.5 Audit trail and announcement read receipts (U3)
 
-_To be merged from `docs/r2/U3-audit-trail.md` (section "Logic")._
+#### What is recorded
+
+- **Every successful write**: when (`at`, the real clock, not the business clock: an audit row says when it really
+  happened), who (the signed-in person; for a sign-in, the person who has just signed in), the method and Express
+  route pattern, the IP, and a summary. Routes the registry does not describe are recorded with the action as the
+  summary (`POST /things/:id/zap`) and no snapshots.
+- **Registered routes** (`server/src/lib/auditSpecs.ts`) load a "before" snapshot just before the handler runs and an
+  "after" snapshot at the moment the response is sent (synchronously, so nothing can slip in between):
+
+| Entity | Routes | Summary, for example |
+| --- | --- | --- |
+| Pay run | `POST /finance/payroll/:id/pay` | Marked paid: Jordan Lee w/c 5 Oct, £945 (· "Marked paid (late)" when the money landed after the due date) |
+| Pay run (side effect) | any gauge write | Recalculated after a gauge change: Jordan Lee w/c 12 Oct, £675 → £795 · Pay run created / removed after a gauge change · Adjusted after payment: Jordan Lee w/c 5 Oct, paid £945; the gauges changed |
+| Gauge entry | `POST /gauges` (create or edit), `PATCH /gauges/:id`, `DELETE /gauges/:id`, `POST /gauges/bulk` (one row per entry created or changed) | Logged gauges: Jordan Lee, 15 Oct at Arndale, 2 sales · Edited gauges: …: taps 2 → 3, sales 2 → 3 · Deleted gauges: … (3 sales) · Logged gauges in bulk: … |
+| Person | `POST /users`, `PATCH /users/:id`, `POST /users/:id/2fa/reset`, `POST /auth/pin/reset/:userId`, sign-in, sign-out, the caller's own two-step and PIN changes | Added Sam Brown: Representative, Trainee, Team North · Updated Daisy Holt: position trainee → field rep · Deactivated Rita Rep · Reactivated … · Reset two-step verification: … · Reset PIN: … · Signed in · Signed out · Turned on two-step verification · Set a PIN |
+| Candidate | `POST /recruitment/candidates`, `PATCH …/:id`, `POST …/:id/stage` (a hire also records the new person), `POST /recruitment/interviews`, `PATCH /recruitment/interviews/:id` (filed under the candidate) | Moved Elliot Bradley: Applied → Phone screen · Booked first interview: Sam Brown, 21 Oct, 14:00 |
+| Event | `POST /events`, `PATCH /events/:id`, `DELETE /events/:id` | Updated event: Castlefield Bowl, 21 Oct: target 14 → 16 · Cancelled event: … · Restored event: … |
+| Campaign | `POST /campaigns`, `PATCH /campaigns/:id` | Updated campaign Breast Cancer Now (BCN): payout per sale £120 → £130 |
+| Pitch | `PUT /pitches/:campaignCode` (entity id = the campaign's id) | Wrote the BCN pitch · Edited the BCN pitch: text |
+| Settings | `PUT /auth/security-settings` | Changed sign-in settings: require a PIN for everyone no → yes |
+| Announcement | `POST /announcements` | Posted announcement: “Saturday rota is up” |
+| Expense | `POST /finance/expenses`, `DELETE /finance/expenses/:id` | Added expense: £42.60 travel, 20 Oct |
+| Learning | `POST /learning/progress/:lessonKey/quiz`, `…/teachback`, `…/:userId/:lessonKey/signoff` (entity id = the learner) | Learned Feel felt found: self-check passed · Signed off a teach-back: Jordan Lee, Bullet theory |
+| Check-in | `POST /checkins`, `DELETE /checkins/:id` | Checked in: Jordan Lee at Arndale, 20 Oct 09:24 · Removed check-in: … |
+
+- **Pay runs moved by a gauge write.** Before the handler, the trail notes everyone whose run the entry can move (the
+  same rule as `affectedPayUsers`: the person, override earners on their team, no-team seniors who logged at the same
+  event, for the old and the new key when an entry is moved) and their runs for the weeks concerned, in two queries.
+  Afterwards it reloads those runs and writes a pay-run row for each one that changed: recalculated (gross changed, or
+  other figures with the gross the same), created, removed, or flagged "adjusted after payment" (a paid run whose
+  `adjustedAt` was set by an admin's change). So a payslip's history explains every change to its figures.
+- Snapshots carry readable names next to ids (`userName` with `userId`). Tables of other 1.2 packages
+  (`campaign_pitches`, `learning_progress`, `check_ins`, `users.pin_hash`) are read defensively: until they exist the
+  snapshot is empty and the row is still written.
+- **Settings** have no stored "before" of their own: the before of a change is what the last recorded settings change
+  left, or the documented defaults (PIN not required, two-step for administrators not required, 12 hours) for the
+  first one.
+- **Not recorded**: reads, failed requests, step one of a two-step sign-in (no session yet), and announcement read
+  receipts (their own table).
+
+#### Secrets never stored
+
+Request bodies and responses are never stored, only snapshots the registry loads itself, and those never select
+PINs, PIN hashes, two-step secrets, recovery codes or session tokens. As a second guard every snapshot is redacted
+before storage (shared `redactAuditSnapshot`): any key, at any depth, named `pin`, `currentPin`, `newPin`, `pinHash`,
+`pin_hash`, `pinSalt`, `password`, `token`, `sessionToken`, `challengeToken`, `secret`, `totp_secret_enc`,
+`totp_pending_enc`, `code`, `recoveryCode(s)`, `code_hash`, `otpauthUrl`, `qrDataUrl`, `manualKey`, or containing
+`secret`, `password`, `token`, `pinhash`, `pin_hash` or `recovery`, is stored as `[redacted]`. (A campaign's code is
+therefore stored as `campaignCode`.) A snapshot larger than 64,000 characters is replaced by a short note; summaries
+are capped at 500 characters.
+
+#### The diff
+
+`auditDiff(before, after)` (shared, pure): the fields whose values differ, compared as JSON for nested values; empty
+and `''` count as null; a create lists every filled field, a delete every field it had. The record's `id` and the
+reference ids that travel with a name (`userId`, `eventId`, `teamId`, `campaignId`, `payPlanId`, `ownerId`,
+`referredById`, `interviewerId`, `candidateId`, `hiredUserId`, `authorId`, `signedOffById`) are never listed, so a move
+shows once, as names; `employeeId` is a value and is listed. Summaries name at most three changes ("… and 2 more");
+long text fields are named, not quoted. Values read the British way: £945 / £412.50, 12 Oct, wall-clock check-ins
+"12 Oct 09:24", zoned times in London time, enums as words ("field rep").
+
+#### Read receipts
+
+- The dashboard reports an announcement as read once at least half of its card has been on screen for 1.2 seconds;
+  never for the author's own announcement. Several cards are sent together, then the stats refresh once. Each
+  person's reported ids are remembered on the device (`localStorage` `lm-announcement-reads:<userId>`, newest 200; a
+  blocked store only means a harmless repeat), so a visit does not post again.
+- **Audience** = everyone whose status is `active`, except the author. **Read count** = reads by people in that
+  audience (a reader who has since left or gone on leave no longer counts; the author's own read never counts).
+- The demo seed marks a plausible share of the active people as having read each seeded announcement (35% just after
+  posting, rising to 90% after a week, at times between the post and now; its own random stream, so the core demo
+  data is unchanged). An existing database starts with no reads.
+
+#### Retention
+
+`purgeAuditLog` deletes rows older than 730 days (two years, real clock) at start-up and every 24 hours
+(`index.ts`). Read receipts live as long as their announcement.
+
+#### Database (`server/src/db/extensions/audit.ts`)
+
+- `audit_log(id, at, user_id, action, entity, entity_id, summary, before_json, after_json, ip)`, indexed on `at`,
+  `(user_id, at)` and `(entity, entity_id, at)`. No foreign key on `user_id`, so a row outlives anything.
+- `announcement_reads(announcement_id, user_id, read_at, PRIMARY KEY (announcement_id, user_id))`, cascading with the
+  announcement and the person; indexed on `user_id`.
+- `upgrade` has no data steps (returns `[]`); `seed` writes `announcement_reads` only.
+
+#### Performance
+
+Reads are untouched (the middleware returns at once for `GET`). A write costs one or two snapshot queries before the
+handler and one to three after it, plus one insert per row; a gauge write adds two queries for the pay runs. `GET
+/audit` is two queries (count and page), `GET /announcements/reads` two.
 
 ### 15.6 One-tap shift check-in (U4)
 
-_To be merged from `docs/r2/U4-check-ins.md` (section "Logic")._
+#### Table (`server/src/db/extensions/checkins.ts`)
 
-### 15.7 Search palette, payroll export and the RangePicker layout fix (U5)
+`check_ins(id, user_id → users ON DELETE CASCADE, event_id → events ON DELETE CASCADE, date, checked_in_at, source
+CHECK IN ('button','quick','offline','leader'), created_at, UNIQUE(user_id, event_id, date))`, plus
+`idx_check_ins_event(event_id, date)`.
 
-_To be merged from `docs/r2/U5-office-tools.md` (section "Logic")._
+- The table is new, so `upgrade()` has nothing to do. An existing database gets the table from `sql` on its next start.
+- Demo seed: on a fresh demo only, today's started (live or completed) events get a check-in for everyone who logged
+  gauges today with a check-in time, at exactly that time. Sources are 30% `quick`, the rest `button`. Absentees show
+  as "not checked in" on the roll call. The seed reads `gauge_entries` but never writes a core table, so the
+  `r2-contracts` hash test holds.
+
+#### On time or late
+
+`shiftCheckInStatus(eventDate, startTime, checkedInAt)` reuses the existing `isCheckInOnTime` and `minutesLate`:
+
+- A check-in is on time up to 5 minutes after the start, inclusive. 09:05:00 is on time; 09:05:01 is "6 min late".
+- Labels read "Checked in 09:24 · on time" or "Checked in 09:36 · 6 min late".
+- Inside the grace a check-in reads "on time", even when `minutesLate` is between 1 and 5.
+
+#### When the button applies (`shiftCheckInWindow`)
+
+- **`open`:** on the event's date, from midnight until the end time inclusive. Arriving early is the point.
+- **`ended`:** after the end time. The button disappears, but an existing check-in still shows.
+- **`not-today` / `cancelled`:** never shown.
+- **Who sees it:** reps and leaders of the event's team, plus an admin who belongs to that team.
+
+#### Time rules (`resolveShiftCheckInTime`)
+
+See the API section above. The future check uses `SHIFT_CHECK_IN_CLOCK_SKEW_MS` (5 minutes) and the age check uses
+`SHIFT_CHECK_IN_REPLAY_DAYS` (7). Naive times compare as strings. Differences between them are taken as if both were
+UTC, so a daylight-saving change never shifts them.
+
+#### Punctuality (`lib/metrics.ts` `punctualityFor`, `lib/smart/digest.ts`, `lib/smart/checkIns.ts`)
+
+- **Which time counts:** a logged day's check-in time is the one-tap check-in for the same person, event and date when
+  there is one. Otherwise it is the gauge entry's own `checked_in_at`, as in 1.1. The SQL is
+  `LEFT JOIN check_ins ci ON (user, event, date)` with `COALESCE(ci.checked_in_at, g.checked_in_at)`
+  (`lib/shiftCheckIns.ts`: `SHIFT_CHECK_IN_JOIN`, `CHECKED_IN_AT_SQL`). The unique key makes it one index lookup per
+  gauge row, and there are no extra queries.
+- **What counts as a sample:** still the gauge rows. A check-in on its own (no gauges logged yet) is not a punctuality
+  sample. It counts once the day is logged.
+- **Removing a check-in:** punctuality falls back to the gauge entry's own time.
+- **When the two disagree:** for example, the gauge says 08:55 and the tap says 09:20. The tap counts. A leader who
+  wants the gauge time to count removes the check-in from the roll call.
+
+#### Pay integrity
+
+- A check-in never writes, edits or reads into `gauge_entries` or `payroll_runs`.
+- Pay counts distinct gauge dates (`weekPayFor`), so a check-in is never a day worked.
+- Tested in `server/src/test/shift-checkins.test.ts`: there is no gauge row, no payroll run, `weekPayFor` is unchanged,
+  and the dashboard shows `days` 0 after check-ins.
+
+#### Offline (`client/src/features/checkins/outbox.ts`)
+
+- **Storage:** the localStorage key is `'lm-checkin-outbox:<userId>'`, with at most 20 items. Every storage call is
+  wrapped. When the phone cannot keep a tap, the button says so rather than dropping it. Signing out keeps the queue:
+  it sends the next time the same person signs in on that phone.
+- **Items:** each one is a `ShiftCheckInInput` with the tapped `checkedInAt` (the phone's wall-clock time, as Log
+  gauges' **Now** uses) and `source: 'offline'`. It also holds the event name and start time, so the phone can show
+  "on time" or "6 min late" before the tap is sent.
+- **One per event and day:** a second tap keeps the earlier time (`addToShiftCheckInQueue`).
+- **When the button queues:** when the browser reports it is offline, or when `POST /checkins` throws a `NetworkError`.
+- **When it replays:** `CheckInOutboxReplay` replays one item at a time (single-flight). It runs on mount, on the window
+  `online` event, and when `NETWORK_EVENT` goes from offline to online. It does not replay on every answer, so a server
+  error can never loop.
+- **Replay outcomes** (`shiftCheckInReplayOutcome`):
+  - 201: sent.
+  - 200: already there, and Linear Hub's check-in stands.
+  - No answer, 401, 408, 429, 5xx, or a 403 from the PIN gate (detected through `PIN_SETUP_REQUIRED_EVENT`): stop and
+    keep the item.
+  - Any other 4xx: the item becomes `failed`, with Linear Hub's reason, until the person dismisses it.
+
+#### Log gauges
+
+- **Prefill:** **Checked in at** is filled from the person's check-in when the field is empty. The check-in can be on
+  Linear Hub, or waiting on this phone for the signed-in person.
+- **What it never replaces:** a time that was typed, set with **Now** or the chip, or already stored on the entry.
+- **Changing the selection:** picking another person or event removes the time the form filled in, or swaps it for
+  the new choice's check-in.
+- **Hint:** the field's hint names the check-in, e.g. "One-tap check-in 09:17 · on time — punctuality uses it".
+- **Chip:** the "Checking in? Use now" chip is hidden when there is a check-in.
+
+### 15.7 Search palette, payroll export and the Gauges layout fix (U5)
+
+- **Search ranking.** Every word of the query must appear somewhere in a row's searchable text. Within a kind, rows
+  whose title starts with the whole query come first, then rows where a word of the title starts with it, then the
+  rest in the kind's natural order. The palette shows the group with the best-ranked result first.
+- **Palette.** Actions and pages are filtered in the browser (every word must appear in the label or its keywords);
+  the server is asked 200 ms after the last key. Actions: Log gauges (`/gauges?log=1`, reps, leaders, admin), New event
+  (`/events?new=1`, admin and leaders with a team), Mark week paid (`/finance?tab=company#runs`, admin).
+- **Pay export columns** (shared `PayExportRow`, both formats in this order): employee name, employee ID, period start,
+  period end, gross, base, commission, bonus, overrides, deductions, reference. Dates dd/mm/yyyy, money two
+  decimals. Xero and Sage differ only in their header names (`PAY_EXPORT_HEADERS`).
+- **Formula guard.** A cell that starts with `=`, `+`, `-`, `@`, a tab or a carriage return gets a leading apostrophe
+  (plain negative numbers excepted), then is quoted when it holds a comma, quote or line break.
+- **Pay integrity.** The export only reads `payroll_runs` (after `ensurePayrollMaterialised`, as `GET /finance/payroll`
+  does). Nothing is recalculated or written.
+- **Layout fix.** On Gauges the tabs and the date-range presets share a row only when both fit; otherwise the presets
+  wrap onto their own line, and the picker itself may shrink (its pills scroll inside it). At 1024 px the admin's
+  Gauges page no longer scrolls sideways.

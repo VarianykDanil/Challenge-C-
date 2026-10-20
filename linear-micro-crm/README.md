@@ -33,6 +33,8 @@ Linear Hub fixes those four things without asking the business to change how it 
 | **Public page** | Signed-out visitors land on an outward-facing page about Linear MCR and Linear Hub (what we do, the six gauges, the careers ladder) with **Sign in**; staff can review it any time at `/welcome`. The logo and colours come from one config (`client/src/content/brand.ts` and the `--brand-*` block in `client/src/index.css`). |
 | **Export & print** | Every table has **Download as CSV** (Excel-ready, exactly the rows on screen, filters in the file name), and each payslip has **Print payslip** for a clean A4 copy. |
 | **Smart features** (1.1) | Pace notes, this week's pay estimate, **Check in with…**, the **Needs attention** bell, event forecasts, signal-proof logging, recruitment deadlines and **Your week in review** — see [Smart features](#smart-features-11) below. |
+| **Learning** (1.2) | The COD pack as 21 lessons with self-checks, teach-backs your leader signs off, the leadership checklist and the progression tracker; a **pitch studio** per campaign (starting with Breast Cancer Now) with the theory behind each line, a step timer, a teleprompter and flashcards. |
+| **Field & office** (1.2) | One-tap **Check in** with a roll call; leader **Bulk entry** (or paste from WhatsApp); an optional sign-in **PIN**; the **Audit** trail and announcement read receipts; ⌘K search for people, events, candidates and campaigns; **Export for payroll** to Xero or Sage. See [What's new in 1.2](docs/USER_GUIDE.md#whats-new-in-12). |
 
 ### Roles
 
@@ -43,7 +45,7 @@ Linear Hub fixes those four things without asking the business to change how it 
 | `recruiter` | The whole recruitment pipeline, the directory, own pay; events and the leaderboard read-only | Candidates, interviews, stage changes (hiring creates the rep's account) |
 | `admin` | Everything, including every employee ID | Everything — people, campaigns, events, any gauges, payroll payments, expenses, announcements |
 
-**Signing in and security, honestly.** Sign-in is a work email plus an employee ID — there is no password yet, so the employee ID is half of the credential and the API only returns it to administrators and to the person themselves (everyone else sees it blank on the Team page, payslips and profiles). Sessions are httpOnly cookies that last 14 days; after eight failed attempts for the same email in fifteen minutes the login is paused for that window; setting a person's status to **Left** deletes their sessions at once, so they are signed out everywhere. Anyone can turn on optional two-step verification with an authenticator app in **Settings → Security**. A sign-in PIN and single sign-on are on the [roadmap](docs/ROADMAP.md).
+**Signing in and security, honestly.** Sign-in is a work email plus an employee ID — there is no password yet, so the employee ID is half of the credential and the API only returns it to administrators and to the person themselves (everyone else sees it blank on the Team page, payslips and profiles). Sessions are httpOnly cookies that last 14 days; after eight failed attempts for the same email in fifteen minutes the login is paused for that window; setting a person's status to **Left** deletes their sessions at once, so they are signed out everywhere. Anyone can turn on optional two-step verification with an authenticator app, and (1.2) a personal sign-in PIN, in **Settings → Security**; an administrator can require a PIN for everyone, require two-step for administrators and set the sign-out time. Single sign-on is on the [roadmap](docs/ROADMAP.md); putting it online is in [docs/DEPLOY.md](docs/DEPLOY.md).
 
 ### Smart features (1.1)
 
@@ -397,9 +399,10 @@ linear-micro-crm/
 - [`docs/USER_GUIDE.md`](docs/USER_GUIDE.md) — step-by-step for reps, leaders, recruiters and administrators, using the app's own button and tab names
 - [`docs/PITCH.md`](docs/PITCH.md) — the business case and rollout plan for Linear MCR
 - [`docs/ROADMAP.md`](docs/ROADMAP.md) — what comes next
-- [`CHANGELOG.md`](CHANGELOG.md) — what changed in each release (1.1.0: the smart release)
+- [`docs/DEPLOY.md`](docs/DEPLOY.md) — putting Linear Hub online (HTTPS, backups off the server, a go-live checklist)
+- [`CHANGELOG.md`](CHANGELOG.md) — what changed in each release (1.2.0: learning, field and office; 1.1.0: the smart release)
 - [`docs/API.md`](docs/API.md) — the API contract and implementation notes
-- [`docs/LOGIC.md`](docs/LOGIC.md) and [`docs/DESIGN.md`](docs/DESIGN.md) — the maths (section 14: the smart release, backups and what loads when) and the design system
+- [`docs/LOGIC.md`](docs/LOGIC.md) and [`docs/DESIGN.md`](docs/DESIGN.md) — the maths (section 14: the smart release, backups and what loads when; section 15: release 1.2) and the design system
 - [`docs/LOAD_TEST.md`](docs/LOAD_TEST.md) — the load and robustness report (§10: 1.1 against 1.0 on the same machine)
 - [`docs/TEAM.md`](docs/TEAM.md) and [`docs/TEAM_CONTRACT.md`](docs/TEAM_CONTRACT.md) — who built it and how
 
