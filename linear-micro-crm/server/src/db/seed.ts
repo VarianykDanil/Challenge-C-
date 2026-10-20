@@ -87,7 +87,16 @@ const addMs = (iso: string, ms: number) => new Date(new Date(iso).getTime() + ms
 const DAY = 86_400_000;
 const HOUR = 3_600_000;
 
-export function seed(db: Db, today: string = D.todayISO()): SeedStats {
+/** Options for `seed` (tests only; the app always seeds everything). */
+export interface SeedOptions {
+  /**
+   * false skips every database extension's `seed` (default true). Lets r2-contracts.test.ts prove that the
+   * extensions' demo rows leave the core demo data byte-for-byte the same.
+   */
+  extensionSeeds?: boolean;
+}
+
+export function seed(db: Db, today: string = D.todayISO(), options: SeedOptions = {}): SeedStats {
   const rng = new Rng(20240227);
   const nowIso = D.nowISO();
   const nowMs = D.businessNow().getTime();
@@ -705,7 +714,7 @@ export function seed(db: Db, today: string = D.todayISO()): SeedStats {
 
     // ── Release 1.2 database extensions (db/extensions): their demo rows, last, from the rows created above ──
     // Each extension draws from its own random stream (ctx.rng), so the core data above never changes.
-    seedExtensions(db, {
+    if (options.extensionSeeds !== false) seedExtensions(db, {
       today,
       nowIso,
       users: users.map((u) => ({

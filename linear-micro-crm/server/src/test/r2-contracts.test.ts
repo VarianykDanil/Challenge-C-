@@ -1,17 +1,19 @@
 /**
  * Release 1.2 foundation contract (r2-foundation): the database extension hooks and the mounting of every 1.2 router.
  * Written to keep holding once L1–L2 and U1–U5 replace the stubs: it checks the extension registry, idempotent
- * upgrades, that a fresh seed leaves the core demo data unchanged, and that each new path is mounted behind
+ * upgrades, the fresh-install order (upgrade before seed), that the extension seeds leave every core table byte-for-byte
+ * the same (hashed under a pinned clock), and that each new path is mounted behind
  * requireAuth (anonymous → 401, signed in → never 404 / 5xx). Owned by the foundation; packages test their own
  * behaviour in their own files.
  */
 import { after, before, test } from 'node:test';
 import assert from 'node:assert/strict';
-import { openDb } from '../db/connection.ts';
+import { createHash } from 'node:crypto';
+import { openDb, type Db } from '../db/connection.ts';
 import { EXTENSIONS, upgradeExtensions } from '../db/extensions/index.ts';
-import { createSchema } from '../db/schema.ts';
+import { createSchema, SCHEMA_SQL } from '../db/schema.ts';
 import { seed } from '../db/seed.ts';
-import { todayISO } from '../lib/dates.ts';
+import { setBusinessClock, todayISO } from '../lib/dates.ts';
 import { startTestServer, type TestClient, type TestServer } from './helpers.ts';
 
 test('extensions: five, in the fixed order, with unique names and the DbExtension shape', () => {
@@ -35,7 +37,7 @@ test('createSchema runs the extensions idempotently: a second run changes nothin
   }
 });
 
-test('a fresh demo seed (with every extension seed) keeps the core demo data: same counts on two databases', () => {
+test('a fresh demo seed (with every extension seed) is deterministic and adds no gauge rows, payroll runs or users', () => {
   const today = todayISO();
   const counts = () => {
     const db = openDb(':memory:');
@@ -54,6 +56,73 @@ test('a fresh demo seed (with every extension seed) keeps the core demo data: sa
   assert.equal(a.gauges, a.stats.gauges, 'extensions add no gauge rows');
   assert.equal(a.payroll, a.stats.payrollRuns, 'extensions add no payroll runs');
   assert.equal(a.users, a.stats.users, 'extensions add no users');
+});
+
+/** The core tables: what the core schema alone creates (extension tables are left out). */
+function coreTables(): string[] {
+  const db = openDb(':memory:');
+  try {
+    db.exec(SCHEMA_SQL);
+    return (db.prepare(`SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%' ORDER BY name`).all() as { name: string }[])
+      .map((r) => r.name);
+  } finally {
+    db.close();
+  }
+}
+
+/**
+ * A sha256 per core table over every row and column (rows sorted, so the order rows went in does not matter). In `meta`
+ * the extensions' own `ext:%` keys are left out: an extension may record its flags; every core key is compared.
+ */
+function coreHashes(db: Db): Record<string, string> {
+  const out: Record<string, string> = {};
+  for (const table of coreTables()) {
+    const where = table === 'meta' ? ` WHERE key NOT LIKE 'ext:%'` : '';
+    const rows = (db.prepare(`SELECT * FROM ${table}${where}`).all() as Record<string, unknown>[]).map((r) => JSON.stringify(r)).sort();
+    out[table] = `${rows.length}:${createHash('sha256').update(rows.join('\n')).digest('hex')}`;
+  }
+  return out;
+}
+
+test('every extension seed leaves the core demo data byte-for-byte the same (pinned business clock)', (t) => {
+  // Freeze the clock so nowIso (announcements.created_at, gauge submitted_at, meta.seeded_at) is identical on both runs.
+  t.mock.timers.enable({ apis: ['Date'], now: new Date('2026-10-14T15:00:00') });
+  setBusinessClock(null);
+  const today = todayISO();
+  const seeded = (extensionSeeds: boolean) => {
+    const db = openDb(':memory:');
+    try {
+      createSchema(db);
+      seed(db, today, { extensionSeeds });
+      return coreHashes(db);
+    } finally {
+      db.close();
+    }
+  };
+  const core = seeded(false);
+  const full = seeded(true);
+  assert.ok(Object.keys(core).length >= 15, `hashed ${Object.keys(core).length} core tables`);
+  assert.ok(Number(core.users!.split(':')[0]) > 0 && Number(core.gauge_entries!.split(':')[0]) > 0, 'the seed filled the core tables');
+  for (const table of Object.keys(core)) assert.equal(full[table], core[table], `core table ${table} changed by an extension seed`);
+  assert.deepEqual(seeded(true), full, 'the full seed is deterministic under a pinned clock');
+});
+
+test('fresh install order: upgrades run on empty core tables, then seed; the first restart upgrades nothing', () => {
+  // index.ts and resetAndSeed call createSchema BEFORE seed, so every extension upgrade first sees an empty database.
+  const db = openDb(':memory:');
+  try {
+    createSchema(db);
+    for (const t of ['users', 'campaigns', 'events', 'teams']) {
+      assert.equal(Number((db.prepare(`SELECT COUNT(*) AS n FROM ${t}`).get() as { n: number }).n), 0, `${t} is empty when upgrades run`);
+    }
+    seed(db, todayISO());
+    // A data step that skipped on the empty database (its rows missing) now finds them: it must insert nothing new over
+    // what seed() wrote (INSERT OR IGNORE) and report nothing (types.ts "ORDER ON A FRESH INSTALL").
+    assert.deepEqual(createSchema(db), [], 'a restart after a fresh seed reports no extension change');
+    assert.deepEqual(createSchema(db), [], 'and stays idempotent');
+  } finally {
+    db.close();
+  }
 });
 
 let srv: TestServer;

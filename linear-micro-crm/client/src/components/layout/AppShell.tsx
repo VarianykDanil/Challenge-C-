@@ -10,6 +10,8 @@ import { ErrorBoundary } from '@/features/common/ErrorBoundary';
 import { OfflineBanner } from '@/features/common/OfflineBanner';
 import { OutboxBanner } from '@/features/gauges/OutboxBanner';
 import { getOutbox } from '@/features/gauges/outbox';
+// Release 1.2 slot (U4): replays check-ins queued without signal, whatever page is open.
+import { CheckInOutboxReplay } from '@/features/checkins/CheckInOutboxReplay';
 import { FOCUSABLE } from '../ui/Modal';
 import { NAV_ITEMS } from './nav';
 import { Sidebar, SIDEBAR_COLLAPSED_WIDTH, SIDEBAR_WIDTH } from './Sidebar';
@@ -181,6 +183,9 @@ export function AppShell({ user, onLogout, children, title, fluid }: AppShellPro
           </ErrorBoundary>
           <ErrorBoundary name="outbox-banner" fallback={null}>
             <OutboxBanner user={user} />
+          </ErrorBoundary>
+          <ErrorBoundary name="checkin-outbox" fallback={null}>
+            <CheckInOutboxReplay user={user} />
           </ErrorBoundary>
         </div>
         <main

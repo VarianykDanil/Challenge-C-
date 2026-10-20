@@ -1,5 +1,5 @@
 // Owned by the Frontend Developer.
-import type { ApiError as ApiErrorBody } from '@lm/shared';
+import type { ApiError as ApiErrorBody, PinSetupRequiredError } from '@lm/shared';
 
 export class ApiError extends Error {
   status: number;
@@ -94,6 +94,10 @@ export async function apiRaw<T>(path: string, init: ApiInit = {}): Promise<ApiRe
     // A 401 on anything but the auth probes means the session ended (expired, deactivated, signed out elsewhere):
     // let the app clear its state and route to sign-in once, instead of every page showing a raw error.
     if (res.status === 401 && !path.startsWith('/auth/') && typeof window !== 'undefined') window.dispatchEvent(new CustomEvent(UNAUTHENTICATED_EVENT));
+    // Release 1.2 (U1's PIN gate): once an admin requires a PIN, a signed-in person without one gets 403
+    // { pinSetupRequired: true } from every API. Tell the app, so an already open session shows "Create your PIN"
+    // (auth/PinSetupGate.tsx re-reads /auth/me) instead of every card failing until a reload.
+    if (res.status === 403 && isPinSetupRequiredBody(body) && typeof window !== 'undefined') window.dispatchEvent(new CustomEvent(PIN_SETUP_REQUIRED_EVENT));
     throw new ApiError(res.status, body);
   }
   return { data: body as T, status: res.status, headers: res.headers };
@@ -113,6 +117,16 @@ export function totalCount(headers: Headers): number | null {
 
 /** Window event fired when a signed-in request is answered with 401. */
 export const UNAUTHENTICATED_EVENT = 'lm:unauthenticated';
+
+/**
+ * Release 1.2 (r2-foundation contract for U1): window event fired when any request is answered 403 with the PIN gate's
+ * body `{ error, pinSetupRequired: true }` (shared `PinSetupRequiredError`). U1 listens in `auth/PinSetupGate.tsx`.
+ */
+export const PIN_SETUP_REQUIRED_EVENT = 'lm:pin-setup-required';
+
+function isPinSetupRequiredBody(body: unknown): body is PinSetupRequiredError {
+  return typeof body === 'object' && body !== null && (body as { pinSetupRequired?: unknown }).pinSetupRequired === true;
+}
 
 export function qs(params: Record<string, string | number | boolean | null | undefined>): string {
   const sp = new URLSearchParams();

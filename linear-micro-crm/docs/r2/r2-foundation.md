@@ -45,7 +45,10 @@ Optional fields on core types (U1): `LoginInput.pin`, `UserWithTeam.hasPin`, `Us
 
 Test harness (`server/src/test/helpers.ts`): `srv.login(who, pin?)` sends `pin` only when given (or `who.pin`);
 `TestClient.put(url, body)` for PUT routes. `server/src/test/r2-contracts.test.ts` (foundation) checks the extension
-registry, idempotent upgrades, an unchanged core seed and that every 1.2 path is mounted behind requireAuth.
+registry, idempotent upgrades, the fresh-install order (a restart right after a fresh seed reports no extension
+change), that the extension seeds leave every core table byte-for-byte the same (a sha256 per core table, seeded with
+and without them under a pinned clock, via `seed(db, today, { extensionSeeds: false })`), and that every 1.2 path is
+mounted behind requireAuth.
 
 ## Logic
 
@@ -62,9 +65,17 @@ checkins.
   upgrade check compares core columns only (names without a colon).
 - `upgrade(db)` adds columns to existing tables with `addColumnIfMissing(db, table, column, ddl)` and runs one-off data
   steps an already-seeded database needs, guarded with `metaFlag` / `setMetaFlag` (`ext:<name>:<step>`).
+- **Order on a fresh install.** `index.ts` and `resetAndSeed` both call `createSchema(db)` before `seed(db)`, so on a
+  new database every `upgrade()` runs on EMPTY core tables (no users, campaigns or events yet) and `seed()` runs
+  after. A data step in `upgrade` therefore skips, without setting its meta flag, when the rows it needs are missing
+  (L2: no BCN campaign yet), and sets the flag only after it has run against them; writes with `INSERT OR IGNORE` /
+  `ON CONFLICT DO NOTHING` on a unique key so it never conflicts with `seed()`; and reports a name only when it
+  actually inserted or changed rows, so the first restart after a fresh seed returns `[]`. Rows that both an existing
+  and a fresh database need (the BCN pitch) go in both `upgrade` and `seed`.
 - `seed(db, ctx)` runs at the end of a fresh demo seed, inside the seed transaction, after every core row exists.
   `ctx` (`SeedContext`): `today`, `nowIso`, `users`, `teams`, `campaigns` (with `code`, e.g. 'BCN'), `events`, and
-  `rng(salt)` — a random stream of the extension's own, so the core demo data stays byte-for-byte the same. Never
+  `rng(salt)` — a random stream of the extension's own, so the core demo data stays byte-for-byte the same: never
+  insert, update or delete a row of a core table (an extension may write its own `ext:%` keys in `meta`). Never
   insert gauge rows or payroll runs.
 
 ### Shared types (`shared/src/types/*.ts`, re-exported from `@lm/shared`)
@@ -126,6 +137,7 @@ checkins.
 | --- | --- | --- |
 | `features/checkins/CheckInButton.tsx` `{ event, variant?: 'compact' \| 'row', className? }` | U4 | Quick gauges header (compact); dashboard Upcoming events, under each row dated today (row) |
 | `features/checkins/CheckInRollCall.tsx` `{ event, canManage, className? }` | U4 | Event page, under "Not logged yet" |
+| `features/checkins/CheckInOutboxReplay.tsx` `{ user }` | U4 | `AppShell` sticky banner row, after the gauge `OutboxBanner` (every page) |
 | `features/learning/PitchLink.tsx` `{ campaignCode, campaignId?, variant?: 'compact' \| 'button', className? }` | L2 | Quick gauges header (compact); event page header actions (button) |
 | `features/learning/PitchesSection.tsx` `{ className? }` | L2 | Learning hub, above the lessons |
 | `features/learning/ProgressCard.tsx` `{ className? }` | L1 | Dashboard (rep, leader), under the KPI tiles and pay estimate (`className="mt-3"`) |
@@ -137,12 +149,25 @@ checkins.
 | `features/settings/PinResetSection.tsx` `{ user, className? }` | U1 | Team → edit person (someone else), under the two-step reset |
 | `auth/PinSetupGate.tsx` `{ children }` | U1 | `App.tsx` ShellLayout, wrapping the AppShell (pass-through) |
 
+- **PIN gate on an open session (U1).** `api/client.ts` dispatches the window event `PIN_SETUP_REQUIRED_EVENT`
+  (`'lm:pin-setup-required'`) whenever any request is answered 403 with `{ pinSetupRequired: true }` (the gate's
+  `PinSetupRequiredError`), as it dispatches `UNAUTHENTICATED_EVENT` on a 401. U1 listens in `auth/PinSetupGate.tsx`
+  and calls `useAuth().refresh()`, so `/auth/me` returns `pinSetupRequired` and the gate shows "Create your PIN"
+  without a reload. U1 does not need to edit `api/client.ts`.
+- **Offline check-ins (U4).** The gauge outbox (`features/gauges/outbox.ts`, replayed by p7's `OutboxBanner`) handles
+  gauge upserts only. U4 keeps its own queue in `features/checkins/outbox.ts` (new, U4-owned; localStorage key
+  `'lm-checkin-outbox:<userId>'`, every storage call wrapped; each item a `ShiftCheckInInput` with the tapped
+  `checkedInAt` and `source: 'offline'`). `CheckInButton` enqueues when `POST /checkins` throws a `NetworkError`;
+  `CheckInOutboxReplay` (mounted once in `AppShell`) replays it single-flight on mount, on the `online` event and on
+  `NETWORK_EVENT` with `online: true`. `POST /checkins` is idempotent on (user, event, date), so a repeated send is
+  harmless. U4 does not edit `AppShell.tsx` or the gauge outbox.
+
 ### Files each package may edit beyond its own new files
 
 - L1: `client/src/content/learning/*`, `client/public/learning/*` (new).
 - U1: `server/src/routes/auth.ts`, `server/src/middleware/auth.ts`, `client/src/pages/Login.tsx`,
   `client/src/auth/AuthProvider.tsx`, `docs/DEPLOY.md` (new).
-- U4: the punctuality SQL in `server/src/lib/metrics.ts` (`punctualityFor`), `server/src/lib/smart/digest.ts` and
+- U4: `client/src/features/checkins/outbox.ts` (new); the punctuality SQL in `server/src/lib/metrics.ts` (`punctualityFor`), `server/src/lib/smart/digest.ts` and
   `server/src/lib/smart/checkIns.ts` (check-in time = the shift check-in when present, else the gauge's
   `checked_in_at`); `client/src/features/gauges/LogGaugesModal.tsx` (prefill the check-in time).
 - U5: `client/src/components/layout/Topbar.tsx` (QuickNav → command palette), `client/src/features/common/RangePicker.tsx`

@@ -15,10 +15,21 @@
  *    steps an existing (already seeded) database needs, guarded so they run once (e.g. a `meta` key
  *    `ext:<name>:<step>`). Returns the names of what it changed (e.g. `users.pin_hash`); createSchema reports them as
  *    `<extension name>:<name>`. A second run must return []. Every added column is nullable or has a default.
+ *  - ORDER ON A FRESH INSTALL: index.ts and resetAndSeed both call createSchema(db) BEFORE seed(db), so on a new
+ *    database every `upgrade()` runs on EMPTY core tables (no users, campaigns or events yet), and `seed()` runs after.
+ *    A data step in `upgrade` therefore must:
+ *      (a) skip, WITHOUT setting its meta flag, when the rows it needs are missing (e.g. no BCN campaign yet); set the
+ *          flag only after the step has run against those rows;
+ *      (b) write with `INSERT OR IGNORE` / `ON CONFLICT DO NOTHING` on a unique key, so the step and `seed()` never
+ *          conflict and a later start that runs the step on a freshly seeded database inserts nothing;
+ *      (c) report a name only when it actually inserted or changed rows (`.run().changes > 0`), so the first restart
+ *          after a fresh seed still returns [] (r2-contracts.test.ts checks this).
+ *    Rows that both an existing and a fresh database need go in BOTH `upgrade` (existing) and `seed` (fresh).
  *  - `seed(db, ctx)`: demo rows for a FRESH seed only (an existing database never runs it). Use `ctx.rng(salt)` for
- *    randomness — never the core seed's generator, so the core demo data stays byte-for-byte the same. Never insert a
- *    gauge_entries or payroll_runs row (a stray gauge row pays a day's base). Read business time from ctx.today /
- *    ctx.nowIso, never `new Date()`.
+ *    randomness — never the core seed's generator, so the core demo data stays byte-for-byte the same: never insert,
+ *    update or delete a row of a core table (r2-contracts.test.ts hashes every core table, seeded with and without the
+ *    extension seeds; your own `ext:%` keys in `meta` are allowed). Never insert a gauge_entries or payroll_runs row
+ *    (a stray gauge row pays a day's base). Read business time from ctx.today / ctx.nowIso, never `new Date()`.
  *  - Never import db/schema.ts or db/seed.ts from an extension (import cycle); the helpers below cover column checks.
  */
 import type { EventStatus, EventType, Position, Role, UserStatus } from '@lm/shared';
