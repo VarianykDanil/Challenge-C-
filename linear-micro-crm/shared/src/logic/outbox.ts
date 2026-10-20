@@ -8,8 +8,7 @@
  *  - sameGaugeDay      does the server already hold exactly what was queued (a save whose answer was lost)?
  *  - replayOutcome     what a POST /gauges status means for the queued item
  *  - inCheckInWindow, preselectTodayEvent, firstMemberWithoutEntry   Log gauges' smart defaults
- *  - tallyStep        one +1 / −1 on the tally, refusing a tap that would break the funnel
- *  - tallyStepThrough, tallyThroughOffer   "Count it through": a +1 that raises the earlier stages with it
+ *  - tallyPerson       one +1 / −1 on the tally: one person, counted at the furthest stage they reached
  *  - normaliseTally    stored tally counts → whole numbers that respect the funnel
  */
 import type { GaugeKey, GaugeTotals, GaugeUpsertInput } from '../types.ts';
@@ -156,7 +155,7 @@ export function firstMemberWithoutEntry(members: readonly PickerMember[], logged
 
 // ───────────────────────────── Tally ─────────────────────────────
 
-/** Lower-case stage names for hints ("sales can't go above taps"). */
+/** Lower-case stage names for hints ("Can't take one off presentations: …"). */
 const STAGE: Record<GaugeKey, string> = {
   stops: 'stops',
   table: 'to table',
@@ -166,97 +165,60 @@ const STAGE: Record<GaugeKey, string> = {
   sales: 'sales',
 };
 
+/** How far a person got, for hints ("3 people got as far as closes"). */
+const FAR: Record<GaugeKey, string> = {
+  stops: 'a stop',
+  table: 'the table',
+  presentations: 'presentations',
+  closes: 'closes',
+  taps: 'taps',
+  sales: 'sales',
+};
+
+/** 2000 → "2,000" (fixed, so a hint never depends on the phone's locale). */
+const thousands = (n: number) => String(n).replace(/\B(?=(\d{3})+(?!\d))/g, ',');
+
 export type TallyStepResult = { ok: true; counts: GaugeTotals } | { ok: false; counts: GaugeTotals; hint: string };
 
 /**
- * One tap on the tally. The funnel (stops ≥ to table ≥ presentations ≥ closes ≥ taps ≥ sales) holds after every tap:
- * a +1 changes only its own row and is refused when that row already equals the stage above it (or the daily
- * maximum); a −1 is refused when the row is 0 or already equals the stage below it. A refused tap returns the counts
- * unchanged with a short hint naming the one thing to do instead.
+ * One tap on the tally, counted as one person at the furthest stage they reached. The owner's rule: someone who got
+ * to a presentation was also stopped and got to the table, so +1 on Presentations adds one to Stops, To table and
+ * Presentations; +1 on Taps adds one to every stage from Stops to Taps; +1 on Stops adds a stop only; +1 on Sales adds
+ * one to all six. The stages after `key` never move.
+ *
+ * −1 takes that one person off again: every stage from Stops down to `key` goes down by 1, so it is the exact inverse
+ * of the +1. It is refused when `key` is 0, or when it would leave `key` below the stage after it (those people got
+ * past `key` too, so one of them has to come off first). A +1 is refused only when a stage it would raise is at the
+ * daily maximum. A refused tap returns the same counts object and one short hint naming what to do instead.
+ *
+ * Given a valid funnel (stops ≥ to table ≥ presentations ≥ closes ≥ taps ≥ sales) the result is a valid funnel, and
+ * every valid funnel is a sum of people's outcomes, so no order of taps is ever needed. Pure and deterministic; the
+ * input is never changed.
  */
-export function tallyStep(counts: GaugeTotals, key: GaugeKey, delta: 1 | -1, max: number = GAUGE_MAX_PER_DAY): TallyStepResult {
+export function tallyPerson(counts: GaugeTotals, key: GaugeKey, delta: 1 | -1, max: number = GAUGE_MAX_PER_DAY): TallyStepResult {
   const i = GAUGE_KEYS.indexOf(key);
-  const value = counts[key];
+  const stages = GAUGE_KEYS.slice(0, i + 1);
   if (delta === 1) {
-    if (value >= max) return { ok: false, counts, hint: `${GAUGE_LABELS[key]} is at the daily maximum of ${max}.` };
-    const above = i > 0 ? GAUGE_KEYS[i - 1] : undefined;
-    if (above && value >= counts[above]) {
-      return { ok: false, counts, hint: `${GAUGE_LABELS[key]} can't go above ${STAGE[above]} (${counts[above]}) — add one to ${GAUGE_LABELS[above]} first.` };
+    const full = stages.find((k) => counts[k] >= max);
+    if (full) return { ok: false, counts, hint: `${GAUGE_LABELS[full]} is at the daily maximum of ${thousands(max)}.` };
+  } else {
+    if (counts[key] <= 0) return { ok: false, counts, hint: `${GAUGE_LABELS[key]} is already 0.` };
+    const after = GAUGE_KEYS[i + 1];
+    if (after && counts[key] - 1 < counts[after]) {
+      const n = counts[after];
+      return {
+        ok: false,
+        counts,
+        hint: `Can't take one off ${STAGE[key]}: ${n} ${n === 1 ? 'person' : 'people'} got as far as ${FAR[after]}. Take one off ${GAUGE_LABELS[after]} first.`,
+      };
     }
-    return { ok: true, counts: { ...counts, [key]: value + 1 } };
+    // Only reachable with counts that are not a funnel (never stored: normaliseTally): never go below 0.
+    const empty = stages.find((k) => counts[k] <= 0);
+    if (empty) return { ok: false, counts, hint: `${GAUGE_LABELS[empty]} is already 0.` };
   }
-  if (value <= 0) return { ok: false, counts, hint: `${GAUGE_LABELS[key]} is already 0.` };
-  const below = i < GAUGE_KEYS.length - 1 ? GAUGE_KEYS[i + 1] : undefined;
-  if (below && value <= counts[below]) {
-    return { ok: false, counts, hint: `${GAUGE_LABELS[key]} can't go below ${STAGE[below]} (${counts[below]}) — take one off ${GAUGE_LABELS[below]} first.` };
-  }
-  return { ok: true, counts: { ...counts, [key]: value - 1 } };
-}
-
-/**
- * "Count it through": +1 on `key`, raising each earlier stage to at least the new value (only the stages that would
- * otherwise be lower), so a sale tapped before its tap still counts and the funnel stays valid. Given a valid funnel,
- * every stage that changes goes up by exactly 1 and the later stages never move. Refused, with the counts unchanged,
- * when `key` is already at the daily maximum (the earlier stages are at or above it, so nothing else can pass it).
- * Pure and deterministic.
- * Example: stops 40, table 10, presentations 5, closes 3, taps 2, sales 2 → through on sales → taps 3, sales 3.
- */
-export function tallyStepThrough(counts: GaugeTotals, key: GaugeKey, max: number = GAUGE_MAX_PER_DAY): TallyStepResult {
-  const value = counts[key];
-  if (value >= max) return { ok: false, counts, hint: `${GAUGE_LABELS[key]} is at the daily maximum of ${max}.` };
-  const next: GaugeTotals = { ...counts, [key]: value + 1 };
-  // Walk up from the stage above `key`: each one is raised to the stage below it when lower (never lowered).
-  for (let i = GAUGE_KEYS.indexOf(key) - 1; i >= 0; i--) {
-    const k = GAUGE_KEYS[i]!;
-    const below = next[GAUGE_KEYS[i + 1]!];
-    if (next[k] < below) next[k] = below;
-  }
+  const next: GaugeTotals = { ...counts };
+  for (const k of stages) next[k] += delta;
   return { ok: true, counts: next };
-}
-
-/** One of each stage, for "+1 tap and sale". */
-const ONE: Record<GaugeKey, string> = {
-  stops: 'stop',
-  table: 'table',
-  presentations: 'presentation',
-  closes: 'close',
-  taps: 'tap',
-  sales: 'sale',
-};
-
-/** "a", "a and b", "a, b and c" (no serial comma). */
-function listOf(words: string[]): string {
-  return words.length <= 1 ? (words[0] ?? '') : `${words.slice(0, -1).join(', ')} and ${words[words.length - 1]}`;
-}
-
-/** What the quick-gauges screen offers when a +1 is refused by the funnel. */
-export interface TallyThroughOffer {
-  /** Why the +1 was refused, e.g. "Sales can't go above taps (2)." */
-  hint: string;
-  /** The button, e.g. "Count it through: +1 tap and sale". */
-  label: string;
-  /** The counts after counting it through (what tallyStepThrough returns). */
-  counts: GaugeTotals;
-}
-
-/**
- * When a +1 on `key` is refused because the stage above is not high enough, the one-tap way to count it anyway: the
- * reason, a button label naming every stage that would go up (in funnel order), and the resulting counts. Null when
- * the +1 is allowed as it is, or is refused for another reason (the daily maximum), so there is nothing to offer.
- */
-export function tallyThroughOffer(counts: GaugeTotals, key: GaugeKey, max: number = GAUGE_MAX_PER_DAY): TallyThroughOffer | null {
-  if (tallyStep(counts, key, 1, max).ok) return null;
-  const i = GAUGE_KEYS.indexOf(key);
-  const above = i > 0 ? GAUGE_KEYS[i - 1] : undefined;
-  if (!above || counts[key] < counts[above]) return null;
-  const through = tallyStepThrough(counts, key, max);
-  if (!through.ok) return null;
-  const raised = GAUGE_KEYS.filter((k) => through.counts[k] > counts[k]).map((k) => ONE[k]);
-  return {
-    hint: `${GAUGE_LABELS[key]} can't go above ${STAGE[above]} (${counts[above]}).`,
-    label: `Count it through: +1 ${listOf(raised)}`,
-    counts: through.counts,
-  };
 }
 
 /**

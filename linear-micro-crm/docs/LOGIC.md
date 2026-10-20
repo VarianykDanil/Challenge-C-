@@ -811,9 +811,7 @@ rule, the funnel check, the paid-week lock and the check-in rules still apply to
 | `inCheckInWindow(start, now)` | `now` within [start − 60 min, start + 90 min], both ends included; no wrap past midnight. |
 | `preselectTodayEvent(events, today, teamId)` | The one own-team event dated today whose status is `live` or `completed`; null when there are none or several, or no team. |
 | `firstMemberWithoutEntry(members, loggedIds)` | The first member in list order who is active, not a recruiter and has no entry for the event. |
-| `tallyStep(counts, key, ±1)` | A +1 changes only its own row and is refused when the row already equals the stage above it, or is at the daily maximum (2,000). A −1 is refused at 0, or when the row already equals the stage below it. A refused tap returns the counts unchanged and one hint, e.g. "Sales can't go above taps (0) — add one to Taps first." |
-| `tallyStepThrough(counts, key)` | **Count it through** (Quick gauges): +1 on `key`, and each earlier stage raised to at least the new value — only the stages that would otherwise be lower. Given a valid funnel, every stage that moves goes up by exactly 1 and the later stages never move, so the funnel stays valid. Refused, counts unchanged, when `key` is at the daily maximum (2,000): "Sales is at the daily maximum of 2000." Examples: all 0, Sales → every stage 1; stops 40, table 10, presentations 5, closes 3, taps 2, sales 2, Sales → taps 3 and sales 3, the rest unchanged. |
-| `tallyThroughOffer(counts, key)` | What Quick gauges offers after a +1 the funnel refused: the reason and a button naming every stage that would go up, in funnel order, e.g. "Sales can't go above taps (2)." with **Count it through: +1 tap and sale** (from all zeros: "+1 stop, table, presentation, close, tap and sale"). Null when the +1 is allowed, on Stops, or at the daily maximum. Pure and deterministic. |
+| `tallyPerson(counts, key, ±1)` | One tap counts **one person at the furthest stage they reached**. +1 on stage K adds 1 to every stage from Stops down to K; the stages after K never move. So Stops +1 adds a stop only, Presentations +1 adds a stop, a table and a presentation, Taps +1 adds one to Stops through Taps, and Sales +1 adds one to all six. −1 on K takes that person off again (every stage from Stops to K down by 1), so it is the exact inverse of the +1. A −1 is refused when K is 0 ("Sales is already 0.") or when it would leave K below the stage after it, whose people also passed K: "Can't take one off closes: 2 people got as far as taps. Take one off Taps first." A +1 is refused only when a stage it would raise is at the daily maximum (2,000), naming that stage: "Stops is at the daily maximum of 2,000." A refused tap returns the same counts and one hint. Every accepted tap keeps the funnel (stops ≥ to table ≥ presentations ≥ closes ≥ taps ≥ sales) by construction, and every valid funnel is a sum of people's outcomes, so no order of taps is ever needed and no +1 is ever blocked for order. Counts that are not a funnel (never stored: `normaliseTally`) never go below 0. Pure and deterministic; the input is never changed. Replaces 1.1.0's `tallyStep` (a +1 changed only its own row and was refused above the stage before it), `tallyStepThrough` and `tallyThroughOffer` (**Count it through**). Stored tallies are funnels already, so they carry over unchanged. |
 | `normaliseTally(raw)` | Stored counts → whole numbers 0…2,000, then each stage lowered to the one above if needed. Never throws. |
 
 **The outbox** (`client/src/features/gauges/outbox.ts`; one localStorage key per signed-in person,
@@ -888,12 +886,23 @@ or an entry it behaves exactly as in 1.0.
 * **Finish shift** opens Log gauges prefilled with the counts. Saving goes through the same validation and the
   outbox. When the day already has an entry, the counts update it, and the stored check-in and notes are kept. The
   tally is cleared once the save succeeds or is kept on the phone.
-* **Buttons.** +1 buttons are 56 px tall; −1 buttons are 44 px. A tap that the funnel refuses greys its +1 and shows
-  the hint for 5 seconds.
+* **Counting.** Each tap goes through `tallyPerson`: one person at the furthest stage they reached, the earlier stages
+  with it. Under the event: **Tap the furthest stage each person reached. Earlier stages count too.** (`TallyHelp.tsx`,
+  one unbreakable run per sentence, so a narrow screen breaks between them). Labels say what a tap does: "Add one
+  person who reached Presentations (also adds a stop and a table), now 5"; Stops reads "Add one person who just
+  stopped, now 5"; a −1 reads "Take one person off Presentations (also takes off a stop and a table), now 5"
+  (`addPersonLabel`, `takePersonLabel`).
+* **Highlight.** Every stage the last +1 raised flashes for 300 ms: a primary ring and a light tint over its row (the
+  card) or tile (Quick gauges) fade out, and the count gives a small scale pulse. Each tap restarts it. It uses the Web
+  Animations API (`useRaiseFlash`), so the shared stylesheet needs no keyframes for it. With `prefers-reduced-motion: reduce`
+  only the fade runs (no movement); without Web Animations nothing happens. A −1 does not flash.
+* **Buttons.** +1 buttons are 56 px tall; −1 buttons are 44 px. A +1 is greyed only when it would take a stage past the
+  daily maximum. A refused tap shows its hint for 5 seconds.
 * **Loading.** The full-screen counter loads the first time the tally opens (`LazyTallyMode`, §14.11); the Gauges
   header's **Tally** button and the dashboard's **Count your shift** link are light pieces in `TallyLinks.tsx`.
 * **Shared code.** The counting lives in `useTallyCounter(event)` (`features/gauges/useTallyCounter.ts`: counts,
-  `tap(key, ±1)`, `tapThrough(key)`, reset with a confirm, the finish handlers, the persisted flag and the hint),
+  `tap(key, ±1)` on `tallyPerson`, `raised` (the stages the last +1 raised, for the highlight), reset with a confirm,
+  the finish handlers, the persisted flag and the hint),
   with `useTallyEvents` and `defaultEvent`; the event list is `TallyEventPicker.tsx`. The Tally card and Quick gauges
   both use them, so they count, refuse and finish the same way. The card also has **Full screen** (an icon on a phone),
   a link to `/quick?eventId=<id>`.
@@ -909,9 +918,14 @@ or an entry it behaves exactly as in 1.0.
   one you can count today.** above the list.
 * **Tiles.** Six, in funnel order. The whole tile is the +1 button (label, the count in tabular figures, a stripe in
   the campaign's colour). The −1 is its own 44 px button in the top-right corner, a sibling of the tile (not nested),
-  so it never adds. Both are labelled with the current count ("Add one to Sales (now 2)"), reachable with Tab, and
-  work with Enter or Space. A +1 the funnel would refuse shows a grey **+1** chip. The chip sits at the right end of the
-  count's row; in a narrow, short tile (a container query: content at most 13rem wide and 8.75rem tall, so a phone
+  so it never adds. Both are labelled with what they do and the current count, as on the card ("Add one person who
+  reached Sales (also adds a stop, a table, a presentation, a close and a tap), now 2"), reachable with Tab, and work
+  with Enter or Space. Under the stage's name a second line says what a tap adds (`TALLY_ADDS`): Stops **just a
+  stop**, To table **+ stop**, Presentations **+ stop, table**, Closes **+ 3 earlier**, Taps **+ 4 earlier**, Sales
+  **+ all 5 earlier** (11 px on a phone, 12 px from 640 px; "+ stop, table, pres." would need 97 px where a 360 px
+  phone's tile leaves 91, so Closes counts instead of naming). It keeps clear of the −1 like the label; held sideways
+  it sits in the tile's bottom-right corner, beside the count. The **+1** chip is grey only at the daily maximum. The
+  chip sits at the right end of the count's row; in a narrow, short tile (a container query: content at most 13rem wide and 8.75rem tall, so a phone
   held upright with tiles up to about 164 px tall) it moves to the left of the count and the row sits at the bottom,
   so the chip is never within about 30 px of the −1 (58 px at 360×640, 65 px at 375×667). Taps buzz briefly where the
   phone supports vibration (`navigator.vibrate`), and `touch-action: manipulation` stops quick double taps zooming the
@@ -919,15 +933,21 @@ or an entry it behaves exactly as in 1.0.
 * **Layout.** 2 columns × 3 rows on a phone held upright, with the rows sharing the height under the header (tiles
   ≥ 96 px). 3 × 2 from 640 px wide or held sideways. When the screen is under 481 px tall (a phone held sideways),
   the tiles go down to 80 px and the header and bar get tighter, so all six fit without scrolling. So do a small phone
-  held upright (`tiny`: portrait and at most 600 px tall, e.g. 320×568). There is never a horizontal scroll: the
-  **Count it through** label wraps inside its button. The count is sized to its tile in container units: up to half
-  the tile's height, and narrow enough for its digits plus the chip (`(100cqw − 3.5rem) / (0.66 × digits)`, between
-  1.5 rem and 9 rem). All six are sized for the largest count, at least two digits, so they stay one size and step
-  down together once, when a count reaches 100. Checked at 320×568, 360×640, 375×667, 375×812, 390×844, 412×915,
-  430×932, 667×375, 844×390, 768×1024, 1024×768, 1024×1366 and 1440×900, light and dark.
-* **Refused taps.** The hint replaces the bottom bar for 8 seconds, in the same box, so the tiles never move under a
-  thumb. A +1 the funnel blocks adds **Count it through: +1 …** (`tallyThroughOffer`; one tap applies
-  `tallyStepThrough`). The hint is also announced to screen readers, and × dismisses it. Any accepted tap clears it.
+  held upright (`tiny`: portrait and at most 600 px tall, e.g. 320×568). The help line sits just under the event
+  header (11 px, two lines on a phone); held sideways it moves into the header, to the right of the event, so it takes
+  no height. To make room for it, the phone header is 48 px (56 px from 640 px) and tiles on a phone held upright may
+  go down to 88 px, so all six still fit on a 360×640 screen. There is never a horizontal scroll: the hint wraps inside
+  the bar. The count is sized to its tile in container units: up to half the tile's height, no taller than the room
+  left under the label and the "what a tap adds" line (`(100cqh − --tile-head) / 1.05`, with `--tile-head` set per
+  layout: 2.25 rem in a cramped phone tile, 2.5 rem otherwise on a phone, 2.375 / 2.625 rem from 640 px, 1.5 rem held
+  sideways), and narrow enough for its digits plus the chip (`(100cqw − 3.5rem) / (0.66 × digits)`), between 1.5 rem
+  and 9 rem. All six are sized for the largest count, at least two digits, so they stay one size and step down
+  together once, when a count reaches 100. Checked at 320×568, 360×640, 375×667, 375×812, 390×844, 412×915, 667×375,
+  844×390, 768×1024, 1024×768, 1024×1366 and 1440×900, light and dark. At 320 px "Presentations" is cut short with an
+  ellipsis (it was before; every "what a tap adds" line fits).
+* **Refused taps.** Only a −1 that later stages still need, or a +1 at the daily maximum. The hint replaces the bottom
+  bar for 8 seconds, in the same box, so the tiles never move under a thumb. It is also announced to screen readers,
+  and × dismisses it. Any accepted tap clears it.
 * **Bottom bar** (sticky, above the iPhone home indicator via `env(safe-area-inset-bottom)`): "N sales from M stops ·
   1 in X", **Reset** (asks first) and a large **Finish shift**. Finish shift opens Log gauges prefilled exactly as on the
   card: same validation, same outbox, and the tally clears once it is saved or kept on the phone.

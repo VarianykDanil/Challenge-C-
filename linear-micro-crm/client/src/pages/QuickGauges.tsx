@@ -2,19 +2,22 @@
 // sidebar (and from the topbar on phones), its own lazy chunk. It is the same tally as the Gauges page's Tally card —
 // the same store (features/gauges/tallyStore.ts), the same counting hook (useTallyCounter) and the same "Finish shift"
 // path through Log gauges and the outbox — laid out for thumbs: the whole tile is the +1, a small −1 sits in its corner.
+// A tap counts one person at the furthest stage they reached (tallyPerson): +1 on Presentations also adds a stop and a
+// table, and every tile that went up flashes briefly so the cascade is visible.
 // /quick?eventId=<id> preselects an event (the Tally card's "Full screen" link).
 import { useEffect, useRef, useState } from 'react';
 import { useLocation } from 'react-router-dom';
-import { Check, Minus, Plus, Tally5, X } from 'lucide-react';
+import { Check, Minus, Tally5, X } from 'lucide-react';
 import clsx from 'clsx';
 import type { GaugeKey, SalesEventWithMeta } from '@lm/shared';
-import { GAUGE_KEYS, GAUGE_LABELS, tallyStep } from '@lm/shared';
+import { GAUGE_KEYS, GAUGE_LABELS, tallyPerson } from '@lm/shared';
 import { Button, Card, Skeleton } from '@/components/ui';
 import { useCurrentUser } from '@/auth/AuthProvider';
 import { LogGaugesModal } from '@/features/gauges/LogGaugesModal';
 import { TallyEventPicker } from '@/features/gauges/TallyEventPicker';
+import { TallyHelp } from '@/features/gauges/TallyHelp';
 import { useStoredTallies } from '@/features/gauges/tallyStore';
-import { defaultEvent, useTallyCounter, useTallyEvents } from '@/features/gauges/useTallyCounter';
+import { addPersonLabel, defaultEvent, takePersonLabel, TALLY_ADDS, useRaiseFlash, useTallyCounter, useTallyEvents } from '@/features/gauges/useTallyCounter';
 import { todayISO } from '@/lib/dates';
 import { formatDateShort, formatTime } from '@/lib/format';
 import { idFromParam, useActionParam } from '@/lib/useActionParam';
@@ -22,12 +25,13 @@ import { usePageTitle } from '@/lib/usePageTitle';
 import { useWakeLock } from '@/lib/useWakeLock';
 
 /**
- * The grid: 2 × 3 on a phone held upright (tiles ≥ 96 px), 3 × 2 from 640 px wide or held sideways; the rows share the
- * height left under the header. A phone held sideways (`short`: max-height 480 px) packs all six onto one screen with
- * 80 px tiles, so no row hides behind the bottom bar; so does a small phone held upright (`tiny`: 320×568).
+ * The grid: 2 × 3 on a phone held upright (tiles ≥ 88 px, so the help line still leaves all six on one 360×640
+ * screen), 3 × 2 from 640 px wide or held sideways; the rows share the height left under the header. A phone held
+ * sideways (`short`: max-height 480 px) packs all six onto one screen with 80 px tiles, so no row hides behind the
+ * bottom bar; so does a small phone held upright (`tiny`: 320×568).
  */
 const GRID =
-  'grid flex-1 grid-cols-2 grid-rows-[repeat(3,minmax(6rem,1fr))] gap-2.5 sm:grid-cols-3 sm:grid-rows-[repeat(2,minmax(6rem,1fr))] sm:gap-3 landscape:grid-cols-3 landscape:grid-rows-[repeat(2,minmax(6rem,1fr))] short:grid-rows-[repeat(2,minmax(5rem,1fr))] short:gap-2 tiny:grid-rows-[repeat(3,minmax(5rem,1fr))] tiny:gap-2';
+  'grid flex-1 grid-cols-2 grid-rows-[repeat(3,minmax(5.5rem,1fr))] gap-2.5 sm:grid-cols-3 sm:grid-rows-[repeat(2,minmax(6rem,1fr))] sm:gap-3 landscape:grid-cols-3 landscape:grid-rows-[repeat(2,minmax(6rem,1fr))] short:grid-rows-[repeat(2,minmax(5rem,1fr))] short:gap-2 tiny:grid-rows-[repeat(3,minmax(5rem,1fr))] tiny:gap-2';
 
 export function QuickGaugesPage() {
   usePageTitle('Quick gauges');
@@ -55,7 +59,7 @@ export function QuickGaugesPage() {
       className="flex min-h-[calc(100dvh-7rem-env(safe-area-inset-bottom))] flex-col gap-3 lg:min-h-[calc(100dvh-8rem-env(safe-area-inset-bottom))] short:-my-3 short:min-h-[calc(100dvh-5.5rem-env(safe-area-inset-bottom))] short:gap-2 tiny:-my-3 tiny:min-h-[calc(100dvh-5.5rem-env(safe-area-inset-bottom))] tiny:gap-2"
       data-quick-gauges
     >
-      <header className="flex min-h-14 items-center gap-3 rounded-2xl border border-border bg-surface px-3 py-2 shadow-card sm:px-4 short:min-h-12 short:py-1.5 tiny:min-h-12 tiny:py-1.5">
+      <header className="flex min-h-12 items-center gap-3 rounded-2xl border border-border bg-surface px-3 py-1.5 shadow-card sm:min-h-14 sm:px-4 sm:py-2 short:min-h-12 short:py-1.5 tiny:min-h-12 tiny:py-1.5">
         <span
           className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-primary-soft text-primary"
           style={selected ? { backgroundColor: `color-mix(in srgb, ${selected.campaignColor} 16%, transparent)`, color: selected.campaignColor } : undefined}
@@ -78,6 +82,10 @@ export function QuickGaugesPage() {
             <p className="text-xs text-muted">Tap a tile as it happens. The counts stay on this phone until you finish the shift.</p>
           )}
         </div>
+        {/* Held sideways there is no height to spare under the header, but room across it: the help line sits here. */}
+        {selected && (
+          <p className="hidden w-60 shrink-0 text-[11px] leading-[14px] text-muted short:block" data-quick-help-side><TallyHelp /></p>
+        )}
         {selected && options.length > 1 && (
           <Button variant="ghost" onClick={() => setChoosing(true)} className="-mr-1">Change</Button>
         )}
@@ -85,7 +93,7 @@ export function QuickGaugesPage() {
 
       {loading ? (
         <div className={GRID} aria-hidden>
-          {GAUGE_KEYS.map((k) => <Skeleton key={k} className="h-full min-h-24 rounded-2xl short:min-h-20 tiny:min-h-20" />)}
+          {GAUGE_KEYS.map((k) => <Skeleton key={k} className="h-full min-h-22 rounded-2xl sm:min-h-24 short:min-h-20 tiny:min-h-20" />)}
         </div>
       ) : selected ? (
         <QuickCounter key={`${selected.id}:${selected.date}`} event={selected} />
@@ -110,9 +118,9 @@ export function QuickGaugesPage() {
 
 function QuickCounter({ event }: { event: SalesEventWithMeta }) {
   const me = useCurrentUser();
-  // A refused tap's hint (and its "Count it through" button) stays a little longer than on the card: gloves, glare.
+  // A refused tap's hint stays a little longer than on the card: gloves, glare.
   const t = useTallyCounter(event, { hintMs: 8000 });
-  const { counts, total, stopsPerSale, hint, offer } = t;
+  const { counts, total, stopsPerSale, hint, raised } = t;
   const [dismissed, setDismissed] = useState<string | null>(null);
   const showHint = hint != null && dismissed !== hint;
   // Every tile's count is the same size, set by the biggest number (at least two digits), so the six read as one set
@@ -132,17 +140,29 @@ function QuickCounter({ event }: { event: SalesEventWithMeta }) {
         <p className="rounded-xl border border-warning/30 bg-warning-soft px-3 py-2 text-xs text-warning">This browser can&apos;t keep the tally if the page reloads — keep this page open until you finish the shift.</p>
       )}
 
+      {/* Tucked under the event header (two short lines on a phone); held sideways it moves into the header. */}
+      <p className="-mt-1.5 px-1 text-[11px] leading-[14px] text-muted sm:-mt-1 sm:text-xs sm:leading-4 short:hidden tiny:-mt-1" data-quick-help><TallyHelp /></p>
+
       <div className={GRID} role="group" aria-label={`Counts for ${event.name}`}>
         {GAUGE_KEYS.map((k) => (
-          <Tile key={k} k={k} value={counts[k]} digits={digits} blocked={!tallyStep(counts, k, 1).ok} color={event.campaignColor} onTap={(d) => {
-            setDismissed(null);
-            t.tap(k, d);
-          }} />
+          <Tile
+            key={k}
+            k={k}
+            value={counts[k]}
+            digits={digits}
+            full={!tallyPerson(counts, k, 1).ok}
+            pulse={raised?.keys.includes(k) ? raised.n : null}
+            color={event.campaignColor}
+            onTap={(d) => {
+              setDismissed(null);
+              t.tap(k, d);
+            }}
+          />
         ))}
       </div>
 
-      {/* Announced once per refusal; the visible panel below repeats it next to its buttons. */}
-      <p role="status" aria-live="polite" className="sr-only">{hint ? `${offer ? offer.hint : hint}${offer ? ` ${offer.label} is available.` : ''}` : ''}</p>
+      {/* Announced once per refusal; the visible panel below repeats it. */}
+      <p role="status" aria-live="polite" className="sr-only">{hint ?? ''}</p>
 
       <div className="sticky bottom-0 z-10 -mx-1 bg-bg px-1 pb-[env(safe-area-inset-bottom)] pt-1">
         <div className="relative rounded-2xl border border-border bg-surface p-3 shadow-pop sm:px-4 short:py-2">
@@ -182,33 +202,18 @@ function QuickCounter({ event }: { event: SalesEventWithMeta }) {
           {showHint && (
             // Same box as the bar (it grows upwards if the text needs it), so the tiles never move under a thumb.
             <div
-              className="absolute inset-x-0 bottom-0 grid min-h-full animate-fade-in grid-cols-[minmax(0,1fr)_auto] content-center items-center gap-x-2 gap-y-2 rounded-2xl border border-warning/40 bg-surface p-3 sm:grid-cols-[minmax(11rem,1fr)_auto_auto] sm:gap-x-4 sm:px-4 short:py-2"
+              className="absolute inset-x-0 bottom-0 flex min-h-full animate-fade-in items-center gap-2 rounded-2xl border border-warning/40 bg-surface p-3 sm:gap-4 sm:px-4 short:py-2"
               data-quick-hint
             >
-              <p className="col-start-1 row-start-1 min-w-0 text-sm font-medium text-warning" aria-hidden>{offer ? offer.hint : hint}</p>
+              <p className="min-w-0 flex-1 text-sm font-medium text-warning" aria-hidden>{hint}</p>
               <button
                 type="button"
                 onClick={() => setDismissed(hint)}
                 aria-label="Dismiss"
-                className="focus-ring col-start-2 row-start-1 -my-1 inline-flex h-10 w-10 items-center justify-center rounded-lg text-muted hover:bg-surface-2 hover:text-fg sm:col-start-3"
+                className="focus-ring -my-1 inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-lg text-muted hover:bg-surface-2 hover:text-fg"
               >
                 <X className="h-4 w-4" aria-hidden />
               </button>
-              {offer && (
-                <Button
-                  variant="soft"
-                  size="lg"
-                  onClick={() => t.tapThrough(offer.key)}
-                  leftIcon={<Plus aria-hidden />}
-                  // The label wraps inside the button (Button's own whitespace-nowrap stays on the button, so the
-                  // wrapping is set on the text): the long "+1 stop, table, presentation, close, tap and sale" never
-                  // pushes the page sideways or runs under the ✕.
-                  className="col-span-2 row-start-2 h-auto min-h-12 min-w-0 justify-start py-2 text-sm short:min-h-11 short:py-1.5 sm:col-span-1 sm:col-start-2 sm:row-start-1 sm:max-w-lg"
-                  data-quick-through={offer.key}
-                >
-                  <span className="min-w-0 whitespace-normal text-left">{offer.label}</span>
-                </Button>
-              )}
             </div>
           )}
         </div>
@@ -232,47 +237,66 @@ interface TileProps {
   value: number;
   /** How many digits the count is sized for (the same for all six tiles). */
   digits: number;
-  /** The funnel would refuse a +1 right now (a tap then explains why and offers to count it through). */
-  blocked: boolean;
+  /** A +1 here would take a stage past the daily maximum (the only time a +1 is refused; a tap then says which). */
+  full: boolean;
+  /** The number of the tap that just raised this stage (it flashes briefly), or null. */
+  pulse: number | null;
   color: string;
   onTap: (delta: 1 | -1) => void;
 }
 
-/** The count's font size inside its tile: up to half the tile's height, and narrow enough that every digit and the +1
- * chip fit across (about 0.66 em a digit; 3.5 rem for the chip and the gap — container units are already measured
- * inside the tile's padding), between 1.5 rem (four digits still fit a 320 px phone) and 9 rem. */
+/** The count's font size inside its tile: up to half the tile's height, never taller than the room left under the label
+ * and its "what a tap adds" line (`--tile-head`: those two lines, the row's top padding and 2 px, set per layout on the
+ * count), and narrow enough that every digit and the +1 chip fit across (about 0.66 em a digit; 3.5 rem for the chip
+ * and the gap — container units are already measured inside the tile's padding), between 1.5 rem (four digits still
+ * fit a 320 px phone) and 9 rem. */
 function countSize(digits: number): string {
-  return `clamp(1.5rem, min(50cqh, calc((100cqw - 3.5rem) / ${(0.66 * digits).toFixed(2)})), 9rem)`;
+  return `clamp(1.5rem, min(50cqh, calc((100cqh - var(--tile-head)) / 1.05), calc((100cqw - 3.5rem) / ${(0.66 * digits).toFixed(2)})), 9rem)`;
 }
 
-/** One stage: the whole tile is the +1; the −1 in its corner is its own button (a sibling, so it never adds). */
-function Tile({ k, value, digits, blocked, color, onTap }: TileProps) {
+/**
+ * One stage: the whole tile is the +1; the −1 in its corner is its own button (a sibling, so it never adds). Inside,
+ * three rows: the stage, what one tap on it adds ("+ stop, table", clear of the −1 like the label), then the count
+ * with its +1 chip. Held sideways (`short`, 80 px tiles) the note moves to the bottom-right corner, beside the count.
+ */
+function Tile({ k, value, digits, full, pulse, color, onTap }: TileProps) {
   const label = GAUGE_LABELS[k];
+  const flash = useRaiseFlash(pulse);
   return (
-    <div className="relative min-h-24 short:min-h-20 tiny:min-h-20" data-quick-tile={k}>
+    <div className="relative min-h-22 sm:min-h-24 short:min-h-20 tiny:min-h-20" data-quick-tile={k}>
       <button
         type="button"
         onClick={() => onTap(1)}
-        aria-label={`Add one to ${label} (now ${value})`}
+        aria-label={addPersonLabel(k, value)}
         data-quick-plus={k}
-        className="focus-ring group absolute inset-0 flex touch-manipulation select-none flex-col justify-between overflow-hidden rounded-2xl [container-type:size] border border-border bg-surface p-3 pl-3.5 text-left shadow-card transition-[transform,background-color,border-color] duration-100 [-webkit-tap-highlight-color:transparent] hover:border-border-strong active:scale-[0.97] active:bg-surface-2 sm:p-4 sm:pl-5 short:p-2.5 short:pl-4 tiny:p-2.5 tiny:pl-3.5"
+        className="focus-ring group absolute inset-0 grid touch-manipulation select-none grid-cols-[minmax(0,1fr)] grid-rows-[auto_auto_minmax(0,1fr)] overflow-hidden rounded-2xl [container-type:size] border border-border bg-surface p-3 pl-3.5 text-left shadow-card transition-[transform,background-color,border-color] duration-100 [-webkit-tap-highlight-color:transparent] hover:border-border-strong active:scale-[0.97] active:bg-surface-2 sm:p-4 sm:pl-5 short:grid-cols-[auto_minmax(0,1fr)] short:grid-rows-[auto_minmax(0,1fr)] short:p-2.5 short:pl-4 tiny:p-2.5 tiny:py-1.5 tiny:pl-3.5"
       >
         <span className="absolute inset-y-0 left-0 w-1.5" style={{ backgroundColor: color }} aria-hidden />
-        <span className="truncate pr-10 text-[13px] font-semibold leading-5 text-muted sm:pr-12 sm:text-base short:text-sm">{label}</span>
+        {/* The tap's highlight: every tile a tap raised flashes for 300 ms, so the cascade is visible. */}
+        <span ref={flash.ring} className="pointer-events-none absolute inset-0 rounded-[inherit] bg-primary/15 opacity-0 ring-2 ring-inset ring-primary" aria-hidden data-quick-flash />
+        <span className="col-span-full truncate pr-10 text-[13px] font-semibold leading-5 text-muted sm:pr-12 sm:text-base short:text-sm">{label}</span>
+        <span className="truncate pr-10 text-[11px] leading-[14px] text-subtle sm:pr-12 sm:text-xs sm:leading-4 short:col-start-2 short:row-start-2 short:self-end short:pl-3 short:pr-0 short:text-right" data-quick-note>
+          {TALLY_ADDS[k]}
+        </span>
         {/* The +1 chip sits at the far end of the row, under the −1 — except in a narrow, short tile (a phone held
             upright, up to about 164 px tall), where that would put it right against the −1: there it leads the row,
             on the left, and the row sits at the bottom of the tile, so neither the chip nor the count is a thumb's
             width from the −1. */}
-        <span className="flex flex-1 items-center justify-between gap-2 pt-1 short:justify-start short:gap-3 short:pt-0 tile-cramped:items-end tile-cramped:justify-start">
+        <span className="flex min-h-0 items-center justify-between gap-2 pt-1 short:col-start-1 short:row-start-2 short:justify-start short:gap-3 short:pt-0 tile-cramped:items-end tile-cramped:justify-start tile-cramped:pt-0">
           {/* Sized to the tile (container units): as big as its height allows, never wider than the tile leaves room
               for, whatever the number of digits. Browsers without container units keep the fixed sizes. */}
-          <span className="kpi-number text-5xl text-fg sm:text-6xl short:text-4xl" style={{ fontSize: countSize(digits) }} data-quick-count={k}>
+          <span
+            ref={flash.count}
+            className="kpi-number text-5xl text-fg [--tile-head:2.5rem] sm:text-6xl sm:[--tile-head:2.625rem] tile-cramped:[--tile-head:2.25rem] sm:tile-cramped:[--tile-head:2.375rem] short:text-4xl short:[--tile-head:1.5rem] short:tile-cramped:[--tile-head:1.5rem]"
+            style={{ fontSize: countSize(digits) }}
+            data-quick-count={k}
+          >
             {value}
           </span>
           <span
             className={clsx(
-              'mb-1 inline-flex h-8 shrink-0 items-center rounded-full px-2.5 text-sm font-bold tabular-nums transition-colors short:mb-0 short:h-7 tile-cramped:order-first tile-cramped:mb-1.5',
-              blocked ? 'bg-surface-2 text-subtle' : 'bg-primary text-primary-fg group-active:bg-primary-hover',
+              'mb-1 inline-flex h-8 shrink-0 items-center rounded-full px-2.5 text-sm font-bold tabular-nums transition-colors short:mb-0 short:h-7 tile-cramped:order-first tile-cramped:mb-0.5 tile-cramped:h-7',
+              full ? 'bg-surface-2 text-subtle' : 'bg-primary text-primary-fg group-active:bg-primary-hover',
             )}
             aria-hidden
             data-quick-chip
@@ -284,7 +308,7 @@ function Tile({ k, value, digits, blocked, color, onTap }: TileProps) {
       <button
         type="button"
         onClick={() => onTap(-1)}
-        aria-label={`Take one off ${label} (now ${value})`}
+        aria-label={takePersonLabel(k, value)}
         data-quick-minus={k}
         className="focus-ring absolute right-1 top-1 z-10 inline-flex h-11 w-11 touch-manipulation items-center justify-center rounded-xl border border-border bg-surface text-muted transition-colors [-webkit-tap-highlight-color:transparent] hover:bg-surface-2 hover:text-fg active:bg-surface-3"
       >

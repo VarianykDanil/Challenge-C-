@@ -264,9 +264,20 @@ link. It opens Google Maps (the Maps app on a phone) at the venue.
 
 * **Opening it.** Tap **Tally** on the Gauges page, or **Count your shift** on the dashboard's **Upcoming events**
   card.
-* **Counting.** Tap the big **+1** next to Stops, To table, Presentations, Closes, Taps and Sales as it happens; the
-  small **−** takes one off. The tally keeps the funnel in order: you can't add a sale before the tap that led to it,
-  and it tells you why in one line.
+* **One tap is one person.** When you finish with someone, tap the big **+1** on the furthest stage they reached:
+  Stops, To table, Presentations, Closes, Taps or Sales. The earlier stages count too, because everyone who got to a
+  presentation was also stopped and came to the table. The line under the event says so: **Tap the furthest stage each
+  person reached. Earlier stages count too.**
+  * Someone you only stopped: **+1** on **Stops**. Just the stop goes up.
+  * Someone who got to a presentation: **+1** on **Presentations**. Stops, To table and Presentations each go up by 1.
+  * Someone who got as far as a tap: **+1** on **Taps**. Stops, To table, Presentations, Closes and Taps each go up by 1.
+  * A sale: **+1** on **Sales** adds one to all six.
+
+  Every row that went up flashes for a moment, so you can see what the tap counted. Taps can come in any order, so a
+  **+1** is never greyed out (only at the daily maximum of 2,000 stops).
+* **Tapped the wrong one?** The small **−** takes that person off again: the same stages go back down by 1. If later
+  stages still need them, it says what to do instead, for example "Can't take one off closes: 2 people got as far as
+  taps. Take one off Taps first."
 * **Your counts are safe** on the phone through reloads and lost signal. The **Tally** button shows today's stop
   count, and the dashboard says **Carry on counting**. An unfinished tally is dropped after 14 days.
 * **Finish shift** opens Log gauges with your counts filled in: check them, add your check-in or notes, and save
@@ -284,12 +295,16 @@ hand or an iPad on the stand.
   screen** opens the same event there. While you are counting, the side menu button shows today's stops so far.
 * **Your event is picked for you** the same way as the Tally card: the one you are already counting today, otherwise
   the one under way, otherwise your only event. If there are several, tap **Change** to pick another.
-* **Counting.** Tap anywhere on a tile to add one: Stops, To table, Presentations, Closes, Taps, Sales. The small
-  **−** in the top corner of each tile takes one off, and never adds; the **+1** on the tile always sits well clear
-  of it. A grey **+1** means that stage can't go higher yet.
-* **Count it through.** If you tap **Sales** before the tap that led to it, Linear Hub says why ("Sales can't go
-  above taps (2).") and offers **Count it through: +1 tap and sale**. One tap adds the sale and raises the earlier
-  stages that need it, so the funnel stays in order.
+* **Counting: one tap is one person.** Tap anywhere on the tile of the furthest stage the person reached: Stops, To
+  table, Presentations, Closes, Taps or Sales. The earlier stages go up with it, exactly as on the Tally card, and the
+  small line under each stage's name says what a tap adds: **just a stop**, **+ stop**, **+ stop, table**, **+ 3
+  earlier**, **+ 4 earlier**, **+ all 5 earlier**. For example, a presentation adds a stop, a table and a
+  presentation; a tap adds one to Stops through Taps; a sale adds one to all six. Every tile that went up flashes for
+  a moment. The help line under the event repeats the rule.
+* **Taking one off.** The small **−** in the top corner of each tile takes that person off again, and never adds; the
+  **+1** on the tile always sits well clear of it. If someone counted further on still needs that stage, the bar at the
+  bottom says which tile to take one off first. Taps can come in any order, so the **+1** is only grey at the daily
+  maximum (2,000 stops).
 * **Same counts as the Tally card.** Start on the Gauges page and carry on here, or the other way round. The numbers
   stay on your phone through reloads and lost signal until you finish. With Linear Hub open in two tabs, both show
   the same counts.

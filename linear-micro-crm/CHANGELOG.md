@@ -15,6 +15,18 @@ response field is renamed or removed, and new fields are optional.
   so new features always show after a pull. The server warns at start-up when its screens are older than the code, and
   `npm run doctor` checks both.
 
+### Changed
+
+- **Tally taps count people.** One tap on the Tally card or in Quick gauges is one person, at the furthest stage they
+  reached, and the earlier stages count too: **+1** on Presentations adds a stop, a table and a presentation; on Taps
+  it adds one to Stops through Taps; on Stops just a stop; on Sales all six. **−1** takes that person off again, and
+  says which tile to take one off first when a later stage still needs them ("Can't take one off closes: 2 people got
+  as far as taps. Take one off Taps first."). Taps can come in any order, so **Count it through** is gone and a **+1**
+  is greyed only at the daily maximum. Each tile says what a tap adds (**+ stop, table**), a line under the event
+  explains the rule, and the tiles a tap raised flash for a moment (no movement with reduced motion). Tallies already
+  on a phone carry over unchanged. `tallyPerson` replaces `tallyStep`, `tallyStepThrough` and `tallyThroughOffer` in
+  `@lm/shared`. No server change.
+
 ### Fixed
 
 - package-lock.json disagreed with package.json (the Node requirement), so every `npm install` rewrote it, and that

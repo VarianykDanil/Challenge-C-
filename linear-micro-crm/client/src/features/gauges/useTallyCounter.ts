@@ -4,7 +4,7 @@
 // Never import this from the shell: it is shared by two lazily loaded chunks and should stay out of the first download.
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { GaugeKey, GaugeTotals, SalesEventWithMeta } from '@lm/shared';
-import { EMPTY_TOTALS, GAUGE_KEYS, tallyStep, tallyStepThrough, tallyThroughOffer, type TallyThroughOffer } from '@lm/shared';
+import { EMPTY_TOTALS, GAUGE_KEYS, GAUGE_LABELS, tallyPerson } from '@lm/shared';
 import { useCurrentUser } from '@/auth/AuthProvider';
 import { todayISO } from '@/lib/dates';
 import { useLoggableEvents } from './loggableEvents';
@@ -37,6 +37,71 @@ export function defaultEvent(options: SalesEventWithMeta[], stored: StoredTally[
 
 const sameCounts = (a: GaugeTotals, b: GaugeTotals) => GAUGE_KEYS.every((k) => a[k] === b[k]);
 
+// ───────────── What a tap means (one person, at the furthest stage they reached: tallyPerson) ─────────────
+
+/** What one tap on each stage adds, as a tile's second line. Named up to two earlier stages, then counted: each fits a
+ * 320 px phone's tile at 11 px ("+ stop, table, pres." would need 97 px where a 360 px phone leaves 91). */
+export const TALLY_ADDS: Record<GaugeKey, string> = {
+  stops: 'just a stop',
+  table: '+ stop',
+  presentations: '+ stop, table',
+  closes: '+ 3 earlier',
+  taps: '+ 4 earlier',
+  sales: '+ all 5 earlier',
+};
+
+const ONE: Record<GaugeKey, string> = { stops: 'a stop', table: 'a table', presentations: 'a presentation', closes: 'a close', taps: 'a tap', sales: 'a sale' };
+/** "a", "a and b", "a, b and c" (no serial comma). */
+const listOf = (words: string[]) => (words.length <= 1 ? (words[0] ?? '') : `${words.slice(0, -1).join(', ')} and ${words[words.length - 1]}`);
+const earlierOf = (k: GaugeKey) => GAUGE_KEYS.slice(0, GAUGE_KEYS.indexOf(k)).map((e) => ONE[e]);
+
+/** A +1's label: "Add one person who reached Presentations (also adds a stop and a table), now 5". */
+export function addPersonLabel(k: GaugeKey, now: number): string {
+  const earlier = earlierOf(k);
+  return earlier.length ? `Add one person who reached ${GAUGE_LABELS[k]} (also adds ${listOf(earlier)}), now ${now}` : `Add one person who just stopped, now ${now}`;
+}
+
+/** A −1's label: "Take one person off Presentations (also takes off a stop and a table), now 5". */
+export function takePersonLabel(k: GaugeKey, now: number): string {
+  const earlier = earlierOf(k);
+  return earlier.length ? `Take one person off ${GAUGE_LABELS[k]} (also takes off ${listOf(earlier)}), now ${now}` : `Take one off Stops, now ${now}`;
+}
+
+const reducedMotion = () => {
+  try {
+    return window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+  } catch {
+    return false;
+  }
+};
+
+/**
+ * The brief highlight on a stage that went up with a tap, so the cascade is visible: `pulse` is the tap's number when
+ * this stage went up with it (see TallyCounterState.raised), else null. `ring` (an overlay, opacity 0 at rest) fades
+ * out over 300 ms; `count` gets a small scale pulse, left out when the person prefers reduced motion. Each new tap
+ * restarts it. Web Animations only, so the shared stylesheet needs no keyframes for it; without them nothing happens.
+ */
+export function useRaiseFlash<C extends HTMLElement = HTMLElement>(pulse: number | null) {
+  const ring = useRef<HTMLSpanElement>(null);
+  const count = useRef<C>(null);
+  useEffect(() => {
+    if (pulse == null) return;
+    const anims: Animation[] = [];
+    try {
+      const r = ring.current?.animate?.([{ opacity: 1 }, { opacity: 0 }], { duration: 300, easing: 'ease-out' });
+      if (r) anims.push(r);
+      if (!reducedMotion()) {
+        const c = count.current?.animate?.([{ transform: 'scale(1)' }, { transform: 'scale(1.08)' }, { transform: 'scale(1)' }], { duration: 300, easing: 'ease-out' });
+        if (c) anims.push(c);
+      }
+    } catch {
+      /* no Web Animations: no highlight */
+    }
+    return () => anims.forEach((a) => a.cancel());
+  }, [pulse]);
+  return { ring, count };
+}
+
 /** A short buzz where the phone supports it (Android Chrome); silently nothing elsewhere. */
 export const vibrate = (pattern: number | number[]) => {
   try {
@@ -61,14 +126,13 @@ export interface TallyCounterState {
   stopsPerSale: number | null;
   /** False when this browser can't keep the counts across a reload (they still count in memory). */
   persisted: boolean;
-  /** Why the last tap was refused, for a few seconds; null otherwise. */
+  /** Why the last tap was refused (a −1 the funnel needs elsewhere first, or the daily maximum), for a few seconds. */
   hint: string | null;
-  /** When the last refused tap was a +1 the funnel blocked: the one-tap way to count it through. */
-  offer: (TallyThroughOffer & { key: GaugeKey }) | null;
-  /** One +1 / −1 (tallyStep); false when the funnel refused it (the hint says why). */
+  /** The stages the last accepted +1 raised, and that tap's number (it changes on every +1, to restart the
+   * highlight); null after a −1, a reset or before the first tap. */
+  raised: { keys: readonly GaugeKey[]; n: number } | null;
+  /** One person +1 / −1 (tallyPerson): every stage from Stops to `key` moves; false when refused (the hint says why). */
   tap: (key: GaugeKey, delta: 1 | -1) => boolean;
-  /** +1 on `key`, raising the earlier stages with it (tallyStepThrough). */
-  tapThrough: (key: GaugeKey) => boolean;
   /** Reset asks first: confirmReset is true between askReset and reset / cancelReset. */
   confirmReset: boolean;
   askReset: () => void;
@@ -92,7 +156,8 @@ export function useTallyCounter(event: SalesEventWithMeta, opts: TallyCounterOpt
   const persistedRef = useRef(persisted);
   persistedRef.current = persisted;
   const [hint, setHint] = useState<string | null>(null);
-  const [refused, setRefused] = useState<GaugeKey | null>(null);
+  const [raised, setRaised] = useState<TallyCounterState['raised']>(null);
+  const pulses = useRef(0);
   const [confirmReset, setConfirmReset] = useState(false);
   const [finishing, setFinishing] = useState(false);
   const onFinished = useRef(opts.onFinished);
@@ -125,10 +190,7 @@ export function useTallyCounter(event: SalesEventWithMeta, opts: TallyCounterOpt
 
   useEffect(() => {
     if (!hint) return;
-    const id = window.setTimeout(() => {
-      setHint(null);
-      setRefused(null);
-    }, hintMs);
+    const id = window.setTimeout(() => setHint(null), hintMs);
     return () => window.clearTimeout(id);
   }, [hint, hintMs]);
 
@@ -141,49 +203,28 @@ export function useTallyCounter(event: SalesEventWithMeta, opts: TallyCounterOpt
     [me.id, event.id, event.date],
   );
 
-  const accepted = useCallback(
-    (next: GaugeTotals) => {
+  const tap = useCallback(
+    (k: GaugeKey, delta: 1 | -1) => {
+      const before = countsRef.current;
+      const r = tallyPerson(before, k, delta);
+      if (!r.ok) {
+        setHint(r.hint);
+        vibrate([30, 40, 30]);
+        return false;
+      }
       setHint(null);
-      setRefused(null);
       setConfirmReset(false);
-      commit(next);
+      setRaised(delta === 1 ? { keys: GAUGE_KEYS.filter((s) => r.counts[s] > before[s]), n: ++pulses.current } : null);
+      commit(r.counts);
       vibrate(8);
+      return true;
     },
     [commit],
   );
 
-  const tap = useCallback(
-    (k: GaugeKey, delta: 1 | -1) => {
-      const r = tallyStep(countsRef.current, k, delta);
-      if (!r.ok) {
-        setHint(r.hint);
-        setRefused(delta === 1 ? k : null);
-        vibrate([30, 40, 30]);
-        return false;
-      }
-      accepted(r.counts);
-      return true;
-    },
-    [accepted],
-  );
-
-  const tapThrough = useCallback(
-    (k: GaugeKey) => {
-      const r = tallyStepThrough(countsRef.current, k);
-      if (!r.ok) {
-        setHint(r.hint);
-        setRefused(null);
-        vibrate([30, 40, 30]);
-        return false;
-      }
-      accepted(r.counts);
-      return true;
-    },
-    [accepted],
-  );
-
   const reset = useCallback(() => {
     setConfirmReset(false);
+    setRaised(null);
     commit({ ...EMPTY_TOTALS });
   }, [commit]);
 
@@ -191,14 +232,9 @@ export function useTallyCounter(event: SalesEventWithMeta, opts: TallyCounterOpt
     clearTally(me.id, event.id, event.date);
     countsRef.current = { ...EMPTY_TOTALS };
     setCounts({ ...EMPTY_TOTALS });
+    setRaised(null);
     onFinished.current?.();
   }, [me.id, event.id, event.date]);
-
-  const offer = useMemo(() => {
-    if (!refused) return null;
-    const o = tallyThroughOffer(counts, refused);
-    return o ? { ...o, key: refused } : null;
-  }, [counts, refused]);
 
   return {
     counts,
@@ -206,9 +242,8 @@ export function useTallyCounter(event: SalesEventWithMeta, opts: TallyCounterOpt
     stopsPerSale: counts.sales > 0 ? Math.round(counts.stops / counts.sales) : null,
     persisted,
     hint,
-    offer,
+    raised,
     tap,
-    tapThrough,
     confirmReset,
     askReset: useCallback(() => setConfirmReset(true), []),
     cancelReset: useCallback(() => setConfirmReset(false), []),
