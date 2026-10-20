@@ -45,21 +45,34 @@ export interface PasteMember {
   lastName: string;
 }
 
-/** One pasted line, e.g. "Jordan 65 22 11 5 3 3", "Jordan L - 65/22/11/5/3/3", "amelia: 40 12 6 2 1 1". */
+/**
+ * One person read from a pasted line, e.g. "Jordan 65 22 11 5 3 3", "Jordan L - 65/22/11/5/3/3",
+ * "amelia: 40 12 6 2 1 1". A line naming two people ("Jordan 65 22 11 5 3 3, Sam 40 12 6 2 1 1") gives two.
+ */
 export interface ParsedPasteLine {
   /** 1-based line number in the pasted text. */
   line: number;
+  /** Unique within one result: "4", or "4.1" / "4.2" when line 4 names two people. Choices are keyed by it. */
+  key: string;
   raw: string;
-  /** The name as written. */
+  /** The name as written (filler such as "gauges for" left out), or the WhatsApp sender's name. */
   name: string;
+  /** Where the name came from: the line itself, or the WhatsApp sender when the line has no name; null → none. */
+  nameFrom: 'line' | 'sender' | null;
   /** Candidate members: one → matched, several → ambiguous (ask), none → unknown. */
   matches: number[];
   /** Set when exactly one member matched (or the person chose). */
   userId: number | null;
+  /** True when the one match is a near miss (a typo or short form), worth a glance. */
+  guess: boolean;
   /** The six gauges in funnel order; null when six numbers could not be read. */
   values: GaugeTotals | null;
-  /** Problems to show on the row ("Found 5 numbers, need 6", "Table is more than stops"). */
+  /** A check-in time written on the line ("in 9:58"), as "HH:mm"; null when none. */
+  checkIn: string | null;
+  /** Problems to show on the row ("Found 5 numbers, need 6", "To table (22) is more than stops (12)"). */
   issues: string[];
+  /** Key of a later complete line for the same person, which fills the table instead of this one; null otherwise. */
+  replacedBy: string | null;
 }
 
 export interface PasteParseResult {
