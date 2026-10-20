@@ -23,6 +23,8 @@ import {
 } from '@lm/shared';
 import { openDb, run, transaction, type Db } from './connection.ts';
 import { createSchema, backfillGaugeRates } from './schema.ts';
+import { seedExtensions } from './extensions/index.ts';
+import { extensionRng } from './extensions/types.ts';
 import { Rng } from '../lib/prng.ts';
 import { RECRUITER_HIRES_SQL } from '../lib/pay.ts';
 import * as D from '../lib/dates.ts';
@@ -700,6 +702,21 @@ export function seed(db: Db, today: string = D.todayISO()): SeedStats {
 
     // money rates are captured per entry (campaign payout, the person's plan commission) — fill them for the seeded rows
     backfillGaugeRates(db);
+
+    // ── Release 1.2 database extensions (db/extensions): their demo rows, last, from the rows created above ──
+    // Each extension draws from its own random stream (ctx.rng), so the core data above never changes.
+    seedExtensions(db, {
+      today,
+      nowIso,
+      users: users.map((u) => ({
+        id: u.id, employeeId: u.employeeId, firstName: u.firstName, lastName: u.lastName, role: u.role, position: u.position,
+        teamId: u.teamId, status: u.status, startDate: u.startDate,
+      })),
+      teams: db.prepare(`SELECT id, name, leader_id AS leaderId FROM teams ORDER BY id`).all() as { id: number; name: string; leaderId: number | null }[],
+      campaigns: [...campaigns.values()].map((c) => ({ id: c.id, code: c.code, name: c.name })),
+      events: events.map((e) => ({ ...e })),
+      rng: extensionRng,
+    });
     run(db, `INSERT INTO meta (key, value) VALUES ('seeded_at', ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value`, [nowIso]);
     run(db, `INSERT INTO meta (key, value) VALUES ('seed_today', ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value`, [today]);
   });

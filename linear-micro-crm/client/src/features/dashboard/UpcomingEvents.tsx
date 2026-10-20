@@ -6,6 +6,8 @@ import type { EventForecast, SalesEventWithMeta } from '@lm/shared';
 import { EmptyState } from '@/components/ui';
 import { useEvents } from '@/api/hooks';
 import { useCurrentUser } from '@/auth/AuthProvider';
+import { CheckInButton } from '@/features/checkins/CheckInButton';
+import { ErrorBoundary } from '@/features/common/ErrorBoundary';
 import { EventStatusBadge } from '@/features/common';
 import { DirectionsLink, EventForecastChip } from '@/features/events';
 import { todayISO } from '@/lib/dates';
@@ -77,6 +79,12 @@ export function UpcomingEvents({ events }: { events: SalesEventWithMeta[] }) {
                   Log gauges
                 </Link>
               </div>
+            )}
+            {/* Release 1.2 slot (U4): one-tap check-in on today's events; nothing until the package lands. */}
+            {e.date === today && (
+              <ErrorBoundary name="check-in" fallback={null}>
+                <CheckInButton event={e} variant="row" className="mt-1 pl-4" />
+              </ErrorBoundary>
             )}
           </li>
         );

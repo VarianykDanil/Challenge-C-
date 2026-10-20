@@ -7,6 +7,10 @@ import { NoAccessPage } from '@/pages/NoAccess';
 export const RECRUITMENT_ROLES: Role[] = ['admin', 'leader', 'recruiter'];
 export const CAMPAIGN_ROLES: Role[] = ['admin', 'leader'];
 export const GAUGE_ROLES: Role[] = ['admin', 'leader', 'rep'];
+/** Release 1.2: /audit (U3). */
+export const AUDIT_ROLES: Role[] = ['admin'];
+/** Release 1.2: /gauges/bulk (U2) — leaders for their own team, admins for any. */
+export const BULK_GAUGE_ROLES: Role[] = ['admin', 'leader'];
 
 export function RequireRole({ roles, children }: { roles: Role[]; children: ReactNode }) {
   const { user } = useAuth();

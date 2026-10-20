@@ -23,6 +23,17 @@
  *  - eventForecast  event expected sales and suggested targets                        (p6)
  *  - outbox         replay rule for gauges saved offline                              (p7)
  *  - digest         "Your week in review"                                             (p9)
+ *
+ * Release 1.2 (r2-foundation lays down every module so nobody else edits this file; owners replace stub bodies):
+ *  - learning          COD pack lesson rules and the progression tracker                (L1)
+ *  - pitchScript       pitch script parser, step targets, fact-check notes              (L2)
+ *  - pitchAnnotations  phrase rules → COD pack theory chips                             (L2)
+ *  - pin               PIN format rules                                                 (U1)
+ *  - bulkPaste         "Paste from WhatsApp" parser for bulk gauge entry                (U2)
+ *  - audit             audit snapshot diff and redacted keys                            (U3)
+ *  - shiftCheckIn      one-tap shift check-in status and undo window                    (U4)
+ *  - search            command palette query rules                                      (U5)
+ *  - payExport         payroll export rows and CSV (Xero, Sage)                          (U5)
  */
 export * from './gauges.ts';
 export * from './finance.ts';
@@ -41,3 +52,13 @@ export * from './attention.ts';
 export * from './eventForecast.ts';
 export * from './outbox.ts';
 export * from './digest.ts';
+// Release 1.2
+export * from './learning.ts';
+export * from './pitchScript.ts';
+export * from './pitchAnnotations.ts';
+export * from './pin.ts';
+export * from './bulkPaste.ts';
+export * from './audit.ts';
+export * from './shiftCheckIn.ts';
+export * from './search.ts';
+export * from './payExport.ts';

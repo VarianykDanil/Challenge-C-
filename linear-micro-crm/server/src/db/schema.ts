@@ -1,5 +1,6 @@
 import { GAUGE_MAX_PER_DAY } from '@lm/shared';
 import type { Db } from './connection.ts';
+import { upgradeExtensions } from './extensions/index.ts';
 
 /** One gauge column: a whole number between 0 and the daily plausibility ceiling (CHECK constraints on new databases). */
 const gaugeCol = (name: string) => `${name} INTEGER NOT NULL DEFAULT 0 CHECK (${name} >= 0 AND ${name} <= ${GAUGE_MAX_PER_DAY})`;
@@ -269,10 +270,15 @@ export function upgradeSchema(db: Db): string[] {
   return added;
 }
 
-/** Creates every table and index that is missing, then brings older tables up to date. Safe to run on every start. */
+/**
+ * Creates every table and index that is missing, then brings older tables up to date. Safe to run on every start.
+ * Release 1.2: then every database extension (db/extensions, in their fixed order) creates its tables and runs its
+ * upgrades. Returns the core columns added (`table.column`) followed by the extensions' changes (`<extension>:<name>`).
+ */
 export function createSchema(db: Db): string[] {
   db.exec(SCHEMA_SQL);
-  return upgradeSchema(db);
+  const added = upgradeSchema(db);
+  return [...added, ...upgradeExtensions(db)];
 }
 
 export function isSeeded(db: Db): boolean {

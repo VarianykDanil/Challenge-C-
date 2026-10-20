@@ -1,0 +1,190 @@
+/**
+ * Release 1.2 — L1 learning-pack contracts (laid down by r2-foundation; OWNED BY L1, which may add fields and types).
+ * STABLE for other packages: `LESSON_KEYS` / `LessonKey` (L2's annotation chips link to /learning/pack/:lessonKey) and
+ * the anchors listed on `LESSON_ANCHORS`. Never rename or remove a key; add new ones at the end.
+ *
+ * Role scoping (server): a rep sees only their own progress; a leader their own team's; admin everyone; a recruiter
+ * their own progress and the lessons (no team view). Teach-back text is visible to the person, their team leader and
+ * admins only.
+ */
+import type { Position } from '../types.ts';
+
+/**
+ * One lesson per COD pack topic, in the order of the pack's leadership checklist (21). Some checklist rows share a
+ * lesson: "ABC days" → gumball-theory, "Attitude muscle" → attitude-regain, "Pre-management criteria" and
+ * "Post-management criteria" → progression-structure. run-an-impact and go-on-a-roadtrip are short placeholders the
+ * office fills in (they are practical tasks on the checklist, not theories in the pack).
+ */
+export const LESSON_KEYS = [
+  'five-steps',
+  'working-habits',
+  'law-of-averages',
+  'impulse-factors',
+  'green-light-theory',
+  'gumball-theory',
+  'can-cant-controls',
+  'buying-signs',
+  'strategic-pause',
+  'bamboo-theory',
+  'pre-emptive-strike',
+  'attitude-regain',
+  'bullet-theory',
+  'straight-line-theory',
+  'core-principles',
+  'progression-structure',
+  'direct-indirect-marketing',
+  'assuming-the-role',
+  'theory-of-teachback',
+  'run-an-impact',
+  'go-on-a-roadtrip',
+] as const;
+export type LessonKey = (typeof LESSON_KEYS)[number];
+
+/**
+ * Section anchors a lesson page renders as element ids, so a link like /learning/pack/impulse-factors#greed lands on
+ * the right part (L2's annotation chips use them). L1 may add anchors; these must exist.
+ */
+export const LESSON_ANCHORS = {
+  'five-steps': ['introduction', 'short-story', 'presentation', 'close', 'consolidation'],
+  'impulse-factors': ['greed', 'indifference', 'fear-of-loss', 'group-effect', 'urgency', 'power-of-suggestion'],
+  'bullet-theory': ['no-money', 'no-time', 'other-charities', 'bank-details', 'direct-debit', 'cows', 'air', 'feel-felt-found', 'rrr'],
+  'straight-line-theory': ['form', 'two-to-one'],
+} as const satisfies Partial<Record<LessonKey, readonly string[]>>;
+
+/** How the hub groups the lesson cards (L1 decides the mapping from LessonKey to group). */
+export type LessonGroup = 'fundamentals' | 'in-the-field' | 'objections' | 'attitude' | 'leadership' | 'tasks';
+
+/** Where one person is on one lesson. */
+export type LessonState = 'new' | 'learned' | 'teachback_sent' | 'taught';
+
+/** One row of learning_progress for one person and lesson (all null when they have not started it). */
+export interface LessonProgress {
+  lessonKey: LessonKey;
+  /** Set when the self-check first passed (every answer right). */
+  learnedAt: string | null;
+  /** The last self-check score (right answers) and how many questions it had. */
+  quizScore: number | null;
+  quizTotal?: number | null;
+  /** The person's own words; only the person, their team leader and admins ever receive it (else null). */
+  teachbackText: string | null;
+  teachbackAt: string | null;
+  /** The leader or admin who signed the teach-back off ("taught"). */
+  taughtSignedOffBy: number | null;
+  taughtSignedOffByName?: string | null;
+  taughtSignedOffAt: string | null;
+  state: LessonState;
+}
+
+/** GET /learning/progress[?userId=] — one person's progress, one row per LESSON_KEYS entry in that order. */
+export interface LearningProgress {
+  userId: number;
+  userName: string;
+  lessons: LessonProgress[];
+  learned: number;
+  taught: number;
+  /** LESSON_KEYS.length */
+  total: number;
+}
+
+/** POST /learning/progress/:lessonKey/quiz — the self-check result; learned when score === total (total ≥ 1). */
+export interface LessonQuizInput {
+  score: number;
+  total: number;
+}
+
+export interface LessonQuizResult {
+  passed: boolean;
+  progress: LessonProgress;
+}
+
+/** POST /learning/progress/:lessonKey/teachback — "write the theory in your own words" (saved for the leader). */
+export interface TeachbackInput {
+  text: string;
+}
+
+/** POST /learning/progress/:userId/:lessonKey/signoff — the leader of that person's team, or an admin. */
+export interface TeachbackSignoffInput {
+  /** false withdraws a sign-off. Default true. */
+  signedOff?: boolean;
+}
+
+/** One person on the checklist page (GET /learning/team). */
+export interface TeamLearningRow {
+  userId: number;
+  userName: string;
+  position: Position;
+  avatarColor: string;
+  teamId: number | null;
+  teamName: string | null;
+  learned: number;
+  taught: number;
+  /** Teach-backs written and waiting for a sign-off. */
+  awaitingSignOff: number;
+  lessons: Pick<LessonProgress, 'lessonKey' | 'learnedAt' | 'teachbackAt' | 'taughtSignedOffAt' | 'state'>[];
+}
+
+/** GET /learning/team — leader: own team; admin: everyone active; rep / recruiter: 403. */
+export interface TeamLearning {
+  rows: TeamLearningRow[];
+  /** LESSON_KEYS.length */
+  total: number;
+}
+
+/** The pack's career ladder (pre-management structure, then post-management). */
+export type CareerLevel =
+  | 'entry'
+  | 'leadership'
+  | 'campaign_manager'
+  | 'assistant_director'
+  | 'senior_director'
+  | 'promoting_owner'
+  | 'regional_consultant'
+  | 'national_consultant';
+
+export const CAREER_LEVELS: CareerLevel[] = [
+  'entry',
+  'leadership',
+  'campaign_manager',
+  'assistant_director',
+  'senior_director',
+  'promoting_owner',
+  'regional_consultant',
+  'national_consultant',
+];
+
+/** One measurable condition for the next level, with real numbers. */
+export interface ProgressionCriterion {
+  /** e.g. 'sales_week', 'sales_two_weeks', 'pack_learned', 'pack_taught', 'trained_leaders', 'team_sales_two_weeks', 'four_plus_one'. */
+  key: string;
+  /** e.g. "14 sales in a week". */
+  label: string;
+  met: boolean;
+  current: number | null;
+  target: number | null;
+  /** e.g. "12 of 14 sales this week". */
+  detail: string;
+  /** True for a condition the admin ticks by hand (no data behind it). */
+  manual?: boolean;
+}
+
+/** A requirement is met when ANY of its options is (e.g. 14 sales in a week OR 12 two weeks running). */
+export interface ProgressionRequirement {
+  key: string;
+  label: string;
+  met: boolean;
+  options: ProgressionCriterion[];
+}
+
+/** GET /learning/progression/:userId — where someone is on the ladder and what the next level needs. */
+export interface Progression {
+  userId: number;
+  userName: string;
+  position: Position;
+  /** null for people outside the field ladder (recruiters). */
+  level: CareerLevel | null;
+  nextLevel: CareerLevel | null;
+  /** All must be met to reach `nextLevel`. */
+  requirements: ProgressionRequirement[];
+  /** One sentence for the dashboard card, e.g. "Your next level: 12 of 14 sales this week; 9 of 21 lessons learned". */
+  headline: string;
+}

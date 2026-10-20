@@ -7,7 +7,8 @@ import { Avatar, Badge, Button, Card, CardHeader, PageHeader, Skeleton } from '@
 import { api } from '@/api/client';
 import { useHealth, useTwoFactorStatus, type HealthInfo } from '@/api/hooks';
 import { useCurrentUser } from '@/auth/AuthProvider';
-import { UserStatusBadge, errorMessage } from '@/features/common';
+import { ErrorBoundary, UserStatusBadge, errorMessage } from '@/features/common';
+import { PinSettings } from '@/features/settings/PinSettings';
 import { RecoveryCodesModal, TwoFactorDisableModal, TwoFactorSetupModal } from '@/features/settings';
 import { formatDate, formatDateTime, formatRelative, fullName, pluralise } from '@/lib/format';
 import { useTheme, type Theme } from '@/components/layout';
@@ -180,6 +181,11 @@ function SecurityCard() {
         </div>
         <p className="mt-3 text-xs text-muted">{t.twoFactor.description}</p>
       </section>
+
+      {/* Release 1.2 slot (U1): your PIN and (admin) the sign-in settings; nothing until the package lands. */}
+      <ErrorBoundary name="pin-settings" fallback={null}>
+        <PinSettings className="mt-4" />
+      </ErrorBoundary>
 
       <TwoFactorSetupModal open={modal === 'setup'} onClose={close} />
       <TwoFactorDisableModal open={modal === 'disable'} onClose={close} />

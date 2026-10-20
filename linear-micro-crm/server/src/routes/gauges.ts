@@ -11,7 +11,8 @@ import { assertCanWriteGauge, canManageTeam, isAdmin, redactEntry } from '../lib
 import { gaugeCount, idParam, isoDate, isoTimestamp, limitQuery, offsetQuery, optionalIdQuery, parseRange } from '../lib/validate.ts';
 import { currentUser } from '../middleware/auth.ts';
 
-const gaugeBody = z.object({
+/** The POST /gauges body (exported for POST /gauges/bulk, release 1.2 U2). */
+export const gaugeBody = z.object({
   /** Optional on POST: the entry the client believes it is editing. A key that resolves to another entry is refused (409). */
   id: z.number().int().positive().optional(),
   eventId: z.number().int().positive(),
@@ -30,7 +31,10 @@ const gaugeBody = z.object({
 
 const GROUPS: SummaryGroup[] = ['user', 'team', 'campaign', 'day', 'week'];
 
-function assertFunnel(t: GaugeTotals): void {
+// Release 1.2: assertFunnel, assertGaugeIntegrity, checkInFor and rateSnapshot are exported so POST /gauges/bulk
+// (routes/bulkGauges.ts, U2) applies exactly the single-entry rules. Behaviour unchanged.
+
+export function assertFunnel(t: GaugeTotals): void {
   const warnings = validateGaugeFunnel(t);
   if (warnings.length) throw badRequest('Invalid funnel', warnings);
 }
@@ -42,7 +46,7 @@ function assertFunnel(t: GaugeTotals): void {
  * time has passed) and was not cancelled, and the person logged belongs to the event's team (admins are exempt from
  * the team rule; the owner works any team's events).
  */
-function assertGaugeIntegrity(me: UserWithTeam, target: UserWithTeam, event: SalesEventWithMeta, date: string, opts: { checkUser: boolean }): void {
+export function assertGaugeIntegrity(me: UserWithTeam, target: UserWithTeam, event: SalesEventWithMeta, date: string, opts: { checkUser: boolean }): void {
   if (event.status === 'cancelled') throw conflict('Gauges cannot be recorded for a cancelled event');
   const today = todayISO();
   if (event.date > today) throw badRequest('Gauges cannot be recorded before the event takes place');
@@ -53,7 +57,7 @@ function assertGaugeIntegrity(me: UserWithTeam, target: UserWithTeam, event: Sal
 }
 
 /** A check-in is naive Europe/London wall-clock time and can never lie in the future. */
-function checkInFor(value: string | null | undefined): string | null {
+export function checkInFor(value: string | null | undefined): string | null {
   const normalised = normaliseCheckIn(value);
   if (normalised !== null && normalised > toBusinessISO(businessNow())) throw badRequest('Check-in time cannot be in the future');
   return normalised;
@@ -64,7 +68,7 @@ function checkInFor(value: string | null | undefined): string | null {
  * payout and the person's pay-plan commission at that moment. Revenue and commission aggregates read these, so a
  * later change to a campaign payout or a promotion only affects future days.
  */
-function rateSnapshot(db: Db, event: SalesEventWithMeta, target: UserWithTeam): { payout: number; commission: number } {
+export function rateSnapshot(db: Db, event: SalesEventWithMeta, target: UserWithTeam): { payout: number; commission: number } {
   return { payout: getCampaign(db, event.campaignId)?.payoutPerSale ?? 0, commission: getPayPlan(db, target.payPlanId)?.commissionPerSale ?? 0 };
 }
 

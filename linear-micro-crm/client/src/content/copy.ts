@@ -60,6 +60,19 @@ export const COPY = {
       title: 'About Linear Hub',
       description: 'The story behind the platform, what it tracks and the squad who built it.',
     },
+    // Release 1.2 (r2-foundation): the new pages' titles; each page's owner may reword its own entry.
+    learning: {
+      title: 'Learning',
+      description: 'The COD pack and your campaign pitches: learn it, practise it, teach it back.',
+    },
+    audit: {
+      title: 'Audit trail',
+      description: 'Who changed what and when, across pay, gauges, people and settings.',
+    },
+    bulkGauges: {
+      title: 'Bulk entry',
+      description: "Log the whole team's gauges for one event in one go, or paste them from WhatsApp.",
+    },
   },
 
   /** Empty-state copy for lists that have nothing to show yet. */

@@ -10,6 +10,7 @@ import { useCurrentUser } from '@/auth/AuthProvider';
 import { ChartSkeleton, ErrorBoundary, ErrorState, ExportButton, RangePicker, useRangeState } from '@/features/common';
 import { GaugeSummaryTable, LogGaugesModal, PerformancePanel, gaugeSummaryCsvColumns } from '@/features/gauges';
 import { LazyTallyMode, TallyButton, type TallyRequest } from '@/features/gauges/TallyLinks';
+import { BulkEntryLink } from '@/features/gauges/BulkEntryLink';
 import { idFromParam, useActionParam } from '@/lib/useActionParam';
 import { csvFilename, sortRows } from '@/lib/csv';
 import { formatDateShort } from '@/lib/format';
@@ -62,6 +63,12 @@ export function GaugesPage() {
         description={COPY.nav.gauges.description}
         actions={
           <>
+            {/* Release 1.2 slot (U2): bulk entry for the team; nothing until the package lands. */}
+            {(isLeader || isAdmin) && (
+              <ErrorBoundary name="bulk-entry" fallback={null}>
+                <BulkEntryLink />
+              </ErrorBoundary>
+            )}
             {/* p7 slots: a throwing tally never takes the page (and its Log gauges button) down with it. */}
             <ErrorBoundary
               name="tally-button"

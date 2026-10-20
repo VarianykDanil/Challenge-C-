@@ -10,6 +10,7 @@ import { GAUGE_ROLES, hasRole } from '@/auth/RequireRole';
 import { Announcements, CompanySection, NewAnnouncementModal, PersonalCharts, PersonalKpis, RecruiterSection, TeamCard, UpcomingEvents } from '@/features/dashboard';
 import { ErrorBoundary, ErrorState } from '@/features/common';
 import { LogGaugesModal } from '@/features/gauges';
+import { ProgressCard } from '@/features/learning/ProgressCard';
 import { TodayTallyLink } from '@/features/gauges/TallyLinks';
 import { LazyAttentionCard, LazyWeekInReview, LazyWeekPayStrip } from '@/features/smart';
 import { COPY, greetingFor, motivationForDate } from '@/content/copy';
@@ -40,6 +41,8 @@ export function DashboardPage() {
   // Smart release 1.1: one cached payload feeds every smart slot (each slot renders nothing until its owner fills it).
   const insights = useInsights().data;
   const showPayStrip = me.role === 'rep' || me.role === 'leader';
+  // Release 1.2 (L1): "Your next level" under the tiles, for the field ladder (reps and leaders).
+  const showProgress = me.role === 'rep' || me.role === 'leader';
 
   return (
     <>
@@ -83,6 +86,7 @@ export function DashboardPage() {
             <div>
               <PersonalKpis dashboard={d} role={me.role} deltaLabel={deltaLabel} streaks={insights?.personal.streaks} />
               {showPayStrip && <ErrorBoundary name="week-pay" className="mt-3"><LazyWeekPayStrip forecast={insights?.personal.payForecast} /></ErrorBoundary>}
+              {showProgress && <ErrorBoundary name="learning-progress" fallback={null}><ProgressCard className="mt-3" /></ErrorBoundary>}
             </div>
           )}
 

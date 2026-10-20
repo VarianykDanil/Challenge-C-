@@ -12,6 +12,7 @@ import { clientBuildStatus, staleBuildMessage } from './lib/buildStatus.ts';
 import { announceAppSecret, appSecretFile, configureAppSecret } from './lib/crypto.ts';
 import { businessClockPinned, businessNow } from './lib/dates.ts';
 import { purgeExpiredChallenges, reencryptLegacySecrets } from './lib/twofactor.ts';
+import { purgeAuditLog } from './lib/audit.ts';
 import { purgeExpiredSessions } from './middleware/auth.ts';
 
 const dbPath = process.env.DB_PATH ? path.resolve(process.env.DB_PATH) : DEFAULT_DB_PATH;
@@ -59,11 +60,18 @@ const guarded = (fn: () => void) => () => {
     console.error('Maintenance failed', err);
   }
 };
+/** Release 1.2 (U3): audit entries older than two years (lib/audit.ts): at start-up and daily. */
+function purgeAudit(): void {
+  const removed = purgeAuditLog(db);
+  if (removed) console.log(`Audit log: removed ${removed} entries older than two years`);
+}
 rollEvents();
 materialisePayroll();
+guarded(purgeAudit)();
 setInterval(guarded(rollEvents), 15 * 60_000).unref();
 setInterval(guarded(purgeExpired), 15 * 60_000).unref();
 setInterval(guarded(materialisePayroll), 86_400_000).unref();
+setInterval(guarded(purgeAudit), 86_400_000).unref();
 
 // Backups (p10): dated copies of the database in <data dir>/backups (LM_BACKUP_DIR relocates it): 10 minutes after
 // start-up when the last one is over 24 h old, and nightly from LM_BACKUP_HOUR (default 02:00 London) when none is

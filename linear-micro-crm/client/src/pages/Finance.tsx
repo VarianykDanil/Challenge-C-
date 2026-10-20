@@ -8,7 +8,8 @@ import { Badge, Button, Card, CardHeader, DataTable, EmptyState, KpiTile, PageHe
 import { DonutChart, TrendChart } from '@/components/charts';
 import { useCampaigns, useDeleteExpense, useExpenses, useFinanceSummary, useMyFinance, usePayRun, usePayroll } from '@/api/hooks';
 import { useCurrentUser } from '@/auth/AuthProvider';
-import { ChartSkeleton, ColourChip, ConfirmDialog, ErrorState, ExportButton, KpiSkeletons, RangePicker, StopRowEvents, errorMessage, useRangeState } from '@/features/common';
+import { ChartSkeleton, ColourChip, ConfirmDialog, ErrorBoundary, ErrorState, ExportButton, KpiSkeletons, RangePicker, StopRowEvents, errorMessage, useRangeState } from '@/features/common';
+import { PayExportButton } from '@/features/office/PayExportButton';
 import { AddExpenseModal, FlaggedRunsList, LazyBulkPayBar, PayrollRunsTable, PayslipModal, campaignFinanceCsvColumns, expenseCsvColumns, financeWeekCsvColumns, payrollRunCsvColumns, payrollRunsRange, useBulkMarkPaid, warningFlags, type PayrollRunSelection } from '@/features/finance';
 import { FORECAST_LABEL, bonusLine, forecastMethod, forecastNoRangeReason, forecastRange } from '@/features/smart/weekPayCopy';
 import { csvFilename, sortRows } from '@/lib/csv';
@@ -420,7 +421,15 @@ function Company({ onOpen, scrollToRuns = false, onScrolled }: { onOpen: (r: Pay
               </>
             )}
             className="mb-0"
-            actions={<ExportButton filename={csvFilename('runs-to-pay')} rows={sortRows(toPay, (r) => r.weekStart, 'desc')} columns={payrollRunCsvColumns(true)} disabled={pending.isLoading} />}
+            actions={
+              <>
+                {/* Release 1.2 slot (U5): export for Xero / Sage; nothing until the package lands. */}
+                <ErrorBoundary name="pay-export" fallback={null}>
+                  <PayExportButton runs={toPay} />
+                </ErrorBoundary>
+                <ExportButton filename={csvFilename('runs-to-pay')} rows={sortRows(toPay, (r) => r.weekStart, 'desc')} columns={payrollRunCsvColumns(true)} disabled={pending.isLoading} />
+              </>
+            }
           />
           {failedCount > 0 && (
             <label className="mt-2 inline-flex min-h-10 cursor-pointer items-center gap-2.5 text-sm text-fg">

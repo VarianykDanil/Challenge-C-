@@ -6,7 +6,8 @@ import { POSITIONS, POSITION_LABELS, ROLE_LABELS } from '@lm/shared';
 import { Badge, Button, Field, Input, Modal, Select, useToast } from '@/components/ui';
 import { useCreateUser, usePayPlans, useResetUserTwoFactor, useTeams, useUpdateUser } from '@/api/hooks';
 import { useCurrentUser } from '@/auth/AuthProvider';
-import { ConfirmDialog, errorMessage } from '@/features/common';
+import { ConfirmDialog, ErrorBoundary, errorMessage } from '@/features/common';
+import { PinResetSection } from '@/features/settings/PinResetSection';
 import { COPY } from '@/content/copy';
 import { todayISO } from '@/lib/dates';
 import { fullName } from '@/lib/format';
@@ -105,6 +106,12 @@ function UserForm({ onClose, user, onSaved }: { onClose: () => void; user?: User
 
       {/* Lost-device recovery for someone else; your own second factor is managed from Settings → Security. */}
       {user && user.id !== me.id && <TwoFactorResetSection user={user} />}
+      {/* Release 1.2 slot (U1): reset someone's sign-in PIN (admin); nothing until the package lands. */}
+      {user && user.id !== me.id && (
+        <ErrorBoundary name="pin-reset" fallback={null}>
+          <PinResetSection user={user} />
+        </ErrorBoundary>
+      )}
 
       <div className="flex justify-end gap-2">
         <Button type="button" variant="ghost" onClick={onClose}>Cancel</Button>

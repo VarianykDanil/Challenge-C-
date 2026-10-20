@@ -1,7 +1,7 @@
 // Sidebar — owned by the Product Designer.
 import { NavLink } from 'react-router-dom';
 import {
-  CalendarDays, Circle, Gauge, Info, LayoutDashboard, Megaphone, PanelLeftClose, PanelLeftOpen, Settings, Tally5, Trophy, UserPlus, Users, Wallet, X,
+  CalendarDays, Circle, Gauge, GraduationCap, History, Info, LayoutDashboard, Megaphone, PanelLeftClose, PanelLeftOpen, Settings, Tally5, Trophy, UserPlus, Users, Wallet, X,
   type LucideIcon,
 } from 'lucide-react';
 import clsx from 'clsx';
@@ -16,6 +16,8 @@ import type { NavItem } from './nav';
 /** lucide icons keyed by the `icon` string in nav.ts. Add here when adding a nav item. */
 export const NAV_ICONS: Record<string, LucideIcon> = {
   LayoutDashboard, CalendarDays, Gauge, Tally5, Trophy, UserPlus, Wallet, Megaphone, Users, Settings, Info,
+  // Release 1.2
+  GraduationCap, History,
 };
 
 /** Today's running stop count across this person's unfinished tallies on this phone, or null when none is under way. */

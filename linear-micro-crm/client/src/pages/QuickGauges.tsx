@@ -13,6 +13,9 @@ import type { GaugeKey, SalesEventWithMeta } from '@lm/shared';
 import { GAUGE_KEYS, GAUGE_LABELS, tallyPerson } from '@lm/shared';
 import { Button, Card, Skeleton } from '@/components/ui';
 import { useCurrentUser } from '@/auth/AuthProvider';
+import { CheckInButton } from '@/features/checkins/CheckInButton';
+import { ErrorBoundary } from '@/features/common/ErrorBoundary';
+import { PitchLink } from '@/features/learning/PitchLink';
 import { LogGaugesModal } from '@/features/gauges/LogGaugesModal';
 import { TallyEventPicker } from '@/features/gauges/TallyEventPicker';
 import { TallyHelp } from '@/features/gauges/TallyHelp';
@@ -85,6 +88,17 @@ export function QuickGaugesPage() {
         {/* Held sideways there is no height to spare under the header, but room across it: the help line sits here. */}
         {selected && (
           <p className="hidden w-60 shrink-0 text-[11px] leading-[14px] text-muted short:block" data-quick-help-side><TallyHelp /></p>
+        )}
+        {/* Release 1.2 slots: the campaign's pitch (L2) and one-tap check-in (U4); nothing until their packages land. */}
+        {selected && (
+          <ErrorBoundary name="pitch-link" fallback={null}>
+            <PitchLink campaignCode={selected.campaignCode} campaignId={selected.campaignId} variant="compact" />
+          </ErrorBoundary>
+        )}
+        {selected && (
+          <ErrorBoundary name="check-in" fallback={null}>
+            <CheckInButton event={selected} variant="compact" />
+          </ErrorBoundary>
         )}
         {selected && options.length > 1 && (
           <Button variant="ghost" onClick={() => setChoosing(true)} className="-mr-1">Change</Button>

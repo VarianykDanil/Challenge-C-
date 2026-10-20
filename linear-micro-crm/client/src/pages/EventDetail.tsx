@@ -10,6 +10,9 @@ import { useCurrentUser } from '@/auth/AuthProvider';
 import { ConfirmDialog, ErrorState, EventStatusBadge, EventTypeBadge, ExportButton, KpiSkeletons, errorMessage } from '@/features/common';
 import { DirectionsLink, EventForecastChip, EventFormModal, inRosterWindow } from '@/features/events';
 import { GaugeEntriesTable, LogGaugesModal, TotalsKpis, gaugeEntryCsvColumns } from '@/features/gauges';
+import { CheckInRollCall } from '@/features/checkins/CheckInRollCall';
+import { ErrorBoundary } from '@/features/common/ErrorBoundary';
+import { PitchLink } from '@/features/learning/PitchLink';
 import { csvFilename } from '@/lib/csv';
 import { todayISO } from '@/lib/dates';
 import { formatDate, formatNumber, formatTime, fullName } from '@/lib/format';
@@ -106,6 +109,10 @@ export function EventDetailPage() {
                   {myEntry ? 'Update my gauges' : logToday ? "Log today's gauges" : 'Log gauges'}
                 </Button>
               )}
+              {/* Release 1.2 slot (L2): the campaign's pitch; nothing until the package lands. */}
+              <ErrorBoundary name="pitch-link" fallback={null}>
+                <PitchLink campaignCode={ev.campaignCode} campaignId={ev.campaignId} variant="button" />
+              </ErrorBoundary>
               {canEdit && <Button variant="outline" onClick={() => setEditOpen(true)} leftIcon={<Pencil className="h-4 w-4" aria-hidden />}>Edit</Button>}
               {canCancel && <Button variant="ghost" className="text-danger" onClick={() => setCancelEventOpen(true)} leftIcon={<Ban className="h-4 w-4" aria-hidden />} aria-label="Cancel event">Cancel event</Button>}
               {canDelete && <Button variant="ghost" className="text-danger" onClick={() => setDeleteEventOpen(true)} leftIcon={<Trash2 className="h-4 w-4" aria-hidden />} aria-label="Delete event">Delete</Button>}
@@ -139,6 +146,13 @@ export function EventDetailPage() {
               teamSize={rosterSize}
               onLog={(u) => { setEditEntry(null); setLogUserId(u.id); setLogOpen(true); }}
             />
+          )}
+
+          {/* Release 1.2 slot (U4): who has checked in; nothing until the package lands. */}
+          {ev && (
+            <ErrorBoundary name="check-in-roll-call" fallback={null}>
+              <CheckInRollCall event={ev} canManage={canManageGauges} />
+            </ErrorBoundary>
           )}
 
           {ev && ratios ? <TotalsKpis totals={ev.totals} ratios={ratios} daysHint={`${formatNumber(ev.repCount)} rep${ev.repCount === 1 ? '' : 's'} logged`} /> : <div className="grid grid-cols-2 gap-3 md:grid-cols-3 xl:grid-cols-6"><KpiSkeletons count={6} /></div>}

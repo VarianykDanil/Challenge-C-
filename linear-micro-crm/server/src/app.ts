@@ -9,7 +9,8 @@ import type { Db } from './db/connection.ts';
 import { bumpDataVersion, responseCache } from './lib/cache.ts';
 import { compression } from './lib/compress.ts';
 import { HttpError } from './lib/errors.ts';
-import { authenticate, requireAuth } from './middleware/auth.ts';
+import { authenticate, pinSetupGate, requireAuth } from './middleware/auth.ts';
+import { auditMiddleware } from './lib/audit.ts';
 import { announcementsRouter } from './routes/announcements.ts';
 import { authRouter } from './routes/auth.ts';
 import { campaignsRouter } from './routes/campaigns.ts';
@@ -25,6 +26,14 @@ import { leaderboardRouter } from './routes/leaderboard.ts';
 import { recruitmentRouter } from './routes/recruitment.ts';
 import { teamsRouter } from './routes/teams.ts';
 import { usersRouter } from './routes/users.ts';
+// Release 1.2 (r2-foundation mounts every package's router; each file names its owner)
+import { announcementReadsRouter, auditRouter } from './routes/audit.ts';
+import { bulkGaugesRouter } from './routes/bulkGauges.ts';
+import { checkinsRouter } from './routes/checkins.ts';
+import { learningRouter } from './routes/learning.ts';
+import { payExportRouter } from './routes/payExport.ts';
+import { pitchesRouter } from './routes/pitches.ts';
+import { searchRouter } from './routes/search.ts';
 
 export interface AppOptions {
   /** When set (production), serve the built client from this folder with an SPA fallback. */
@@ -101,6 +110,12 @@ const CACHED_PATHS = [
   '/me/attention',
   '/me/digest',
   '/events/forecast',
+  // Release 1.2
+  '/learning/progress',
+  '/learning/team',
+  '/learning/progression',
+  '/pitches',
+  '/search',
 ];
 
 export function createApp(db: Db, opts: AppOptions = {}): Express {
@@ -123,6 +138,10 @@ export function createApp(db: Db, opts: AppOptions = {}): Express {
 
   const api = express.Router();
   api.use(authenticate(db));
+  // Release 1.2 slots, both pass-through until their packages land: U1's PIN gate (403 until a required PIN is set),
+  // then U3's audit recorder (successful writes, with before/after snapshots).
+  api.use(pinSetupGate(db));
+  api.use(auditMiddleware(db));
   // any write invalidates the aggregate cache before the handler runs (handlers are synchronous node:sqlite calls)
   api.use((req, _res, next) => {
     if (req.method !== 'GET' && req.method !== 'HEAD' && req.method !== 'OPTIONS') bumpDataVersion();
@@ -141,11 +160,23 @@ export function createApp(db: Db, opts: AppOptions = {}): Express {
   api.use('/teams', requireAuth, teamsRouter(db));
   api.use('/campaigns', requireAuth, campaignsRouter(db));
   api.use('/events', requireAuth, eventsRouter(db));
+  // Release 1.2 (U2): POST /gauges/bulk, before the gauges router.
+  api.use('/gauges/bulk', requireAuth, bulkGaugesRouter(db));
   api.use('/gauges', requireAuth, gaugesRouter(db));
   api.use('/leaderboard', requireAuth, leaderboardRouter(db));
+  // Release 1.2 (U5): GET /finance/payroll/export, before the finance router (its /payroll/:id would catch "export").
+  api.use('/finance/payroll/export', requireAuth, payExportRouter(db));
   api.use('/finance', requireAuth, financeRouter(db));
   api.use('/recruitment', requireAuth, recruitmentRouter(db));
+  // Release 1.2 (U3): POST /announcements/:id/read and GET /announcements/reads, before the announcements router.
+  api.use('/announcements', requireAuth, announcementReadsRouter(db));
   api.use('/announcements', requireAuth, announcementsRouter(db));
+  // Release 1.2: learning (L1), pitches (L2), audit (U3), shift check-ins (U4), search (U5).
+  api.use('/learning', requireAuth, learningRouter(db));
+  api.use('/pitches', requireAuth, pitchesRouter(db));
+  api.use('/audit', requireAuth, auditRouter(db));
+  api.use('/checkins', requireAuth, checkinsRouter(db));
+  api.use('/search', requireAuth, searchRouter(db));
   api.use((_req, res) => {
     res.status(404).json({ error: 'Not found' });
   });

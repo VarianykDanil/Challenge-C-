@@ -1353,3 +1353,39 @@ with `npm run build` (minified, before gzip):
 - Rule for later work: import a dashboard- or finance-only component through its `Lazy…` wrapper, never directly and
   never through a barrel that re-exports it, or it moves back into that page's chunk (or the main one). Measure with
   `npx vite build --sourcemap` and a source-map breakdown of `dist/assets/index-*.js`.
+
+## 15. Release 1.2
+
+Learning (the COD pack and campaign pitches) and field and office upgrades. The foundation (r2-foundation) laid down
+the contracts each package fills: database extensions run by `createSchema` and the seed (`server/src/db/extensions`),
+shared types (`shared/src/types/*.ts`) and pure logic modules (`shared/src/logic`), stub routes, client pages and
+slots. Every new payload is built from data the caller may already see; nothing in 1.2 creates a gauge row or a
+payroll run as a side effect. Each subsection below is merged from the package's fragment in `docs/r2/`.
+
+### 15.1 Learning pack: COD pack lessons, the Learn / Teach checklist and the progression tracker (L1)
+
+_To be merged from `docs/r2/L1-learning-pack.md` (section "Logic")._
+
+### 15.2 Pitch studio: campaign pitches, annotations and practice modes (L2)
+
+_To be merged from `docs/r2/L2-learning-pitch.md` (section "Logic")._
+
+### 15.3 Sign-in PIN, stronger sessions and the deploy guide (U1)
+
+_To be merged from `docs/r2/U1-sign-in-pin.md` (section "Logic")._
+
+### 15.4 Bulk gauge entry with WhatsApp paste (U2)
+
+_To be merged from `docs/r2/U2-bulk-entry.md` (section "Logic")._
+
+### 15.5 Audit trail and announcement read receipts (U3)
+
+_To be merged from `docs/r2/U3-audit-trail.md` (section "Logic")._
+
+### 15.6 One-tap shift check-in (U4)
+
+_To be merged from `docs/r2/U4-check-ins.md` (section "Logic")._
+
+### 15.7 Search palette, payroll export and the RangePicker layout fix (U5)
+
+_To be merged from `docs/r2/U5-office-tools.md` (section "Logic")._

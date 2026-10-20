@@ -62,6 +62,12 @@ export interface UserWithTeam extends User {
   payPlanName: string;
   /** Present on /auth/me and login responses: whether two-step verification is switched on. */
   twoFactorEnabled?: boolean;
+  /** Release 1.2 (U1): present on /auth/me and login responses only — whether the caller has set a sign-in PIN. */
+  hasPin?: boolean;
+  /** Release 1.2 (U1): true while the admin requires a PIN and the caller has none (the client shows "Create your PIN"). */
+  pinSetupRequired?: boolean;
+  /** Release 1.2 (U1): true while admins must use two-step verification and this admin has not set it up. */
+  twoFactorSetupRequired?: boolean;
 }
 
 export interface Team {
@@ -520,6 +526,8 @@ export interface Dashboard {
 export interface LoginInput {
   email: string;
   employeeId: string;
+  /** Release 1.2 (U1): the 4–6 digit PIN, required once the person has set one (see types/pin.ts). */
+  pin?: string;
 }
 
 export interface AuthResponse {

@@ -1,6 +1,8 @@
 import { Megaphone, Pin } from 'lucide-react';
 import type { Announcement } from '@lm/shared';
 import { EmptyState } from '@/components/ui';
+import { AnnouncementReads } from '@/features/audit/AnnouncementReads';
+import { ErrorBoundary } from '@/features/common/ErrorBoundary';
 import { formatRelative } from '@/lib/format';
 import { COPY } from '@/content/copy';
 
@@ -16,6 +18,10 @@ export function Announcements({ items }: { items: Announcement[] }) {
           </div>
           <p className="mt-1 whitespace-pre-line text-sm text-muted">{a.body}</p>
           <div className="mt-2 text-xs text-muted">{a.authorName ?? 'Office'} · {formatRelative(a.createdAt)}</div>
+          {/* Release 1.2 slot (U3): marks it read when seen; "Read by 18 of 34" for the author and admins. */}
+          <ErrorBoundary name="announcement-reads" fallback={null}>
+            <AnnouncementReads announcement={a} />
+          </ErrorBoundary>
         </li>
       ))}
     </ul>

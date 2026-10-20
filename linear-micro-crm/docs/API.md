@@ -572,6 +572,51 @@ When the request carries an **admin** session, the response also has `backup` (`
   `/api/me/dashboard?range=week` 6,302 B → 2,250 B (57–69% fewer bytes over the hotspot). The load mix at 50
   connections stays at 0 errors (smoke 82/82); compression-specific work is about 2% of the server's busy time.
 
+## 1.2 endpoints
+
+Release 1.2. Every change is **additive**: no response field was renamed or removed; new fields on existing payloads are
+optional (`LoginInput.pin`, `UserWithTeam.hasPin`, `UserWithTeam.pinSetupRequired`, `UserWithTeam.twoFactorSetupRequired`).
+Every route is mounted behind `requireAuth` (anonymous → 401). Types: `shared/src/types/{learning,pitches,pin,bulk,audit,checkins,search}.ts`.
+Cached per user (20 s, cleared by any write): `/learning/progress`, `/learning/team`, `/learning/progression`, `/pitches`, `/search`.
+
+| Package | Endpoints |
+| --- | --- |
+| L1 learning-pack | `GET /learning/progress[?userId=]`, `POST /learning/progress/:lessonKey/quiz`, `POST /learning/progress/:lessonKey/teachback`, `POST /learning/progress/:userId/:lessonKey/signoff`, `GET /learning/team`, `GET /learning/progression/:userId` |
+| L2 learning-pitch | `GET /pitches`, `GET /pitches/:campaignCode`, `PUT /pitches/:campaignCode` (admin, leader) |
+| U1 sign-in-pin | `POST /auth/login` (+ `pin`), `GET /auth/pin`, `POST /auth/pin`, `POST /auth/pin/reset/:userId` (admin), `GET` / `PUT /auth/security-settings` (admin) |
+| U2 bulk-entry | `POST /gauges/bulk` (leader: own team; admin) |
+| U3 audit-trail | `GET /audit` (admin), `GET /audit/:entity/:entityId`, `POST /announcements/:id/read`, `GET /announcements/reads` |
+| U4 check-ins | `POST /checkins`, `DELETE /checkins/:id`, `GET /checkins?eventId=` |
+| U5 office-tools | `GET /search?q=`, `GET /finance/payroll/export?weekStart=&format=xero\|sage` (admin) |
+
+### Learning pack: COD pack lessons, the Learn / Teach checklist and the progression tracker (L1)
+
+_To be merged from `docs/r2/L1-learning-pack.md` (section "API")._
+
+### Pitch studio: campaign pitches, annotations and practice modes (L2)
+
+_To be merged from `docs/r2/L2-learning-pitch.md` (section "API")._
+
+### Sign-in PIN, stronger sessions and the deploy guide (U1)
+
+_To be merged from `docs/r2/U1-sign-in-pin.md` (section "API")._
+
+### Bulk gauge entry with WhatsApp paste (U2)
+
+_To be merged from `docs/r2/U2-bulk-entry.md` (section "API")._
+
+### Audit trail and announcement read receipts (U3)
+
+_To be merged from `docs/r2/U3-audit-trail.md` (section "API")._
+
+### One-tap shift check-in (U4)
+
+_To be merged from `docs/r2/U4-check-ins.md` (section "API")._
+
+### Search palette, payroll export and the RangePicker layout fix (U5)
+
+_To be merged from `docs/r2/U5-office-tools.md` (section "API")._
+
 ## Seed & demo accounts
 The server seeds `server/data/linear.sqlite` on first start (or `npm run seed` to reset) with deterministic
 sample data for the last 26 weeks. Demo logins (email / employee ID):

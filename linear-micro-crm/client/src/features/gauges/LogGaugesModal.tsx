@@ -11,7 +11,8 @@ import { Button, Field, Input, Modal, Select, Stepper, Textarea, useToast } from
 import { ApiError, isNetworkError } from '@/api/client';
 import { useEvent, useGauges, useUpdateGauge, useUpsertGauge, useUsers } from '@/api/hooks';
 import { useCurrentUser } from '@/auth/AuthProvider';
-import { errorDetails, errorMessage, RatioCell } from '@/features/common';
+import { errorDetails, errorMessage, ErrorBoundary, RatioCell } from '@/features/common';
+import { EntityHistory } from '@/features/audit/EntityHistory';
 import { isoToLocalInput, nowLocalInput, todayISO } from '@/lib/dates';
 import { formatDate, formatDateShort, formatStopsPerSale, formatTime, fullName } from '@/lib/format';
 import { BENCHMARK_KEYS, RATIO_LABELS } from '@/lib/ratios';
@@ -59,6 +60,12 @@ export function LogGaugesModal(props: LogGaugesModalProps) {
   return (
     <Modal open={props.open} onClose={props.onClose} title={props.entry ? 'Update gauges' : 'Log gauges'} description="Stops ≥ to table ≥ presentations ≥ closes ≥ taps ≥ sales. Saving again for the same event updates the entry." size="lg">
       <LogGaugesForm {...props} />
+      {/* Release 1.2 slot (U3): the entry's change history; nothing until the package lands. */}
+      {props.entry && (
+        <ErrorBoundary name="gauge-history" fallback={null}>
+          <EntityHistory entity="gauge_entry" entityId={props.entry.id} className="mt-5" />
+        </ErrorBoundary>
+      )}
     </Modal>
   );
 }

@@ -43,6 +43,8 @@ export interface TestResponse {
 export interface Credentials {
   email: string;
   employeeId: string;
+  /** Release 1.2 (U1): the sign-in PIN, sent only when given. */
+  pin?: string;
 }
 
 /** A tiny fetch client that keeps the session cookie (lm_session) between calls. Paths are relative to /api. */
@@ -80,6 +82,8 @@ export class TestClient {
   get = (url: string) => this.req('GET', url);
   post = (url: string, body?: unknown) => this.req('POST', url, body);
   patch = (url: string, body?: unknown) => this.req('PATCH', url, body);
+  /** Release 1.2 (e.g. PUT /pitches/:campaignCode, PUT /auth/security-settings). */
+  put = (url: string, body?: unknown) => this.req('PUT', url, body);
   del = (url: string) => this.req('DELETE', url);
 }
 
@@ -265,8 +269,11 @@ export interface TestServer {
   base: string;
   /** The fixture ids (null with `seed: true`). */
   fixture: Fixture | null;
-  /** Sign in by role / fixture account name, or with explicit credentials; throws unless the login answers 200. */
-  login(who: DemoRole | FixtureAccount | Credentials): Promise<TestClient>;
+  /**
+   * Sign in by role / fixture account name, or with explicit credentials; throws unless the login answers 200.
+   * Release 1.2: `pin` (or `who.pin`) is sent as the sign-in PIN; without one the body is exactly as before.
+   */
+  login(who: DemoRole | FixtureAccount | Credentials, pin?: string): Promise<TestClient>;
   /** A client without a session. */
   anon(): TestClient;
   /** Forget cached aggregates (e.g. after writing rows directly with addGauge, or flipping LM_SMART). */
@@ -306,9 +313,10 @@ export async function startTestServer(opts: StartOptions = {}): Promise<TestServ
     db,
     base,
     fixture,
-    async login(who) {
+    async login(who, pin) {
       const client = new TestClient(base);
-      const r = await client.post('/auth/login', credentials(who));
+      const creds = credentials(who);
+      const r = await client.post('/auth/login', pin === undefined ? creds : { ...creds, pin });
       if (r.status !== 200 || !client.cookie) throw new Error(`login ${JSON.stringify(who)} → ${r.status} ${JSON.stringify(r.json)}`);
       return client;
     },

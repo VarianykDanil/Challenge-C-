@@ -2,12 +2,48 @@
 
 Step-by-step for everyone at Linear MCR, by role. Start with **Everyone**, then jump to your section. Buttons, tabs and fields are named exactly as they appear in the app, in **bold**.
 
+- [What's new in 1.2](#whats-new-in-12) — learning the COD pack and your pitch, and field and office upgrades
 - [What's new in 1.1](#whats-new-in-11) — the smart release
 - [Everyone](#everyone) — signing in, what your role can do, your dashboard, the six gauges, logging a day, ratios and benchmarks, the Gauges page, pay and punctuality, the leaderboard, events, the team directory, settings
 - [Leaders](#leaders) — scheduling events, logging for your team, the team view, announcements
 - [Recruiters](#recruiters) — your dashboard, the pipeline, adding and moving candidates, interviews, hiring, your pay
 - [Administrators](#administrators) — campaigns, people, gauges and events for anyone, payroll, expenses, company finance
 - [If something goes wrong](#if-something-goes-wrong)
+
+---
+
+## What's new in 1.2
+
+Linear Hub 1.2 adds a **Learning** page for the COD pack and your campaign pitches, and a set of upgrades for the
+field and the office. Each part below is filled in as it is finished.
+
+### Learning pack: COD pack lessons, the Learn / Teach checklist and the progression tracker
+
+_To be merged from `docs/r2/L1-learning-pack.md` (section "User guide")._
+
+### Pitch studio: campaign pitches, annotations and practice modes
+
+_To be merged from `docs/r2/L2-learning-pitch.md` (section "User guide")._
+
+### Sign-in PIN, stronger sessions and the deploy guide
+
+_To be merged from `docs/r2/U1-sign-in-pin.md` (section "User guide")._
+
+### Bulk gauge entry with WhatsApp paste
+
+_To be merged from `docs/r2/U2-bulk-entry.md` (section "User guide")._
+
+### Audit trail and announcement read receipts
+
+_To be merged from `docs/r2/U3-audit-trail.md` (section "User guide")._
+
+### One-tap shift check-in
+
+_To be merged from `docs/r2/U4-check-ins.md` (section "User guide")._
+
+### Search palette, payroll export and the RangePicker layout fix
+
+_To be merged from `docs/r2/U5-office-tools.md` (section "User guide")._
 
 ---
 

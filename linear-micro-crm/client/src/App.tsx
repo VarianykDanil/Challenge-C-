@@ -7,7 +7,8 @@ import { ToastProvider, useToast } from '@/components/ui';
 import { UNAUTHENTICATED_EVENT } from '@/api/client';
 import { AuthProvider, useAuth } from '@/auth/AuthProvider';
 import { RedirectIfAuthed, RequireAuth } from '@/auth/RequireAuth';
-import { CAMPAIGN_ROLES, GAUGE_ROLES, RECRUITMENT_ROLES, RequireRole } from '@/auth/RequireRole';
+import { AUDIT_ROLES, BULK_GAUGE_ROLES, CAMPAIGN_ROLES, GAUGE_ROLES, RECRUITMENT_ROLES, RequireRole } from '@/auth/RequireRole';
+import { PinSetupGate } from '@/auth/PinSetupGate';
 import { NotFoundPage } from '@/pages/NotFound';
 import { FullPageSpinner } from '@/features/common/FullPageSpinner';
 
@@ -33,6 +34,14 @@ const LandingPage = lazy(() => import('@/pages/Landing').then((m) => ({ default:
 // sign-in page loads behind the same full-page spinner the session check shows, so it reads as one wait.
 const LoginPage = lazy(() => import('@/pages/Login').then((m) => ({ default: m.LoginPage })));
 const AboutPage = lazy(() => import('@/pages/About').then((m) => ({ default: m.AboutPage })));
+// Release 1.2 (r2-foundation lays down every page; each file names its owner): Learning hub, lesson, checklist (L1),
+// pitch studio (L2), audit trail (U3), bulk gauge entry (U2).
+const LearningPage = lazy(() => import('@/pages/Learning').then((m) => ({ default: m.LearningPage })));
+const LearningLessonPage = lazy(() => import('@/pages/LearningLesson').then((m) => ({ default: m.LearningLessonPage })));
+const LearningPitchPage = lazy(() => import('@/pages/LearningPitch').then((m) => ({ default: m.LearningPitchPage })));
+const LearningProgressPage = lazy(() => import('@/pages/LearningProgress').then((m) => ({ default: m.LearningProgressPage })));
+const AuditPage = lazy(() => import('@/pages/Audit').then((m) => ({ default: m.AuditPage })));
+const BulkGaugesPage = lazy(() => import('@/pages/BulkGauges').then((m) => ({ default: m.BulkGaugesPage })));
 
 /**
  * Signed-in shell: one layout route for every signed-in page, the dashboard included (as the index child), so the
@@ -43,18 +52,21 @@ function ShellLayout() {
   const navigate = useNavigate();
   const { pathname } = useLocation();
   if (!user) return <Navigate to="/login" replace />;
+  // Release 1.2 (U1): the PIN gate shows "Create your PIN" instead of the app while one is required (pass-through now).
   return (
-    <AppShell
-      user={user}
-      fluid={pathname === '/recruitment'}
-      onLogout={() => {
-        void logout().finally(() => navigate('/login', { replace: true }));
-      }}
-    >
-      <Suspense fallback={<PageFallback />}>
-        <Outlet />
-      </Suspense>
-    </AppShell>
+    <PinSetupGate>
+      <AppShell
+        user={user}
+        fluid={pathname === '/recruitment'}
+        onLogout={() => {
+          void logout().finally(() => navigate('/login', { replace: true }));
+        }}
+      >
+        <Suspense fallback={<PageFallback />}>
+          <Outlet />
+        </Suspense>
+      </AppShell>
+    </PinSetupGate>
   );
 }
 
@@ -137,6 +149,7 @@ export default function App() {
             <Route path="events" element={<EventsPage />} />
             <Route path="events/:id" element={<EventDetailPage />} />
             <Route path="gauges" element={<RequireRole roles={GAUGE_ROLES}><GaugesPage /></RequireRole>} />
+            <Route path="gauges/bulk" element={<RequireRole roles={BULK_GAUGE_ROLES}><BulkGaugesPage /></RequireRole>} />
             <Route path="quick" element={<RequireRole roles={GAUGE_ROLES}><QuickGaugesPage /></RequireRole>} />
             <Route path="leaderboard" element={<LeaderboardPage />} />
             <Route path="recruitment" element={<RequireRole roles={RECRUITMENT_ROLES}><RecruitmentPage /></RequireRole>} />
@@ -147,6 +160,11 @@ export default function App() {
             <Route path="team/:id" element={<UserDetailPage />} />
             <Route path="settings" element={<SettingsPage />} />
             <Route path="about" element={<AboutPage />} />
+            <Route path="learning" element={<LearningPage />} />
+            <Route path="learning/pack/:lessonKey" element={<LearningLessonPage />} />
+            <Route path="learning/pitch/:campaignCode" element={<LearningPitchPage />} />
+            <Route path="learning/progress" element={<LearningProgressPage />} />
+            <Route path="audit" element={<RequireRole roles={AUDIT_ROLES}><AuditPage /></RequireRole>} />
             <Route path="*" element={<NotFoundPage />} />
           </Route>
         </Routes>

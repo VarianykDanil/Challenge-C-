@@ -76,6 +76,18 @@ export function authenticate(db: Db): RequestHandler {
   };
 }
 
+/**
+ * Release 1.2 — OWNED BY U1 sign-in-pin (laid down by r2-foundation as a pass-through). Mounted in app.ts on the /api
+ * router right after `authenticate`. While the admin requires a PIN and the signed-in caller has none
+ * (`req.user.pinSetupRequired`), every API except PIN setup, /auth/me, /auth/logout and /health answers 403 with
+ * `{ error, pinSetupRequired: true }` (shared PinSetupRequiredError). Never blocks anonymous requests (requireAuth
+ * answers those).
+ */
+export function pinSetupGate(db: Db): RequestHandler {
+  void db;
+  return (_req, _res, next) => next();
+}
+
 export const requireAuth: RequestHandler = (req, _res, next) => {
   if (!req.user) return next(unauthorized());
   next();

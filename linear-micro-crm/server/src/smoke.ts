@@ -1830,7 +1830,8 @@ async function main(): Promise<void> {
     const indexes = () => all<{ name: string }>(legacy, `SELECT name FROM sqlite_master WHERE type = 'index'`).map((t) => t.name);
     ok(!tables().includes('recovery_codes') && !indexes().includes('idx_events_campaign'), 'legacy has no recovery_codes table and no campaign index');
     const added = createSchema(legacy);
-    eq(added.join(','), 'users.totp_secret_enc,users.totp_pending_enc,users.totp_enabled_at,users.totp_last_counter,gauge_entries.payout_per_sale,gauge_entries.commission_per_sale,payroll_runs.adjusted_at', 'columns added');
+    // core columns only: release 1.2 extensions report their own changes as `<extension>:<name>` (db/extensions)
+    eq(added.filter((n) => !n.includes(':')).join(','), 'users.totp_secret_enc,users.totp_pending_enc,users.totp_enabled_at,users.totp_last_counter,gauge_entries.payout_per_sale,gauge_entries.commission_per_sale,payroll_runs.adjusted_at', 'columns added');
     ok(tableColumns(legacy, 'users').includes('totp_last_counter') && tableColumns(legacy, 'payroll_runs').includes('adjusted_at'), 'columns present');
     ok(tables().includes('recovery_codes') && tables().includes('two_factor_challenges'), 'tables created');
     ok(indexes().includes('idx_events_campaign'), 'idx_events_campaign created');

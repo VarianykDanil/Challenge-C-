@@ -5,7 +5,8 @@ import type { PayrollFlag, PayrollRunWithUser } from '@lm/shared';
 import { BRAND, POSITION_LABELS } from '@lm/shared';
 import { Badge, Button, Modal, Skeleton } from '@/components/ui';
 import { usePayslip } from '@/api/hooks';
-import { ErrorState, OnTimeBadge, PayrollStatusBadge } from '@/features/common';
+import { ErrorBoundary, ErrorState, OnTimeBadge, PayrollStatusBadge } from '@/features/common';
+import { EntityHistory } from '@/features/audit/EntityHistory';
 import { GaugeEntriesTable } from '@/features/gauges';
 import { formatDate, formatDateTime, formatGBP, formatNumber, formatRangeLabel } from '@/lib/format';
 import { PAYROLL_STATUS_LABELS } from '@/lib/labels';
@@ -208,6 +209,10 @@ function PayslipBody({ run }: { run: PayrollRunWithUser }) {
         <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted">The week's gauges</div>
         <GaugeEntriesTable rows={p?.entries ?? []} loading={q.isLoading} showPerson={false} emptyMessage={isRecruiter ? 'Recruiters do not log gauges' : 'No gauge entries this week'} />
       </div>
+      {/* Release 1.2 slot (U3): the run's change history; nothing until the package lands. */}
+      <ErrorBoundary name="payslip-history" fallback={null}>
+        <EntityHistory entity="payroll_run" entityId={run.id} className="print:hidden" />
+      </ErrorBoundary>
     </div>
   );
 }
