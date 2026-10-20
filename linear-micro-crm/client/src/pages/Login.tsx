@@ -1,16 +1,19 @@
-// Owned by the Product Designer (layout); the two-step verification step by the Frontend Developer.
+// Owned by the Product Designer (layout); the two-step verification step by the Frontend Developer; the PIN step by
+// U1 sign-in-pin (release 1.2).
 // Contract: exports LoginPage(); uses useAuth() and pickDemoAccounts().
 import { useEffect, useRef, useState, type FormEvent } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
-import { ArrowLeft, ArrowRight, Check, CircleAlert, IdCard, Info, Mail, MapPin, ShieldCheck, Smartphone } from 'lucide-react';
+import { ArrowLeft, ArrowRight, Check, CircleAlert, IdCard, Info, KeyRound, Mail, MapPin, ShieldCheck, Smartphone } from 'lucide-react';
 import clsx from 'clsx';
-import { BRAND, ROLE_LABELS } from '@lm/shared';
+import { BRAND, PIN_MIN_LENGTH, ROLE_LABELS, isPinFormatValid, type LoginPinDetails } from '@lm/shared';
 import { COPY } from '@/content/copy';
 import { useAuth } from '@/auth/AuthProvider';
 import { pickDemoAccounts } from '@/api/hooks';
 import { ApiError } from '@/api/client';
 import { apiMessage } from '@/features/common/QueryStates';
 import { OneTimeCodeInput, RECOVERY_CODE_RE, RecoveryCodeInput, isCompleteCode } from '@/features/settings/OneTimeCodeInput';
+import { PinField, PinInput } from '@/features/settings/PinInput';
+import { PIN_COPY } from '@/features/settings/pinCopy';
 import { Logo, LogoMark } from '@/components/brand/Logo';
 import { BrandBackdrop } from '@/components/brand/BrandBackdrop';
 import { ThemeToggle } from '@/components/layout/theme';
@@ -18,6 +21,30 @@ import { Avatar, Badge, Button, Divider, Field, Input, Skeleton } from '@/compon
 
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const NETWORK_ERROR = 'We couldn’t reach the server. Check your connection and try again.';
+/** Show "N tries left" once this few wrong PINs remain before the lock. */
+const WARN_TRIES_LEFT = 3;
+
+/**
+ * Release 1.2 (U1): why the PIN step opens. 'missing' comes from a 200 `requiresPin` answer (`login()` resolves with
+ * it); 'wrong' and 'locked' from a 401 / 423 error.
+ */
+type PinStepReason = { reason: 'missing' | LoginPinDetails['reason']; attemptsLeft?: number };
+
+/**
+ * The sign-in failed at the PIN — 401 (wrong) or 423 (locked) with `details: { requiresPin: true, reason,
+ * attemptsLeft? }` (shared LoginPinDetails). Null for any other answer.
+ */
+function pinStop(e: unknown): LoginPinDetails | null {
+  if (!(e instanceof ApiError) || (e.status !== 401 && e.status !== 423)) return null;
+  const d = e.details as Partial<LoginPinDetails> | null | undefined;
+  return d && typeof d === 'object' && d.requiresPin === true && typeof d.reason === 'string' ? (d as LoginPinDetails) : null;
+}
+
+/** The error line for a wrong PIN, with the tries left once few remain. */
+function wrongPinMessage(attemptsLeft: number | undefined): string {
+  const t = PIN_COPY.login;
+  return attemptsLeft !== undefined && attemptsLeft <= WARN_TRIES_LEFT ? `${t.wrong} ${t.triesLeft(attemptsLeft)}` : t.wrong;
+}
 
 export function LoginPage() {
   const { login, completeTwoFactor } = useAuth();
@@ -42,34 +69,75 @@ export function LoginPage() {
   const [locked, setLocked] = useState(false);
   const [verifying, setVerifying] = useState(false);
   const codeRef = useRef<HTMLInputElement>(null);
-  const stage: 'credentials' | 'code' = challenge ? 'code' : 'credentials';
+
+  // Step 1b (release 1.2, only for accounts with a PIN): the PIN, after the email and employee ID matched.
+  const [pinStep, setPinStep] = useState(false);
+  const [pin, setPin] = useState('');
+  const [pinError, setPinError] = useState<string | null>(null);
+  /** Locked PIN (423) or the login limiter (429): the field stays disabled with the message until the user goes back. */
+  const [pinLocked, setPinLocked] = useState(false);
+  const [pinBusy, setPinBusy] = useState(false);
+  const [pinHint, setPinHint] = useState<string | null>(null);
+  const pinRef = useRef<HTMLInputElement>(null);
+  const stage: 'credentials' | 'pin' | 'code' = challenge ? 'code' : pinStep ? 'pin' : 'credentials';
 
   useEffect(() => { if (stage === 'credentials') emailRef.current?.focus(); }, [stage]);
 
   const emailError = touched.email && !EMAIL_RE.test(email.trim()) ? 'Enter a valid work email.' : undefined;
   const idError = touched.employeeId && employeeId.trim().length < 3 ? 'Enter your employee ID, e.g. LM-0042.' : undefined;
 
+  /** Swap the form for the code step (no session yet) and keep the credentials for "Back". */
+  function openCodeStep(challengeToken: string) {
+    setPinStep(false);
+    setUseRecovery(false);
+    setCode('');
+    setRecoveryCode('');
+    setCodeError(null);
+    setLocked(false);
+    setChallenge(challengeToken);
+  }
+
+  /** Swap the form for the PIN step, as the server's answer says (missing, wrong or locked). */
+  function openPinStep(stop: PinStepReason) {
+    setPin('');
+    setPinBusy(false);
+    setPinLocked(stop.reason === 'locked');
+    setPinError(stop.reason === 'locked' ? PIN_COPY.login.locked : stop.reason === 'wrong' ? wrongPinMessage(stop.attemptsLeft) : null);
+    setPinHint(stop.reason === 'missing' && stop.attemptsLeft !== undefined && stop.attemptsLeft <= WARN_TRIES_LEFT ? PIN_COPY.login.triesLeft(stop.attemptsLeft) : null);
+    setPinStep(true);
+  }
+
   async function signIn(creds: { email: string; employeeId: string }, source: 'form' | string) {
     setError(null);
     setNotice(null);
     setSubmitting(source);
+    const normalised = { email: creds.email.trim().toLowerCase(), employeeId: creds.employeeId.trim().toUpperCase() };
     try {
-      const result = await login({ email: creds.email.trim().toLowerCase(), employeeId: creds.employeeId.trim().toUpperCase() });
+      const result = await login(normalised);
+      if (result.requiresPin) {
+        setEmail(normalised.email);
+        setEmployeeId(normalised.employeeId);
+        openPinStep({ reason: 'missing', attemptsLeft: result.attemptsLeft });
+        setSubmitting(null);
+        return;
+      }
       if (result.requiresTwoFactor) {
-        // No session yet: swap the form for the code step and keep the credentials for "Back".
-        setEmail(creds.email.trim().toLowerCase());
-        setEmployeeId(creds.employeeId.trim().toUpperCase());
-        setUseRecovery(false);
-        setCode('');
-        setRecoveryCode('');
-        setCodeError(null);
-        setLocked(false);
-        setChallenge(result.challengeToken);
+        setEmail(normalised.email);
+        setEmployeeId(normalised.employeeId);
+        openCodeStep(result.challengeToken);
         setSubmitting(null);
         return;
       }
       navigate('/', { replace: true });
     } catch (e) {
+      const stop = pinStop(e);
+      if (stop) {
+        setEmail(normalised.email);
+        setEmployeeId(normalised.employeeId);
+        openPinStep(stop);
+        setSubmitting(null);
+        return;
+      }
       if (e instanceof ApiError) {
         setError(e.status === 401 ? 'We couldn’t match that email and employee ID. Check both and try again.' : e.message);
       } else {
@@ -101,8 +169,56 @@ export function LoginPage() {
     setCodeError(null);
     setLocked(false);
     setVerifying(false);
+    setPinStep(false);
+    setPin('');
+    setPinError(null);
+    setPinHint(null);
+    setPinLocked(false);
+    setPinBusy(false);
     setError(null);
     setNotice(message);
+  }
+
+  async function submitPin(e?: FormEvent) {
+    e?.preventDefault();
+    if (pinBusy || pinLocked || !isPinFormatValid(pin)) return;
+    setPinError(null);
+    setPinBusy(true);
+    try {
+      const result = await login({ email, employeeId, pin });
+      if (result.requiresPin) {
+        openPinStep({ reason: 'missing', attemptsLeft: result.attemptsLeft }); // the PIN did not arrive: ask again
+        return;
+      }
+      if (result.requiresTwoFactor) {
+        openCodeStep(result.challengeToken);
+        setPinBusy(false);
+        return;
+      }
+      navigate('/', { replace: true });
+    } catch (err) {
+      const stop = pinStop(err);
+      if (stop?.reason === 'locked') {
+        setPinLocked(true);
+        setPinHint(null);
+        setPinError(PIN_COPY.login.locked);
+      } else if (stop) {
+        setPinHint(null);
+        setPinError(wrongPinMessage(stop.attemptsLeft));
+        setPin('');
+        requestAnimationFrame(() => pinRef.current?.focus());
+      } else if (err instanceof ApiError && err.status === 429) {
+        setPinLocked(true);
+        setPinError(apiMessage(err, PIN_COPY.login.tooMany));
+      } else if (err instanceof ApiError && err.status === 401) {
+        // The email and employee ID stopped matching meanwhile (e.g. the account was deactivated): start again.
+        backToCredentials();
+        setError('We couldn’t match that email and employee ID. Check both and try again.');
+      } else {
+        setPinError(err instanceof ApiError ? err.message : NETWORK_ERROR);
+      }
+      setPinBusy(false);
+    }
   }
 
   async function verify(input: { code?: string; recoveryCode?: string }) {
@@ -242,6 +358,19 @@ export function LoginPage() {
                 onComplete={(c) => void verify({ code: c })}
                 onSubmit={onVerifySubmit}
                 onToggleRecovery={toggleRecovery}
+                onBack={() => backToCredentials()}
+              />
+            ) : stage === 'pin' ? (
+              <PinStep
+                email={email}
+                pin={pin}
+                error={pinError}
+                hint={pinHint}
+                locked={pinLocked}
+                busy={pinBusy}
+                inputRef={pinRef}
+                onPinChange={(v) => { setPin(v); if (pinError && !pinLocked) setPinError(null); }}
+                onSubmit={(e) => void submitPin(e)}
                 onBack={() => backToCredentials()}
               />
             ) : (
@@ -437,6 +566,72 @@ function TwoFactorStep({ email, useRecovery, code, recoveryCode, error, locked, 
             {useRecovery ? t.useApp : t.useRecovery}
           </Button>
           <Button type="button" variant="link" size="sm" onClick={onBack} disabled={verifying} leftIcon={<ArrowLeft />}>
+            {t.back}
+          </Button>
+        </div>
+      </form>
+    </div>
+  );
+}
+
+interface PinStepProps {
+  email: string;
+  pin: string;
+  error: string | null;
+  /** A quiet line under the field (e.g. tries left), shown when there is no error. */
+  hint: string | null;
+  locked: boolean;
+  busy: boolean;
+  inputRef: React.RefObject<HTMLInputElement | null>;
+  onPinChange: (value: string) => void;
+  onSubmit: (e: FormEvent) => void;
+  onBack: () => void;
+}
+
+/** Release 1.2 (U1): sign-in step for accounts with a PIN, between the credentials and the two-step code. */
+function PinStep({ email, pin, error, hint, locked, busy, inputRef, onPinChange, onSubmit, onBack }: PinStepProps) {
+  const t = PIN_COPY.login;
+  return (
+    <div data-testid="login-pin" className="animate-slide-up">
+      <span className="mb-5 inline-flex h-12 w-12 items-center justify-center rounded-xl bg-primary-soft text-primary" aria-hidden>
+        <KeyRound className="h-6 w-6" />
+      </span>
+      <h2 className="text-2xl font-bold tracking-tight">{t.heading}</h2>
+      <p className="mt-1.5 text-sm text-muted">{t.body}</p>
+      <p className="mt-2 text-xs text-muted">
+        {t.signingInAs} <span className="font-medium text-fg">{email}</span>
+      </p>
+
+      {error && (
+        <div role="alert" data-testid="login-pin-error" className="mt-5 flex items-start gap-3 rounded-xl border border-danger/30 bg-danger-soft px-4 py-3 text-sm text-danger animate-scale-in">
+          <CircleAlert className="mt-0.5 h-4 w-4 shrink-0" aria-hidden />
+          <span className="text-fg">{error}</span>
+        </div>
+      )}
+
+      <form onSubmit={onSubmit} noValidate className="mt-6 space-y-5">
+        {/* The account the PIN belongs to, for password managers (they pair a password field with a username). */}
+        <input type="text" name="username" autoComplete="username" value={email} readOnly tabIndex={-1} aria-hidden className="sr-only" />
+        <PinField htmlFor="login-pin" label={t.label} hint={hint ?? undefined}>
+          <PinInput
+            ref={inputRef}
+            id="login-pin"
+            name="pin"
+            autoFocus
+            autoComplete="current-password"
+            value={pin}
+            onChange={onPinChange}
+            disabled={locked || busy}
+            invalid={!!error && !locked}
+            minLength={PIN_MIN_LENGTH}
+          />
+        </PinField>
+        <Button type="submit" size="lg" fullWidth loading={busy} disabled={locked || !isPinFormatValid(pin)} rightIcon={<ArrowRight />}>
+          {t.submit}
+        </Button>
+        <p className="text-xs leading-relaxed text-muted">{t.forgot}</p>
+        <div className="flex justify-end">
+          <Button type="button" variant="link" size="sm" onClick={onBack} disabled={busy} leftIcon={<ArrowLeft />}>
             {t.back}
           </Button>
         </div>

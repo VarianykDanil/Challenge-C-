@@ -1,17 +1,21 @@
 // Owned by the Frontend Developer. Contract: useAuth() shape is used by Login (Designer) and AppShell.
-import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from 'react';
+import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
-import type { AuthResponse, LoginInput, TwoFactorChallenge, UserWithTeam } from '@lm/shared';
+import type { AuthResponse, LoginInput, LoginPinChallenge, TwoFactorChallenge, UserWithTeam } from '@lm/shared';
 import { api, ApiError } from '@/api/client';
 
 /**
  * What `login()` resolves to. A plain credentials match signs the user in straight away; an account with
  * two-step verification on gets a short-lived challenge instead and must finish with `completeTwoFactor()`.
- * Both members carry `requiresTwoFactor`, so `if (result.requiresTwoFactor)` narrows cleanly.
+ * Release 1.2 (U1): an account with a PIN signed in without one gets `requiresPin` (no session yet) and calls
+ * `login()` again with the same details plus `pin`.
+ * Every member carries `requiresTwoFactor` and `requiresPin`, so `if (result.requiresPin)` / `if (result.requiresTwoFactor)`
+ * narrow cleanly.
  */
 export type LoginResult =
-  | { ok: true; requiresTwoFactor: false }
-  | { ok: false; requiresTwoFactor: true; challengeToken: string };
+  | { ok: true; requiresTwoFactor: false; requiresPin: false }
+  | { ok: false; requiresTwoFactor: true; requiresPin: false; challengeToken: string }
+  | { ok: false; requiresTwoFactor: false; requiresPin: true; attemptsLeft: number };
 
 export interface TwoFactorCompletion {
   challengeToken: string;
@@ -36,6 +40,9 @@ export interface AuthContextValue {
 
 const AuthContext = createContext<AuthContextValue | null>(null);
 
+/** A tab coming back to the front re-reads /auth/me at most this often. */
+const VISIBLE_REFRESH_MS = 60_000;
+
 export function AuthProvider({ children }: { children: ReactNode }) {
   const qc = useQueryClient();
   const [user, setUser] = useState<UserWithTeam | null>(null);
@@ -57,6 +64,24 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     void refresh();
   }, [refresh]);
 
+  // Release 1.2 (U1): re-read /auth/me when a signed-in tab comes back to the front (at most once a minute), so a
+  // session that ended while the phone was in a pocket — the idle timeout, a PIN reset, a new sign-in rule — shows the
+  // sign-in page or the "Create your PIN" step straight away instead of a page of stale cards.
+  const signedInRef = useRef(false);
+  useEffect(() => {
+    signedInRef.current = user !== null;
+  }, [user]);
+  useEffect(() => {
+    let last = Date.now();
+    const onVisible = () => {
+      if (document.visibilityState !== 'visible' || !signedInRef.current || Date.now() - last < VISIBLE_REFRESH_MS) return;
+      last = Date.now();
+      void refresh();
+    };
+    document.addEventListener('visibilitychange', onVisible);
+    return () => document.removeEventListener('visibilitychange', onVisible);
+  }, [refresh]);
+
   const signedIn = useCallback(
     (res: AuthResponse) => {
       // Drop anything cached for a previous session before the new user's pages mount.
@@ -68,13 +93,17 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const login = useCallback(
     async (input: LoginInput): Promise<LoginResult> => {
-      const res = await api<AuthResponse | TwoFactorChallenge>('/auth/login', { method: 'POST', json: input });
+      const res = await api<AuthResponse | TwoFactorChallenge | LoginPinChallenge>('/auth/login', { method: 'POST', json: input });
+      if ('requiresPin' in res && res.requiresPin) {
+        // No session cookie yet: the account has a PIN and none was sent.
+        return { ok: false, requiresTwoFactor: false, requiresPin: true, attemptsLeft: res.attemptsLeft };
+      }
       if ('requiresTwoFactor' in res && res.requiresTwoFactor) {
         // No session cookie yet: the user has to prove the second factor first.
-        return { ok: false, requiresTwoFactor: true, challengeToken: res.challengeToken };
+        return { ok: false, requiresTwoFactor: true, requiresPin: false, challengeToken: res.challengeToken };
       }
       signedIn(res as AuthResponse);
-      return { ok: true, requiresTwoFactor: false };
+      return { ok: true, requiresTwoFactor: false, requiresPin: false };
     },
     [signedIn],
   );
