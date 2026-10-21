@@ -2,6 +2,7 @@
 // leader of their team (or an admin) signs the Teach tick off here, with or without a written teach-back. A sign-off
 // also ticks Learn when it was still empty (the server marks it learned), so Teach ✓ never sits next to Learn ☐.
 // Withdrawing takes that Learn back only when nothing else holds it (no passed self-check, no teach-back since).
+// On phones the sign-off, withdraw and read buttons are at least 40 px tall (tap targets); desktop is unchanged.
 import { useState } from 'react';
 import { Link } from 'react-router-dom';
 import { Check, ChevronDown, ListChecks, Square } from 'lucide-react';
@@ -122,7 +123,7 @@ export function PersonChecklist({ progress, canSignOff, self, className }: Perso
                         {l.teachbackText && !self && (
                           <button
                             type="button"
-                            className="focus-ring mt-0.5 inline-flex min-h-7 items-center gap-1 rounded text-xs font-medium text-primary hover:underline"
+                            className="focus-ring mt-0.5 inline-flex min-h-7 items-center gap-1 rounded text-xs font-medium text-primary hover:underline max-sm:min-h-10"
                             aria-expanded={expanded}
                             onClick={() => setOpen(expanded ? null : lesson.key)}
                           >
@@ -148,7 +149,7 @@ export function PersonChecklist({ progress, canSignOff, self, className }: Perso
                           taught ? (
                             <button
                               type="button"
-                              className="focus-ring inline-flex min-h-9 items-center gap-1 rounded-md bg-success px-2 text-xs font-semibold text-status-fg"
+                              className="focus-ring inline-flex min-h-9 items-center justify-center gap-1 rounded-md bg-success px-2 text-xs font-semibold text-status-fg max-sm:min-h-10 max-sm:min-w-10"
                               aria-pressed="true"
                               aria-label={`${lesson.short}: signed off. Withdraw the sign-off`}
                               title={`Signed off ${formatDateShort(l.taughtSignedOffAt)}${l.taughtSignedOffByName ? ` by ${l.taughtSignedOffByName}` : ''}`}
@@ -161,7 +162,7 @@ export function PersonChecklist({ progress, canSignOff, self, className }: Perso
                             <Button
                               size="sm"
                               variant={l.state === 'teachback_sent' ? 'primary' : 'soft'}
-                              className="min-h-9 px-2.5"
+                              className="min-h-9 px-2.5 max-sm:min-h-10"
                               aria-label={`Sign off ${lesson.short} for ${first}`}
                               loading={signOff.isPending && signOff.variables?.lessonKey === lesson.key}
                               onClick={() => sign(l, true)}

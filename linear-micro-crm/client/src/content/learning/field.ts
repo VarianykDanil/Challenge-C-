@@ -230,7 +230,8 @@ export const STRATEGIC_PAUSE: Lesson = {
   short: 'Strategic pause',
   checklist: ['Strategic pause'],
   page: '6',
-  summary: 'Pausing to add effect. A strategic pause shows confidence.',
+  // Our own words: the pack's definition opens the lesson below, so the summary does not repeat it.
+  summary: 'Use strategic pauses in the presentation to add effect and show you are confident. Pitch scripts mark where each one goes.',
   keyPoints: ['Pausing to add effect.', 'Shows confidence.', 'Use strategic pauses in the presentation.'],
   sections: [
     {
@@ -266,7 +267,7 @@ export const PRE_EMPTIVE_STRIKE: Lesson = {
   short: 'Pre-emptive strike',
   checklist: ['Pre-emptive strike'],
   page: '6',
-  summary: 'Attacking the negative before it arises: name the objection first, then always follow up with urgency.',
+  summary: 'Get ahead of an objection by naming it before they raise it, as in “I know you’re busy”, then always follow up with urgency.',
   keyPoints: ['Attacking the negative before it arises.', '“I know you’re busy.”', 'Always follow up with urgency!'],
   sections: [
     {

@@ -7,7 +7,6 @@ import { Link } from 'react-router-dom';
 import clsx from 'clsx';
 import { AlertTriangle, CornerDownRight, Drama } from 'lucide-react';
 import {
-  pitchLinesToCheck,
   pitchStepVerdict,
   type PitchBlock,
   type PitchFact,
@@ -112,7 +111,9 @@ export function ScriptView({ script, facts, showTheory, narrow, className }: Scr
             </p>
             <p className="mt-1">
               Not in this script: it comes after the sign-up. {STEP_HINT.consolidation}{' '}
-              <Link to={stepLessonHref('consolidation')} className="font-medium text-primary hover:underline">See the five steps</Link>
+              <Link to={stepLessonHref('consolidation')} className="font-medium text-primary hover:underline max-sm:inline-flex max-sm:min-h-10 max-sm:items-center max-sm:align-middle">
+                See the five steps
+              </Link>
             </p>
           </div>
         )}
@@ -145,7 +146,10 @@ function StepHeading({ estimate, first }: { estimate: PitchStepEstimate; first: 
       </div>
       <p className="mt-1 text-xs text-muted sm:pl-10">
         {STEP_HINT[estimate.step]}{' '}
-        <Link to={stepLessonHref(estimate.step)} className="font-medium text-primary hover:underline">Lesson</Link>
+        {/* 40 px tall on phones (a tap target), an ordinary inline link from `sm` up. */}
+        <Link to={stepLessonHref(estimate.step)} className="font-medium text-primary hover:underline max-sm:inline-flex max-sm:min-h-10 max-sm:items-center max-sm:align-middle">
+          Lesson
+        </Link>
       </p>
     </div>
   );
@@ -249,7 +253,7 @@ function Branches({ block, placement, showTheory, narrow }: { block: Extract<Pit
       </p>
       {many && (
         <SegmentedControl
-          className={narrow ? 'mb-3' : 'mb-3 md:hidden'}
+          className={narrow ? 'mb-3 max-sm:h-11' : 'mb-3 max-sm:h-11 md:hidden'}
           size="md"
           fullWidth
           aria-label="Their answer"
@@ -283,23 +287,9 @@ function Branches({ block, placement, showTheory, narrow }: { block: Extract<Pit
 
 /**
  * Read mode and the editor preview: notes about the whole script (no quoted line), and a count of the line notes,
- * shown above the script. `practice` (the teleprompter and flashcards, which show no notes of their own beyond the
- * flags on their lines): only the banner with the number of lines to check, and nothing when there are none.
+ * shown above the script. (The teleprompter and the flashcards say how many lines to check in strips of their own.)
  */
-export function FactSummary({ facts, className, practice = false }: { facts: readonly PitchFact[]; className?: string; practice?: boolean }) {
-  if (practice) {
-    const n = pitchLinesToCheck(facts);
-    if (!n) return null;
-    return (
-      <div className={clsx('flex items-start gap-3 rounded-xl border border-warning/30 bg-warning-soft px-4 py-3 text-sm text-fg', className)} role="note" data-fact-banner>
-        <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-warning" aria-hidden />
-        <p>
-          <span className="font-semibold">Check the figures:</span> {n} {n === 1 ? 'line uses' : 'lines use'} figures the office has not approved yet. Read
-          mode shows the notes.
-        </p>
-      </div>
-    );
-  }
+export function FactSummary({ facts, className }: { facts: readonly PitchFact[]; className?: string }) {
   if (!facts.length) return null;
   const general = facts.filter((f) => f.lines.length === 0);
   const onLines = facts.filter((f) => f.lines.length > 0);

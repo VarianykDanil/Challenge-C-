@@ -63,7 +63,7 @@ export function TeachBack({ lesson, progress }: TeachBackProps) {
           ) : (
             <p className="text-sm text-muted">Sent {formatDate(progress?.teachbackAt)}. Waiting for {who} to sign it off.</p>
           )}
-          <Button variant="outline" size="sm" leftIcon={<Pencil />} onClick={() => setEditing(true)}>
+          <Button variant="outline" size="sm" className="max-sm:h-10" leftIcon={<Pencil />} onClick={() => setEditing(true)}>
             Rewrite it
           </Button>
         </div>

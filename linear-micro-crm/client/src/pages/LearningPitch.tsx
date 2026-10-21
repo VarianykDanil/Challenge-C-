@@ -3,7 +3,7 @@
 // behind each line, a step timer and three practice modes: Read, Teleprompter and Memorise (flashcards); the two
 // practice modes flag the lines whose figures the office has not approved yet. Admins and leaders write and edit it
 // (?edit=1 opens the editor); only admins (the office) change the fact-check notes. Every signed-in role can read it.
-import { useEffect, useMemo, useState, type ReactNode } from 'react';
+import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { Link, useParams, useSearchParams } from 'react-router-dom';
 import { useQueryClient } from '@tanstack/react-query';
 import { ArrowLeft, BookOpen, GraduationCap, Layers, MonitorPlay, Mic, Pencil, PenLine } from 'lucide-react';
@@ -73,7 +73,7 @@ export function LearningPitchPage() {
   };
 
   const back = (
-    <Link to="/learning" className="inline-flex min-h-8 items-center gap-1 hover:underline">
+    <Link to="/learning" className="inline-flex min-h-8 items-center gap-1 hover:underline max-sm:min-h-10">
       <ArrowLeft className="h-3 w-3" aria-hidden /> {COPY.nav.learning.title}
     </Link>
   );
@@ -174,6 +174,22 @@ function PitchStudio({
   useEffect(() => writeStored('lm-pitch-mode', mode), [mode]);
   useEffect(() => writeStored('lm-pitch-theory', showTheory ? 'on' : 'off'), [showTheory]);
 
+  // "See the notes" in the teleprompter and the flashcards opens Read mode, which unmounts the button: focus moves to
+  // the notes summary (or, without one, to the Read option) instead of falling back to the page.
+  const notesRef = useRef<HTMLDivElement>(null);
+  const modesRef = useRef<HTMLDivElement>(null);
+  const focusNotes = useRef(false);
+  const showNotes = () => {
+    focusNotes.current = true;
+    setMode('read');
+  };
+  useEffect(() => {
+    if (mode !== 'read' || !focusNotes.current) return;
+    focusNotes.current = false;
+    const notes = notesRef.current;
+    (notes?.childElementCount ? notes : modesRef.current?.querySelector<HTMLElement>('[role="radio"][aria-checked="true"]'))?.focus();
+  }, [mode]);
+
   const updated = `Updated ${formatDateShort(pitch.updatedAt)}${pitch.updatedByName ? ` by ${pitch.updatedByName}` : ''}`;
 
   return (
@@ -186,12 +202,12 @@ function PitchStudio({
         actions={canEdit ? <Button variant="outline" onClick={onEdit} leftIcon={<Pencil />}>Edit</Button> : undefined}
       />
       <div className="space-y-4" data-pitch-studio data-mode={mode}>
-        <div className="flex flex-wrap items-center justify-between gap-3">
+        <div ref={modesRef} className="flex flex-wrap items-center justify-between gap-3">
           <SegmentedControl
             aria-label="Practice mode"
             value={mode}
             onChange={setMode}
-            className="max-sm:flex max-sm:w-full max-sm:[&_button>span]:hidden"
+            className="max-sm:flex max-sm:h-11 max-sm:w-full max-sm:[&_button>span]:hidden"
             options={[
               { value: 'read', label: 'Read', icon: <BookOpen /> },
               { value: 'prompter', label: 'Teleprompter', icon: <MonitorPlay /> },
@@ -205,24 +221,26 @@ function PitchStudio({
           <>
             <StepTimer steps={script.steps} wordsPerMinute={script.wordsPerMinute} />
             <Card className="p-4 sm:p-6 lg:p-8">
-              <FactSummary facts={facts} className="mb-6" />
+              <div ref={notesRef} tabIndex={-1} role="region" aria-label="Notes on the figures" className="focus-ring mb-6 rounded-xl empty:hidden">
+                <FactSummary facts={facts} />
+              </div>
               <ScriptView script={script} facts={facts} showTheory={showTheory} />
             </Card>
           </>
         )}
-        {/* The practice modes show no notes, so they say how many lines still need checking (the remembered mode can
-            open straight into one of them). The teleprompter says it in a strip inside its own panel, so the panel
-            still fits the first screen with its controls. */}
-        {mode === 'memorise' && <FactSummary facts={facts} practice className="mx-auto max-w-3xl" />}
+        {/* The practice modes say how many lines still need checking in a one-line strip of their own (the teleprompter
+            inside its panel, the flashcards in their progress card), so their controls still fit the first screen. */}
         {mode === 'prompter' && (
           <>
-            <Teleprompter script={script} facts={facts} onShowNotes={() => setMode('read')} />
+            <Teleprompter script={script} facts={facts} onShowNotes={showNotes} />
             <p className="text-xs text-muted">
               Space plays and pauses, the arrow keys change the speed, F goes full screen. On a phone, turn it sideways for the widest lines.
             </p>
           </>
         )}
-        {mode === 'memorise' && <Memorise script={script} facts={facts} userId={userId} campaignCode={pitch.campaignCode} />}
+        {mode === 'memorise' && (
+          <Memorise script={script} facts={facts} userId={userId} campaignCode={pitch.campaignCode} onShowNotes={showNotes} />
+        )}
       </div>
     </>
   );

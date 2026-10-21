@@ -78,12 +78,14 @@ function PendingCard({ pending, personHref }: { pending: TeachbackAwaiting[]; pe
                   <Avatar name={p.userName} color={p.avatarColor} size="sm" />
                   <div className="min-w-0 flex-1">
                     <div className="flex flex-wrap items-baseline gap-x-2">
-                      <Link to={personHref(p.userId)} className="focus-ring rounded text-sm font-semibold text-fg hover:underline">
+                      {/* 40 px tall on phones (tap targets), touching but not overlapping; plain text links from `sm` up. */}
+                      <Link to={personHref(p.userId)} className="focus-ring rounded text-sm font-semibold text-fg hover:underline max-sm:inline-flex max-sm:min-h-10 max-sm:items-center">
                         {p.userName}
                       </Link>
-                      <span className="text-xs text-muted">{formatRelative(p.teachbackAt)}</span>
+                      {/* Sent already: a phone clock a few minutes behind reads "just now", never "in 9 minutes". */}
+                      <span className="text-xs text-muted">{formatRelative(p.teachbackAt, new Date(), { past: true })}</span>
                     </div>
-                    <Link to={`/learning/pack/${p.lessonKey}`} className="focus-ring rounded text-xs font-medium text-primary hover:underline">
+                    <Link to={`/learning/pack/${p.lessonKey}`} className="focus-ring rounded text-xs font-medium text-primary hover:underline max-sm:inline-flex max-sm:min-h-10 max-sm:items-center">
                       {lesson.short}
                     </Link>
                     {p.teachbackText &&

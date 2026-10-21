@@ -201,7 +201,7 @@ export function PitchEditor({ campaignCode, campaignName, pitch, canEditFacts, o
   return (
     <div data-pitch-editor>
       <SegmentedControl
-        className="mb-4 xl:hidden"
+        className="mb-4 max-sm:h-11 xl:hidden"
         fullWidth
         aria-label="Editor view"
         value={pane}

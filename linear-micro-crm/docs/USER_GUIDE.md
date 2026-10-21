@@ -47,9 +47,10 @@ ask your leader what each involves. Once you have done it, tap **I've done this*
 
 - **Reps and recruiters**: your leadership checklist (Learn and Teach ticks for every lesson) and the progression
   tracker: your level, the next one and each criterion with your real numbers (for example "12 of 14 sales this week",
-  "9 of 21 lessons learned"), a chart of your sales per week for the last 12 weeks against the 14 and 12 lines, and
-  the whole ladder from entry level to national consultant. Recruiters see the checklist only (they are outside the
-  field ladder).
+  "9 of 21 lessons learned"), a chart of your sales per week for the last 12 weeks against the 14 and 12 lines (touch
+  or slide a finger along it, or hover, to read a week; on a keyboard Tab to it and use the arrow keys), and the whole
+  ladder from entry level to national consultant. Recruiters see the checklist only (they are outside the field
+  ladder).
 - **Leaders**: **Me** shows your own; **My team** shows the teach-backs **Waiting for your sign-off** (read them and
   tap **Sign off**), everyone's Learn / Taught counts, and on a tablet or computer the whole checklist grid. Open a
   person to tick their Teach column (**Sign off**, which ticks Learn too if it was empty; tap a green **Taught** to
@@ -66,7 +67,8 @@ this week; 9 of 21 lessons learned". Tap it for the Progress page.
 
 **Learning → Pitches.** At the top of the Learning page there is a card for every active campaign (and any inactive
 one that has a pitch). A campaign with a pitch shows its title and when it was last updated; tap it to open the pitch.
-Admins and leaders see **Write the pitch** on a campaign without one; everyone else sees "Not written yet".
+Admins and leaders see **Write the pitch** under the name of a campaign without one; everyone else sees "Not written
+yet". A long campaign name wraps to a second line rather than being cut.
 
 **Opening a pitch from the field.** On **Quick gauges** a microphone button next to the event opens that campaign's
 pitch; on an event's page the **Pitch** button does the same. Both only appear when the campaign has a pitch.
@@ -86,23 +88,30 @@ reads aloud and who updated it last. Choose how to practise:
   source. Each line has its own note, so "Over 1000 women…" and "every 43 minutes…" each get their own suggestion. A
   green **Checked** note means it matches. The script itself is never changed by the check: the office decides the
   final wording.
-- **In the teleprompter and the flashcards** a banner says how many lines still need checking ("Check the figures: 5
-  lines use figures the office has not approved yet. Read mode shows the notes."). In the teleprompter it is a strip
-  at the top of the dark panel (on a phone just "Check the figures: 5 lines"), so Play and the speed still fit on the
-  screen; tap **See the notes** to go to Read mode. In the teleprompter those lines end with an amber warning sign,
-  with the suggested wording under them (on a phone, tap **Check the figures** under the line). The notes do not speed
-  it up: the lines scroll at the words a minute you chose, and a note under a line simply takes its own time. A flashcard for one of those lines says **Check the figures** at the top; once you reveal the line, the note
-  and its suggested wording show under it (tap to open on a phone).
+- **In the teleprompter and the flashcards** a strip says how many lines still need checking ("Check the figures: 5
+  lines use figures the office has not approved yet"; on a phone just "Check the figures: 5 lines"), with **See the
+  notes** to go to the notes in Read mode. In the teleprompter it sits at the top of the dark panel, so Play and the
+  speed still fit on the screen; in the flashcards it is in the "Lines you know" card (at its top on a phone, next to
+  "Saved on this device only." on a wider screen, so it adds no height above the card). In the teleprompter those
+  lines end with an amber warning sign, with the suggested wording under them (on a phone, tap **Check the figures**
+  under the line). The notes do not speed it up: the lines scroll at the words a minute you chose, and a note under a
+  line simply takes its own time. A flashcard for one of those lines says **Check the figures** at the top; once you
+  reveal the line, the note and its suggested wording show under **Again** and **Known** (on a phone, tap **Check the
+  figures** there to open it), so the two buttons stay in the same place on every card.
 - **Step timer**: tap **Start** as you begin, **Next step** as you move from the introduction to the short story and
   on, then **Finish** (or **Stop**). Each step shows your time against the target (introduction 7–10 s, short story
-  10–15 s). On a phone it shrinks to one line that stays at the top while you read down. Nothing is saved.
+  10–15 s). On a tablet, or beside the sidebar on a laptop, each step's number sits above its name so every name shows
+  in full. On a phone, held upright or sideways, it shrinks to one line that stays at the top with **Next step** and
+  **Stop** while you read down. Nothing is saved.
 - **Teleprompter**: the script on a dark panel that scrolls by itself past a reading line. **Play**/**Pause**, **−**
   and **+** to change the speed (words a minute, kept on the phone), the circle arrow to go back to the start, and the
   corner button for full screen. Turn the phone sideways for the widest lines. On a keyboard: Space plays and pauses,
   the arrow keys change the speed, F goes full screen, Esc leaves it. The screen stays awake while it plays.
 - **Memorise**: flashcards, one line at a time. You see the line before as the cue; say the next line, then tap to
   check and mark it **Known** or **Again**. "Lines you know" counts up; **Only lines still to learn** skips the ones you
-  know; **Start over** clears it. Progress is saved on this device only.
+  know; **Start over** clears it. Progress is saved on this device only. On a phone the card comes first and the
+  "Lines you know" card is under it, so the line and **Again** / **Known** usually fit on the screen without scrolling
+  (the longest lines need a short scroll).
 
 **Writing and editing (admins and leaders).** **Edit** on a pitch (or **Write the pitch**) opens the editor: a title,
 the script, and the fact-check notes, with a live **Preview** beside it (a **Write**/**Preview** switch on phones and

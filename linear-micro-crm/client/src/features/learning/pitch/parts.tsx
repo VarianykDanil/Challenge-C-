@@ -6,20 +6,23 @@ import clsx from 'clsx';
 import { AlertTriangle, BadgeCheck, ChevronDown, ExternalLink, GraduationCap, Info, Target } from 'lucide-react';
 import type { PitchAnnotation, PitchFact, PitchSegment, PitchStepKey, PitchStepTarget } from '@lm/shared';
 
-/** "22 s", "1 min 5 s", "2 min". */
+/** A no-break space: a number and its unit ("22 s", "1 min") never split across two lines. */
+export const NBSP = ' ';
+
+/** "22 s", "1 min 5 s", "2 min" (each number joined to its unit by a no-break space). */
 export function formatSeconds(total: number): string {
   const s = Math.max(0, Math.round(total));
-  if (s < 60) return `${s} s`;
+  if (s < 60) return `${s}${NBSP}s`;
   const m = Math.floor(s / 60);
   const r = s % 60;
-  return r ? `${m} min ${r} s` : `${m} min`;
+  return r ? `${m}${NBSP}min ${r}${NBSP}s` : `${m}${NBSP}min`;
 }
 
 /** "7–10 s" for a pack target, or null when the pack sets none. */
 export function targetLabel(t: Pick<PitchStepTarget, 'minSeconds' | 'maxSeconds'>): string | null {
-  if (t.minSeconds != null && t.maxSeconds != null) return `${t.minSeconds}–${t.maxSeconds} s`;
-  if (t.maxSeconds != null) return `up to ${t.maxSeconds} s`;
-  if (t.minSeconds != null) return `at least ${t.minSeconds} s`;
+  if (t.minSeconds != null && t.maxSeconds != null) return `${t.minSeconds}–${t.maxSeconds}${NBSP}s`;
+  if (t.maxSeconds != null) return `up to ${t.maxSeconds}${NBSP}s`;
+  if (t.minSeconds != null) return `at least ${t.minSeconds}${NBSP}s`;
   return null;
 }
 
@@ -96,7 +99,7 @@ export function InlineSegments({ segments, tone = 'page', name }: { segments: re
 
 /**
  * The COD pack theories a line uses: a chip per theory; tapping one shows why it works and a link to its lesson.
- * Chips are 32 px tall with a 40 px tap area.
+ * Chips are 40 px tall on phones; from `sm` up they are 32 px tall with a 40 px tap area.
  */
 export function TheoryChips({ annotations, className }: { annotations: readonly PitchAnnotation[]; className?: string }) {
   const [open, setOpen] = useState<string | null>(null);
@@ -114,7 +117,7 @@ export function TheoryChips({ annotations, className }: { annotations: readonly 
               aria-expanded={on}
               onClick={() => setOpen(on ? null : a.theory)}
               className={clsx(
-                'focus-ring relative inline-flex h-8 items-center gap-1 rounded-full px-2.5 text-xs font-medium ring-1 ring-inset transition-colors',
+                'focus-ring relative inline-flex h-8 items-center gap-1 rounded-full px-2.5 text-xs font-medium ring-1 ring-inset transition-colors max-sm:h-10',
                 "after:absolute after:-inset-y-1 after:inset-x-0 after:content-['']",
                 on ? 'bg-primary-soft text-primary ring-primary/40' : 'bg-surface-2 text-muted ring-border hover:text-fg',
               )}
@@ -160,7 +163,7 @@ export function FactNote({ fact, className, showQuote = true }: { fact: PitchFac
   const t = FACT_TONE[fact.tone];
   const Icon = t.icon;
   return (
-    <div className={clsx('rounded-xl border p-3 text-sm', t.box, className)}>
+    <div className={clsx('rounded-xl border p-3 text-sm', t.box, className)} data-fact-note>
       <p className={clsx('flex items-center gap-1.5 text-xs font-semibold', t.text)}>
         <Icon className="h-3.5 w-3.5 shrink-0" aria-hidden />
         {t.label}
@@ -179,7 +182,7 @@ export function FactNote({ fact, className, showQuote = true }: { fact: PitchFac
         <ul className="mt-2 space-y-1">
           {fact.sources.map((src) => (
             <li key={src}>
-              <a href={src} target="_blank" rel="noreferrer noopener" className="inline-flex min-h-8 max-w-full items-center gap-1 break-all text-xs font-medium text-primary hover:underline">
+              <a href={src} target="_blank" rel="noreferrer noopener" className="inline-flex min-h-8 max-w-full items-center gap-1 break-all text-xs font-medium text-primary hover:underline max-sm:min-h-10">
                 <ExternalLink className="h-3 w-3 shrink-0" aria-hidden />
                 <span className="truncate">{hostOf(src)}</span>
                 <span className="sr-only"> (opens in a new tab)</span>

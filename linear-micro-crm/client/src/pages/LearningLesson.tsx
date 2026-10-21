@@ -19,7 +19,7 @@ import { COPY } from '@/content/copy';
 import { usePageTitle } from '@/lib/usePageTitle';
 
 const back = (
-  <Link to="/learning" className="inline-flex items-center gap-1 hover:underline">
+  <Link to="/learning" className="inline-flex items-center gap-1 hover:underline max-sm:min-h-10">
     <ArrowLeft className="h-3 w-3" aria-hidden /> {COPY.nav.learning.title}
   </Link>
 );

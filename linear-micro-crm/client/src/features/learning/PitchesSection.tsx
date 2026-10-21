@@ -59,38 +59,46 @@ export function PitchesSection({ className }: PitchesSectionProps) {
   );
 }
 
+/**
+ * One campaign's card. The campaign's name has the card's width to itself (it wraps to a second line rather than
+ * being cut), and "Write the pitch" sits under it instead of beside it.
+ */
 function PitchCard({ item, canWrite }: { item: PitchListItem; canWrite: boolean }) {
   const href = `/learning/pitch/${encodeURIComponent(item.campaignCode)}`;
   const inner = (
     <>
       <span className="absolute inset-y-3 left-0 w-1 rounded-r-full" style={{ backgroundColor: item.campaignColor }} aria-hidden />
       <span className="min-w-0 flex-1">
-        <span className="flex items-center gap-2">
-          <span className="truncate text-sm font-semibold text-fg">{item.campaignName}</span>
-          <Badge size="sm" tone="neutral" className="font-mono">{item.campaignCode}</Badge>
-          {!item.campaignActive && <Badge size="sm" tone="neutral">Inactive</Badge>}
+        <span className="flex items-start gap-2">
+          <span className="line-clamp-2 min-w-0 break-words text-sm font-semibold text-fg" data-pitch-name>
+            {item.campaignName}
+          </span>
+          <Badge size="sm" tone="neutral" className="shrink-0 font-mono">{item.campaignCode}</Badge>
+          {!item.campaignActive && <Badge size="sm" tone="neutral" className="shrink-0">Inactive</Badge>}
         </span>
         {item.hasPitch ? (
           <>
-            <span className="mt-1 block truncate text-sm text-fg">{item.title}</span>
+            <span className="mt-1 line-clamp-2 break-words text-sm text-fg">{item.title}</span>
             {item.updatedAt && <span className="mt-0.5 block text-xs text-muted">Updated {formatDateShort(item.updatedAt)}</span>}
           </>
         ) : (
-          <span className="mt-1 block text-sm text-muted">{canWrite ? 'No pitch yet' : 'Not written yet'}</span>
+          <>
+            <span className="mt-1 block text-sm text-muted">{canWrite ? 'No pitch yet' : 'Not written yet'}</span>
+            {canWrite && (
+              <span className="mt-1.5 inline-flex items-center gap-1 text-sm font-medium text-primary group-hover:underline">
+                <PenLine className="h-4 w-4" aria-hidden />
+                Write the pitch
+              </span>
+            )}
+          </>
         )}
       </span>
-      {item.hasPitch ? (
-        <ChevronRight className="h-5 w-5 shrink-0 text-subtle transition-transform group-hover:translate-x-0.5" aria-hidden />
-      ) : canWrite ? (
-        <span className="inline-flex shrink-0 items-center gap-1 text-sm font-medium text-primary">
-          <PenLine className="h-4 w-4" aria-hidden />
-          Write the pitch
-        </span>
-      ) : null}
+      {item.hasPitch && <ChevronRight className="h-5 w-5 shrink-0 text-subtle transition-transform group-hover:translate-x-0.5" aria-hidden />}
     </>
   );
+  // h-full: the cards in a row of the grid share its height when one has a second line.
   const cls =
-    'group relative flex min-h-24 w-full items-center gap-3 overflow-hidden rounded-xl border border-border bg-surface py-4 pl-5 pr-4 text-left shadow-card';
+    'group relative flex h-full min-h-24 w-full items-center gap-3 overflow-hidden rounded-xl border border-border bg-surface py-4 pl-5 pr-4 text-left shadow-card';
   if (item.hasPitch) {
     return (
       <Link to={href} className={clsx(cls, 'card-hover focus-ring')} aria-label={`${item.campaignName}: ${item.title}`}>

@@ -211,7 +211,8 @@ export const LAW_OF_AVERAGES: Lesson = {
   short: 'Law of averages',
   checklist: ['Law of averages'],
   page: '6',
-  summary: 'The more you repeat an action, the more a positive / negative outcome will occur. The more shots you take on target, the more goals you score.',
+  // Our own words: the pack's definition and football line open the lesson below, so the summary does not repeat them.
+  summary: 'Results come from repetition, good or bad: keep taking shots on target and the goals follow. Your gauges count every shot.',
   keyPoints: [
     'The more you repeat an action, the more a positive / negative outcome will occur.',
     'The more shots you take on target, the more goals you score.',
@@ -264,7 +265,7 @@ export const IMPULSE_FACTORS: Lesson = {
   checklist: ['6 impulse factors'],
   page: '5',
   summary:
-    'Impulse is someone’s natural level of excitement. Six impulse factors are designed to increase it, remembered in order as GIFGUP: greed, indifference, fear of loss, group effect, urgency and power of suggestion.',
+    'GIFGUP is how you remember the six impulse factors, in order: greed, indifference, fear of loss, group effect, urgency and power of suggestion. Each one raises someone’s excitement.',
   keyPoints: [
     'Greed is the most important impulse factor: increase value, decrease cost.',
     'Indifference: a take it or leave it approach. Be relaxed.',

@@ -1,13 +1,14 @@
 // Release 1.2 — L2 learning-pitch: the step timer. The five steps with the pack's target times (introduction 7–10 s,
 // short story 10–15 s), the script's read-aloud estimate per step, and a practice stopwatch: Start, then "Next step"
 // as you move on, to see your own time per step against the targets. While it runs the card sticks under the top bar
-// (on phones as one compact line), so it stays in reach while you read down the script. Nothing is saved.
+// (on phones, and on any screen under 480 px tall such as a phone held sideways, as one compact line), so it and its
+// Next step / Stop stay in reach while you read down the script. Nothing is saved.
 import { useEffect, useState } from 'react';
 import clsx from 'clsx';
 import { ChevronDown, Flag, Play, RotateCcw, SkipForward, Square, Timer } from 'lucide-react';
 import { pitchStepVerdict, type PitchStepEstimate } from '@lm/shared';
 import { Button, Card } from '@/components/ui';
-import { STEP_NUMBER, formatSeconds, targetLabel } from './parts';
+import { NBSP, STEP_NUMBER, formatSeconds, targetLabel } from './parts';
 
 interface Run {
   step: number;
@@ -17,7 +18,7 @@ interface Run {
 const now = () => (typeof performance !== 'undefined' ? performance.now() : Date.now());
 
 function lapLabel(s: number): string {
-  return s < 60 ? `${s.toFixed(1)} s` : formatSeconds(s);
+  return s < 60 ? `${s.toFixed(1)}${NBSP}s` : formatSeconds(s);
 }
 
 export function StepTimer({ steps, wordsPerMinute, className }: { steps: readonly PitchStepEstimate[]; wordsPerMinute: number; className?: string }) {
@@ -60,8 +61,8 @@ export function StepTimer({ steps, wordsPerMinute, className }: { steps: readonl
   const showTiles = open || (!run && timed);
 
   return (
-    <Card className={clsx(run && 'sticky top-[4.5rem] z-20 shadow-pop', 'p-4 sm:p-5', className)} data-step-timer aria-label="Step timer">
-      <div className={clsx('flex items-start justify-between gap-3', run && 'max-sm:hidden')}>
+    <Card className={clsx(run && 'sticky top-[4.5rem] z-20 shadow-pop', '@container p-4 sm:p-5', className)} data-step-timer aria-label="Step timer">
+      <div className={clsx('flex items-start justify-between gap-3', run && 'max-sm:hidden short:hidden')}>
         <div className="flex min-w-0 items-start gap-3">
           <span className="mt-0.5 inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-primary-soft text-primary" aria-hidden>
             <Timer className="h-4 w-4" />
@@ -69,7 +70,7 @@ export function StepTimer({ steps, wordsPerMinute, className }: { steps: readonl
           <div className="min-w-0">
             <h3 className="font-sans text-sm font-semibold tracking-normal text-fg">Step timer</h3>
             <p className="mt-0.5 text-xs leading-relaxed text-muted">
-              Pack targets: introduction 7–10 s, short story 10–15 s. Script times are estimates at {wordsPerMinute} words a minute.
+              Pack targets: introduction 7–10{NBSP}s, short story 10–15{NBSP}s. Script times are estimates at {wordsPerMinute} words a minute.
             </p>
           </div>
         </div>
@@ -84,9 +85,9 @@ export function StepTimer({ steps, wordsPerMinute, className }: { steps: readonl
         </button>
       </div>
 
-      {/* Phones while running: one compact line instead of the five tiles. */}
+      {/* Phones and short screens (`short`, under 480 px tall) while running: one compact line instead of the tiles. */}
       {run && current && (
-        <p className="flex items-baseline gap-2 text-sm sm:hidden" aria-live="off">
+        <p className="flex items-baseline gap-2 text-sm sm:hidden short:flex" aria-live="off">
           <span className="font-semibold text-fg">
             {STEP_NUMBER[current.step]} · {current.label}
           </span>
@@ -95,10 +96,15 @@ export function StepTimer({ steps, wordsPerMinute, className }: { steps: readonl
         </p>
       )}
 
+      {/* Phones: a row of tiles to swipe. From `sm` up a grid that keeps every step name whole, sized by the card's own
+          width (container queries): five across from 46rem, the number beside the name; five across from 38rem with
+          the number above the name (a tablet, or beside the sidebar at 1024 px), so the card stays short while it
+          sticks under the top bar; three across (3 + 2) below that. */}
       <ol
         className={clsx(
-          'scrollbar-thin relative -mx-1 mt-3 snap-x gap-2 overflow-x-auto px-1 pb-1 sm:grid sm:grid-cols-5 sm:overflow-visible',
+          'scrollbar-thin relative -mx-1 mt-3 snap-x grid-cols-3 gap-2 overflow-x-auto px-1 pb-1 sm:grid sm:overflow-visible @[38rem]:grid-cols-5',
           showTiles && !run ? 'flex' : 'hidden',
+          run && 'short:hidden',
         )}
       >
         {steps.map((s, i) => {
@@ -116,11 +122,11 @@ export function StepTimer({ steps, wordsPerMinute, className }: { steps: readonl
               )}
               aria-current={active ? 'step' : undefined}
             >
-              <p className="flex items-center gap-1.5 text-xs font-semibold text-fg">
+              <p className="flex items-center gap-1.5 text-xs font-semibold text-fg @[38rem]:@max-[46rem]:flex-col @[38rem]:@max-[46rem]:items-start @[38rem]:@max-[46rem]:gap-1">
                 <span className="inline-flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-surface text-[11px] tabular ring-1 ring-border" aria-hidden>
                   {STEP_NUMBER[s.step]}
                 </span>
-                <span className="truncate">{s.label}</span>
+                <span className="min-w-0">{s.label}</span>
               </p>
               <p className="mt-1.5 text-xs text-muted">{target ? `Target ${target}` : 'No set time'}</p>
               <p className={clsx('mt-0.5 text-xs', est === 'over' || est === 'under' ? 'text-warning' : 'text-muted')}>

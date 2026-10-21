@@ -26,7 +26,7 @@ export function LearningProgressPage() {
   usePageTitle(personId ? 'Learning progress' : 'Progress');
 
   const toLearning = (
-    <Link to="/learning" className="inline-flex items-center gap-1 hover:underline">
+    <Link to="/learning" className="inline-flex items-center gap-1 hover:underline max-sm:min-h-10">
       <ArrowLeft className="h-3 w-3" aria-hidden /> {COPY.nav.learning.title}
     </Link>
   );
@@ -92,7 +92,7 @@ function PersonView({ userId, isAdmin }: { userId: number; isAdmin: boolean }) {
   const progress = useLearningProgress(userId);
   const name = progress.data?.userName;
   const back = (
-    <Link to="/learning/progress?view=team" className="inline-flex items-center gap-1 hover:underline">
+    <Link to="/learning/progress?view=team" className="inline-flex items-center gap-1 hover:underline max-sm:min-h-10">
       <ArrowLeft className="h-3 w-3" aria-hidden /> {isAdmin ? 'Everyone' : 'My team'}
     </Link>
   );

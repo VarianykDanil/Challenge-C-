@@ -31,8 +31,9 @@ export const BULLET_THEORY: Lesson = {
   image: IMAGES.cylinder,
   sections: [
     {
+      // The pack's opening sentence ("Bullet theory is what we use to handle objections in the field…") is the summary
+      // at the top of the page, so the lesson starts with the chamber rather than repeating it.
       blocks: [
-        { kind: 'p', text: 'Bullet theory is what we use to handle objections in the field. There are 6 main objections you’ll come across!', tone: 'lead' },
         { kind: 'bullet-chamber' },
         {
           kind: 'callout',
