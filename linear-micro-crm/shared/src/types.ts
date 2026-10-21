@@ -525,6 +525,8 @@ export interface Dashboard {
   } | null;
   upcomingEvents: SalesEventWithMeta[];
   announcements: Announcement[];
+  /** Release 1.2: how many announcements there are beyond these five (GET /announcements?offset=5 lists them). */
+  olderAnnouncements?: number;
 }
 
 // ─────────────────────────── Auth ───────────────────────────

@@ -50,6 +50,16 @@ const AUDIT_SELECT = `
          a.entity_id AS entityId, a.summary, a.before_json AS beforeJson, a.after_json AS afterJson, a.ip
   FROM audit_log a LEFT JOIN users u ON u.id = a.user_id`;
 
+/**
+ * The `q` search folds apostrophes and quotes on both sides, so what a phone keyboard types finds what the summaries
+ * print: apostrophes (’ ‘ ') are dropped, so "can't", "can’t" and "cant" all find “Can’t controls”, and curly double
+ * quotes read as straight ones. `SUMMARY_FOLDED` is the same fold in SQL, over `lower(summary)` as before.
+ */
+const SUMMARY_FOLDED = `replace(replace(replace(replace(replace(lower(a.summary), '’', ''), '‘', ''), '''', ''), '“', '"'), '”', '"')`;
+function foldAuditSearch(q: string): string {
+  return q.toLowerCase().replace(/[’‘']/g, '').replace(/[“”]/g, '"');
+}
+
 function parseJson(text: string | null): unknown {
   if (!text) return null;
   try {
@@ -154,7 +164,7 @@ export function auditRouter(db: Db): Router {
     const entityRaw = optionalString(req.query.entity);
     if (entityRaw !== undefined && !isAuditEntity(entityRaw)) throw badRequest('Invalid entity');
     const entity = entityRaw as AuditEntity | undefined;
-    const q = optionalString(req.query.q)?.slice(0, 100);
+    const q = foldAuditSearch(optionalString(req.query.q)?.slice(0, 100) ?? '').trim();
     const signIns = optionalString(req.query.signIns);
     if (signIns !== undefined && signIns !== '0' && signIns !== '1') throw badRequest('signIns must be 0 or 1');
     const limitRaw = optionalIdQuery(req.query.limit, 'limit');
@@ -184,8 +194,8 @@ export function auditRouter(db: Db): Router {
       params.push(entityId);
     }
     if (q) {
-      clauses.push(`lower(a.summary) LIKE ? ESCAPE '\\'`);
-      params.push(`%${q.toLowerCase().replace(/[\\%_]/g, (c) => `\\${c}`)}%`);
+      clauses.push(`${SUMMARY_FOLDED} LIKE ? ESCAPE '\\'`);
+      params.push(`%${q.replace(/[\\%_]/g, (c) => `\\${c}`)}%`);
     }
     if (signIns === '0') {
       clauses.push(`a.action NOT IN (${placeholders(SIGN_IN_ACTIONS.length)})`);

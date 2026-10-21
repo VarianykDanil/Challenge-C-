@@ -171,6 +171,20 @@ export function useAnnouncements() {
   return useQuery({ queryKey: keys.announcements, queryFn: () => api<Announcement[]>('/announcements') });
 }
 
+/** The dashboard lists the latest five announcements; "Older announcements" lists up to 20 after them. */
+export const OLDER_ANNOUNCEMENTS_OFFSET = 5;
+export const OLDER_ANNOUNCEMENTS_LIMIT = 20;
+
+/** GET /announcements?offset=5&limit=20 — the announcements after the dashboard's five, fetched once the list is opened. */
+export function useOlderAnnouncements({ enabled = true }: { enabled?: boolean } = {}) {
+  return useQuery({
+    queryKey: [...keys.announcements, 'older', OLDER_ANNOUNCEMENTS_OFFSET, OLDER_ANNOUNCEMENTS_LIMIT] as const,
+    queryFn: () => api<Announcement[]>(`/announcements${qs({ offset: OLDER_ANNOUNCEMENTS_OFFSET, limit: OLDER_ANNOUNCEMENTS_LIMIT })}`),
+    enabled,
+    staleTime: 30_000,
+  });
+}
+
 export function useCreateAnnouncement() {
   const qc = useQueryClient();
   return useMutation({

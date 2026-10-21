@@ -1866,7 +1866,7 @@ funnel rule in plain English.
 | Settings | `PUT /auth/security-settings` | Changed sign-in settings: require a PIN for everyone no → yes |
 | Announcement | `POST /announcements` | Posted announcement: “Saturday rota is up” |
 | Expense | `POST /finance/expenses`, `DELETE /finance/expenses/:id` | Added expense: £42.60 travel, 20 Oct |
-| Learning | `POST /learning/progress/:lessonKey/quiz`, `…/teachback`, `…/:userId/:lessonKey/signoff` (entity id = the learner) | Learned Feel felt found: self-check passed · Signed off a teach-back: Jordan Lee, Bullet theory · Took back a teach-back sign-off: … |
+| Learning | `POST /learning/progress/:lessonKey/quiz`, `…/teachback`, `…/:userId/:lessonKey/signoff` (entity id = the learner) | Learned “Pre-emptive strike”: self-check passed · Took the self-check: “Bullet theory” · Wrote a teach-back: “Can and can’t controls” · Signed off a teach-back: Jordan Lee, “Bullet theory” · Took back a teach-back sign-off: … (the lesson's own title, from shared `LESSON_TITLES`, which a test holds equal to `client/src/content/learning`; rows written before this change keep the key in words, e.g. "Pre emptive strike") |
 | Check-in | `POST /checkins`, `DELETE /checkins/:id` | Checked in: Jordan Lee at Arndale, 20 Oct 09:24 · Removed check-in: … |
 
 - **Pay runs moved by a gauge write.** Before the handler, the trail notes everyone whose run the entry can move (the
@@ -1952,7 +1952,9 @@ long text fields are named, not quoted. Values read the British way: £945 / £4
 #### Read receipts
 
 - The dashboard reports an announcement as read once at least half of its card has been on screen for 1.2 seconds;
-  never for the author's own announcement. Several cards are sent together, then the stats refresh once. Each
+  never for the author's own announcement. The same goes for the cards under **Older announcements** (the twenty after
+  the latest five, `GET /announcements?offset=5&limit=20`, fetched when the list is first opened; the dashboard
+  payload's `olderAnnouncements` says how many there are, and the list is offered only when there are some). Several cards are sent together, then the stats refresh once. Each
   person's reported ids are remembered on the device (`localStorage` `lm-announcement-reads:<userId>`, newest 200; a
   blocked store only means a harmless repeat), so a visit does not post again.
 - **Audience** = everyone whose status is `active`, except the author. **Read count** = reads by people in that
@@ -1960,6 +1962,14 @@ long text fields are named, not quoted. Values read the British way: £945 / £4
 - The demo seed marks a plausible share of the active people as having read each seeded announcement (35% just after
   posting, rising to 90% after a week, at times between the post and now; its own random stream, so the core demo
   data is unchanged). An existing database starts with no reads.
+
+#### Dates on screen
+
+Audit times stay on the real clock (they are a security record), while "today" elsewhere may come from a pinned
+business clock (`LM_BUSINESS_NOW`). So the Audit page heads each day with its date only ("Wednesday 21 October", the
+year added for another year; `auditDayHeading`, client/src/features/audit/dayHeading.ts), never "Today", "Yesterday" or
+"Tomorrow", which a pinned demo clock could make wrong. The History panels already show the full date and time ("21
+Oct 2026, 09:24").
 
 #### Retention
 

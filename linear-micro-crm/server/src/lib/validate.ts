@@ -67,11 +67,14 @@ export function limitQuery(value: unknown, fallback = MAX_LIMIT): number {
   return Math.min(chosen, MAX_LIMIT);
 }
 
-/** Optional `offset` query param for paging: a non-negative integer, 0 when missing; `400` otherwise. */
+/**
+ * Optional `offset` query param for paging: a non-negative integer, 0 when missing; `400` otherwise. A safe integer
+ * only: `99999999999999999999` would reach SQLite as a REAL and fail `OFFSET ?` with "datatype mismatch" (a 500).
+ */
 export function offsetQuery(value: unknown): number {
   if (value === undefined || value === null || value === '') return 0;
   const n = Number(value);
-  if (!Number.isInteger(n) || n < 0) throw badRequest('Invalid offset');
+  if (!Number.isSafeInteger(n) || n < 0) throw badRequest('Invalid offset');
   return n;
 }
 

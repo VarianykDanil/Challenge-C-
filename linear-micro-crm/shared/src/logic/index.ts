@@ -34,6 +34,7 @@
  *  - shiftCheckIn      one-tap shift check-in status and undo window                    (U4)
  *  - search            command palette query rules                                      (U5)
  *  - payExport         payroll export rows and CSV (Xero, Sage)                          (U5)
+ *  - lessonTitles      lesson key → title, for summaries the server writes                (UC fix group)
  */
 export * from './gauges.ts';
 export * from './finance.ts';
@@ -62,3 +63,4 @@ export * from './audit.ts';
 export * from './shiftCheckIn.ts';
 export * from './search.ts';
 export * from './payExport.ts';
+export * from './lessonTitles.ts';

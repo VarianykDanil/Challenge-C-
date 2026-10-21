@@ -201,17 +201,23 @@ change goes through and the payslip is marked "adjusted after payment".
 #### Administrators
 
 - **Audit** (sidebar, under Manage) lists every change, newest first, grouped by day: who made it, at what time, a
-  sentence saying what happened and a tag for the kind of record. Tap a row to see exactly which fields changed, with
-  the old value struck through and the new one beside it, plus the route and the IP address it came from.
-- Narrow the list with **Search** (words in the sentence, e.g. "marked paid" or a name), **Person**, **Record** (pay
-  run, gauge entry, person, candidate …) and **From** / **To** dates. **Show sign-ins** adds sign-ins and sign-outs,
+  sentence saying what happened and a tag for the kind of record. Each day is headed with its date ("Wednesday 21
+  October"; the year is added for another year), never "Today" or "Yesterday", as the times are when the change
+  really happened. A lesson is named by its title: "Learned “Pre-emptive strike”: self-check passed". Tap a row to
+  see exactly which fields changed, with the old value struck through and the new one beside it, plus the route and
+  the IP address it came from.
+- Narrow the list with **Search** (words in the sentence, e.g. "marked paid" or a name; apostrophes do not matter,
+  so "cant controls" finds "Can’t controls"), **Person**, **Record** (pay run, gauge entry, person, candidate …) and
+  **From** / **To** dates. **Show sign-ins** adds sign-ins and sign-outs,
   which are hidden by default so the page is about changes. **Clear filters** starts again. **Newer** and **Older** move
   through the pages, 50 changes at a time. The filters are part of the page address, so a view can be bookmarked.
 - On a payslip (Finance → open a pay run) the **History** section at the bottom lists that run's changes: marked paid,
   recalculated after a gauge change (with the old and new gross), adjusted after payment. **Open in the audit trail**
-  shows the same rows on the Audit page. An open gauge entry has the same **History** section.
+  shows the same rows on the Audit page. An open gauge entry has the same **History** section. Its times carry their
+  date ("21 Oct 2026, 09:24").
 - Under each announcement on the dashboard, **Read by 27 of 28** shows how many active people have read it; tap it to
-  see their names.
+  see their names. Earlier ones are under **Older announcements** at the bottom of the card (with how many there
+  are): tap it to list up to 20 more, each with the same **Read by** line.
 
 #### Leaders
 
@@ -219,12 +225,13 @@ change goes through and the payslip is marked "adjusted after payment".
   form shows who logged or changed it, when, and what changed. You do not see the IP address, pay runs or anyone
   else's records.
 - Under announcements you wrote, **Read by 12 of 33** shows how many active people have read it, and tapping it shows
-  who. You do not see these figures for other people's announcements.
+  who, under **Older announcements** too. You do not see these figures for other people's announcements.
 
 #### Reps and recruiters
 
 - Nothing new to do. When an announcement has been on your screen for a moment it counts as read, so whoever posted
-  it knows it reached you. You do not see who else has read it, and there is no Audit page or History section for you.
+  it knows it reached you; one you open under **Older announcements** counts the same way. You do not see who else
+  has read it, and there is no Audit page or History section for you.
 
 ### One-tap shift check-in
 
@@ -760,7 +767,7 @@ The dashboard greets you by name and shows your position, team and the dates in 
 | **Your trend** / **Your funnel** | Sales and stops per day; your funnel against the law of averages with one to three coaching notes underneath. |
 | Team card (named after your team) | Stops, sales, conversion and your team's top five. People without a team see **Top performers** across the company instead. |
 | **Upcoming events** | The next five for your team (administrators: the whole company). |
-| **Announcements** | The latest five, pinned first. Leaders and administrators see **New announcement** here. |
+| **Announcements** | The latest five, pinned first; **Older announcements** underneath lists up to 20 earlier ones. Leaders and administrators see **New announcement** here (**New**, or just the megaphone icon, on a narrow card). |
 
 **The "vs" arrows.** Each change compares with the **same days of the previous period**, and the small label under the tile names them — on Thursday 15 October the week view says "vs 5 Oct – 8 Oct". This week (Monday to today) is compared with last week Monday to the same weekday; this month (1st to today) with the same days of last month; this quarter with the same stretch of the previous quarter. The leaderboard's movement arrows use the same comparison. An arrow is blank when there was nothing in the previous period.
 

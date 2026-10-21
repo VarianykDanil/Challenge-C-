@@ -11,9 +11,10 @@ import { useUsers } from '@/api/hooks';
 import { Button, Card, EmptyState, Field, Input, PageHeader, Select, Skeleton, Switch } from '@/components/ui';
 import { COPY } from '@/content/copy';
 import { AuditEntryItem } from '@/features/audit/AuditEntryItem';
+import { auditDayHeading } from '@/features/audit/dayHeading';
 import { ErrorState } from '@/features/common';
 import { toISODate } from '@/lib/dates';
-import { formatDayHeading, formatNumber, fullName } from '@/lib/format';
+import { formatNumber, fullName } from '@/lib/format';
 import { usePageTitle } from '@/lib/usePageTitle';
 
 const PAGE_SIZE = 50;
@@ -117,7 +118,7 @@ export function AuditPage() {
       <Card className="mb-4" padded={false}>
         <form className="grid grid-cols-2 gap-3 p-3 sm:p-4 xl:grid-cols-[minmax(0,1.6fr)_repeat(4,minmax(0,1fr))]" role="search" onSubmit={(e) => { e.preventDefault(); update({ q: search.trim() }); }}>
           <Field label="Search" htmlFor="audit-q" className="col-span-2 min-w-0 xl:col-span-1">
-            <Input id="audit-q" type="search" placeholder="Words in the summary, e.g. marked paid" value={search} onChange={(e) => setSearch(e.target.value)} leftIcon={<Search aria-hidden />} />
+            <Input id="audit-q" type="search" placeholder="e.g. marked paid" title="Words in the summary, e.g. marked paid or a name" value={search} onChange={(e) => setSearch(e.target.value)} leftIcon={<Search aria-hidden />} />
           </Field>
           <Field label="Person" htmlFor="audit-person" className="col-span-2 min-w-0 sm:col-span-1">
             <Select id="audit-person" value={userId ? String(userId) : ''} onChange={(e) => update({ userId: e.target.value })} placeholder="Everyone" options={people} />
@@ -173,8 +174,9 @@ export function AuditPage() {
       ) : (
         <div className={log.isPlaceholderData ? 'opacity-60 transition-opacity' : undefined} aria-busy={log.isFetching || undefined}>
           {groups.map((g) => (
-            <section key={g.day} className="mb-4" aria-label={formatDayHeading(g.day)}>
-              <h2 className="eyebrow mb-2 px-1">{formatDayHeading(g.day)}</h2>
+            // the date itself, never "Today" / "Tomorrow": audit times are the real clock (see dayHeading.ts)
+            <section key={g.day} className="mb-4" aria-label={auditDayHeading(g.day)}>
+              <h2 className="eyebrow mb-2 px-1">{auditDayHeading(g.day)}</h2>
               <Card padded={false} className="overflow-hidden">
                 <ul className="divide-y divide-border">
                   {g.rows.map((r) => <AuditEntryItem key={r.id} entry={r} timeOnly />)}

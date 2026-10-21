@@ -29,6 +29,7 @@ import {
   auditMoney,
   auditValueText,
   auditWeekLabel,
+  lessonTitle,
   type AuditEntity,
   type AuditFieldChange,
   type CandidateStage,
@@ -603,8 +604,12 @@ function lastSettings(db: Db): Snap {
   return settingsFrom(parsed) ?? { ...SETTINGS_DEFAULTS };
 }
 
-function lessonLabel(key: unknown): string {
-  return auditHumanise(String(key ?? 'a lesson'));
+/** A lesson as its page names it, in quotes: “Pre-emptive strike” (shared LESSON_TITLES); an unknown key in words. */
+export function lessonLabel(key: unknown): string {
+  const title = lessonTitle(key);
+  if (title) return `“${title}”`;
+  const words = auditHumanise(typeof key === 'string' ? key : '');
+  return words ? `“${words}”` : 'a lesson';
 }
 
 // ───────────────────────────── the registry ─────────────────────────────

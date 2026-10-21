@@ -2,13 +2,15 @@ import { Router } from 'express';
 import { z } from 'zod';
 import { periodDeltas, type Dashboard, type GaugeTotals } from '@lm/shared';
 import { all, get, type Db } from '../db/connection.ts';
-import { Where, listAnnouncements, listEvents } from '../db/queries.ts';
+import { Where, countAnnouncements, listAnnouncements, listEvents } from '../db/queries.ts';
 import { addDays, previousToDateRange, rangeForPeriod, todayISO } from '../lib/dates.ts';
 import { GAUGE_FROM, GAUGE_PAYOUT_SQL, leaderboard, punctualityFor, ratiosOf, salesPerDay, totalsFor, trendFor } from '../lib/metrics.ts';
 import { earningsForRange, nextPay } from '../lib/pay.ts';
 import { currentUser } from '../middleware/auth.ts';
 
 const rangeParam = z.enum(['week', 'month', 'quarter']).default('week');
+/** The dashboard lists the latest five announcements; "Older announcements" (GET /announcements?offset=5) the rest. */
+export const DASHBOARD_ANNOUNCEMENTS = 5;
 
 export function dashboardRouter(db: Db): Router {
   const router = Router();
@@ -130,7 +132,8 @@ export function dashboardRouter(db: Db): Router {
       team,
       company,
       upcomingEvents,
-      announcements: listAnnouncements(db, 5),
+      announcements: listAnnouncements(db, DASHBOARD_ANNOUNCEMENTS),
+      olderAnnouncements: Math.max(0, countAnnouncements(db) - DASHBOARD_ANNOUNCEMENTS),
     };
     res.json(dashboard);
   });

@@ -4,7 +4,11 @@ import type { Announcement } from '@lm/shared';
 import { get, run, type Db } from '../db/connection.ts';
 import { ANNOUNCEMENT_SELECT, listAnnouncements, mapAnnouncement } from '../db/queries.ts';
 import { nowISO } from '../lib/dates.ts';
+import { offsetQuery, optionalIdQuery } from '../lib/validate.ts';
 import { currentUser, requireRole } from '../middleware/auth.ts';
+
+/** GET /announcements?limit= answers at most this many (the dashboard's "Older announcements" asks for 20). */
+export const ANNOUNCEMENTS_PAGE_MAX = 50;
 
 const body = z.object({
   title: z.string().trim().min(1).max(200),
@@ -15,8 +19,16 @@ const body = z.object({
 export function announcementsRouter(db: Db): Router {
   const router = Router();
 
-  router.get('/', (_req, res) => {
-    res.json(listAnnouncements(db));
+  /**
+   * Everyone signed in reads every announcement (as on the dashboard). Pinned first, newest first. Without `limit`
+   * all of them, as before; `limit` (1–50, more is capped) and `offset` (≥ 0) page through them in the same order, so
+   * `?offset=5&limit=20` is the twenty after the dashboard's latest five.
+   */
+  router.get('/', (req, res) => {
+    const limitRaw = optionalIdQuery(req.query.limit, 'limit');
+    const offset = offsetQuery(req.query.offset);
+    const limit = limitRaw === undefined ? undefined : Math.min(limitRaw, ANNOUNCEMENTS_PAGE_MAX);
+    res.json(listAnnouncements(db, limit, offset));
   });
 
   router.post('/', requireRole('admin', 'leader'), (req, res) => {

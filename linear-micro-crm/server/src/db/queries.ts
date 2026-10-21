@@ -252,9 +252,19 @@ export function mapAnnouncement(row: Announcement): Announcement {
   return { ...row, pinned: Boolean(row.pinned) };
 }
 
-export function listAnnouncements(db: Db, limit?: number): Announcement[] {
-  const lim = limit ? ` LIMIT ${limit}` : '';
-  return all<Announcement>(db, `${ANNOUNCEMENT_SELECT} ORDER BY a.pinned DESC, a.created_at DESC${lim}`).map(mapAnnouncement);
+/**
+ * Announcements pinned first, newest first (the id breaks a tie, so pages never overlap). `limit` omitted: all of
+ * them; `offset` skips that many (the dashboard shows the first five, "Older announcements" pages on from there).
+ */
+export function listAnnouncements(db: Db, limit?: number, offset = 0): Announcement[] {
+  const order = `${ANNOUNCEMENT_SELECT} ORDER BY a.pinned DESC, a.created_at DESC, a.id DESC`;
+  const rows = limit ? all<Announcement>(db, `${order} LIMIT ? OFFSET ?`, [limit, offset]) : all<Announcement>(db, `${order} LIMIT -1 OFFSET ?`, [offset]);
+  return rows.map(mapAnnouncement);
+}
+
+/** How many announcements `listAnnouncements` can list. */
+export function countAnnouncements(db: Db): number {
+  return Number(get<{ n: number }>(db, `SELECT COUNT(*) AS n FROM announcements a JOIN users u ON u.id = a.author_id`)!.n);
 }
 
 // ── Helpers ─────────────────────────────────────────────────────────────────

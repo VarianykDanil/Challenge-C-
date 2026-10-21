@@ -1,13 +1,13 @@
 import { useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { ArrowRight, Megaphone, PlusCircle, Quote } from 'lucide-react';
+import { ArrowRight, PlusCircle, Quote } from 'lucide-react';
 import type { DashboardRange } from '@lm/shared';
 import { DASHBOARD_RANGE_LABELS, POSITION_LABELS } from '@lm/shared';
 import { Button, Card, CardHeader, PageHeader, SegmentedControl, Skeleton } from '@/components/ui';
 import { useDashboard, useInsights, useLeaderboard } from '@/api/hooks';
 import { useCurrentUser } from '@/auth/AuthProvider';
 import { GAUGE_ROLES, hasRole } from '@/auth/RequireRole';
-import { Announcements, CompanySection, NewAnnouncementModal, PersonalCharts, PersonalKpis, RecruiterSection, TeamCard, UpcomingEvents } from '@/features/dashboard';
+import { AnnouncementsCard, CompanySection, NewAnnouncementModal, PersonalCharts, PersonalKpis, RecruiterSection, TeamCard, UpcomingEvents } from '@/features/dashboard';
 import { ErrorBoundary, ErrorState } from '@/features/common';
 import { LogGaugesModal } from '@/features/gauges';
 import { ProgressCard } from '@/features/learning/ProgressCard';
@@ -106,11 +106,7 @@ export function DashboardPage() {
                 </>
               )}
             </Card>
-            <Card className="min-w-0">
-              <CardHeader title="Announcements" actions={canAnnounce ? <Button size="sm" variant="outline" onClick={() => setAnnounceOpen(true)} leftIcon={<Megaphone className="h-3.5 w-3.5" aria-hidden />}>New announcement</Button> : undefined} />
-              {/* Capped so the row's other cards are not stretched by a long notice board. */}
-              <div className="max-h-[32rem] overflow-y-auto scrollbar-thin">{!d ? <div className="space-y-2"><Skeleton className="h-16" /><Skeleton className="h-16" /></div> : <Announcements items={d.announcements} />}</div>
-            </Card>
+            <AnnouncementsCard dashboard={d} canAnnounce={canAnnounce} onNew={() => setAnnounceOpen(true)} />
           </div>
 
           <ErrorBoundary name="week-in-review"><LazyWeekInReview /></ErrorBoundary>
