@@ -18,8 +18,8 @@ export function straightenQuotes(text: string): string {
 export const PITCH_ANNOTATION_RULES: PitchAnnotationRule[] = [
   {
     theory: 'introduction',
-    label: 'Hook',
-    why: 'A first line that stops them: the first impression is made in 7 to 10 seconds',
+    label: 'Introduction',
+    why: 'Introduction (7 to 10 seconds): the most important step, the 1st impression',
     lessonKey: 'five-steps',
     anchor: 'introduction',
     pattern: /^(?:over|nearly|almost|around|about|more than) [\d,]+\s|\bevery \d+ (?:minutes|seconds|hours)\b/i,
@@ -73,7 +73,7 @@ export const PITCH_ANNOTATION_RULES: PitchAnnotationRule[] = [
   {
     theory: 'buzzwords',
     label: 'Buzzwords',
-    why: '"Unfortunately", "Obviously", "However" carry the conversation where you want it',
+    why: 'Use buzzwords: "Unfortunately", "Obviously", "However"',
     lessonKey: 'five-steps',
     anchor: 'presentation',
     pattern: /\b(?:unfortunately|obviously|however)\b/i,

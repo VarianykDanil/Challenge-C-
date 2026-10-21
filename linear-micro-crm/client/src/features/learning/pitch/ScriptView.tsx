@@ -2,11 +2,19 @@
 // Large type, stage directions muted italic, pauses as visual beats, Yes / No branches side by side (tabs on phones),
 // step headings with the pack's targets, theory chips under each line and the fact-check notes beside the lines they
 // concern (in the margin on wide screens, folded under the line on phones).
-import { useState, type ReactNode } from 'react';
+import { useLayoutEffect, useRef, useState, type ReactNode, type RefObject } from 'react';
 import { Link } from 'react-router-dom';
 import clsx from 'clsx';
 import { AlertTriangle, CornerDownRight, Drama } from 'lucide-react';
-import { pitchStepVerdict, type PitchBlock, type PitchFact, type PitchScript, type PitchStepEstimate, type PitchStepKey } from '@lm/shared';
+import {
+  pitchLinesToCheck,
+  pitchStepVerdict,
+  type PitchBlock,
+  type PitchFact,
+  type PitchScript,
+  type PitchStepEstimate,
+  type PitchStepKey,
+} from '@lm/shared';
 import { Badge, SegmentedControl } from '@/components/ui';
 import { FactNote, FoldedFactNote, InlineSegments, STEP_HINT, STEP_NUMBER, TheoryChips, formatSeconds, stepLessonHref, targetLabel } from './parts';
 
@@ -34,7 +42,49 @@ function factPlacement(facts: readonly PitchFact[]) {
 
 type Placement = ReturnType<typeof factPlacement>;
 
+/** Space between two margin notes that would otherwise overlap. */
+const MARGIN_NOTE_GAP = 12;
+
+/**
+ * Wide screens: each margin note hangs beside the lines below its own (its aside is 0 px tall), so two notes on nearby
+ * lines (the BCN pitch's lines 1 and 4) would overlap. After layout, a note that would overlap the one above moves down
+ * (translateY, so the script itself never moves), and a spacer after the script makes room for the last one. Re-run when
+ * the script's or a note's size changes (a theory chip opens, the window resizes, fonts load).
+ */
+function useStackedMarginNotes(rowsRef: RefObject<HTMLDivElement | null>, spacerRef: RefObject<HTMLDivElement | null>, enabled: boolean) {
+  useLayoutEffect(() => {
+    const rows = rowsRef.current;
+    const spacer = spacerRef.current;
+    if (!enabled || !rows || !spacer) return;
+    const layout = () => {
+      const notes = [...rows.querySelectorAll<HTMLElement>('[data-margin-notes]')];
+      for (const n of notes) n.style.transform = '';
+      spacer.style.height = '';
+      let prevBottom = Number.NEGATIVE_INFINITY;
+      for (const n of notes) {
+        if (n.offsetParent === null) continue; // hidden below xl: the notes fold under their lines instead
+        const r = n.getBoundingClientRect();
+        const top = Math.max(r.top, prevBottom + MARGIN_NOTE_GAP);
+        if (top > r.top) n.style.transform = `translateY(${Math.ceil(top - r.top)}px)`;
+        prevBottom = top + r.height;
+      }
+      const end = rows.getBoundingClientRect().bottom;
+      if (prevBottom > end) spacer.style.height = `${Math.ceil(prevBottom - end)}px`;
+    };
+    layout();
+    if (typeof ResizeObserver === 'undefined') return;
+    // The rows and the notes only: their sizes never depend on the transforms or the spacer, so no resize loop.
+    const ro = new ResizeObserver(layout);
+    ro.observe(rows);
+    for (const n of rows.querySelectorAll<HTMLElement>('[data-margin-notes]')) ro.observe(n);
+    return () => ro.disconnect();
+  });
+}
+
 export function ScriptView({ script, facts, showTheory, narrow, className }: ScriptViewProps) {
+  const rowsRef = useRef<HTMLDivElement>(null);
+  const spacerRef = useRef<HTMLDivElement>(null);
+  useStackedMarginNotes(rowsRef, spacerRef, !narrow && facts.some((f) => f.lines.length > 0));
   const placement = factPlacement(facts);
   const steps = new Map(script.steps.map((s) => [s.step, s]));
   const rows: ReactNode[] = [];
@@ -53,18 +103,21 @@ export function ScriptView({ script, facts, showTheory, narrow, className }: Scr
 
   return (
     <div className={clsx('min-w-0', className)} data-pitch-script>
-      {rows}
-      {missingConsolidation && (
-        <div className="mt-8 rounded-xl border border-dashed border-border-strong/70 px-4 py-3 text-sm text-muted">
-          <p className="font-semibold text-fg">
-            <span className="tabular">5</span> · Consolidation
-          </p>
-          <p className="mt-1">
-            Not in this script: it comes after the sign-up. {STEP_HINT.consolidation}{' '}
-            <Link to={stepLessonHref('consolidation')} className="font-medium text-primary hover:underline">See the five steps</Link>
-          </p>
-        </div>
-      )}
+      <div ref={rowsRef}>
+        {rows}
+        {missingConsolidation && (
+          <div className="mt-8 rounded-xl border border-dashed border-border-strong/70 px-4 py-3 text-sm text-muted">
+            <p className="font-semibold text-fg">
+              <span className="tabular">5</span> · Consolidation
+            </p>
+            <p className="mt-1">
+              Not in this script: it comes after the sign-up. {STEP_HINT.consolidation}{' '}
+              <Link to={stepLessonHref('consolidation')} className="font-medium text-primary hover:underline">See the five steps</Link>
+            </p>
+          </div>
+        )}
+      </div>
+      {!narrow && <div ref={spacerRef} aria-hidden />}
     </div>
   );
 }
@@ -85,9 +138,10 @@ function StepHeading({ estimate, first }: { estimate: PitchStepEstimate; first: 
         <span className="text-xs text-muted">
           {target ? `Target ${target}` : 'No set time'} · reads in about {formatSeconds(estimate.seconds)}
         </span>
+        {/* An estimate at the speaking rate, not a verdict on the script: neutral words and colour. */}
         {verdict === 'within' && <Badge tone="success" size="sm">On target</Badge>}
-        {verdict === 'over' && <Badge tone="warning" size="sm">Longer than {target}</Badge>}
-        {verdict === 'under' && <Badge tone="warning" size="sm">Shorter than {target}</Badge>}
+        {verdict === 'over' && <Badge tone="neutral" size="sm">Estimate over {target}</Badge>}
+        {verdict === 'under' && <Badge tone="neutral" size="sm">Estimate under {target}</Badge>}
       </div>
       <p className="mt-1 text-xs text-muted sm:pl-10">
         {STEP_HINT[estimate.step]}{' '}
@@ -108,9 +162,12 @@ function BlockRow({ block, placement, showTheory, narrow }: { block: PitchBlock;
       {/* h-0: a tall note hangs beside the lines below it instead of pushing them apart. */}
       {notes.length > 0 && (
         <aside className="hidden xl:block xl:h-0" aria-label="Fact check for this line">
-          {notes.map((f, i) => (
-            <FactNote key={i} fact={f} className="mb-3" />
-          ))}
+          {/* moved down by useStackedMarginNotes when it would overlap the note above */}
+          <div data-margin-notes className="space-y-3">
+            {notes.map((f, i) => (
+              <FactNote key={i} fact={f} />
+            ))}
+          </div>
         </aside>
       )}
     </div>
@@ -224,8 +281,25 @@ function Branches({ block, placement, showTheory, narrow }: { block: Extract<Pit
   );
 }
 
-/** Notes about the whole script (no quoted line), and a count of the line notes: shown above the script. */
-export function FactSummary({ facts, className }: { facts: readonly PitchFact[]; className?: string }) {
+/**
+ * Read mode and the editor preview: notes about the whole script (no quoted line), and a count of the line notes,
+ * shown above the script. `practice` (the teleprompter and flashcards, which show no notes of their own beyond the
+ * flags on their lines): only the banner with the number of lines to check, and nothing when there are none.
+ */
+export function FactSummary({ facts, className, practice = false }: { facts: readonly PitchFact[]; className?: string; practice?: boolean }) {
+  if (practice) {
+    const n = pitchLinesToCheck(facts);
+    if (!n) return null;
+    return (
+      <div className={clsx('flex items-start gap-3 rounded-xl border border-warning/30 bg-warning-soft px-4 py-3 text-sm text-fg', className)} role="note" data-fact-banner>
+        <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-warning" aria-hidden />
+        <p>
+          <span className="font-semibold">Check the figures:</span> {n} {n === 1 ? 'line uses' : 'lines use'} figures the office has not approved yet. Read
+          mode shows the notes.
+        </p>
+      </div>
+    );
+  }
   if (!facts.length) return null;
   const general = facts.filter((f) => f.lines.length === 0);
   const onLines = facts.filter((f) => f.lines.length > 0);

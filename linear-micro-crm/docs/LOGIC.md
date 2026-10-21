@@ -1536,19 +1536,22 @@ either end). Line numbers are the 1-based source lines.
 - The seeded BCN pitch: 19 spoken lines; Introduction (lines 1, 4, 9) about 22 s, Short story (from "What we do",
   line 11, through the Yes/No and "Our mission") about 25 s, Presentation (from "As of 1980", line 24) about 14 s,
   Close (from the owner's "(Close)" on line 28) about 52 s, no Consolidation: about 1 min 52 s in all. The page shows
-  the introduction and short story as "Longer than 7–10 s" / "Longer than 10–15 s" (an estimate; the step timer
-  measures the real thing).
+  the introduction and short story as "Estimate over 7–10 s" / "Estimate over 10–15 s" ("Estimate under …" for a
+  short step, "On target" within it). These are neutral grey badges: an estimate at 150 words a minute, not a verdict
+  on the script; the step timer measures the real thing.
 
 #### Annotations (`PITCH_ANNOTATION_RULES`, `annotatePitchLine`)
 
 Phrase patterns → the COD pack theory, a one-line why and the L1 lesson it links to
 (`/learning/pack/:lessonKey#anchor`; every key and anchor is checked against `LESSON_KEYS` / `LESSON_ANCHORS`).
 Matching is case-insensitive on the line as written (brackets included), with curly quotes straightened; a theory
-appears once per line, in rule order.
+appears once per line, in rule order. Tapping a chip shows "Label: why." — without the "Label:" when the why already
+names it ("Introduction (7 to 10 seconds): the most important step, the 1st impression.", "Use buzzwords:
+"Unfortunately", "Obviously", "However"."). Chip names are the pack's own terms.
 
 | Chip | Matches (examples) | Lesson |
 | --- | --- | --- |
-| Hook | a line opening "Over/Nearly/About 1000 …", "every 43 minutes" | five-steps#introduction |
+| Introduction | a line opening "Over/Nearly/About 1000 …", "every 43 minutes" | five-steps#introduction |
 | Strategic pause | `(Pause …)` | strategic-pause |
 | Pre-emptive strike | "I know that's …", "I know you're …", "I can see you're …" | pre-emptive-strike |
 | Indifference | "no pressure", "take it or leave it" | impulse-factors#indifference |
@@ -1578,6 +1581,46 @@ appears once per line, in rule order.
   stands for left-out words (fragments in order); a quote may span up to three lines.
 - The script itself is never changed to match a note: the notes sit beside it ("Check the figures"), and the office
   approves final figures (the BCN general note quotes the Fundraising Regulator's code).
+- **One note per quoted line** so each line gets its own suggestion. The seeded BCN fact check
+  (`BCN_PITCH_FACTS`, server/src/db/extensions/pitches.ts) has seven notes: line 1 "Over 1000 women … every month"
+  (suggests "Nearly 1,000 women are dying from breast cancer in the UK every month"), line 4 "every 43 minutes"
+  (suggests "That's every 45 minutes someone is losing a mother, a daughter or a wife"; 11,500 a year is about one
+  every 45 minutes), line 20 "it's definitely on the rise in the UK" and line 40 "over the age of 35" (not checked
+  yet, no suggestion: check against the Breast Cancer Now campaign brief), line 22 the 2050 mission (verified),
+  line 24 the survival figures (not verified) and the general fundraising-rules note. The shared test checks each note
+  lands on its line.
+- **Who writes them**: only the office (admins). A leader edits the title and script; PUT refuses a leader's change to
+  the notes (403, `PITCH_FACTS_OFFICE_ONLY`), and the editor shows the notes read-only to leaders.
+
+#### Fact flags in the practice modes (`pitchFactFlags(facts)`, `pitchLinesToCheck(facts)`)
+
+The teleprompter and the flashcards show no notes of their own, and the remembered mode (`lm-pitch-mode`) can open
+straight into them, so they flag the lines instead. The script's words are never changed.
+
+- `pitchFactFlags(facts)` → `Map<line, PitchFactFlag[]>`: every script line a **`check`** note quotes, with the notes
+  on it in note order; `first` is true on the first line a note quotes (the note opens there), false on its later
+  lines (marker only). `verified` and general notes are not flagged.
+- `pitchLinesToCheck(facts)` = the number of flagged lines (lines, not notes). When it is more than 0 both practice
+  modes say: "**Check the figures:** N lines use figures the office has not approved yet. Read mode shows the
+  notes." ("1 line uses …"). The seeded BCN pitch has 5 (lines 1, 4, 20, 24, 40). Above the flashcards it is a banner;
+  in the teleprompter it is a strip at the top of the ink panel, inside the panel, so the panel keeps its height
+  (`max(20rem, 100dvh − 21rem)`) and Play, the speed, back to the start and full screen stay where they were in 1.2.0
+  (on the first screen at 375×667, 375×812 and 1440×900). Under 640 px wide, and on a phone held sideways, the strip
+  shows "Check the figures: N lines" only (the whole sentence stays in it for screen readers). Its **See the notes**
+  button (40 px) opens Read mode, from full screen too. The strip is about 41 px (52 px where the sentence wraps).
+- Teleprompter: an amber marker at the end of a flagged line and, under it, "Check the figures" with the suggested
+  wording (or the note when it has none); open on screens 640 px and wider, folded behind a 40 px "Check the figures"
+  button on phones. The amber is `#FBBF24` in both themes (the ink panel is always dark).
+- Teleprompter pace: the scroll covers the script's height in `words × 60 ÷ wpm + pauses` seconds, where the
+  script's height is the scrollable height less the flag blocks (each flag's height plus its margins, measured again
+  when a flag opens or closes or the panel resizes). The lines therefore pass at the chosen words a minute, at the
+  same speed as in 1.2.0, and a flag adds the time its own height takes at that speed. BCN at 150 wpm: 116 s of lines
+  (286 words, 2 s of pauses) plus about 17 s of flags at 768–1440 px, about 7 s on a phone where they are folded.
+- Flashcards: a "Check the figures" badge in the card header before the reveal (without giving the line away); after
+  the reveal the note with its suggested wording and source under the line, open from 640 px, folded on phones.
+- Read mode on wide screens (1280 px and up): margin notes hang beside the lines below their own; when two would
+  overlap (lines 1 and 4), the later one moves down (measured after layout, a transform only, so the script never
+  moves) and a spacer keeps the last one inside the card.
 
 #### Flashcards (`pitchCards(script)`)
 

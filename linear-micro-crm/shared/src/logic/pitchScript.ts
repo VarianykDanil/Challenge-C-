@@ -23,6 +23,7 @@ import type {
   PitchBranch,
   PitchCard,
   PitchFact,
+  PitchFactFlag,
   PitchFactTone,
   PitchScript,
   PitchSegment,
@@ -56,6 +57,8 @@ export const PITCH_DEFAULT_PAUSE_SECONDS = 1;
 export const PITCH_TITLE_MAX = 120;
 export const PITCH_BODY_MAX = 20_000;
 export const PITCH_FACTS_MAX = 10_000;
+/** The fact check is the office's (admins): PUT's 403 for a leader who changes it, and the editor's read-only hint. */
+export const PITCH_FACTS_OFFICE_ONLY = 'Only the office can change the fact-check notes';
 
 /**
  * Phrases that start a step when the writer has not marked it. Steps only move forward: a cue for an earlier step later
@@ -540,4 +543,23 @@ export function parsePitchFacts(facts: string | null, body: string): PitchFact[]
     const lines = [...new Set(quotes.flatMap((q) => matchPitchQuote(q, body)))].sort((a, b) => a - b);
     return { quote: quotes[0] ?? null, quotes, note, suggestion, tone, sources, lines };
   });
+}
+
+/**
+ * The practice modes' flags: for every script line a 'check' note quotes (a figure the office has not approved yet),
+ * the notes on it in note order. A note opens on the first line it quotes (`first`); 'verified' and general notes are
+ * not flagged. The script text is never changed.
+ */
+export function pitchFactFlags(facts: readonly PitchFact[]): Map<number, PitchFactFlag[]> {
+  const out = new Map<number, PitchFactFlag[]>();
+  for (const fact of facts) {
+    if (fact.tone !== 'check') continue;
+    fact.lines.forEach((line, i) => out.set(line, [...(out.get(line) ?? []), { fact, first: i === 0 }]));
+  }
+  return out;
+}
+
+/** How many script lines use a figure the office has not approved yet (the "N lines" of the practice banner). */
+export function pitchLinesToCheck(facts: readonly PitchFact[]): number {
+  return pitchFactFlags(facts).size;
 }

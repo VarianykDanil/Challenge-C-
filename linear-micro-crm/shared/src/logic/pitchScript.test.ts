@@ -11,6 +11,8 @@ import {
   parsePitchFacts,
   parsePitchScript,
   pitchCards,
+  pitchFactFlags,
+  pitchLinesToCheck,
   pitchLineKey,
   pitchLineSeconds,
   pitchSegments,
@@ -63,9 +65,13 @@ You live in the UK
 You bank in the UK
 Cheeky question are you slightly over the age of 35?`;
 
-const BCN_FACTS = `- "Over 1000 women ... every month" and "every 43 minutes": Breast Cancer Now says about 11,500 women die of breast cancer each year in the UK = nearly 1,000 a month, about one every 45 minutes. Suggested accurate wording: "Nearly 1,000 women die from breast cancer in the UK every month. That's one every 45 minutes." Source: https://breastcancernow.org/about-us/media/statements/breast-cancer-now-responds-to-news-that-197-000-deaths-from-breast-cancer-have-been-avoided-in-the-uk-in-the-last-37-years
+// The seeded fact check (server/src/db/extensions/pitches.ts BCN_PITCH_FACTS), one note per quoted line.
+const BCN_FACTS = `- "Over 1000 women ... every month": Breast Cancer Now says about 11,500 women die of breast cancer each year in the UK, nearly 1,000 a month. Suggested accurate wording: "Nearly 1,000 women are dying from breast cancer in the UK every month" Source: https://breastcancernow.org/about-us/media/statements/breast-cancer-now-responds-to-news-that-197-000-deaths-from-breast-cancer-have-been-avoided-in-the-uk-in-the-last-37-years
+- "every 43 minutes": 11,500 a year is about one every 45 minutes. Suggested accurate wording: "That's every 45 minutes someone is losing a mother, a daughter or a wife" Source: https://breastcancernow.org/about-us/media/statements/breast-cancer-now-responds-to-news-that-197-000-deaths-from-breast-cancer-have-been-avoided-in-the-uk-in-the-last-37-years
+- "it's definitely on the rise in the UK": not checked yet. Check it against the Breast Cancer Now campaign brief before you use it.
 - "by 2050 anyone diagnosed will live and be supported to live well": matches Breast Cancer Now's stated aim (https://breastcancernow.org/about-us/who-we-are).
 - "As of 1980 it was a 50% survival rate ... 2025 87%": not verified. Cancer Research UK reports breast cancer death rates down 46% since the early 1970s. Use the figure in the charity's current campaign brief.
+- "over the age of 35": not checked yet. Check the age against the Breast Cancer Now campaign brief before you use it.
 - UK fundraising rules (Fundraising Regulator's Code of Fundraising Practice) require statements to donors to be accurate and not misleading; the office should approve the final figures.`;
 
 type LineBlock = Extract<PitchBlock, { kind: 'line' }>;
@@ -198,7 +204,12 @@ test('BCN pitch: counts and read-aloud estimate (words at 150 a minute, pauses, 
 test('BCN pitch: annotation chips on the lines the plan names', () => {
   const s = parsePitchScript(BCN);
   const at = (n: number) => theories(lineAt(s.blocks, n));
-  assert.deepEqual(at(1), ['introduction'], 'the opening figure is the hook');
+  assert.deepEqual(at(1), ['introduction'], 'the opening figure is the introduction');
+  const intro = lineAt(s.blocks, 1).annotations[0]!;
+  assert.equal(intro.label, 'Introduction', 'the pack calls it the introduction (not a "hook")');
+  assert.equal(intro.why, 'Introduction (7 to 10 seconds): the most important step, the 1st impression');
+  const buzz = lineAt(s.blocks, 30).annotations.find((a) => a.theory === 'buzzwords')!;
+  assert.equal(buzz.why, 'Use buzzwords: "Unfortunately", "Obviously", "However"');
   assert.ok(at(9).includes('pre-emptive-strike'), '"I know that\'s a little bit heavy"');
   assert.ok(at(11).includes('short-story'));
   assert.ok(at(24).includes('presentation'));
@@ -339,33 +350,59 @@ test('flashcards: one per spoken line, cue is the line before, branch lines carr
   assert.deepEqual(dup.map((c) => c.key), [pitchLineKey('Hello'), `${pitchLineKey('Hello')}:2`]);
 });
 
-test('fact-check notes: quotes, notes, suggestion, sources, tone and the lines they concern', () => {
+test('fact-check notes: one note per quoted line, each with its own suggestion, tone and sources', () => {
   const facts = parsePitchFacts(BCN_FACTS, BCN);
-  assert.equal(facts.length, 4);
-  const [deaths, mission, survival, rules] = facts;
-  assert.deepEqual(deaths!.quotes, ['Over 1000 women ... every month', 'every 43 minutes']);
+  assert.equal(facts.length, 7);
+  assert.deepEqual(facts.map((f) => f.lines), [[1], [4], [20], [22], [24], [40], []], 'each note attaches to the line it quotes');
+  assert.deepEqual(facts.map((f) => f.tone), ['check', 'check', 'check', 'verified', 'check', 'check', 'info']);
+  const [deaths, minutes, rise, mission, survival, age, rules] = facts;
+
+  assert.deepEqual(deaths!.quotes, ['Over 1000 women ... every month']);
   assert.equal(deaths!.quote, 'Over 1000 women ... every month');
-  assert.deepEqual(deaths!.lines, [1, 4]);
-  assert.equal(deaths!.suggestion, "Nearly 1,000 women die from breast cancer in the UK every month. That's one every 45 minutes.");
-  assert.equal(deaths!.tone, 'check');
-  assert.ok(deaths!.note.startsWith('Breast Cancer Now says about 11,500 women'));
-  assert.ok(!deaths!.note.includes('http') && !deaths!.note.includes('Source'), deaths!.note);
+  assert.equal(deaths!.suggestion, 'Nearly 1,000 women are dying from breast cancer in the UK every month');
+  assert.equal(deaths!.note, 'Breast Cancer Now says about 11,500 women die of breast cancer each year in the UK, nearly 1,000 a month.');
   assert.equal(deaths!.sources.length, 1);
   assert.ok(deaths!.sources[0]!.startsWith('https://breastcancernow.org/about-us/media/statements/'));
 
-  assert.deepEqual(mission!.lines, [22]);
-  assert.equal(mission!.tone, 'verified');
+  assert.deepEqual(minutes!.quotes, ['every 43 minutes']);
+  assert.equal(minutes!.suggestion, "That's every 45 minutes someone is losing a mother, a daughter or a wife", "keeps the owner's own words");
+  assert.equal(minutes!.note, '11,500 a year is about one every 45 minutes.');
+  assert.deepEqual(minutes!.sources, deaths!.sources);
+
+  for (const f of [rise!, age!]) {
+    assert.equal(f.suggestion, null, 'needs checking, no suggestion');
+    assert.ok(f.note.startsWith('Not checked yet. Check '), f.note);
+    assert.ok(f.note.includes('Breast Cancer Now campaign brief'), f.note);
+    assert.deepEqual(f.sources, []);
+  }
+
   assert.equal(mission!.note, "Matches Breast Cancer Now's stated aim.");
   assert.deepEqual(mission!.sources, ['https://breastcancernow.org/about-us/who-we-are']);
-
-  assert.deepEqual(survival!.lines, [24]);
-  assert.equal(survival!.tone, 'check');
   assert.ok(survival!.note.startsWith('Not verified.'));
 
   assert.equal(rules!.quote, null);
   assert.deepEqual(rules!.lines, []);
-  assert.equal(rules!.tone, 'info');
   assert.ok(rules!.note.includes("(Fundraising Regulator's Code of Fundraising Practice)"), 'ordinary brackets are kept');
+  for (const f of facts) assert.ok(!f.note.includes('http') && !f.note.includes('Source'), f.note);
+});
+
+test('fact flags for the practice modes: the lines a "check" note quotes, the note opening on its first line', () => {
+  const facts = parsePitchFacts(BCN_FACTS, BCN);
+  const flags = pitchFactFlags(facts);
+  assert.deepEqual([...flags.keys()].sort((a, b) => a - b), [1, 4, 20, 24, 40], 'the checked mission line and the general note are not flagged');
+  assert.equal(pitchLinesToCheck(facts), 5);
+  assert.equal(flags.get(1)![0]!.fact.suggestion, 'Nearly 1,000 women are dying from breast cancer in the UK every month');
+  assert.equal(flags.get(4)![0]!.fact.suggestion, "That's every 45 minutes someone is losing a mother, a daughter or a wife");
+  assert.ok([...flags.values()].every((list) => list.length === 1 && list[0]!.first));
+
+  // One note over two lines: it opens on the first, the second is marked; two notes on one line are both kept.
+  const both = parsePitchFacts('- "Over 1000 women ... every month" and "every 43 minutes": check both.\n- "every 43 minutes": and this.', BCN);
+  const f2 = pitchFactFlags(both);
+  assert.deepEqual(f2.get(1)!.map((x) => x.first), [true]);
+  assert.deepEqual(f2.get(4)!.map((x) => [x.fact.note, x.first]), [['Check both.', false], ['And this.', true]]);
+  assert.equal(pitchLinesToCheck(both), 2, 'lines, not notes');
+  assert.equal(pitchLinesToCheck([]), 0);
+  assert.equal(pitchLinesToCheck(parsePitchFacts('- "by 2050 anyone diagnosed": matches the aim.', BCN)), 0, 'a checked figure is not flagged');
 });
 
 test('fact-check notes: wrapped bullets, paragraphs without bullets, empty input, quotes across lines', () => {

@@ -1,7 +1,8 @@
 // Release 1.2 — /learning/pitch/:campaignCode, the pitch studio — OWNED BY L2 learning-pitch.
 // The campaign's pitch set for reading aloud, with the fact check beside the lines it concerns, the COD pack theory
-// behind each line, a step timer and three practice modes: Read, Teleprompter and Memorise (flashcards). Admins and
-// leaders write and edit it (?edit=1 opens the editor). Every signed-in role can read it.
+// behind each line, a step timer and three practice modes: Read, Teleprompter and Memorise (flashcards); the two
+// practice modes flag the lines whose figures the office has not approved yet. Admins and leaders write and edit it
+// (?edit=1 opens the editor); only admins (the office) change the fact-check notes. Every signed-in role can read it.
 import { useEffect, useMemo, useState, type ReactNode } from 'react';
 import { Link, useParams, useSearchParams } from 'react-router-dom';
 import { useQueryClient } from '@tanstack/react-query';
@@ -110,7 +111,13 @@ export function LearningPitchPage() {
     return (
       <>
         <PageHeader breadcrumbs={back} eyebrow={eyebrow} title={pitch ? `Edit: ${pitch.title}` : 'Write the pitch'} />
-        <PitchEditor campaignCode={campaign.campaignCode} campaignName={campaign.campaignName} pitch={pitch ?? null} onDone={onSaved} />
+        <PitchEditor
+          campaignCode={campaign.campaignCode}
+          campaignName={campaign.campaignName}
+          pitch={pitch ?? null}
+          canEditFacts={me.role === 'admin'}
+          onDone={onSaved}
+        />
       </>
     );
   }
@@ -203,15 +210,19 @@ function PitchStudio({
             </Card>
           </>
         )}
+        {/* The practice modes show no notes, so they say how many lines still need checking (the remembered mode can
+            open straight into one of them). The teleprompter says it in a strip inside its own panel, so the panel
+            still fits the first screen with its controls. */}
+        {mode === 'memorise' && <FactSummary facts={facts} practice className="mx-auto max-w-3xl" />}
         {mode === 'prompter' && (
           <>
-            <Teleprompter script={script} />
+            <Teleprompter script={script} facts={facts} onShowNotes={() => setMode('read')} />
             <p className="text-xs text-muted">
               Space plays and pauses, the arrow keys change the speed, F goes full screen. On a phone, turn it sideways for the widest lines.
             </p>
           </>
         )}
-        {mode === 'memorise' && <Memorise script={script} userId={userId} campaignCode={pitch.campaignCode} />}
+        {mode === 'memorise' && <Memorise script={script} facts={facts} userId={userId} campaignCode={pitch.campaignCode} />}
       </div>
     </>
   );

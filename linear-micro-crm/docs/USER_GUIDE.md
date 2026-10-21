@@ -75,15 +75,24 @@ pitch; on an event's page the **Pitch** button does the same. Both only appear w
 reads aloud and who updated it last. Choose how to practise:
 
 - **Read**: the script in large type, in its five steps (Introduction, Short story, Presentation, Close,
-  Consolidation), each with the pack's target time and the script's estimate. Stage directions are grey italics,
+  Consolidation), each with the pack's target time and the script's estimate ("Estimate over 7–10 s" means the words
+  take longer than the target at a steady pace; time yourself with the step timer). Stage directions are grey italics,
   pauses are a row of dots ("Pause · 1 s"), **Name** marks where their name goes and **Close** marks the close. When
   they answer a question, "If yes" and "If no" sit side by side (tabs on a phone). Under each line, small chips name
   the COD pack theory it uses (**Pre-emptive strike**, **Group effect**, **Greed** …); tap one to see why it works and
   **Open the lesson**. Turn **Show the theory** off for a clean script.
 - **Check the figures.** Where the fact check has a note on a line, it sits beside the line on a wide screen and under
   it on a phone (tap **Check the figures**): what the charity actually says, a suggested accurate wording and the
-  source. A green **Figure checked** note means it matches. The script itself is never changed by the check: the office
-  decides the final wording.
+  source. Each line has its own note, so "Over 1000 women…" and "every 43 minutes…" each get their own suggestion. A
+  green **Checked** note means it matches. The script itself is never changed by the check: the office decides the
+  final wording.
+- **In the teleprompter and the flashcards** a banner says how many lines still need checking ("Check the figures: 5
+  lines use figures the office has not approved yet. Read mode shows the notes."). In the teleprompter it is a strip
+  at the top of the dark panel (on a phone just "Check the figures: 5 lines"), so Play and the speed still fit on the
+  screen; tap **See the notes** to go to Read mode. In the teleprompter those lines end with an amber warning sign,
+  with the suggested wording under them (on a phone, tap **Check the figures** under the line). The notes do not speed
+  it up: the lines scroll at the words a minute you chose, and a note under a line simply takes its own time. A flashcard for one of those lines says **Check the figures** at the top; once you reveal the line, the note
+  and its suggested wording show under it (tap to open on a phone).
 - **Step timer**: tap **Start** as you begin, **Next step** as you move from the introduction to the short story and
   on, then **Finish** (or **Stop**). Each step shows your time against the target (introduction 7–10 s, short story
   10–15 s). On a phone it shrinks to one line that stays at the top while you read down. Nothing is saved.
@@ -101,8 +110,10 @@ tablets). **How to write the script** lists the format: one spoken line per line
 `(Name)` for their name; `(Close)` for the close; `Yes -` and `No -` for the answers to a question; `(Short story)`,
 `(Presentation)` and so on to start a step. **Start from a template** fills an empty script with a skeleton in that
 format. Fact-check notes go one per line starting with "- ", with the words they are about in double quotes and a
-colon; links become sources. **Save pitch** publishes it to everyone straight away; **Cancel** asks before throwing
-changes away. Every save records who made it, and the audit trail keeps the history.
+colon; links become sources. Only the office (administrators) writes the fact-check notes: leaders see them greyed out
+with "Only the office can change the fact-check notes." and can change the title and the script. **Save pitch**
+publishes it to everyone straight away; **Cancel** asks before throwing changes away. Every save records who made it,
+and the audit trail keeps the history.
 
 Recruiters and reps read every pitch and practise with all three modes; they cannot edit.
 

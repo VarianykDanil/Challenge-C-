@@ -1,12 +1,14 @@
 // Release 1.2 — L2 learning-pitch: write or edit a campaign's pitch (admins and leaders). The script and the fact-check
 // notes as plain text with a live preview set exactly as the crew will read it. Saving records who saved it (and U3's
-// audit trail keeps the history).
+// audit trail keeps the history). The fact-check notes are the office's: leaders see them read-only and their save
+// leaves them out (PUT keeps the stored notes; a leader's change to them is 403).
 import { useDeferredValue, useEffect, useId, useMemo, useState } from 'react';
 import clsx from 'clsx';
 import { Eye, FileText, PenLine, Save } from 'lucide-react';
 import {
   PITCH_BODY_MAX,
   PITCH_FACTS_MAX,
+  PITCH_FACTS_OFFICE_ONLY,
   PITCH_TITLE_MAX,
   parsePitchFacts,
   parsePitchScript,
@@ -51,10 +53,12 @@ export interface PitchEditorProps {
   campaignCode: string;
   campaignName: string;
   pitch: CampaignPitch | null;
+  /** Admins (the office) only; leaders see the notes read-only and never send them. */
+  canEditFacts: boolean;
   onDone: (saved: CampaignPitch | null) => void;
 }
 
-export function PitchEditor({ campaignCode, campaignName, pitch, onDone }: PitchEditorProps) {
+export function PitchEditor({ campaignCode, campaignName, pitch, canEditFacts, onDone }: PitchEditorProps) {
   const toast = useToast();
   const save = useSavePitch(campaignCode);
   const ids = { title: useId(), body: useId(), facts: useId() };
@@ -93,7 +97,7 @@ export function PitchEditor({ campaignCode, campaignName, pitch, onDone }: Pitch
     setTouched(true);
     if (!title.trim() || !body.trim()) return;
     save.mutate(
-      { title, body, facts: facts.trim() ? facts : null },
+      canEditFacts ? { title, body, facts: facts.trim() ? facts : null } : { title, body },
       {
         onSuccess: (saved) => {
           toast.success('Pitch saved', `${campaignName}: everyone sees the new version now.`);
@@ -135,18 +139,32 @@ export function PitchEditor({ campaignCode, campaignName, pitch, onDone }: Pitch
             spellCheck
             className="min-h-[22rem] text-[15px]"
             invalid={!!bodyError}
-            placeholder={'Over 1000 women…\n(Pause - 1 Second)\n\nWhat we do is…'}
+            placeholder={'Your opening line\n(Pause - 1 Second)\n\nWhat we do is…'}
             data-pitch-editor-body
           />
         </Field>
         <FormatGuide />
         <Field
           label="Fact-check notes"
-          optional
+          optional={canEditFacts}
           htmlFor={ids.facts}
-          hint={'One note per line, starting with "- ". Put the words it is about in double quotes, then a colon: - "every 43 minutes": … Links become sources.'}
+          hint={
+            canEditFacts
+              ? 'One note per line, starting with "- ". Put the words it is about in double quotes, then a colon: - "every 43 minutes": … Links become sources.'
+              : `${PITCH_FACTS_OFFICE_ONLY}.`
+          }
         >
-          <Textarea id={ids.facts} value={facts} onChange={(e) => setFacts(e.target.value)} rows={6} maxLength={PITCH_FACTS_MAX} className="text-[13px]" />
+          <Textarea
+            id={ids.facts}
+            value={facts}
+            onChange={(e) => setFacts(e.target.value)}
+            readOnly={!canEditFacts}
+            rows={6}
+            maxLength={PITCH_FACTS_MAX}
+            className={clsx('text-[13px]', !canEditFacts && 'bg-surface-2 text-muted shadow-none')}
+            placeholder={canEditFacts ? undefined : 'No fact-check notes yet.'}
+            data-pitch-editor-facts
+          />
         </Field>
         {unmatched.length > 0 && (
           <p className="text-xs text-warning" role="status">

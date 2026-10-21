@@ -2,12 +2,25 @@
 // on its own at a chosen speed (words a minute) past a reading line. Full screen on demand (the browser's full-screen
 // mode where it allows, else a fixed overlay), and laid out for a phone held sideways. Keys: Space play / pause,
 // ↑ ↓ speed, Home back to the start, F full screen, Esc leave full screen. The screen stays awake while it plays.
-import { useCallback, useEffect, useLayoutEffect, useRef, useState, type KeyboardEvent } from 'react';
+// A line that uses a figure the office has not approved yet carries an amber marker and, under it, the suggested
+// wording (or the note when there is none): shown on wide screens, behind a "Check the figures" tap on phones. The
+// script's own words are never changed. A strip at the top of the panel says how many lines those are (inside the
+// panel, so the controls stay on the first screen), and the flags add no speed: the lines pass at the chosen pace.
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent } from 'react';
 import clsx from 'clsx';
-import { Maximize2, Minimize2, Minus, Pause, Play, Plus, RotateCcw } from 'lucide-react';
-import { PITCH_DEFAULT_PAUSE_SECONDS, type PitchBlock, type PitchScript } from '@lm/shared';
+import { AlertTriangle, ChevronDown, Maximize2, Minimize2, Minus, Pause, Play, Plus, RotateCcw } from 'lucide-react';
+import { PITCH_DEFAULT_PAUSE_SECONDS, pitchFactFlags, type PitchBlock, type PitchFact, type PitchFactFlag, type PitchScript } from '@lm/shared';
 import { useWakeLock } from '@/lib/useWakeLock';
 import { InlineSegments } from './parts';
+
+/**
+ * The amber of the flags on the always-dark ink panel, in both themes: the dark theme's --warning (the light theme's
+ * --warning is a dark amber made for light surfaces and is too dim on ink).
+ */
+const PROMPTER_AMBER = 'text-[#FBBF24]';
+
+type Flags = ReadonlyMap<number, readonly PitchFactFlag[]>;
+const NO_FLAGS: Flags = new Map();
 
 export const PROMPTER_MIN_WPM = 90;
 export const PROMPTER_MAX_WPM = 240;
@@ -25,7 +38,7 @@ function readStoredWpm(): number {
   return 150;
 }
 
-/** Seconds to scroll the whole teleprompter at `wpm`: every spoken word (both branches are on screen) plus pauses. */
+/** Seconds the spoken lines take at `wpm`: every spoken word (both branches are on screen) plus pauses. */
 function prompterSeconds(script: PitchScript, wpm: number): number {
   let pauses = 0;
   const visit = (blocks: readonly PitchBlock[]) => {
@@ -43,7 +56,33 @@ function prompterSeconds(script: PitchScript, wpm: number): number {
   return Math.max(5, (script.wordCount * 60) / wpm + pauses);
 }
 
-export function Teleprompter({ script, name }: { script: PitchScript; name?: string }) {
+/**
+ * Pixels of the scroll that are fact flags, not script: each flag's margin box (its height plus its margins, which is
+ * what it adds between a line and the next block). The pace leaves them out, so a flag does not speed the lines up.
+ */
+function flagPixels(scroller: HTMLElement): number {
+  let px = 0;
+  for (const el of scroller.querySelectorAll<HTMLElement>('[data-fact-flag]')) {
+    const cs = getComputedStyle(el);
+    px += el.offsetHeight + (parseFloat(cs.marginTop) || 0) + (parseFloat(cs.marginBottom) || 0);
+  }
+  return px;
+}
+
+export function Teleprompter({
+  script,
+  facts,
+  name,
+  onShowNotes,
+}: {
+  script: PitchScript;
+  facts?: readonly PitchFact[];
+  name?: string;
+  /** Opens Read mode, where the notes are (the strip's "See the notes"). */
+  onShowNotes?: () => void;
+}) {
+  const flags = useMemo<Flags>(() => (facts?.length ? pitchFactFlags(facts) : NO_FLAGS), [facts]);
+  const toCheck = flags.size;
   const wrapRef = useRef<HTMLDivElement>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
   const [playing, setPlaying] = useState(false);
@@ -60,7 +99,8 @@ export function Teleprompter({ script, name }: { script: PitchScript; name?: str
     }
   }, [wpm]);
 
-  // Auto-scroll: a steady rate that covers the scrollable height in the time the words take at `wpm`.
+  // Auto-scroll: a steady rate that covers the script's height (the scrollable height less the fact flags) in the time
+  // the words take at `wpm`. A flag then passes at that same rate, adding its own time instead of speeding the lines.
   useEffect(() => {
     if (!playing) return;
     const el = scrollRef.current;
@@ -69,13 +109,21 @@ export function Teleprompter({ script, name }: { script: PitchScript; name?: str
     let last = performance.now();
     let carry = el.scrollTop;
     const seconds = prompterSeconds(script, wpm);
+    // Measured again only when the layout changes (a flag opened or closed, the panel resized), not every frame.
+    let measuredFor = '';
+    let flagPx = 0;
     const frame = (t: number) => {
       const dt = Math.min(0.1, (t - last) / 1000);
       last = t;
       const max = el.scrollHeight - el.clientHeight;
+      const layout = `${el.scrollHeight}x${el.clientWidth}`;
+      if (layout !== measuredFor) {
+        measuredFor = layout;
+        flagPx = flagPixels(el);
+      }
       // The reader may drag the text: carry on from wherever it is now.
       if (Math.abs(el.scrollTop - carry) > 2) carry = el.scrollTop;
-      carry = Math.min(max, carry + (max / seconds) * dt);
+      carry = Math.min(max, carry + (Math.max(1, max - flagPx) / seconds) * dt);
       el.scrollTop = carry;
       if (carry >= max - 0.5) {
         setPlaying(false);
@@ -194,6 +242,32 @@ export function Teleprompter({ script, name }: { script: PitchScript; name?: str
       data-teleprompter
       data-full={full || undefined}
     >
+      {toCheck > 0 && (
+        // Inside the panel, not above it: the panel keeps its height, so Play and the speed stay on the first screen.
+        // On a phone (or held sideways) it is one line: the count and "See the notes"; the full sentence is read out.
+        <div className="flex min-h-10 shrink-0 items-center gap-2 border-b border-ink-fg/10 bg-ink-2 pl-4 pr-1 text-sm sm:pl-6 sm:pr-2" role="note" data-fact-banner>
+          <AlertTriangle className={clsx('h-4 w-4 shrink-0', PROMPTER_AMBER)} aria-hidden />
+          <p className="min-w-0 flex-1 py-1.5 leading-snug text-ink-fg">
+            <span className={clsx('font-semibold', PROMPTER_AMBER)}>Check the figures:</span>{' '}
+            <span className="whitespace-nowrap">
+              {toCheck} {toCheck === 1 ? 'line' : 'lines'}
+            </span>
+            <span className="max-sm:sr-only short:sr-only">
+              {' '}
+              {toCheck === 1 ? 'uses' : 'use'} figures the office has not approved yet. Read mode shows the notes.
+            </span>
+          </p>
+          {onShowNotes && (
+            <button
+              type="button"
+              onClick={onShowNotes}
+              className="focus-ring inline-flex h-10 shrink-0 items-center rounded-lg px-2.5 text-sm font-semibold text-ink-fg underline decoration-ink-fg/40 underline-offset-4 hover:bg-ink-fg/10 hover:decoration-ink-fg"
+            >
+              See the notes
+            </button>
+          )}
+        </div>
+      )}
       <div className="relative min-h-0 flex-1">
         {/* the reading line, at READING_LINE of the text area's height */}
         <div className="pointer-events-none absolute inset-x-0 top-[32%] z-10 h-[3.2em] -translate-y-1/2 border-y border-ink-fg/10 bg-ink-fg/[0.04] text-2xl short:text-xl" aria-hidden />
@@ -205,7 +279,7 @@ export function Teleprompter({ script, name }: { script: PitchScript; name?: str
           data-prompter-scroll
         >
           <div className="mx-auto max-w-3xl" style={{ paddingTop: pad.top, paddingBottom: pad.bottom }}>
-            <PrompterBlocks blocks={script.blocks} name={name} />
+            <PrompterBlocks blocks={script.blocks} name={name} flags={flags} />
             <p className="mt-10 text-center text-sm font-medium uppercase tracking-[0.2em] text-ink-muted">End of the script</p>
           </div>
         </div>
@@ -254,7 +328,49 @@ export function Teleprompter({ script, name }: { script: PitchScript; name?: str
   );
 }
 
-function PrompterBlocks({ blocks, name }: { blocks: readonly PitchBlock[]; name?: string }) {
+/** Under a flagged line: "Check the figures" and the suggested wording (or the note), folded on phones. */
+function PrompterFactFlag({ flags }: { flags: readonly PitchFactFlag[] }) {
+  const [open, setOpen] = useState(false);
+  // A note opens on the first line it quotes; on its later lines the marker points back to it.
+  const notes = flags.filter((f) => f.first).map((f) => f.fact);
+  const label = (
+    <>
+      <AlertTriangle className="h-4 w-4 shrink-0" aria-hidden />
+      Check the figures
+    </>
+  );
+  return (
+    <div className={clsx('-mt-2 mb-5 short:-mt-1 short:mb-3', PROMPTER_AMBER)} data-fact-flag>
+      <button
+        type="button"
+        aria-expanded={open}
+        onClick={() => setOpen((o) => !o)}
+        className="focus-ring -ml-2 inline-flex h-10 items-center gap-1.5 rounded-lg px-2 text-sm font-semibold hover:bg-ink-fg/10 sm:hidden"
+      >
+        {label}
+        <ChevronDown className={clsx('h-4 w-4 transition-transform', open && 'rotate-180')} aria-hidden />
+      </button>
+      <p className="hidden items-center gap-1.5 text-sm font-semibold uppercase tracking-[0.12em] sm:flex">{label}</p>
+      <div className={clsx('mt-1 space-y-2 border-l-2 border-current/60 pl-3 sm:pl-4', open ? 'block animate-fade-in' : 'hidden sm:block')}>
+        {notes.length === 0 && <p className="text-base text-ink-muted">The note on an earlier line covers this one too.</p>}
+        {notes.map((fact, i) =>
+          fact.suggestion ? (
+            <p key={i} className="text-lg leading-snug text-ink-fg sm:text-xl short:text-base">
+              <span className={clsx('mr-1.5 text-xs font-bold uppercase tracking-[0.15em]', PROMPTER_AMBER)}>Suggested wording</span>
+              <span className="block">“{fact.suggestion}”</span>
+            </p>
+          ) : (
+            <p key={i} className="text-base leading-snug text-ink-fg/90 sm:text-lg short:text-sm">
+              {fact.note}
+            </p>
+          ),
+        )}
+      </div>
+    </div>
+  );
+}
+
+function PrompterBlocks({ blocks, name, flags }: { blocks: readonly PitchBlock[]; name?: string; flags: Flags }) {
   return (
     <>
       {blocks.map((b, i) => {
@@ -274,19 +390,34 @@ function PrompterBlocks({ blocks, name }: { blocks: readonly PitchBlock[]; name?
                 ({b.text})
               </p>
             );
-          case 'line':
-            return (
-              <p key={i} className="mb-4 text-[28px] font-semibold leading-[1.4] sm:text-4xl sm:leading-[1.35] short:mb-3 short:text-2xl">
+          case 'line': {
+            const lineFlags = flags.get(b.line);
+            const text = (
+              <p key={i} className="mb-4 text-[28px] font-semibold leading-[1.4] sm:text-4xl sm:leading-[1.35] short:mb-3 short:text-2xl" data-prompter-line={b.line}>
                 <InlineSegments segments={b.segments} tone="prompter" name={name} />
+                {lineFlags && (
+                  <span className={clsx('ml-2 inline-flex translate-y-[-0.1em] align-middle', PROMPTER_AMBER)}>
+                    <AlertTriangle className="h-[0.75em] w-[0.75em]" aria-hidden />
+                    <span className="sr-only">(uses a figure the office has not approved yet)</span>
+                  </span>
+                )}
               </p>
             );
+            if (!lineFlags) return text;
+            return (
+              <div key={i}>
+                {text}
+                <PrompterFactFlag flags={lineFlags} />
+              </div>
+            );
+          }
           case 'branch':
             return (
               <div key={i} className="my-5 space-y-5 short:my-3 short:space-y-3">
                 {b.branches.map((br) => (
                   <div key={br.answer} className="border-l-4 border-ink-fg/30 pl-4 sm:pl-6">
                     <p className="mb-2 text-sm font-bold uppercase tracking-[0.2em] text-ink-muted">If {br.label.toLowerCase()}</p>
-                    <PrompterBlocks blocks={br.blocks} name={name} />
+                    <PrompterBlocks blocks={br.blocks} name={name} flags={flags} />
                   </div>
                 ))}
               </div>

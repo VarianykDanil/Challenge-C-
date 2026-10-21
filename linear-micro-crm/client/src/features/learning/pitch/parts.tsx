@@ -128,7 +128,9 @@ export function TheoryChips({ annotations, className }: { annotations: readonly 
       {active && (
         <p className="mt-2 flex flex-wrap items-baseline gap-x-2 gap-y-1 rounded-lg bg-surface-2/70 px-3 py-2 text-sm text-fg animate-fade-in">
           <span>
-            <span className="font-semibold">{active.label}:</span> {active.why}.
+            {/* "Introduction (7 to 10 seconds): …", "Use buzzwords: …" already name the theory: no "Label:" before them. */}
+            {!active.why.toLowerCase().includes(active.label.toLowerCase()) && <span className="font-semibold">{active.label}: </span>}
+            {active.why}.
           </span>
           <Link to={lessonHref(active)} className="inline-flex min-h-10 items-center gap-1 text-sm font-medium text-primary hover:underline sm:min-h-0">
             Open the lesson <span aria-hidden>→</span>
@@ -141,7 +143,7 @@ export function TheoryChips({ annotations, className }: { annotations: readonly 
 
 const FACT_TONE = {
   check: { icon: AlertTriangle, label: 'Check the figures', box: 'border-warning/30 bg-warning-soft', text: 'text-warning' },
-  verified: { icon: BadgeCheck, label: 'Figure checked', box: 'border-success/30 bg-success-soft', text: 'text-success' },
+  verified: { icon: BadgeCheck, label: 'Checked', box: 'border-success/30 bg-success-soft', text: 'text-success' },
   info: { icon: Info, label: 'Note', box: 'border-info/30 bg-info-soft', text: 'text-info' },
 } as const;
 
@@ -190,8 +192,11 @@ export function FactNote({ fact, className, showQuote = true }: { fact: PitchFac
   );
 }
 
-/** On phones a fact note folds under its line behind a "Check the figures" button. */
-export function FoldedFactNote({ fact }: { fact: PitchFact }) {
+/**
+ * On phones a fact note folds under its line behind a "Check the figures" button. With `openOnWide` (the flashcards)
+ * the note is simply shown from the `sm` breakpoint up, and only phones fold it.
+ */
+export function FoldedFactNote({ fact, openOnWide = false }: { fact: PitchFact; openOnWide?: boolean }) {
   const [open, setOpen] = useState(false);
   const t = FACT_TONE[fact.tone];
   const Icon = t.icon;
@@ -201,13 +206,23 @@ export function FoldedFactNote({ fact }: { fact: PitchFact }) {
         type="button"
         aria-expanded={open}
         onClick={() => setOpen((o) => !o)}
-        className={clsx('focus-ring inline-flex h-10 items-center gap-1.5 rounded-lg px-2.5 text-xs font-semibold ring-1 ring-inset', t.text, 'ring-current/30 hover:bg-surface-2')}
+        className={clsx(
+          'focus-ring inline-flex h-10 items-center gap-1.5 rounded-lg px-2.5 text-xs font-semibold ring-1 ring-inset',
+          t.text,
+          'ring-current/30 hover:bg-surface-2',
+          openOnWide && 'sm:hidden',
+        )}
       >
         <Icon className="h-3.5 w-3.5" aria-hidden />
         {t.label}
         <ChevronDown className={clsx('h-3.5 w-3.5 transition-transform', open && 'rotate-180')} aria-hidden />
       </button>
-      {open && <FactNote fact={fact} showQuote={false} className="mt-2 animate-fade-in" />}
+      {openOnWide ? (
+        // Fades in only when opened on a phone: a media-query flip (rotating a tablet) must not replay it.
+        <FactNote fact={fact} showQuote={false} className={clsx('sm:mt-0', open ? 'mt-2 animate-fade-in sm:animate-none' : 'max-sm:hidden')} />
+      ) : (
+        open && <FactNote fact={fact} showQuote={false} className="mt-2 animate-fade-in" />
+      )}
     </div>
   );
 }

@@ -4,9 +4,9 @@
  */
 import { after, before, describe, test } from 'node:test';
 import assert from 'node:assert/strict';
-import { parsePitchFacts, parsePitchScript, type CampaignPitch, type PitchListItem } from '@lm/shared';
+import { parsePitchFacts, parsePitchScript, pitchFactFlags, pitchLinesToCheck, type CampaignPitch, type PitchListItem } from '@lm/shared';
 import { openDb } from '../db/connection.ts';
-import { BCN_PITCH_BODY, BCN_PITCH_FACTS, BCN_PITCH_TITLE } from '../db/extensions/pitches.ts';
+import { BCN_PITCH_BODY, BCN_PITCH_FACTS, BCN_PITCH_FACTS_V1, BCN_PITCH_TITLE } from '../db/extensions/pitches.ts';
 import { createSchema } from '../db/schema.ts';
 import { seed } from '../db/seed.ts';
 import { todayISO } from '../lib/dates.ts';
@@ -89,17 +89,27 @@ describe('pitches on the small fixture', () => {
     assert.equal((await rep.get('/pitches/FXC')).status, 404, 'nothing was saved');
   });
 
+  test('PUT: a leader may not write fact-check notes on a new pitch (403, nothing saved)', async () => {
+    for (const facts of ['- "Hello there": fine.', 'a general note']) {
+      const r = await leader.put('/pitches/FXC', { title: 'Fixture pitch', body: 'Hello there', facts });
+      assert.equal(r.status, 403);
+      assert.equal(r.json.error, 'Only the office can change the fact-check notes');
+    }
+    assert.equal((await rep.get('/pitches/FXC')).status, 404, 'nothing was saved');
+  });
+
   test('PUT: a leader creates (201), everyone reads it, the list shows it; CRLF and padding are normalised', async () => {
     await rep.get('/pitches');
     assert.equal((await rep.get('/pitches')).headers.get('x-cache'), 'HIT', 'the list is cached');
-    const created = await leader.put('/pitches/fxc', { title: '  Fixture   pitch ', body: '\r\nHello there\r\n(Pause)\r\nYes - great\r\n\r\n', facts: '- "Hello there": fine.' });
+    // No notes yet: a blank or null `facts` from a leader changes nothing, so it is allowed.
+    const created = await leader.put('/pitches/fxc', { title: '  Fixture   pitch ', body: '\r\nHello there\r\n(Pause)\r\nYes - great\r\n\r\n', facts: '  ' });
     assert.equal(created.status, 201);
     const p = created.json as CampaignPitch;
     assert.equal(p.campaignCode, 'FXC');
     assert.equal(p.campaignId, srv.fixture!.campaignId);
     assert.equal(p.title, 'Fixture pitch');
     assert.equal(p.body, 'Hello there\n(Pause)\nYes - great');
-    assert.equal(p.facts, '- "Hello there": fine.');
+    assert.equal(p.facts, null);
     assert.equal(p.updatedBy, srv.fixture!.users.leader);
     assert.equal(p.updatedByName, 'Lee Leader');
     assert.match(p.updatedAt, /^\d{4}-\d{2}-\d{2}T/);
@@ -115,6 +125,34 @@ describe('pitches on the small fixture', () => {
     assert.equal((list.json as PitchListItem[])[0]!.hasPitch, true);
     assert.equal((list.json as PitchListItem[])[0]!.title, 'Fixture pitch');
     assert.equal((list.json as PitchListItem[])[0]!.updatedAt, p.updatedAt);
+  });
+
+  test('PUT: the office writes the notes; a leader edits the title and script but a change to the notes is 403', async () => {
+    const office = await admin.put('/pitches/FXC', { title: 'Fixture pitch', body: 'Hello there\n(Pause)\nYes - great', facts: '- "Hello there": fine.' });
+    assert.equal(office.status, 200);
+    assert.equal(office.json.facts, '- "Hello there": fine.');
+    assert.equal(office.json.updatedBy, srv.fixture!.users.admin);
+
+    // Notes left out, or sent back unchanged (CRLF and padding aside), are kept: the leader's title and script save.
+    const omitted = await leader.put('/pitches/FXC', { title: 'Fixture pitch v1', body: 'Hello there, leader' });
+    assert.equal(omitted.status, 200);
+    assert.equal(omitted.json.title, 'Fixture pitch v1');
+    assert.equal(omitted.json.facts, '- "Hello there": fine.');
+    assert.equal(omitted.json.updatedBy, srv.fixture!.users.leader);
+    const same = await leader.put('/pitches/FXC', { title: 'Fixture pitch v1b', body: 'Hello there, leader', facts: '\r\n- "Hello there": fine.\r\n ' });
+    assert.equal(same.status, 200);
+    assert.equal(same.json.facts, '- "Hello there": fine.');
+
+    // Any change to the notes, clearing them included, is refused and nothing is saved.
+    for (const facts of ['- "Hello there": wrong.', null, '   ', '']) {
+      const r = await leader.put('/pitches/FXC', { title: 'Sneaky', body: 'Changed', facts });
+      assert.equal(r.status, 403, JSON.stringify(facts));
+      assert.equal(r.json.error, 'Only the office can change the fact-check notes');
+    }
+    const now = (await rep.get('/pitches/FXC')).json as CampaignPitch;
+    assert.equal(now.title, 'Fixture pitch v1b');
+    assert.equal(now.body, 'Hello there, leader');
+    assert.equal(now.facts, '- "Hello there": fine.');
   });
 
   test('PUT: an admin replaces (200); facts left out are kept, null or blank clears them', async () => {
@@ -171,12 +209,121 @@ describe('the BCN pitch in the demo seed', () => {
     }
   });
 
-  test('the seeded pitch parses: a Yes / No branch, 19 spoken lines, four fact notes matched to their lines', () => {
+  test('the seeded pitch parses: a Yes / No branch, 19 spoken lines, one fact note per quoted line', () => {
     const s = parsePitchScript(BCN_PITCH_BODY);
     assert.equal(s.lineCount, 19);
     assert.equal(s.blocks.filter((b) => b.kind === 'branch').length, 1);
     const facts = parsePitchFacts(BCN_PITCH_FACTS, BCN_PITCH_BODY);
-    assert.deepEqual(facts.map((f) => f.lines), [[1, 4], [22], [24], []]);
+    assert.deepEqual(facts.map((f) => f.lines), [[1], [4], [20], [22], [24], [40], []], 'each note sits on its own line');
+    assert.deepEqual(facts.map((f) => f.tone), ['check', 'check', 'check', 'verified', 'check', 'check', 'info']);
+    assert.equal(facts[0]!.suggestion, 'Nearly 1,000 women are dying from breast cancer in the UK every month');
+    assert.equal(facts[1]!.suggestion, "That's every 45 minutes someone is losing a mother, a daughter or a wife");
+    assert.deepEqual(facts.map((f) => f.suggestion != null), [true, true, false, false, false, false, false]);
+    assert.equal(facts[0]!.sources[0], facts[1]!.sources[0], 'both figures cite the same Breast Cancer Now statement');
+    assert.deepEqual(pitchFactFlags(facts).get(1)!.map((x) => x.fact.suggestion), [facts[0]!.suggestion]);
+    assert.equal(pitchLinesToCheck(facts), 5);
+    // The script is the owner's, word for word: the notes never change it.
+    assert.ok(BCN_PITCH_BODY.startsWith('Over 1000 women are dying from breast cancer every month\n'));
+    assert.ok(BCN_PITCH_BODY.includes("That's every 43 minutes someone is losing a mother, a daughter or a wife"));
+  });
+});
+
+describe('the 1.2.0 → split fact check upgrade (ext:pitches:facts-v2)', () => {
+  /** A demo database as 1.2.0 left it: the BCN pitch with the old merged notes, no facts-v2 flag. */
+  function oldDatabase(edit?: (db: ReturnType<typeof openDb>) => void) {
+    const db = openDb(':memory:');
+    createSchema(db);
+    seed(db, todayISO());
+    db.prepare(`UPDATE campaign_pitches SET facts = ?`).run(BCN_PITCH_FACTS_V1);
+    db.prepare(`DELETE FROM meta WHERE key = 'ext:pitches:facts-v2'`).run();
+    edit?.(db);
+    return db;
+  }
+  const row = (db: ReturnType<typeof openDb>) =>
+    db.prepare(`SELECT title, body, facts, updated_by AS updatedBy, updated_at AS updatedAt FROM campaign_pitches`).get() as {
+      title: string;
+      body: string;
+      facts: string | null;
+      updatedBy: number | null;
+      updatedAt: string;
+    };
+  const flagged = (db: ReturnType<typeof openDb>) => Boolean(db.prepare(`SELECT 1 FROM meta WHERE key = 'ext:pitches:facts-v2'`).get());
+
+  test('a fresh seed has the split notes and the flag; a restart changes nothing', () => {
+    const db = openDb(':memory:');
+    try {
+      createSchema(db);
+      seed(db, todayISO());
+      assert.equal(row(db).facts, BCN_PITCH_FACTS);
+      assert.ok(flagged(db));
+      assert.deepEqual(createSchema(db), []);
+    } finally {
+      db.close();
+    }
+  });
+
+  test('an untouched seeded pitch gets the split notes once; who saved it and when stay as they were', () => {
+    const db = oldDatabase();
+    try {
+      const before = row(db);
+      assert.equal(before.facts, BCN_PITCH_FACTS_V1);
+      assert.deepEqual(createSchema(db), ['pitches:campaign_pitches.bcn-facts-v2']);
+      const after = row(db);
+      assert.equal(after.facts, BCN_PITCH_FACTS);
+      assert.equal(after.body, BCN_PITCH_BODY, 'the script is never changed');
+      assert.equal(after.title, before.title);
+      assert.equal(after.updatedBy, before.updatedBy);
+      assert.equal(after.updatedAt, before.updatedAt);
+      assert.ok(flagged(db));
+      assert.deepEqual(createSchema(db), [], 'runs once');
+      const n = (t: string) => Number((db.prepare(`SELECT COUNT(*) AS n FROM ${t}`).get() as { n: number }).n);
+      const gauges = n('gauge_entries');
+      const runs = n('payroll_runs');
+      db.prepare(`UPDATE campaign_pitches SET facts = ?`).run(BCN_PITCH_FACTS_V1);
+      db.prepare(`DELETE FROM meta WHERE key = 'ext:pitches:facts-v2'`).run();
+      createSchema(db);
+      assert.equal(n('gauge_entries'), gauges, 'no gauge rows as a side effect');
+      assert.equal(n('payroll_runs'), runs, 'no payroll runs as a side effect');
+    } finally {
+      db.close();
+    }
+  });
+
+  const edits: [string, (db: ReturnType<typeof openDb>) => void][] = [
+    ['the script was edited', (db) => db.prepare(`UPDATE campaign_pitches SET body = body || '\nThank you'`).run()],
+    ['the title was edited', (db) => db.prepare(`UPDATE campaign_pitches SET title = 'Our BCN pitch'`).run()],
+    ['the notes were edited', (db) => db.prepare(`UPDATE campaign_pitches SET facts = facts || '\n- office note'`).run()],
+    [
+      'a leader saved it unchanged',
+      (db) => db.prepare(`UPDATE campaign_pitches SET updated_by = (SELECT id FROM users WHERE role = 'leader' ORDER BY id LIMIT 1)`).run(),
+    ],
+  ];
+  for (const [what, edit] of edits) {
+    test(`a pitch a person edited is never touched: ${what}`, () => {
+      const db = oldDatabase(edit);
+      try {
+        const before = row(db);
+        assert.deepEqual(createSchema(db), []);
+        assert.deepEqual(row(db), before);
+        assert.ok(flagged(db), 'the step ran (and will not run again)');
+      } finally {
+        db.close();
+      }
+    });
+  }
+
+  test('a database without a BCN pitch skips the step without setting the flag', () => {
+    const db = openDb(':memory:');
+    try {
+      createSchema(db);
+      seed(db, todayISO(), { extensionSeeds: false });
+      db.prepare(`DELETE FROM meta WHERE key LIKE 'ext:pitches:%'`).run();
+      db.prepare(`UPDATE campaigns SET code = 'BCX' WHERE code = 'BCN'`).run();
+      assert.deepEqual(createSchema(db), []);
+      assert.ok(!flagged(db));
+    } finally {
+      db.close();
+    }
   });
 });
 

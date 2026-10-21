@@ -166,6 +166,16 @@ export interface PitchFact {
   lines: number[];
 }
 
+/**
+ * A line flagged in the practice modes (teleprompter, flashcards): a fact-check note the office has not approved yet
+ * (tone 'check') quotes it (pitchFactFlags).
+ */
+export interface PitchFactFlag {
+  fact: PitchFact;
+  /** True on the first line the note quotes, where its suggested wording shows; later lines it covers get the marker. */
+  first: boolean;
+}
+
 /** Memorise mode: one flashcard per spoken line (pitchCards). */
 export interface PitchCard {
   /** Stable per line text (pitchLineKey), ":2" etc. when the same words come back; progress is saved under it. */

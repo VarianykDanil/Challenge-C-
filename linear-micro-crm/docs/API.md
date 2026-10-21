@@ -654,7 +654,7 @@ covers `/pitches/:campaignCode` too); every PUT bumps the data version, so the n
 | --- | --- | --- |
 | `GET /pitches` | every role | `PitchListItem[]`: one row per campaign, active campaigns first, then by name: `{ campaignId, campaignCode, campaignName, campaignColor, campaignActive, hasPitch, title, updatedAt }` (`title` and `updatedAt` null without a pitch) |
 | `GET /pitches/:campaignCode` | every role | `CampaignPitch`: `{ id, campaignId, campaignCode, campaignName, campaignColor, title, body, facts, updatedBy, updatedByName, updatedAt }`. The code is case-insensitive. **404 `Campaign not found`** for an unknown or malformed code (not 2–6 letters or digits), **404 `Pitch not found`** when the campaign has no pitch yet |
-| `PUT /pitches/:campaignCode` | admin, leader (others 403) | Body `PitchUpsertInput` `{ title, body, facts? }`. **201** with the `CampaignPitch` when it creates the pitch, **200** when it replaces it. 404 `Campaign not found`; 400 `Validation failed` with details |
+| `PUT /pitches/:campaignCode` | admin, leader (others 403) | Body `PitchUpsertInput` `{ title, body, facts? }`. **201** with the `CampaignPitch` when it creates the pitch, **200** when it replaces it. 404 `Campaign not found`; 400 `Validation failed` with details; **403 `Only the office can change the fact-check notes`** when a leader's `facts` would change the stored notes (nothing is saved) |
 
 PUT rules:
 
@@ -663,6 +663,11 @@ PUT rules:
   server never rewrites the script.
 - `facts`: CRLF normalised, trimmed, at most 10,000 characters (`PITCH_FACTS_MAX`). **Left out keeps the saved notes**;
   `null` or blank clears them.
+- **Only admins (the office) change `facts`.** A leader may leave `facts` out, or send the stored notes back unchanged
+  (after the normalising above; `null`/blank equals "no notes"), and the title and script save. Any other `facts` from
+  a leader (new or changed notes, clearing them, or notes on a pitch they create) is **403** with the error
+  `Only the office can change the fact-check notes` (`PITCH_FACTS_OFFICE_ONLY` in `@lm/shared`), and nothing is saved.
+  The client editor shows the notes read-only to leaders and leaves `facts` out of their save.
 - `updated_by` is the caller, `updated_at` the business clock (`nowISO()`). One row per campaign (`campaign_id` is
   unique): a PUT is an upsert. U3's audit middleware records each edit; nothing here writes the audit log itself.
 - A pitch never creates gauge rows or payroll runs (route test).
@@ -690,6 +695,13 @@ The BCN pitch (title "The BCN pitch", `BCN_PITCH_BODY`, `BCN_PITCH_FACTS`, saved
   `pitches:campaign_pitches.bcn` only when a row went in. On a fresh install `upgrade` runs before the seed on an empty
   campaigns table, finds no BCN campaign and skips without setting the flag, so the first restart after a fresh seed
   reports nothing (r2-contracts test). Other campaigns get no pitch.
+
+`BCN_PITCH_FACTS` has one note per quoted line (LOGIC §15.2). A database seeded by 1.2.0 holds the old merged notes
+(`BCN_PITCH_FACTS_V1`). A second one-off `upgrade` step (meta flag `ext:pitches:facts-v2`) replaces them with the new
+notes **only on a pitch nobody has edited**: title, script and notes exactly as seeded, and `updated_by` empty or the
+owner (the seed's saver). It leaves `updated_by` and `updated_at` alone and reports `pitches:campaign_pitches.bcn-facts-v2`
+only when it changed the row. A pitch a person edited is never touched. Without a BCN pitch it skips without setting the
+flag; a fresh `seed` writes the new notes and sets both flags.
 
 ### Sign-in PIN, stronger sessions and the deploy guide (U1)
 

@@ -1,18 +1,21 @@
 // Release 1.2 — L2 learning-pitch: Memorise mode. One flashcard per spoken line: the line before it is the cue, the
 // line itself is hidden until you tap; then mark it "Known" or "Again". Progress is kept on this device per person and
 // campaign (memoriseStore.ts). Keys: Space or Enter reveals, K known, A again, ← → move.
+// A card whose line uses a figure the office has not approved yet says so in its header ("Check the figures"), and
+// once revealed shows the note with its suggested wording under the line (folded on phones). The line stays as written.
 import { useEffect, useMemo, useState, type KeyboardEvent } from 'react';
-import { Check, ChevronLeft, ChevronRight, Eye, PartyPopper, RotateCcw, Undo2 } from 'lucide-react';
-import { countPitchWords, pitchCards, type PitchScript } from '@lm/shared';
+import { AlertTriangle, Check, ChevronLeft, ChevronRight, Eye, PartyPopper, RotateCcw, Undo2 } from 'lucide-react';
+import { countPitchWords, pitchCards, pitchFactFlags, type PitchFact, type PitchScript } from '@lm/shared';
 import { Badge, Button, Card, ProgressBar, Switch } from '@/components/ui';
 import { ConfirmDialog } from '@/features/common/ConfirmDialog';
 import { useMemoriseProgress } from './memoriseStore';
-import { InlineSegments, STEP_NUMBER } from './parts';
+import { FoldedFactNote, InlineSegments, STEP_NUMBER } from './parts';
 
 const STEP_LABEL = { introduction: 'Introduction', 'short-story': 'Short story', presentation: 'Presentation', close: 'Close', consolidation: 'Consolidation' } as const;
 
-export function Memorise({ script, userId, campaignCode }: { script: PitchScript; userId: number; campaignCode: string }) {
+export function Memorise({ script, facts, userId, campaignCode }: { script: PitchScript; facts?: readonly PitchFact[]; userId: number; campaignCode: string }) {
   const cards = useMemo(() => pitchCards(script), [script]);
+  const flags = useMemo(() => pitchFactFlags(facts ?? []), [facts]);
   const { known, mark, reset } = useMemoriseProgress(userId, campaignCode);
   const [onlyToLearn, setOnlyToLearn] = useState(false);
   const [index, setIndex] = useState(0);
@@ -64,6 +67,8 @@ export function Memorise({ script, userId, campaignCode }: { script: PitchScript
 
   const allKnown = knownCount === cards.length;
   const isKnown = card ? known.has(card.key) : false;
+  // The 'check' notes on this card's line (one note may cover several lines: show each once).
+  const cardFacts = card ? [...new Set((flags.get(card.line) ?? []).map((f) => f.fact))] : [];
 
   return (
     <div className="mx-auto max-w-3xl space-y-4" onKeyDown={onKeyDown} data-memorise>
@@ -115,6 +120,11 @@ export function Memorise({ script, userId, campaignCode }: { script: PitchScript
                 <Check aria-hidden /> Known
               </Badge>
             )}
+            {cardFacts.length > 0 && (
+              <Badge size="sm" tone="warning" data-fact-flag>
+                <AlertTriangle aria-hidden /> Check the figures
+              </Badge>
+            )}
           </div>
           <div className="px-4 py-5 sm:px-6">
             <p className="eyebrow text-muted">{card.cue ? (card.branch && card.cue === card.branch.question ? 'After the question' : 'After') : 'Your opening line'}</p>
@@ -122,9 +132,14 @@ export function Memorise({ script, userId, campaignCode }: { script: PitchScript
 
             <div className="mt-4">
               {revealed ? (
-                <p className="rounded-xl bg-primary-soft/60 px-4 py-4 text-[21px] font-semibold leading-[1.5] text-fg ring-1 ring-inset ring-primary/20 animate-fade-in sm:text-2xl" data-memorise-answer>
-                  <InlineSegments segments={card.segments} />
-                </p>
+                <>
+                  <p className="rounded-xl bg-primary-soft/60 px-4 py-4 text-[21px] font-semibold leading-[1.5] text-fg ring-1 ring-inset ring-primary/20 animate-fade-in sm:text-2xl" data-memorise-answer>
+                    <InlineSegments segments={card.segments} />
+                  </p>
+                  {cardFacts.map((fact, i) => (
+                    <FoldedFactNote key={`${card.key}-${i}`} fact={fact} openOnWide />
+                  ))}
+                </>
               ) : (
                 <button
                   type="button"

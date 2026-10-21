@@ -6,16 +6,25 @@
  *                                404 "Pitch not found" when the campaign has no pitch yet — cached
  *  PUT /pitches/:campaignCode  PitchUpsertInput → CampaignPitch (admin, leader): creates (201) or replaces (200) the
  *                                campaign's pitch and records who saved it. `facts` left out keeps the saved notes;
- *                                null or blank clears them.
+ *                                null or blank clears them. Only an admin (the office) may change `facts`: a leader's
+ *                                PUT that would change them (clearing included) is 403 "Only the office can change the
+ *                                fact-check notes" and saves nothing; left out or sent back unchanged is fine.
  * Pitches are company-wide training material (campaigns are not team-scoped), so every role reads every pitch.
  * Types: shared/src/types/pitches.ts. Mounted in app.ts with requireAuth; '/pitches' is in CACHED_PATHS, and every
  * PUT bumps the data version (app.ts), so the next read is fresh. U3's audit middleware records the edits.
  */
 import { Router } from 'express';
 import { z } from 'zod';
-import { PITCH_BODY_MAX, PITCH_FACTS_MAX, PITCH_TITLE_MAX, type CampaignPitch, type PitchListItem } from '@lm/shared';
+import {
+  PITCH_BODY_MAX,
+  PITCH_FACTS_MAX,
+  PITCH_FACTS_OFFICE_ONLY,
+  PITCH_TITLE_MAX,
+  type CampaignPitch,
+  type PitchListItem,
+} from '@lm/shared';
 import { all, get, type Db } from '../db/connection.ts';
-import { notFound } from '../lib/errors.ts';
+import { forbidden, notFound } from '../lib/errors.ts';
 import { nowISO } from '../lib/dates.ts';
 import { requireRole } from '../middleware/auth.ts';
 
@@ -88,6 +97,8 @@ export function pitchesRouter(db: Db): Router {
     const input = pitchBody.parse(req.body);
     const existing = pitchFor(db, campaign.id);
     const facts = input.facts === undefined ? (existing?.facts ?? null) : input.facts || null;
+    // The fact check is the office's: a leader edits the title and script, and may send the notes back unchanged.
+    if (req.user!.role !== 'admin' && facts !== (existing?.facts ?? null)) throw forbidden(PITCH_FACTS_OFFICE_ONLY);
     db.prepare(
       `INSERT INTO campaign_pitches (campaign_id, title, body, facts, updated_by, updated_at) VALUES (?, ?, ?, ?, ?, ?)
        ON CONFLICT(campaign_id) DO UPDATE SET title = excluded.title, body = excluded.body, facts = excluded.facts,
