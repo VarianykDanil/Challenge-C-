@@ -14,24 +14,26 @@ Nothing yet. What comes next is in [docs/ROADMAP.md](docs/ROADMAP.md).
 ### Added
 
 - **Learning page** (everyone). The COD pack as 21 lessons, each with the pack's pictures, a three-question
-  self-check and a teach-back your leader reads and signs off; field cards for the 5 steps and the six objections;
+  self-check (marked by the server) and a teach-back your leader reads and signs off; field cards for the 5 steps and the six objections;
   the leadership checklist (Learn / Teach) and the progression tracker with your real numbers. Leaders see their
   team's teach-backs waiting for sign-off; admins confirm the office-only criteria. A one-line "next level" card on
   the dashboard.
 - **Pitch studio** (Learning → Pitches): a pitch per campaign, starting with the Breast Cancer Now pitch as written.
   Read it with the COD theory each line uses, time each step against the pack's targets, practise on a teleprompter
-  or with flashcards. Fact-check notes sit beside a line without changing it. Admins and leaders write and edit
-  pitches; Quick gauges and event pages open the campaign's pitch.
-- **Sign-in PIN** (Settings → Security): an optional 4–6 digit PIN after email and employee ID, locked after ten
-  wrong tries; admins can require a PIN for everyone, require two-step verification for admins, set the sign-out time
-  and reset a person's PIN. `docs/DEPLOY.md` explains putting Linear Hub online.
+  or with flashcards. Fact-check notes sit beside a line without changing it, and every practice mode flags the
+  figures the office has not approved yet. Admins and leaders write and edit pitches (only admins change the fact
+  check); Quick gauges and event pages open the campaign's pitch.
+- **Sign-in PIN** (Settings → Security): an optional 4–6 digit PIN after email and employee ID. Ten wrong tries lock
+  it for 15 minutes, longer each time (up to a day); admins can require a PIN for everyone, require two-step
+  verification for admins, set the sign-out time and reset a person's PIN, and `npm run pin:reset -- <email>` resets
+  one from the server. `docs/DEPLOY.md` explains putting Linear Hub online.
 - **Bulk entry** (leaders, admins): the whole team's gauges for an event on one sheet, or pasted straight from the
   WhatsApp chat; everything saves together or nothing does, and it keeps working offline until saved.
 - **Audit trail** (admins): every change with who, when, what changed and from where, with filters; a **History**
   section on payslips and gauge entries; "Read by N of M" under announcements.
 - **One-tap check-in** (reps, leaders): **Check in** on today's events, on time or late against the start and grace,
   with 2 minutes to undo and an offline queue; a roll call on the event page for leaders and admins. A check-in never
-  creates gauges or pay; punctuality uses it where there is one.
+  creates gauges or pay; punctuality uses it where there is one, unless a leader recorded the arrival time.
 - **Search** (⌘K / Ctrl+K): the top bar finds people, events, candidates and campaigns (only what you could open)
   and offers actions: Log gauges, New event, Mark week paid.
 - **Export for payroll** (admins, Finance → Runs to pay): a week's unpaid runs as a CSV for Xero Payroll or Sage
@@ -41,6 +43,16 @@ Nothing yet. What comes next is in [docs/ROADMAP.md](docs/ROADMAP.md).
 - `npm start` installs changed dependencies (`npm ci`) and rebuilds stale screens first, naming the file that changed,
   so new features always show after a pull. The server warns at start-up when its screens are older than the code, and
   `npm run doctor` checks both.
+
+### Security
+
+- Sign-in PINs are hashed with a key derived from the app secret, so a copied database file on its own does not give
+  them away. Back up the app secret (`LM_APP_SECRET` or `server/data/app-secret`) and keep the backups folder private.
+- Behind a reverse proxy (`TRUST_PROXY=1`) the sign-in limiter counts each client, not the proxy, so one person's
+  wrong tries cannot lock out someone else.
+- A per-person limit of 60 writes a minute on the 1.2 learning, pitch, check-in, PIN and bulk-entry routes.
+- The audit trail stores no row for a write that changed nothing, keeps long text as its length and fingerprint, and
+  shows a leader no other team's notes or arrival times in an entry's history.
 
 ### Changed
 
