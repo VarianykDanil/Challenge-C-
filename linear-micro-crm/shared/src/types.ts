@@ -93,7 +93,9 @@ export interface UserWithTeam extends User {
   twoFactorSetupRequired?: boolean;
   /**
    * Release 1.3 (r3-foundation, used by P6): the campaign a `client` account belongs to (users.client_campaign_id).
-   * Present on /auth/me for client accounts only; absent for staff.
+   * Present on /auth/me and the sign-in responses for client accounts only; absent for staff. A client account's own
+   * payload also leaves out teamId, teamName, payPlanId and payPlanName (server lib/client.ts clientSafeUser): code that
+   * runs for a client session never reads them.
    */
   clientCampaignId?: number | null;
 }

@@ -10,7 +10,10 @@
  *  GET  /statements/templates/:campaignId, PUT … StatementColumnMapping → StatementTemplate
  *  GET  /statements/client-refs?userId=, PUT /statements/client-refs/:userId ClientRef[] → ClientRef[]
  *  POST /statements/check-now                  → CheckNowResult
- *  POST /statements/upload                     → 201 StatementSummary (a PDF)
+ *  POST /statements/upload?fileName=&campaignId= → 201 StatementSummary. The body is the PDF itself
+ *       (Content-Type: application/pdf; client/src/api/statements.ts useUploadStatement), read on this route only with
+ *       express.raw({ type: 'application/pdf', limit: <P3's cap> }): no multipart (busboy is P5's), and the app-wide
+ *       express.json stops at 1 MB and leaves other content types alone.
  *  GET  /statements/:id                        → StatementDetail
  *  GET  /statements/:id/file                   → the PDF
  *  POST /statements/:id/apply                  → StatementDetail

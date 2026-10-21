@@ -16,9 +16,11 @@
  * server/data). Run with the server test script (TZ=Europe/London). Node runs each test file in its own process.
  *
  * Release 1.3 (r3-foundation): `srv.login('client')` signs in a client portal account — the seeded demo client (Hannah
- * Price, Breast Cancer Now, CL-0001) with `seed: true`; with the fixture, a client of the fixture campaign
- * (cleo.client@fixture.test, CL-0001) created on first use, so no other test sees an extra user.
- * addClientUser(db, …) adds more client accounts.
+ * Price, Breast Cancer Now, CL-0001, no PIN: the demo client is exempt from the client PIN rule) with `seed: true`;
+ * with the fixture, a client of the fixture campaign (cleo.client@fixture.test, CL-0001, PIN FIXTURE_ACCOUNTS.client.pin
+ * — an invited client has a PIN once P6 requires one) created on first use, so no other test sees an extra user. The
+ * fixture writes no demo-client marker, so cleo is never "the demo client". addClientUser(db, …) adds more client
+ * accounts (with `pinHash`, or addClientUserWithPin, for one that has a PIN).
  */
 import { mkdtempSync, rmSync } from 'node:fs';
 import http from 'node:http';
@@ -31,8 +33,10 @@ import { get, openDb, run, type Db } from '../db/connection.ts';
 import { createSchema } from '../db/schema.ts';
 import { seed as seedDemo } from '../db/seed.ts';
 import { bumpDataVersion, clearResponseCache } from '../lib/cache.ts';
+import { clientPayPlanId, nextClientAccessCode } from '../lib/client.ts';
 import { configureAppSecret } from '../lib/crypto.ts';
 import { addDays, mondayOf, todayISO } from '../lib/dates.ts';
+import { hashPin, savePinHash } from '../lib/pin.ts';
 import { resetCodeFailures } from '../lib/twofactor.ts';
 import { resetLoginFailures } from '../routes/auth.ts';
 
@@ -112,8 +116,11 @@ export const FIXTURE_ACCOUNTS = {
   rep: { email: 'remy.rep@fixture.test', employeeId: 'FX-0004' },
   repA2: { email: 'rita.rep@fixture.test', employeeId: 'FX-0005' },
   repB: { email: 'bo.rep@fixture.test', employeeId: 'FX-0006' },
-  /** Release 1.3: a client portal account of the fixture campaign — created on the first login('client'). */
-  client: { email: 'cleo.client@fixture.test', employeeId: 'CL-0001' },
+  /**
+   * Release 1.3: a client portal account of the fixture campaign — created on the first login('client'), with this PIN
+   * (sent on every login('client')), so the fixture keeps signing in once P6 makes a PIN required for client accounts.
+   */
+  client: { email: 'cleo.client@fixture.test', employeeId: 'CL-0001', pin: '5821' },
 } as const satisfies Record<string, Credentials>;
 
 export type FixtureAccount = keyof typeof FIXTURE_ACCOUNTS;
@@ -212,27 +219,34 @@ export function addHistory(db: Db, h: HistoryInput): string[] {
 export interface ClientUserInput {
   campaignId: number;
   email?: string;
-  /** The access code (default: the next free CL-xxxx). */
+  /** The access code (default: the next free CL-xxxx from lib/client.ts nextClientAccessCode, never a demo code). */
   employeeId?: string;
   firstName?: string;
   lastName?: string;
   status?: 'active' | 'left';
+  /** A PIN hash from lib/pin.ts hashPin (default: no PIN). addClientUserWithPin hashes one for you. */
+  pinHash?: string;
 }
 
 /**
  * Release 1.3: insert a client portal account directly (role and position 'client', no team, the owner's pay plan),
- * as P6's invite will. Returns its id.
+ * as P6's invite will. Returns its id. Never a demo client: only the demo seed writes that marker.
  */
 export function addClientUser(db: Db, c: ClientUserInput): number {
-  const n = Number(get<{ n: number | null }>(db, `SELECT MAX(CAST(substr(employee_id, 4) AS INTEGER)) AS n FROM users WHERE employee_id LIKE 'CL-%'`)?.n ?? 0) + 1;
-  const code = c.employeeId ?? `CL-${String(n).padStart(4, '0')}`;
-  const plan = get<{ id: number }>(db, `SELECT id FROM pay_plans ORDER BY (position = 'owner') DESC, id ASC LIMIT 1`)!.id;
-  return run(
+  const code = c.employeeId ?? nextClientAccessCode(db);
+  const id = run(
     db,
     `INSERT INTO users (employee_id, email, first_name, last_name, role, position, team_id, pay_plan_id, start_date, status, phone, avatar_color, city, client_campaign_id)
      VALUES (?, ?, ?, ?, 'client', 'client', NULL, ?, ?, ?, NULL, '#BE185D', NULL, ?)`,
-    [code, c.email ?? `client${n}@client.test`, c.firstName ?? 'Cleo', c.lastName ?? 'Client', plan, todayISO(), c.status ?? 'active', c.campaignId],
+    [code, c.email ?? `${code.toLowerCase()}@client.test`, c.firstName ?? 'Cleo', c.lastName ?? 'Client', clientPayPlanId(db), todayISO(), c.status ?? 'active', c.campaignId],
   ).lastInsertRowid;
+  if (c.pinHash) savePinHash(db, id, c.pinHash);
+  return id;
+}
+
+/** Release 1.3: addClientUser with a sign-in PIN (hashed with the test server's app secret). */
+export async function addClientUserWithPin(db: Db, c: Omit<ClientUserInput, 'pinHash'>, pin: string): Promise<number> {
+  return addClientUser(db, { ...c, pinHash: await hashPin(pin) });
 }
 
 /** The small, date-relative fixture described at the top of this file. */
@@ -351,9 +365,9 @@ export async function startTestServer(opts: StartOptions = {}): Promise<TestServ
     async login(who, pin) {
       const client = new TestClient(base);
       const creds = credentials(who);
-      // Release 1.3: the fixture's client account exists only once a test signs in as it.
+      // Release 1.3: the fixture's client account exists only once a test signs in as it (with its PIN).
       if (who === 'client' && fixture && !get(db, `SELECT 1 FROM users WHERE lower(employee_id) = lower(?)`, [creds.employeeId])) {
-        addClientUser(db, { campaignId: fixture.campaignId, email: creds.email, employeeId: creds.employeeId });
+        await addClientUserWithPin(db, { campaignId: fixture.campaignId, email: creds.email, employeeId: creds.employeeId }, FIXTURE_ACCOUNTS.client.pin);
       }
       const r = await client.post('/auth/login', pin === undefined ? creds : { ...creds, pin });
       if (r.status !== 200 || !client.cookie) throw new Error(`login ${JSON.stringify(who)} → ${r.status} ${JSON.stringify(r.json)}`);

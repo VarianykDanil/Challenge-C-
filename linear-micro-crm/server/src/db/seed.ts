@@ -26,6 +26,7 @@ import { createSchema, backfillGaugeRates } from './schema.ts';
 import { seedExtensions } from './extensions/index.ts';
 import { extensionRng } from './extensions/types.ts';
 import { Rng } from '../lib/prng.ts';
+import { writeDemoClientMarkers } from '../lib/client.ts';
 import { RECRUITER_HIRES_SQL } from '../lib/pay.ts';
 import * as D from '../lib/dates.ts';
 import * as S from './seed-data.ts';
@@ -94,6 +95,12 @@ export interface SeedOptions {
    * extensions' demo rows leave the core demo data byte-for-byte the same.
    */
   extensionSeeds?: boolean;
+  /**
+   * Release 1.3 (r3-foundation): seed only these extensions (by name, still in the fixed EXTENSIONS order). Lets
+   * r3-contracts.test.ts prove that each 1.3 extension's seed writes only its own columns. Ignored when
+   * `extensionSeeds` is false.
+   */
+  onlyExtensions?: readonly string[];
 }
 
 export function seed(db: Db, today: string = D.todayISO(), options: SeedOptions = {}): SeedStats {
@@ -716,7 +723,7 @@ export function seed(db: Db, today: string = D.todayISO(), options: SeedOptions 
     // Inserted last among the users and without the core random stream, so every other row is exactly as before. Not in
     // `users` (the staff): extensions get them as ctx.clients. role/position 'client', no team, the owner's pay plan
     // (users.pay_plan_id is required; a client is never payable: lib/pay.ts payableUsers leaves clients out), no PIN —
-    // so the demo sign-in works (P6 makes a PIN required for real client accounts).
+    // so the demo sign-in works (P6 makes a PIN required for every other client account).
     const clientPlan = plans.get('owner')!;
     const clients = S.CLIENT_ACCOUNTS.flatMap((c) => {
       const campaign = campaigns.get(c.campaign);
@@ -730,6 +737,9 @@ export function seed(db: Db, today: string = D.todayISO(), options: SeedOptions 
       return [{ id: r.lastInsertRowid, employeeId: c.code, firstName: c.firstName, lastName: c.lastName, email: c.email, campaignId: campaign.id }];
     });
     stats.users += clients.length;
+    // The marker that makes them THE demo client accounts (lib/client.ts isDemoClientAccount): only this seed writes it,
+    // so on an upgraded database a client with the same access code is never listed on the sign-in page.
+    writeDemoClientMarkers(db, clients);
 
     // ── Release 1.2 database extensions (db/extensions): their demo rows, last, from the rows created above ──
     // Each extension draws from its own random stream (ctx.rng), so the core data above never changes.
@@ -745,7 +755,7 @@ export function seed(db: Db, today: string = D.todayISO(), options: SeedOptions 
       campaigns: [...campaigns.values()].map((c) => ({ id: c.id, code: c.code, name: c.name })),
       events: events.map((e) => ({ ...e })),
       rng: extensionRng,
-    });
+    }, options.onlyExtensions);
     run(db, `INSERT INTO meta (key, value) VALUES ('seeded_at', ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value`, [nowIso]);
     run(db, `INSERT INTO meta (key, value) VALUES ('seed_today', ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value`, [today]);
   });

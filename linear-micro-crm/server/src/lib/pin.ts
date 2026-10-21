@@ -243,7 +243,21 @@ export interface AccountFlags {
   twoFactorSetupRequired: boolean;
 }
 
-export function accountFlags(settings: SecuritySettings, who: { role: Role; hasPin: boolean; twoFactorEnabled: boolean }): AccountFlags {
+/**
+ * Who the flags are for. Release 1.3 (r3-foundation): `demoClient` is true only for the seeded demo client account
+ * (lib/client.ts isDemoClientAccount; false for staff and for every invited client). Both callers — middleware/auth.ts
+ * `authenticate` and routes/auth.ts `withFlags` — pass it, so P6's rule "a PIN is required for client accounts, except
+ * the demo one" is a change to the body below only:
+ *   pinSetupRequired: !who.hasPin && (settings.requirePin || (who.role === 'client' && !who.demoClient))
+ */
+export interface AccountFlagsSubject {
+  role: Role;
+  hasPin: boolean;
+  twoFactorEnabled: boolean;
+  demoClient: boolean;
+}
+
+export function accountFlags(settings: SecuritySettings, who: AccountFlagsSubject): AccountFlags {
   return {
     hasPin: who.hasPin,
     pinSetupRequired: settings.requirePin && !who.hasPin,

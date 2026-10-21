@@ -101,11 +101,27 @@ export function useSaveClientRefs(userId: number) {
   return useMutation({ mutationFn: (refs: ClientRef[]) => api<ClientRef[]>(`/statements/client-refs/${userId}`, { method: 'PUT', json: refs }), onSuccess: () => invalidateStatements(qc) });
 }
 
-/** POST /statements/upload — a PDF as multipart/form-data (field "file"; P3 decides the extra fields). */
+/** What Finance → Statements → Upload sends: the PDF itself, its file name and (optionally) the campaign it is for. */
+export interface StatementUploadInput {
+  file: Blob;
+  fileName: string;
+  campaignId?: number | null;
+}
+
+/**
+ * POST /statements/upload?fileName=&campaignId= — the PDF as the raw request body (Content-Type: application/pdf), not
+ * multipart: the server has no multipart parser for P3 (busboy is P5's) and express.json stops at 1 MB. P3's router
+ * reads it with express.raw({ type: 'application/pdf', limit: … }) on that route only.
+ */
 export function useUploadStatement() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: (form: FormData) => api<StatementSummary>('/statements/upload', { method: 'POST', body: form }),
+    mutationFn: ({ file, fileName, campaignId }: StatementUploadInput) =>
+      api<StatementSummary>(`/statements/upload${qs({ fileName, campaignId: campaignId ?? undefined })}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/pdf' },
+        body: file,
+      }),
     onSuccess: () => invalidateStatements(qc),
   });
 }

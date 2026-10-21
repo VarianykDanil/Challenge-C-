@@ -9,6 +9,7 @@ import { all, get, run, transaction, type Db } from '../db/connection.ts';
 import { USER_SELECT } from '../db/queries.ts';
 import { HttpError, badRequest, conflict, notFound, unauthorized } from '../lib/errors.ts';
 import { FailureLimiter } from '../lib/limiter.ts';
+import { clientCampaignIdOf, clientSafeUser, demoClientMarkers, isClientUser, isDemoClientAccount, matchesDemoClient } from '../lib/client.ts';
 import {
   accountFlags, clearPin, clearPinFailures, countPinAttempt, hashPin, isPinLocked, pinAttemptsLeft, pinHashNeedsUpgrade,
   pinLockedMessage, pinRow, pinStatusFor, readSecuritySettings, resetPinAndSignOut, savePinHash, upgradePinHash, verifyPin,
@@ -55,9 +56,6 @@ const needsOneFactor = (b: { code?: string; recoveryCode?: string }) => b.code !
 const ONE_FACTOR_MESSAGE = { message: 'Provide a code or a recovery code', path: ['code'] };
 const disableBody = z.object(secondFactorFields).refine(needsOneFactor, ONE_FACTOR_MESSAGE);
 const loginTwoFactorBody = z.object({ challengeToken: z.string().trim().min(1, 'Challenge token is required').max(128), ...secondFactorFields }).refine(needsOneFactor, ONE_FACTOR_MESSAGE);
-
-/** Release 1.3: the seeded demo client portal account(s) (db/seed-data.ts CLIENT_ACCOUNTS). */
-const DEMO_CLIENT_CODES = ['CL-0001'];
 
 /** The four demo accounts from docs/API.md, in role order. */
 const DEMO: { employeeId: string; role: Role; label: string }[] = [
@@ -152,12 +150,25 @@ export function authRouter(db: Db): Router {
   const router = Router();
 
   const userById = (id: number) => get<UserWithTeam>(db, `${USER_SELECT} WHERE u.id = ?`, [id]);
-  /** The signed-in person's own flags on a login response (the same ones `authenticate` puts on /auth/me). */
-  const withFlags = (user: UserWithTeam, twoFactorEnabled: boolean): UserWithTeam => ({
-    ...user,
-    twoFactorEnabled,
-    ...accountFlags(readSecuritySettings(db), { role: user.role, hasPin: Boolean(pinRow(db, user.id)?.hash), twoFactorEnabled }),
-  });
+  /**
+   * The signed-in person's own flags on a login response (the same ones `authenticate` puts on /auth/me). Release 1.3
+   * (r3-foundation): a client account's payload also carries its campaign and leaves out the office's fields
+   * (lib/client.ts clientSafeUser), exactly like /auth/me.
+   */
+  const withFlags = (user: UserWithTeam, twoFactorEnabled: boolean): UserWithTeam => {
+    const client = isClientUser(user);
+    return clientSafeUser({
+      ...user,
+      twoFactorEnabled,
+      ...accountFlags(readSecuritySettings(db), {
+        role: user.role,
+        hasPin: Boolean(pinRow(db, user.id)?.hash),
+        twoFactorEnabled,
+        demoClient: client && isDemoClientAccount(db, user),
+      }),
+      ...(client ? { clientCampaignId: clientCampaignIdOf(db, user.id) } : {}),
+    });
+  };
 
   /**
    * Checks the current PIN of a signed-in person (change or remove). Locked → 423 saying when it unlocks; wrong → 400
@@ -430,14 +441,16 @@ export function authRouter(db: Db): Router {
       accounts.push({ label: `${u.firstName} ${u.lastName} (${d.label})`, role: u.role, email: u.email, employeeId: u.employeeId });
     }
     // Release 1.3 (r3-foundation): the seeded demo client portal account(s), apart from the four staff accounts (which
-    // keep their shape and order). Only an active client account with the seeded access code and no PIN is listed, so a
-    // real deployment's clients never show here. P6 shows it on the sign-in page.
-    const clientAccounts = all<UserWithTeam & { pinSet: number }>(
+    // keep their shape and order). Only the accounts the demo seed itself recorded (meta `seed_demo_clients`: same id,
+    // access code and email) that are active and have no PIN are listed — never a client matched by its access code
+    // alone, so on an upgraded database no real client ever shows here. P6 shows it on the sign-in page.
+    const markers = demoClientMarkers(db);
+    const clientAccounts = markers.length === 0 ? [] : all<UserWithTeam & { pinSet: number }>(
       db,
-      `${USER_SELECT.replace('SELECT ', 'SELECT (u.pin_hash IS NOT NULL) AS pinSet, ')} WHERE u.role = 'client' AND upper(u.employee_id) IN (${DEMO_CLIENT_CODES.map(() => '?').join(', ')}) ORDER BY u.employee_id`,
-      DEMO_CLIENT_CODES,
+      `${USER_SELECT.replace('SELECT ', 'SELECT (u.pin_hash IS NOT NULL) AS pinSet, ')} WHERE u.role = 'client' AND u.id IN (${markers.map(() => '?').join(', ')}) ORDER BY u.employee_id`,
+      markers.map((m) => m.id),
     )
-      .filter((u) => u.status !== 'left' && !u.pinSet)
+      .filter((u) => u.status !== 'left' && !u.pinSet && markers.some((m) => matchesDemoClient(m, u)))
       .map((u) => ({ label: `${u.firstName} ${u.lastName} (Client)`, role: u.role, email: u.email, employeeId: u.employeeId }));
     res.json(clientAccounts.length ? { accounts, clientAccounts } : { accounts });
   });

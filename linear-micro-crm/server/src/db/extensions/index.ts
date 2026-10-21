@@ -42,7 +42,10 @@ export function upgradeExtensions(db: Db): string[] {
   return changed;
 }
 
-/** Calls every extension's demo seed, in order (the caller holds the seed transaction). */
-export function seedExtensions(db: Db, ctx: SeedContext): void {
-  for (const ext of EXTENSIONS) ext.seed?.(db, ctx);
+/**
+ * Calls every extension's demo seed, in order (the caller holds the seed transaction). `only` (tests) limits it to the
+ * named extensions, still in that order.
+ */
+export function seedExtensions(db: Db, ctx: SeedContext, only?: readonly string[]): void {
+  for (const ext of EXTENSIONS) if (!only || only.includes(ext.name)) ext.seed?.(db, ctx);
 }

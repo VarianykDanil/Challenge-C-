@@ -60,8 +60,11 @@ test('a fresh demo seed (with every extension seed) is deterministic and adds no
 });
 
 /**
- * The core tables and their core columns: what the core schema and the core column upgrades alone create (extension
- * tables, and the columns extensions add to core tables, are left out).
+ * The core tables (what the core schema alone creates; extension tables are left out) and the columns hashed for each:
+ * every column the core schema, its column upgrades and the five 1.2 extensions give it. Release 1.3 (r3-foundation):
+ * only the columns the 1.3 extensions add to core tables are left out — each 1.3 extension's seed may fill its own
+ * (extensions/types.ts), and r3-contracts.test.ts checks that it writes no other — so a 1.2 column (a PIN on a demo
+ * account, a check-in) written by any extension seed still changes the hash, as in 1.2.
  */
 function coreColumns(): Map<string, string[]> {
   const db = openDb(':memory:');
@@ -70,6 +73,10 @@ function coreColumns(): Map<string, string[]> {
     upgradeSchema(db);
     const tables = (db.prepare(`SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%' ORDER BY name`).all() as { name: string }[])
       .map((r) => r.name);
+    for (const e of EXTENSIONS.slice(0, 5)) {
+      if (e.sql.trim()) db.exec(e.sql);
+      e.upgrade(db);
+    }
     return new Map(tables.map((t) => [t, (db.prepare(`PRAGMA table_info(${t})`).all() as { name: string }[]).map((c) => c.name)]));
   } finally {
     db.close();
@@ -77,11 +84,10 @@ function coreColumns(): Map<string, string[]> {
 }
 
 /**
- * A sha256 per core table over every row and every CORE column (rows sorted, so the order rows went in does not
+ * A sha256 per core table over every row and every hashed column (rows sorted, so the order rows went in does not
  * matter). In `meta` the extensions' own `ext:%` keys are left out: an extension may record its flags; every core key
- * is compared. Release 1.3 (r3-foundation): columns an extension added to a core table are its own — its seed may fill
- * them on core rows (extensions/types.ts) — so they are left out; any inserted or deleted row still changes the hash.
- * The one row exception the plan makes: announcements a client portal account posted (P6's published demo posts).
+ * is compared. Any inserted or deleted row changes the hash. Release 1.3: the one row exception the plan makes is
+ * announcements a client portal account posted (P6's published demo posts).
  */
 function coreHashes(db: Db): Record<string, string> {
   const out: Record<string, string> = {};

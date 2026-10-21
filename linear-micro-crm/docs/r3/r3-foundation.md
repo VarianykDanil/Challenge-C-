@@ -25,17 +25,42 @@ existing file" below says who owns every file 1.3 touches.
   `/client(/*)` (not `/client-posts` or `/client-accounts`). Everything else, whatever the method and even an unknown
   path, answers **403** `ClientPortalOnlyError` `{ error: 'This account can only use the client portal',
   clientPortalOnly: true }`. `clientMayCall(path)` is exported for tests. Staff and anonymous requests pass through.
-- `authenticate` puts `clientCampaignId` on `req.user` (and so on `/auth/me`) for client sessions only.
+- A client account's own payload — `req.user`, `GET /auth/me` and the `user` of `POST /auth/login` (and
+  `/auth/login/2fa`) — carries `clientCampaignId` and leaves out the office's fields `teamId`, `teamName`, `payPlanId`
+  and `payPlanName` (`CLIENT_HIDDEN_USER_FIELDS`, `clientSafeUser`). Staff payloads are unchanged and never carry
+  `clientCampaignId`. The shared `UserWithTeam` type still declares those four fields; a client session's code never
+  reads them.
+- **The demo client** is recognised by a marker only the core demo seed writes — meta `seed_demo_clients` = JSON
+  `[{ id, employeeId, email }]` (`DEMO_CLIENTS_META_KEY`) — never by its access code alone. An account is the demo
+  client only while its id, access code and email all still match (`isDemoClientAccount`). An upgraded 1.2 database has
+  no marker, so none of its clients is ever the demo one.
 - `GET /auth/demo-accounts` keeps `accounts` (the four staff accounts, same shape and order) and adds
   `clientAccounts: [{ label: 'Hannah Price (Client)', role: 'client', email: 'hannah.price@breastcancernow.example',
-  employeeId: 'CL-0001' }]` while the seeded demo client exists, is active and has no PIN (absent otherwise; nothing
-  with `LM_DEMO_ACCOUNTS=0`). P6 shows it on the sign-in page.
+  employeeId: 'CL-0001' }]` only for marked demo client accounts that are active and have no PIN (the key is absent
+  otherwise; nothing with `LM_DEMO_ACCOUNTS=0`, or when the four staff demo accounts are not all there). P6 shows it on
+  the sign-in page.
+- **The client PIN rule (P6) has its contract in place**: `lib/pin.ts` `accountFlags(settings, who)` now takes
+  `who: AccountFlagsSubject { role, hasPin, twoFactorEnabled, demoClient }`, and both callers (`authenticate` in
+  middleware/auth.ts, `withFlags` in routes/auth.ts — foundation code) already pass `demoClient` (true only for the
+  marked demo client). P6 makes a PIN required for client accounts by changing **only the body** of `accountFlags`:
+  `pinSetupRequired: !who.hasPin && (settings.requirePin || (who.role === 'client' && !who.demoClient))`. The existing
+  PIN gate then holds a PIN-less client at "Create your PIN" (the client app already renders `ClientLayout` →
+  `PinSetupGate`), and the client guard lets `/auth/pin(/*)` through. Every foundation test keeps holding afterwards:
+  the fixture client signs in with a PIN and the demo client is exempt. (Checked in the browser with the admin's
+  "Require a PIN for everyone": a PIN-less invited client opening /client gets the existing "Create your PIN" step,
+  light and dark. Its words say "employee ID"; P6 changes them to "access code" for clients in
+  `auth/PinSetupStep.tsx`.)
 - Client accounts never appear in a staff list: `GET /users` (any filter) leaves them out and `GET /users/:id`,
   `/users/:id/performance`, `PATCH /users/:id`, `POST /users/:id/2fa/reset` answer 404 for them; the search palette's
   people, `GET /learning/team`, the Needs-attention members, the read-receipt audience ("Read by 18 of 34") and
   `lib/pay.ts payableUsers` (so no payroll run) leave them out. Server helper `server/src/lib/client.ts` (foundation,
   STABLE; P6 may add functions): `CLIENT_ROLE`, `isClientUser(user)`, `staffOnly(alias = 'u')` → `u.role <> 'client'`,
-  `clientCampaignIdOf(db, userId)`, `nextClientAccessCode(db)` → "CL-0002", `clientPayPlanId(db)`.
+  `clientCampaignIdOf(db, userId)`, `clientPayPlanId(db)`; `DEMO_CLIENT_ACCESS_CODES` (['CL-0001'], kept equal to
+  seed-data.ts `CLIENT_ACCOUNTS` by a test) and `nextClientAccessCode(db)`, which never hands out a demo code (the
+  first real client is "CL-0002" even on a database without the demo client); `DEMO_CLIENTS_META_KEY`,
+  `DemoClientMarker`, `writeDemoClientMarkers(db, clients)` (db/seed.ts only), `demoClientMarkers(db)`,
+  `matchesDemoClient(marker, user)`, `isDemoClientAccount(db, user)`; `CLIENT_HIDDEN_USER_FIELDS`,
+  `clientSafeUser(user)`.
 
 ### New routes (all mounted in `server/src/app.ts` behind `requireAuth`; anonymous → 401)
 
@@ -73,6 +98,16 @@ are per route, never router-wide, so the 1.0 routes keep their own rules).
 | `PUT /events/:id/roster` (admin, leader) · `POST` / `DELETE /events/:id/roster/me` (admin, leader, rep) | P8 | 501 |
 | `POST /audit/events` (staff) | `routes/auditEvents.ts` (P9), mounted before `/audit` | **204**, records nothing (so P4's exports and P9's slot can report from day one; the audit middleware skips it) |
 
+Request bodies: the app parses only JSON (`express.json`, 1 MB) and has no multipart parser outside P5. So:
+
+- `POST /statements/upload?fileName=&campaignId=` (P3) takes **the PDF itself as the body**
+  (`Content-Type: application/pdf`; `client/src/api/statements.ts` `useUploadStatement({ file, fileName, campaignId? })`
+  sends it so). P3 reads it on that route only with `express.raw({ type: 'application/pdf', limit: <P3's cap> })`;
+  a contract test sends a 1.5 MB PDF body through every middleware to the stub.
+- P2's signature image stays inside the JSON: `CompanySettingsInput.signatureImage` is a `data:image/png;base64,…`
+  string of at most 200 KB (well under the 1 MB limit); P2 stores the file under `server/data/uploads/`.
+- P5's video upload is the only multipart route (busboy, P5's own dependency).
+
 Response cache (`CACHED_PATHS` in app.ts): adds `/pay/breakdown`, `/videos/team`, `/campaigns/:id/page`, `/venues`,
 `/events/:id/plan`. A background job that changes data those read must call `bumpDataVersion()` (lib/cache.ts).
 
@@ -86,7 +121,7 @@ shows the PDF in an iframe.
 
 | Where | Call | Owner of the hook |
 | --- | --- | --- |
-| `routes/finance.ts` `POST /finance/payroll/:id/pay`, after validation, before the UPDATE | `assertInvoicePayable(db, run, me, req.body)` (`lib/invoices.ts`) — P2 throws 409 unless accepted / deemed accepted or `body.overrideReason` | P2 |
+| `routes/finance.ts` `POST /finance/payroll/:id/pay`, after validation, before the UPDATE | `assertInvoicePayable(db, run, me, req.body)` (`lib/invoices.ts`) — P2 throws 409 unless accepted / deemed accepted or `body.overrideReason` (audited). **The override's UI is P2's**: "Mark paid anyway" with a reason lives in `InvoiceActionsBar` inside `PayslipModal` (both P2's) and sends `overrideReason`; Finance's row **Mark paid** and its confirm modal (P1's `Finance.tsx`) and the bulk bar (P2's `BulkPayBar.tsx`) send no reason, so P2's 409 message must tell the admin where to go, e.g. "This invoice is not accepted yet. Open the run to mark it paid with a reason." | P2 |
 | `routes/finance.ts` `GET /finance/payroll`, `GET /finance/me` (runs), `GET /finance/payroll/:id` | `withInvoiceSummaries(db, runs, me)` → each run's `invoice?: InvoiceSummary` (one grouped query) | P2 |
 | `routes/campaigns.ts` after `POST /campaigns` (before = null) and `PATCH /campaigns/:id` | `recordCampaignRateChange(db, campaignId, before, after, actorId)` (`lib/payRule.ts`) | P1 |
 | `index.ts` at start-up (each guarded) | `startInvoiceJobs(db)` (`lib/invoices.ts`), `startStatementJob(db)` (`lib/statements/job.ts`) → stop functions; unref'd timers | P2, P3 |
@@ -106,19 +141,30 @@ cache version → routers (each mount recorded for the route table).
 - `server/src/lib/routeTable.ts` (foundation, STABLE): app.ts records every `/api` mount; `listApiRoutes(app)` →
   `{ method, path, mount }[]` (e.g. `POST /finance/payroll/:id/pay`). Use it to enumerate every route (P6's client
   guard test, P9's audit coverage test).
-- `server/src/test/helpers.ts`: `srv.login('client')` signs in the demo client (seed: Hannah Price, BCN, CL-0001; the
-  fixture: cleo.client@fixture.test / CL-0001 of the fixture campaign FXC, created on first use so other tests see no
-  extra user); `DEMO_ACCOUNTS.client`, `FIXTURE_ACCOUNTS.client`; `addClientUser(db, { campaignId, email?, employeeId?,
-  firstName?, lastName?, status? })` → id.
+- `server/src/test/helpers.ts`: `srv.login('client')` signs in a client account — with `seed: true` the demo client
+  (Hannah Price, BCN, CL-0001, no PIN, the marked demo account); with the fixture cleo.client@fixture.test / CL-0001 of
+  the fixture campaign FXC **with the PIN `FIXTURE_ACCOUNTS.client.pin` ('5821')**, created on first use so other tests
+  see no extra user (the fixture writes no demo marker, so cleo is an ordinary invited client). `DEMO_ACCOUNTS.client`,
+  `FIXTURE_ACCOUNTS.client`; `addClientUser(db, { campaignId, email?, employeeId?, firstName?, lastName?, status?,
+  pinHash? })` → id (default code from `nextClientAccessCode`); `addClientUserWithPin(db, input, pin)` → Promise<id>.
+  Both login paths keep working once P6 requires a PIN for client accounts.
+- `db/seed.ts` `seed(db, today, { extensionSeeds?, onlyExtensions? })`: `onlyExtensions` (tests) seeds only the named
+  extensions, in the fixed order.
 - `server/src/test/r3-contracts.test.ts` (foundation): the extension list and order, every 1.3 table and core-table
   column, a 1.2 database upgrading cleanly (rows kept, changes reported once), the demo client account, the client
   guard paths, the audit registry, the attention providers, every 1.3 path mounted behind requireAuth (anonymous 401,
   admin never "Not found" / 5xx except 501), the 1.0 routes beside the new mounts, the route table, the client session
   (portal, /auth/me, staff 403 on the portal), **a client gets 403 clientPortalOnly on every other route in the app**,
-  client accounts absent from staff lists, `fromClient`, no new payload keys while the 1.3 columns are empty, the cache.
-- `r2-contracts.test.ts` (updated): the first five extensions keep their order; the core-table hashes cover the core
-  columns only (an extension's own columns on core rows may be filled by its seed) and leave out announcements authored
-  by client accounts (P6's published demo posts).
+  client accounts absent from staff lists, `fromClient`, no new payload keys while the 1.3 columns are empty, the cache;
+  and: the demo marker and `isDemoClientAccount` (an edited email or code, staff, an invited client → false), the demo
+  codes equal to the seed's and never handed out, **demo-accounts never listing a client by access code alone** (an
+  upgraded database with a PIN-less CL-0001 client lists none), the client payloads without office fields (me, login),
+  the fixture client's PIN sign-in, the raw-PDF upload contract, and **each 1.3 extension seed — run after the ones
+  before it — changing core tables only in its own columns** (P6 may add client-authored announcements).
+- `r2-contracts.test.ts` (updated): the first five extensions keep their order; the core-table hashes cover every core
+  column and every column the 1.2 extensions added (a PIN or a check-in written by any seed still fails), leave out only
+  the columns the 1.3 extensions add to core tables (the r3 test above checks those per extension), and leave out
+  announcements authored by client accounts (P6's published demo posts).
 
 ## Logic
 
@@ -132,11 +178,13 @@ both `upgrade` and `seed`, `ctx.rng(salt)`, never gauge rows or payroll runs fro
 
 - The foundation laid down each 1.3 extension's tables and columns; they are STABLE. Owners add columns with
   `addColumnIfMissing` in `upgrade` (so a database created at the foundation commit upgrades too) and new tables.
-- An extension's `seed` may UPDATE the columns its own extension added to core tables, on core rows. The one core-row
-  insert allowed: P6 may insert `announcements` authored by a client account (`ctx.clients`).
+- An extension's `seed` may UPDATE only the columns its own extension added to core tables, on core rows (tested per
+  extension in r3-contracts). The one core-row insert allowed: P6 may insert `announcements` authored by a client
+  account (`ctx.clients`).
 - Core demo rows are written by the core seed (`db/seed.ts`): the demo client account (foundation, inserted after every
   staff member without the core random stream, counted in `stats.users`, passed to extensions as `ctx.clients:
-  SeedClientRef[]` — never in `ctx.users`) and the 1.3 pay plans, runs, bonuses and cancellations (P1).
+  SeedClientRef[]` — never in `ctx.users` — and recorded in meta `seed_demo_clients` with `writeDemoClientMarkers`) and
+  the 1.3 pay plans, runs, bonuses and cancellations (P1).
 
 | Extension (owner) | Tables | Columns on core tables | Meta |
 | --- | --- | --- | --- |
@@ -247,7 +295,7 @@ Files on disk (git-ignored in `.gitignore`): `server/data/media/` (P5 videos), `
   `useStatements`, `useStatement`, `statementFileUrl`, `useApplyStatement`, `useMatchStatementRow`,
   `useCheckStatementsNow`, `useMailSettings`, `useSaveMailSettings`, `useTestMail`, `useStatementSenders`,
   `useSaveStatementSenders`, `useStatementTemplate`, `useSaveStatementTemplate`, `useClientRefs`, `useSaveClientRefs`,
-  `useUploadStatement`), `videos.ts` (P5: `videoKeys`, `useVideos`, `useVideo`, `videoStreamUrl`, `useAddVideoLink`,
+  `useUploadStatement({ file, fileName, campaignId? })` (raw PDF body), type `StatementUploadInput`), `videos.ts` (P5: `videoKeys`, `useVideos`, `useVideo`, `videoStreamUrl`, `useAddVideoLink`,
   `useUpdateVideo`, `useDeleteVideo`, `useReportVideoProgress`, `useVideoViews`, `useTeamVideoProgress`,
   `useVideoSettings`, `useSaveVideoSettings`), `clientPortal.ts` (P6: `clientPortalKeys`, `useClientPortal`,
   `useCreateClientPost`, `useClientPosts`, `useUnreadClientPosts`, `useMarkClientPostRead`, `useDecideClientPost`,
@@ -316,6 +364,7 @@ Files on disk (git-ignored in `.gitignore`): `server/data/media/` (P5 videos), `
 No two packages edit the same file. Foundation-owned (ask the lead): `server/src/app.ts`, `index.ts`,
 `middleware/clientGuard.ts`, `middleware/auth.ts`, `lib/routeTable.ts`, `lib/attention/index.ts` + `types.ts`,
 `lib/client.ts` (P6 may ADD functions), `db/extensions/index.ts` + `types.ts`, `db/schema.ts`, `routes/users.ts`,
+`routes/auth.ts` (the demo-accounts list and `withFlags`; P9 may add failed-sign-in recording only),
 `routes/search.ts`, `routes/learning.ts`, `routes/attention.ts`, `test/helpers.ts`,
 `test/r2-contracts.test.ts`, `test/r3-contracts.test.ts`; `shared/src/index.ts`, `logic/index.ts`, `types.ts`,
 `constants.ts`, `logic/r3-contracts.test.ts`; client `App.tsx`, `auth/RequireRole.tsx`, `components/layout/*`,
@@ -325,12 +374,12 @@ No two packages edit the same file. Foundation-owned (ask the lead): `server/src
 
 | Package | Its own new files (above) plus these existing ones |
 | --- | --- |
-| P1 | `server/src/lib/pay.ts`, `db/maintenance.ts`, `routes/finance.ts` (keep the P2 hook calls), `routes/dashboard.ts` and `lib/smart/payForecast.ts` / `payrollFlags.ts` / `digest.ts` where pay figures show, `db/queries.ts` (the payroll section only), `db/seed.ts` and `db/seed-data.ts` (pay plans, payroll runs, bonuses, cancellations; keep the demo client block), `smoke.ts` (the pay checks the new rule changes), the existing tests of pay maths (`money`, `personal`, `office-tools`…); shared `logic/finance.ts`, `logic/payForecast.ts`, `logic/payrollFlags.ts`; client `pages/Finance.tsx` (keep the DisputesCard slot), `features/finance/PayrollRunsTable.tsx` (keep the InvoiceStatusBadge slot), `features/finance/csv.ts`, `features/smart/WeekPayStrip.tsx` / `weekPayCopy.ts`, `features/dashboard/PersonalKpis.tsx` |
+| P1 | `server/src/lib/pay.ts`, `db/maintenance.ts`, `routes/finance.ts` (keep the P2 hook calls), `routes/dashboard.ts` and `lib/smart/payForecast.ts` / `payrollFlags.ts` / `digest.ts` where pay figures show, `db/queries.ts` (the payroll section only), `db/seed.ts` and `db/seed-data.ts` (pay plans, payroll runs, bonuses, cancellations; keep the demo client block with its `writeDemoClientMarkers` call, `CLIENT_ACCOUNTS`, and the `onlyExtensions` option), `smoke.ts` (the pay checks the new rule changes), the existing tests of pay maths (`money`, `personal`, `office-tools`…); shared `logic/finance.ts`, `logic/payForecast.ts`, `logic/payrollFlags.ts`; client `pages/Finance.tsx` (keep the DisputesCard slot), `features/finance/PayrollRunsTable.tsx` (keep the InvoiceStatusBadge slot), `features/finance/csv.ts`, `features/smart/WeekPayStrip.tsx` / `weekPayCopy.ts`, `features/dashboard/PersonalKpis.tsx` |
 | P2 | `client/src/features/finance/PayslipModal.tsx` (keep the PayBreakdown and RecordOpened slots), `features/finance/BulkPayBar.tsx`, `features/finance/bulkPay.tsx` |
-| P3 | `server/package.json` + `package-lock.json` (imapflow, mailparser, pdfjs-dist; jspdf at P4's version for demo PDFs) |
+| P3 | `server/package.json` (its own dependency lines only: imapflow, mailparser, pdfjs-dist, @types/mailparser; jspdf at P4's version for demo PDFs) + `package-lock.json` — shared with P5, see below |
 | P4 | `client/src/features/common/ExportButton.tsx`, `client/src/lib/csv.ts`, `client/package.json` + `package-lock.json` (jspdf, jspdf-autotable); its node test in `server/src/test/` |
-| P5 | `server/package.json` + `package-lock.json` (busboy) |
-| P6 | `server/src/routes/announcements.ts`, `routes/campaigns.ts` (the campaign's brief fields; keep P1's `recordCampaignRateChange` calls), `lib/pin.ts` (PIN required for client accounts), `test/announcements-older.test.ts` if its shapes change; client `pages/Campaigns.tsx`, `features/campaigns/*`, `pages/Login.tsx` (the client demo button, client sign-in), `auth/PinSetupStep.tsx` if the client's PIN step needs other words |
+| P5 | `server/package.json` (its own dependency lines only: busboy, @types/busboy) + `package-lock.json` — shared with P3, see below |
+| P6 | `server/src/routes/announcements.ts`, `routes/campaigns.ts` (the campaign's brief fields; keep P1's `recordCampaignRateChange` calls), `lib/pin.ts` (the body of `accountFlags` for the client PIN rule — its signature and both callers are the foundation's — and any other client PIN behaviour), `test/announcements-older.test.ts` if its shapes change; client `pages/Campaigns.tsx`, `features/campaigns/*`, `pages/Login.tsx` (the client demo button, client sign-in), `auth/PinSetupStep.tsx` if the client's PIN step needs other words |
 | P7 | `server/src/routes/recruitment.ts` (date of birth on candidates, interview_changes on PATCH /recruitment/interviews/:id); client `pages/Recruitment.tsx` (**Schedule**), `pages/CandidateDetail.tsx` (keep the RecordOpened slot), `features/recruitment/*` |
 | P8 | `server/src/routes/events.ts` (`bookings` on events), `lib/smart/eventForecast.ts` (bookings feed forecasts), shared `logic/eventForecast.ts` if the maths changes; client `pages/Events.tsx` (**Venues**), `pages/EventDetail.tsx`, `pages/QuickGauges.tsx`, `features/events/*`, `features/dashboard/UpcomingEvents.tsx` (keep the slots) |
 | P9 | `server/src/lib/audit.ts`, `lib/auditSpecs.ts`, `lib/audit/registry.ts`, `lib/audit/events.ts`, `routes/audit.ts`, `routes/auth.ts` (only to record failed sign-ins if the middleware cannot), `middleware/writeLimit.ts` (rate-limit POST /audit/events), `db/extensions/audit.ts` (e.g. a kind column), the `audit*` tests; shared `types/audit.ts`, `logic/audit.ts`; client `pages/Audit.tsx` (keep the AuditPdfButton and RecordOpened slots), `features/audit/*`, `api/audit.ts` |
@@ -338,8 +387,16 @@ No two packages edit the same file. Foundation-owned (ask the lead): `server/src
 Dependencies (only these; checked on 21 Oct 2026 — the highest release at least two weeks old; pin exactly with
 `npm install <pkg>@<version> -w <workspace>`): P3 `imapflow@2.2.6`, `mailparser@3.9.36` (+ `@types/mailparser@3.9.0`
 dev), `pdfjs-dist@6.4.299`; P4 `jspdf@4.2.1`, `jspdf-autotable@5.0.8` (client; P3 uses the same `jspdf@4.2.1` on the
-server); P5 `busboy@1.6.0` (+ `@types/busboy@1.5.4` dev). Three packages touch `package-lock.json`: the lead
-regenerates it when merging.
+server); P5 `busboy@1.6.0` (+ `@types/busboy@1.5.4` dev). Three packages touch `package-lock.json`, and two (P3, P5)
+`server/package.json`: each package adds only its own lines with `npm install <pkg>@<version> --save-exact -w server`
+(or `-w client`) and changes nothing else in those files; the lead merges P3 first, then P5, takes both sets of
+dependency lines in `server/package.json` (alphabetical, as npm writes them) and regenerates `package-lock.json` with
+`npm install` before the final `npm ci` check.
+
+Out of scope for every 1.3 package (unchanged): `client/src/features/office/PayExportButton.tsx` and
+`server/src/routes/payExport.ts` (the Xero / Sage payroll CSV). It is an import file for payroll software, so it gets no
+PDF (P4), and it is already recorded on the server (`GET /finance/payroll/export` writes an audit row with the format,
+week, run count and total), which P9 may classify as an export from its own audit code without editing either file.
 
 Bundle: the foundation's routes, nav items and slots add 6.0 kB to the main chunk (466.17 → 472.19 kB, gzip 144.5 →
 146.1 kB); every 1.3 page is its own lazy chunk.
@@ -358,7 +415,14 @@ Nothing changes for anyone yet apart from two new items in the sidebar (and the 
 
 ## Owner notes
 
-- The demo client account is part of the demo data only (a fresh seed). It has no PIN so the demo sign-in works; P6
-  makes a PIN required for real client accounts. It never appears in Team, the search palette, payroll, leaderboards
-  or read receipts.
-- Client accounts sign in with their email and an access code (CL-0001…), like staff use their employee ID.
+- The demo client account is part of the demo data only: a **fresh** demo seed (`npm run seed`) creates it and records
+  it as the demo account. It has no PIN so the demo sign-in works; P6 makes a PIN required for every other client
+  account. It never appears in Team, the search palette, payroll, leaderboards or read receipts.
+- **An existing 1.2 database (yours) upgrades without the demo client**: no Hannah Price, and no client button on the
+  sign-in page. That is deliberate — the upgrade never adds a sign-in that needs no PIN to a database that may hold
+  real data. To see the demo client, start from a fresh demo seed (a copy, not your live data); or invite a real client
+  once P6 lands.
+- Client accounts sign in with their email and an access code, like staff use their employee ID. The first client you
+  invite gets CL-0002: CL-0001 is kept for the demo account, so a real client never shares its code.
+- A client account sees only its own name, email, access code and campaign about itself: the pay plan its account is
+  attached to (the owner's, because every account needs one) and team fields are never sent to it.

@@ -4,6 +4,7 @@ import { isSessionIdle, type PinSetupRequiredError, type Role, type TwoFactorSet
 import { get, run, type Db } from '../db/connection.ts';
 import { USER_SELECT } from '../db/queries.ts';
 import { forbidden, unauthorized } from '../lib/errors.ts';
+import { clientSafeUser, isDemoClientAccount } from '../lib/client.ts';
 import { accountFlags, readSecuritySettings } from '../lib/pin.ts';
 
 export const SESSION_COOKIE = 'lm_session';
@@ -99,13 +100,16 @@ export function authenticate(db: Db): RequestHandler {
     const { expiresAt: _expires, seenAt: _seen, totpOn, pinOn, clientCampaign, ...user } = row;
     const twoFactorEnabled = Boolean(totpOn);
     // The caller's own flags ride on req.user so /auth/me and the dashboard's `user` carry them; other users' rows never do.
-    // Release 1.3 (r3-foundation): a client portal session also carries its campaign (staff sessions never do).
-    req.user = {
+    // Release 1.3 (r3-foundation): a client portal session also carries its campaign (staff sessions never do), leaves
+    // out the office's fields (lib/client.ts clientSafeUser), and tells accountFlags whether it is the seeded demo client
+    // (lib/client.ts isDemoClientAccount: one meta read, client sessions only) for P6's client PIN rule.
+    const client = user.role === 'client';
+    req.user = clientSafeUser({
       ...user,
       twoFactorEnabled,
-      ...accountFlags(settings, { role: user.role, hasPin: Boolean(pinOn), twoFactorEnabled }),
-      ...(user.role === 'client' ? { clientCampaignId: clientCampaign ?? null } : {}),
-    };
+      ...accountFlags(settings, { role: user.role, hasPin: Boolean(pinOn), twoFactorEnabled, demoClient: client && isDemoClientAccount(db, user) }),
+      ...(client ? { clientCampaignId: clientCampaign ?? null } : {}),
+    });
     req.sessionToken = token;
     next();
   };
