@@ -9,6 +9,11 @@
  * Tables owned by other 1.2 packages (campaign_pitches L2, learning_progress L1, check_ins U4, users.pin_hash U1) are
  * read defensively: when a table or column is not there yet the snapshot is simply empty. Snapshots never include
  * PINs, secrets, codes or tokens (and lib/audit.ts redacts again before storing).
+ *
+ * A write that changed nothing writes no row (`after` answers []): a check-in replay answered "already recorded", a
+ * teach-back saved with the same text, a pitch saved unchanged, sign-in settings saved with the same values, a
+ * self-check retake that changes no stored field, and a repeated sign-off that keeps the first signer. So nobody can
+ * fill the trail with rows that say nothing.
  */
 import {
   AUDIT_DIFF_SKIPPED,
@@ -33,7 +38,8 @@ import {
   type UserWithTeam,
 } from '@lm/shared';
 import { all, get, placeholders, type Db } from '../db/connection.ts';
-import { mondayOf, todayISO } from './dates.ts';
+import { mondayOf } from './dates.ts';
+import { readSecuritySettings } from './pin.ts';
 
 type Snap = Record<string, unknown>;
 
@@ -263,6 +269,19 @@ function learningSnapshot(db: Db, userId: number, lessonKey: string): Snap | nul
   );
 }
 
+/** The stored teach-back text (compared to tell a save of the same words; never put in a snapshot). */
+function teachbackText(db: Db, userId: number, lessonKey: string): string | null {
+  return soft(
+    () => get<{ t: string | null }>(db, `SELECT teachback_text AS t FROM learning_progress WHERE user_id = ? AND lesson_key = ?`, [userId, lessonKey])?.t ?? null,
+    null,
+  );
+}
+
+interface TeachbackState {
+  snap: Snap | null;
+  text: string | null;
+}
+
 const CHECK_IN_SNAP = `
   SELECT ci.id, ci.user_id AS userId, u.first_name || ' ' || u.last_name AS userName, ci.event_id AS eventId, e.name AS eventName,
          ci.date, ci.checked_in_at AS checkedInAt, ci.source
@@ -300,6 +319,8 @@ interface EntityRouteOptions {
   summary(c: Change, db: Db): string;
   /** More rows (e.g. a hire also adds a person). */
   extra?(db: Db, c: Change): AuditDraft[];
+  /** Write nothing when the record existed before and no snapshot field changed (a save of the same values). */
+  skipUnchanged?: boolean;
 }
 
 function entityRoute(method: AuditRouteSpec['method'], pattern: string, o: EntityRouteOptions): AuditRouteSpec<{ id: number | null; before: Snap | null }> {
@@ -316,6 +337,7 @@ function entityRoute(method: AuditRouteSpec['method'], pattern: string, o: Entit
       const before = state?.before ?? null;
       const after = method === 'DELETE' || !id ? null : o.load(db, id);
       const c: Change = { id, before, after, diff: auditDiff(before, after), done };
+      if (o.skipUnchanged && before && after && !c.diff.length) return [];
       const entityId = o.entityIdOf ? o.entityIdOf(c) : id;
       return [{ entity: o.entity, entityId, summary: o.summary(c, db), before, after }, ...(o.extra?.(db, c) ?? [])];
     },
@@ -415,7 +437,8 @@ function payRunDrafts(db: Db, watch: PayWatch | undefined): AuditDraft[] {
 
 const gaugePlace = (s: Snap) => `${str(s.userName, 'Someone')}, ${auditDayLabel(String(s.date))} at ${str(s.eventName, 'an event')}`;
 
-function gaugeSummary(before: Snap | null, after: Snap | null, diff: AuditFieldChange[], bulk = false): string {
+/** "Logged gauges: …" / "Edited gauges: …: sales 2 → 3" / "Deleted gauges: …"; routes/audit.ts rebuilds it for a leader's redacted view. */
+export function gaugeSummary(before: Snap | null, after: Snap | null, diff: AuditFieldChange[], bulk = false): string {
   const how = bulk ? ' in bulk' : '';
   if (after && !before) return `Logged gauges${how}: ${gaugePlace(after)}, ${plural(numOr0(after.sales), 'sale')}`;
   if (before && !after) return `Deleted gauges: ${gaugePlace(before)} (${plural(numOr0(before.sales), 'sale')})`;
@@ -573,7 +596,7 @@ function settingsFrom(v: unknown): Snap | null {
   return Object.keys(out).length ? out : null;
 }
 
-/** The settings before a change: what the last recorded change left, else the documented defaults. */
+/** What the last recorded settings change left, else the documented defaults (when the stored settings cannot be read). */
 function lastSettings(db: Db): Snap {
   const row = get<{ a: string | null }>(db, `SELECT after_json AS a FROM audit_log WHERE entity = 'settings' AND after_json IS NOT NULL ORDER BY at DESC, id DESC LIMIT 1`);
   const parsed = soft(() => (row?.a ? (JSON.parse(row.a) as unknown) : null), null);
@@ -657,10 +680,12 @@ export const AUDIT_ROUTES: readonly AuditRouteSpec<any>[] = [ // eslint-disable-
   {
     method: 'PUT',
     pattern: '/auth/security-settings',
-    before: (db) => lastSettings(db),
+    // the settings as stored now (U1's meta keys), so a change made outside the trail is still a true "before"
+    before: (db) => soft(() => settingsFrom(readSecuritySettings(db)), null) ?? lastSettings(db),
     after(_db, done, before: Snap | undefined) {
       const after = settingsFrom(done.response);
       const diff = auditDiff(before ?? null, after);
+      if (before && after && !diff.length) return []; // saved with the same values
       return [{ entity: 'settings', entityId: null, summary: withChanges('Changed sign-in settings', diff), before: before ?? null, after }];
     },
   } satisfies AuditRouteSpec<Snap>,
@@ -737,12 +762,15 @@ export const AUDIT_ROUTES: readonly AuditRouteSpec<any>[] = [ // eslint-disable-
   entityRoute('PUT', '/pitches/:campaignCode', {
     entity: 'pitch',
     load: pitchSnapshot,
+    skipUnchanged: true, // a pitch saved with the same title, script and fact-check notes
     // a pitch is keyed by its campaign: the entity id is the campaign's id
     idBefore: (db, call) =>
       get<{ id: number }>(db, `SELECT id FROM campaigns WHERE lower(code) = lower(?)`, [String(call.params.campaignCode ?? '')])?.id ?? null,
     summary: ({ before, after, diff, done }) => {
       const code = str(after?.campaignCode ?? before?.campaignCode, String(done.params.campaignCode ?? '').toUpperCase());
-      return before ? withChanges(`Edited the ${code} pitch`, diff, ['campaignCode']) : `Wrote the ${code} pitch`;
+      // a pitch's text is its script, as the audit views label it (the stored snapshots keep the column name, body)
+      const named = diff.map((d) => (d.field === 'body' ? { ...d, field: 'script' } : d));
+      return before ? withChanges(`Edited the ${code} pitch`, named, ['campaignCode']) : `Wrote the ${code} pitch`;
     },
   }),
 
@@ -754,6 +782,7 @@ export const AUDIT_ROUTES: readonly AuditRouteSpec<any>[] = [ // eslint-disable-
     after(db, done, before: Snap | null) {
       if (!done.me) return [];
       const after = learningSnapshot(db, done.me.id, String(done.params.lessonKey));
+      if (!auditDiff(before, after).length) return []; // a retake with the same score: nothing stored changed
       const lesson = lessonLabel(done.params.lessonKey);
       const summary = after?.learnedAt && !before?.learnedAt ? `Learned ${lesson}: self-check passed` : `Took the self-check: ${lesson}`;
       return [{ entity: 'learning', entityId: done.me.id, summary, before, after }];
@@ -762,13 +791,18 @@ export const AUDIT_ROUTES: readonly AuditRouteSpec<any>[] = [ // eslint-disable-
   {
     method: 'POST',
     pattern: '/learning/progress/:lessonKey/teachback',
-    before: (db, call) => (call.me ? learningSnapshot(db, call.me.id, String(call.params.lessonKey)) : null),
-    after(db, done, before: Snap | null) {
+    // the text itself is compared, never stored: a teach-back reaches only the person, their leader and admins
+    before: (db, call) =>
+      call.me ? { snap: learningSnapshot(db, call.me.id, String(call.params.lessonKey)), text: teachbackText(db, call.me.id, String(call.params.lessonKey)) } : null,
+    after(db, done, state: TeachbackState | null) {
       if (!done.me) return [];
-      const after = learningSnapshot(db, done.me.id, String(done.params.lessonKey));
-      return [{ entity: 'learning', entityId: done.me.id, summary: `Wrote a teach-back: ${lessonLabel(done.params.lessonKey)}`, before, after }];
+      const key = String(done.params.lessonKey);
+      if (state?.text != null && teachbackText(db, done.me.id, key) === state.text) return []; // saved with the same text
+      const before = state?.snap ?? null;
+      const after = learningSnapshot(db, done.me.id, key);
+      return [{ entity: 'learning', entityId: done.me.id, summary: `Wrote a teach-back: ${lessonLabel(key)}`, before, after }];
     },
-  } satisfies AuditRouteSpec<Snap | null>,
+  } satisfies AuditRouteSpec<TeachbackState | null>,
   {
     method: 'POST',
     pattern: '/learning/progress/:userId/:lessonKey/signoff',
@@ -779,7 +813,10 @@ export const AUDIT_ROUTES: readonly AuditRouteSpec<any>[] = [ // eslint-disable-
     after(db, done, before: Snap | null) {
       const userId = paramId(done, 'userId');
       const after = userId ? learningSnapshot(db, userId, String(done.params.lessonKey)) : null;
-      const summary = `Signed off a teach-back: ${userName(db, userId) ?? 'someone'}, ${lessonLabel(done.params.lessonKey)}`;
+      // signed off already (the first signer stands), or a sign-off taken back where there was none: nothing changed
+      if (!auditDiff(before, after).length) return [];
+      const what = after?.signedOffAt ? 'Signed off a teach-back' : 'Took back a teach-back sign-off';
+      const summary = `${what}: ${userName(db, userId) ?? 'someone'}, ${lessonLabel(done.params.lessonKey)}`;
       return [{ entity: 'learning', entityId: userId, summary, before, after }];
     },
   } satisfies AuditRouteSpec<Snap | null>,
@@ -788,23 +825,17 @@ export const AUDIT_ROUTES: readonly AuditRouteSpec<any>[] = [ // eslint-disable-
   {
     method: 'POST',
     pattern: '/checkins',
-    before(db, call) {
-      const body = bodyOf(call);
-      const userId = toId(body.userId) ?? call.me?.id ?? null;
-      const eventId = toId(body.eventId);
-      const date = isoDay(body.date) ?? todayISO();
-      if (!userId || !eventId) return null;
-      return soft(() => get<Snap>(db, `${CHECK_IN_SNAP} WHERE ci.user_id = ? AND ci.event_id = ? AND ci.date = ?`, [userId, eventId, date]) ?? null, null);
-    },
-    after(db, done, before: Snap | null) {
-      const id = toId(responseOf(done).id) ?? toId(before?.id);
+    // The route answers 201 with a new check-in and 200 with the one already recorded (the first one stands, whatever
+    // the request carries). The status is the test, not a lookup of our own: the route finds the earlier check-in by
+    // the signed-in person and a day it works out itself, so any copy of that here could disagree and record a replay.
+    after(db, done) {
+      if (done.status !== 201) return []; // a replay answered "already recorded": nothing changed
+      const id = toId(responseOf(done).id);
       const after = id ? checkInSnapshot(db, id) : null;
-      const s = after ?? before;
-      const where = s ? `${str(s.userName, 'Someone')} at ${str(s.eventName, 'an event')}, ${auditValueText('checkedInAt', s.checkedInAt)}` : 'an event';
-      const summary = before && after && before.id === after.id ? `Check-in already recorded: ${where}` : `Checked in: ${where}`;
-      return [{ entity: 'check_in', entityId: id, summary, before, after }];
+      const where = after ? `${str(after.userName, 'Someone')} at ${str(after.eventName, 'an event')}, ${auditValueText('checkedInAt', after.checkedInAt)}` : 'an event';
+      return [{ entity: 'check_in', entityId: id, summary: `Checked in: ${where}`, before: null, after }];
     },
-  } satisfies AuditRouteSpec<Snap | null>,
+  } satisfies AuditRouteSpec,
   entityRoute('DELETE', '/checkins/:id', {
     entity: 'check_in',
     load: checkInSnapshot,

@@ -8,8 +8,12 @@
  *  A week without runs answers the header line alone. Never cached (Cache-Control: no-store): it carries employee IDs.
  *  400: weekStart missing, not a date or not a Monday; format or runs not one of the values above.
  *
- * Reading only: nothing is recalculated or written, so the export can never change pay. The export itself is recorded
- * in the audit trail (recordAudit, U3) because payroll data leaves the system.
+ * It may first create the pending runs of weeks that have closed, exactly as GET /finance/payroll does
+ * (ensurePayrollMaterialised, so the file matches what the Finance page lists); it never changes a paid run. That
+ * guard only runs when the last closed week has no runs yet, and when it creates runs it also brings the week
+ * before's unpaid runs back in line with the gauges and moves the data version (materialisePayrollRuns), so every
+ * cached view is rebuilt on its next read — the same as after GET /finance/payroll. Otherwise the export only reads.
+ * The export itself is recorded in the audit trail (recordAudit, U3) because payroll data leaves the system.
  * Mounted in app.ts at /finance/payroll/export BEFORE the /finance router (whose /payroll/:id would catch "export").
  */
 import { Router } from 'express';
@@ -54,7 +58,8 @@ export function payExportRouter(db: Db): Router {
   router.get('/', requireRole('admin'), (req, res) => {
     const me = currentUser(req);
     const query = exportQuery.parse({ weekStart: req.query.weekStart, format: req.query.format, runs: req.query.runs ?? undefined });
-    // A week that has just closed gets its runs first (as GET /finance/payroll does).
+    // A week that has just closed gets its pending runs first (as GET /finance/payroll does); when that creates runs,
+    // materialisePayrollRuns moves the data version itself, so the cached views are cleared exactly as there.
     ensurePayrollMaterialised(db, todayISO());
     const runs = payExportRuns(db, query.weekStart, query.runs);
     const csv = payExportCsv(payExportRows(runs), query.format);

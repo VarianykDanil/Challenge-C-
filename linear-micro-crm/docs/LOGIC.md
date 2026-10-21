@@ -1766,11 +1766,11 @@ funnel rule in plain English.
 | Candidate | `POST /recruitment/candidates`, `PATCH …/:id`, `POST …/:id/stage` (a hire also records the new person), `POST /recruitment/interviews`, `PATCH /recruitment/interviews/:id` (filed under the candidate) | Moved Elliot Bradley: Applied → Phone screen · Booked first interview: Sam Brown, 21 Oct, 14:00 |
 | Event | `POST /events`, `PATCH /events/:id`, `DELETE /events/:id` | Updated event: Castlefield Bowl, 21 Oct: target 14 → 16 · Cancelled event: … · Restored event: … |
 | Campaign | `POST /campaigns`, `PATCH /campaigns/:id` | Updated campaign Breast Cancer Now (BCN): payout per sale £120 → £130 |
-| Pitch | `PUT /pitches/:campaignCode` (entity id = the campaign's id) | Wrote the BCN pitch · Edited the BCN pitch: text |
+| Pitch | `PUT /pitches/:campaignCode` (entity id = the campaign's id) | Wrote the BCN pitch · Edited the BCN pitch: script |
 | Settings | `PUT /auth/security-settings` | Changed sign-in settings: require a PIN for everyone no → yes |
 | Announcement | `POST /announcements` | Posted announcement: “Saturday rota is up” |
 | Expense | `POST /finance/expenses`, `DELETE /finance/expenses/:id` | Added expense: £42.60 travel, 20 Oct |
-| Learning | `POST /learning/progress/:lessonKey/quiz`, `…/teachback`, `…/:userId/:lessonKey/signoff` (entity id = the learner) | Learned Feel felt found: self-check passed · Signed off a teach-back: Jordan Lee, Bullet theory |
+| Learning | `POST /learning/progress/:lessonKey/quiz`, `…/teachback`, `…/:userId/:lessonKey/signoff` (entity id = the learner) | Learned Feel felt found: self-check passed · Signed off a teach-back: Jordan Lee, Bullet theory · Took back a teach-back sign-off: … |
 | Check-in | `POST /checkins`, `DELETE /checkins/:id` | Checked in: Jordan Lee at Arndale, 20 Oct 09:24 · Removed check-in: … |
 
 - **Pay runs moved by a gauge write.** Before the handler, the trail notes everyone whose run the entry can move (the
@@ -1782,11 +1782,21 @@ funnel rule in plain English.
 - Snapshots carry readable names next to ids (`userName` with `userId`). Tables of other 1.2 packages
   (`campaign_pitches`, `learning_progress`, `check_ins`, `users.pin_hash`) are read defensively: until they exist the
   snapshot is empty and the row is still written.
-- **Settings** have no stored "before" of their own: the before of a change is what the last recorded settings change
-  left, or the documented defaults (PIN not required, two-step for administrators not required, 12 hours) for the
-  first one.
-- **Not recorded**: reads, failed requests, step one of a two-step sign-in (no session yet), and announcement read
-  receipts (their own table).
+- **Settings**: the before of a change is the settings as they are stored when the request arrives (U1's keys in
+  `meta`), so a change made outside the app still reads true. Only when they cannot be read is it what the last
+  recorded settings change left, or the documented defaults (PIN not required, two-step for administrators not
+  required, 12 hours).
+- **Not recorded**: reads, failed requests, step one of a two-step sign-in (no session yet), announcement read
+  receipts (their own table), and **writes that changed nothing**:
+  - a check-in replay answered "already recorded" (the first check-in stands): the route's answer decides (`201` new,
+    `200` the one already there), whatever date, time or extra fields the replay carries;
+  - a teach-back saved with the same text (compared after trimming; the text itself is never put in a snapshot);
+  - a pitch saved with the same title, script and fact-check notes (whoever saves it);
+  - sign-in settings saved with the values they already have;
+  - a self-check retake that changes no stored field (the same score, the lesson already learned or still not);
+  - a second sign-off of a teach-back (the first signer stands), or a sign-off taken back where there was none.
+  So nobody can fill the trail with rows that say nothing. Every other write is recorded, even when it changed
+  nothing (for example an admin saving a person unchanged: "Updated Rita Rep (no changes)").
 
 #### Secrets never stored
 
@@ -1798,6 +1808,40 @@ before storage (shared `redactAuditSnapshot`): any key, at any depth, named `pin
 `secret`, `password`, `token`, `pinhash`, `pin_hash` or `recovery`, is stored as `[redacted]`. (A campaign's code is
 therefore stored as `campaignCode`.) A snapshot larger than 64,000 characters is replaced by a short note; summaries
 are capped at 500 characters.
+
+#### Long text
+
+Any text in a snapshot longer than 2,000 characters (a pitch script, its fact-check notes, a long announcement) is
+stored as `{ length, sha256, head }`: its length in characters, the SHA-256 of the whole text (hex) and its first 200
+characters (`compactLongText` in `server/src/lib/audit.ts`, after redaction, at any depth). Two versions compare equal
+exactly when their text is the same, so the diff still lists the field as changed, and a save of the same text is
+not a change. Text of 2,000 characters or fewer is stored as it is. A 19,000-character script therefore costs a few
+hundred bytes per row instead of 38 KB. The summary names the field ("Edited the BCN pitch: script": a pitch's text is
+its script; an announcement's stays "text"). The audit page and the record histories show it under the field's label
+("Script") as "Changed · 19,204 characters (was 18,950)", then the first 200 characters of
+each version, marked "First 200 of 19,204 characters"; "added" and "removed" when one side is empty. Rows written
+before this change keep the whole text and show it as before.
+
+#### What a leader sees in a gauge entry's history
+
+A leader may open the history of a gauge entry of their own team (or their own). An entry can be moved between
+people and teams, so every snapshot is judged on its own, by the rule `GET /gauges` uses (`canSeeEntryDetails`):
+the check-in time and notes of a snapshot whose person is not on the leader's team (their team now) are blanked; the
+numbers and names stay. When anything was blanked, the row's diff and summary are rebuilt from the blanked
+snapshots, so neither can quote what was hidden: after Bo's entry (team B) is moved to Remy (team A), team A's leader
+sees "Edited gauges: Bo Rep, 14 Oct at …: person Bo Rep → Remy Rep, event … → …" with no trace of Bo's note or
+check-in time. Admins always see everything. IP addresses are for admins only.
+
+#### Per-person write limit
+
+The 1.2 writes anyone signed in can repeat at will share a budget of 60 per person per minute (the real clock, a
+one-minute window from the first of them): `POST /learning/*` (self-check, teach-back, sign-off), `PUT /pitches/*`,
+`POST /checkins`, `POST /auth/pin` and the routes below it, and `POST /gauges/bulk`. The next one inside the minute
+is refused with 429 "That is more than 60 changes in a minute. Wait a minute, then try again." and
+`Retry-After: 60`; refused requests do not count and nothing is recorded for them. Reads, other writes and
+signed-out requests are not affected. The counter is in memory (`server/src/middleware/writeLimit.ts`, on the login
+limiter's bounded map), so a restart forgets it. A phone replaying its queued check-ins stops at a 429 and tries
+again later; nothing queued is lost.
 
 #### The diff
 
@@ -1838,7 +1882,8 @@ long text fields are named, not quoted. Values read the British way: £945 / £4
 
 Reads are untouched (the middleware returns at once for `GET`). A write costs one or two snapshot queries before the
 handler and one to three after it, plus one insert per row; a gauge write adds two queries for the pay runs. `GET
-/audit` is two queries (count and page), `GET /announcements/reads` two.
+/audit` is two queries (count and page), `GET /announcements/reads` two; a leader's gauge entry history adds one
+query for the teams of the people in its snapshots.
 
 ### 15.6 One-tap shift check-in (U4)
 
@@ -1938,8 +1983,12 @@ UTC, so a daylight-saving change never shifts them.
   decimals. Xero and Sage differ only in their header names (`PAY_EXPORT_HEADERS`).
 - **Formula guard.** A cell that starts with `=`, `+`, `-`, `@`, a tab or a carriage return gets a leading apostrophe
   (plain negative numbers excepted), then is quoted when it holds a comma, quote or line break.
-- **Pay integrity.** The export only reads `payroll_runs` (after `ensurePayrollMaterialised`, as `GET /finance/payroll`
-  does). Nothing is recalculated or written.
+- **Pay integrity.** Before reading, the export runs the same guard as `GET /finance/payroll`
+  (`ensurePayrollMaterialised`), so the file always matches what the Finance page lists: when the last closed week has
+  no runs yet, it creates that week's pending runs and brings the week before's unpaid runs back in line with the
+  gauges, exactly as that page would on its next load. It never changes a paid run. When the guard changes runs it
+  moves the data version, so every cached view (dashboards, summaries) is rebuilt on its next read, the same as after
+  the Finance page. Otherwise the export only reads.
 - **Layout fix.** On Gauges the tabs and the date-range presets share a row only when both fit; otherwise the presets
   wrap onto their own line, and the picker itself may shrink (its pills scroll inside it). At 1024 px the admin's
   Gauges page no longer scrolls sideways.

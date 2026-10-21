@@ -796,11 +796,19 @@ cache (they are admin views or per-author lists, and any write clears the cache 
 the registry does not describe), `summary`, `ip` (admins only, null for anyone else), `before` and `after` (the stored
 snapshots, or null) and `diff` (`AuditFieldChange[]`, computed when read by the shared `auditDiff`).
 
+Long text: in `before`, `after` and `diff`, a text value longer than 2,000 characters is
+`{ length: number, sha256: string, head: string }` (its length, the SHA-256 of the whole text in hex, its first 200
+characters) instead of the text. Two versions differ exactly when their `sha256` differs. Rows written before this
+change may still hold the whole text.
+
 #### `GET /audit/:entity/:entityId` → `AuditEntryDetail[]`
 
 The newest 100 rows about one record. Admin: any entity. Leader: `gauge_entry` only, and only entries of a person on
 their own team or their own entries (a deleted entry is judged by the person in its last snapshot); anything else 403.
 Reps and recruiters 403. Unknown entity or non-numeric id → 400. `ip` is null for leaders. An id with no rows → `[]`.
+For a leader every snapshot is redacted like `GET /gauges`: `checkedInAt` and `notes` are null in a snapshot whose
+person is not on the leader's team (an entry moved onto the team keeps its earlier owner's details hidden), and that
+row's `diff` and `summary` are rebuilt from the redacted snapshots.
 
 #### `POST /announcements/:id/read` → 204
 
@@ -821,6 +829,18 @@ For every `POST`, `PUT`, `PATCH` and `DELETE` that is answered 2xx it writes one
 Logic). Reads (`GET`, `HEAD`, `OPTIONS`) pass straight through, so read throughput is unchanged. Failed requests
 (4xx, 5xx) write nothing. An audit failure is logged to the console and never changes the response.
 `recordAudit(db, entry)` writes an explicit row (e.g. from a maintenance job). Route files were not edited.
+A write that changed nothing writes no row: a check-in replay answered "already recorded" (`200`, whatever the body
+carries), a teach-back saved with the same text, a pitch saved unchanged, sign-in settings saved with the same values,
+a self-check retake that changes no stored field, a repeated sign-off or one taken back where there was none (see
+Logic §15.5).
+
+#### Per-person write limit (429)
+
+At most 60 a minute per signed-in person, all together, of `POST /learning/*`, `PUT /pitches/*`, `POST /checkins`,
+`POST /auth/pin` (and `/auth/pin/*`) and `POST /gauges/bulk`. The next one inside the minute answers
+`429 { "error": "That is more than 60 changes in a minute. Wait a minute, then try again." }` with `Retry-After: 60`
+and is not recorded; refused requests do not count. Reads, other writes and signed-out requests (401 as before) are
+not limited. `createApp(db, { writeLimitPerMinute })` sets the number (0 turns it off).
 
 ### One-tap shift check-in (U4)
 
@@ -902,6 +922,8 @@ E-mail matches on the part before the @ only. LIKE wildcards in the query are es
 only (others 403). `weekStart` must be a Monday (400 otherwise); `runs=unpaid` (default) exports pending runs and
 failed transfers, `runs=all` every run of the week. Sorted by surname then first name. `X-Total-Count` = rows;
 `Cache-Control: no-store`. A week without runs answers the header line alone. Each export is written to the audit trail.
+Like `GET /finance/payroll`, it first creates the pending runs of a week that has just closed when that week has none
+yet (it never changes a paid run); when it does, the response cache is cleared as it is after that route.
 
 ## Seed & demo accounts
 The server seeds `server/data/linear.sqlite` on first start (or `npm run seed` to reset) with deterministic

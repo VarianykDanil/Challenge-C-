@@ -2,7 +2,8 @@
  * Release 1.2 — /audit and announcement read receipts — OWNED BY U3 audit-trail.
  *
  *  GET  /audit?userId=&entity=&entityId=&from=&to=&q=&signIns=&limit=&offset=  → AuditPage (admin), newest first
- *  GET  /audit/:entity/:entityId   → AuditEntryDetail[] (admin; leader: their own team's gauge entries and their own)
+ *  GET  /audit/:entity/:entityId   → AuditEntryDetail[] (admin; leader: their own team's gauge entries and their own,
+ *                                    with every snapshot redacted the way GET /gauges redacts: see redactGaugeHistory)
  *  POST /announcements/:id/read    → 204 (any signed-in user; idempotent)         [announcementReadsRouter]
  *  GET  /announcements/reads[?ids=1,2]  → AnnouncementReadStats[] (admin: every announcement; others: the ones they wrote)
  * The recording itself is lib/audit.ts (middleware + recordAudit). Types: shared/src/types/audit.ts.
@@ -15,6 +16,7 @@ import { all, get, placeholders, run, type Db } from '../db/connection.ts';
 import { getGauge, getUser } from '../db/queries.ts';
 import { addDays, toBusinessISO } from '../lib/dates.ts';
 import { badRequest, forbidden, notFound } from '../lib/errors.ts';
+import { gaugeSummary } from '../lib/auditSpecs.ts';
 import { canSeeEntryDetails } from '../lib/scope.ts';
 import { idParam, isoDate, offsetQuery, optionalIdQuery, optionalString } from '../lib/validate.ts';
 import { currentUser, requireRole } from '../middleware/auth.ts';
@@ -106,6 +108,41 @@ function canReadGaugeHistory(db: Db, me: UserWithTeam, entryId: number): boolean
   return owner ? canSeeEntryDetails(me, { id: owner.id, teamId: owner.teamId }) : false;
 }
 
+const isRecord = (v: unknown): v is Record<string, unknown> => v !== null && typeof v === 'object' && !Array.isArray(v);
+const ownerOf = (snap: unknown): number | null => (isRecord(snap) && typeof snap.userId === 'number' ? snap.userId : null);
+
+/**
+ * A leader's view of a gauge entry's history, redacted snapshot by snapshot with the rule GET /gauges uses
+ * (canSeeEntryDetails / redactEntry): the check-in time and notes of a person outside the leader's team are blanked.
+ * An entry can move between people and teams, so each snapshot is judged by the person it belonged to then (their
+ * team now, as /gauges does), not by the entry's current owner. When anything was blanked, the diff and the summary
+ * are rebuilt from the redacted snapshots, so neither can quote what was hidden. One query for the owners' teams.
+ */
+export function redactGaugeHistory(db: Db, me: UserWithTeam, rows: AuditEntryDetail[]): AuditEntryDetail[] {
+  if (me.role === 'admin') return rows;
+  const ids = [...new Set(rows.flatMap((r) => [ownerOf(r.before), ownerOf(r.after)]).filter((id): id is number => id !== null))];
+  const teams = new Map<number, number | null>();
+  if (ids.length) {
+    for (const u of all<{ id: number; teamId: number | null }>(db, `SELECT id, team_id AS teamId FROM users WHERE id IN (${placeholders(ids.length)})`, ids)) teams.set(u.id, u.teamId);
+  }
+  const visible = (owner: number | null) => owner !== null && teams.has(owner) && canSeeEntryDetails(me, { id: owner, teamId: teams.get(owner) ?? null });
+  return rows.map((row) => {
+    let hid = false;
+    const redact = (snap: unknown): unknown => {
+      if (!isRecord(snap) || visible(ownerOf(snap))) return snap;
+      if ((snap.checkedInAt ?? null) === null && (snap.notes ?? null) === null) return snap;
+      hid = true;
+      return { ...snap, checkedInAt: null, notes: null };
+    };
+    const before = redact(row.before);
+    const after = redact(row.after);
+    if (!hid) return row;
+    const diff = auditDiff(before, after);
+    const summary = gaugeSummary(isRecord(before) ? before : null, isRecord(after) ? after : null, diff, row.action === 'POST /gauges/bulk');
+    return { ...row, before, after, diff, summary };
+  });
+}
+
 export function auditRouter(db: Db): Router {
   const router = Router();
 
@@ -175,7 +212,8 @@ export function auditRouter(db: Db): Router {
       entityId,
       ENTITY_HISTORY_MAX,
     ]);
-    const body: AuditEntryDetail[] = rows.map((r) => toDetail(r, me.role === 'admin'));
+    const details = rows.map((r) => toDetail(r, me.role === 'admin'));
+    const body: AuditEntryDetail[] = entity === 'gauge_entry' ? redactGaugeHistory(db, me, details) : details;
     res.json(body);
   });
 

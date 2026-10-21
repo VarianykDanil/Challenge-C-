@@ -3,9 +3,10 @@
 import { useId, useState } from 'react';
 import { ArrowRight, ChevronDown } from 'lucide-react';
 import clsx from 'clsx';
-import { AUDIT_ENTITY_LABELS, auditFieldLabel, auditValueText, type AuditEntryDetail, type AuditFieldChange } from '@lm/shared';
+import { AUDIT_ENTITY_LABELS, auditFieldLabel, auditValueText, type AuditEntity, type AuditEntryDetail, type AuditFieldChange } from '@lm/shared';
 import { Avatar, Badge } from '@/components/ui';
-import { formatDateTime, formatTime } from '@/lib/format';
+import { formatDateTime, formatNumber, formatTime } from '@/lib/format';
+import { isAuditLongText, longTextHeadline } from './longText';
 
 const LONG_TEXT = 60;
 
@@ -13,12 +14,30 @@ function isLong(v: unknown): v is string {
   return typeof v === 'string' && (v.length > LONG_TEXT || v.includes('\n'));
 }
 
+/** A field's label in the diff; a pitch's text is its script. */
+function fieldLabel(field: string, entity?: AuditEntity | null): string {
+  return entity === 'pitch' && field === 'body' ? 'Script' : auditFieldLabel(field);
+}
+
+const boxTone = (tone: 'before' | 'after') => (tone === 'before' ? 'bg-danger-soft/60 text-fg' : 'bg-success-soft/60 text-fg');
+
 /** One value of a diff: long text in full (scrolls inside its box), everything else through the shared wording. */
 function DiffValue({ field, value, tone }: { field: string; value: unknown; tone: 'before' | 'after' }) {
   const empty = value === null || value === undefined || value === '';
+  if (isAuditLongText(value)) {
+    // over 2,000 characters: the trail keeps the length and the first 200 characters only
+    return (
+      <span className="block min-w-0">
+        <span className={clsx('block whitespace-pre-wrap break-words rounded-md px-2 py-1.5 text-xs leading-relaxed', boxTone(tone))}>
+          {value.head.trimEnd()}…
+        </span>
+        <span className="mt-1 block text-[11px] text-muted">First {formatNumber(Math.min(value.head.length, value.length))} of {formatNumber(value.length)} characters</span>
+      </span>
+    );
+  }
   if (isLong(value)) {
     return (
-      <span className={clsx('block max-h-40 overflow-y-auto whitespace-pre-wrap break-words rounded-md px-2 py-1.5 text-xs leading-relaxed scrollbar-thin', tone === 'before' ? 'bg-danger-soft/60 text-fg' : 'bg-success-soft/60 text-fg')}>
+      <span className={clsx('block max-h-40 overflow-y-auto whitespace-pre-wrap break-words rounded-md px-2 py-1.5 text-xs leading-relaxed scrollbar-thin', boxTone(tone))}>
         {value}
       </span>
     );
@@ -30,16 +49,28 @@ function DiffValue({ field, value, tone }: { field: string; value: unknown; tone
   );
 }
 
-/** The field-level differences: a table on wide screens, stacked "before → after" rows on a phone. */
-export function AuditDiffTable({ diff, className }: { diff: AuditFieldChange[]; className?: string }) {
+/**
+ * The field-level differences: a table on wide screens, stacked "before → after" rows on a phone. Text the trail
+ * stored as its length and start (over 2,000 characters) gets a headline beside its label: "Script" · "Changed ·
+ * 19,204 characters (was 18,950)".
+ */
+export function AuditDiffTable({ diff, entity, className }: { diff: AuditFieldChange[]; entity?: AuditEntity | null; className?: string }) {
   if (!diff.length) return <p className={clsx('text-xs text-muted', className)}>No field changes were recorded for this action.</p>;
   return (
     <dl className={clsx('divide-y divide-border overflow-hidden rounded-lg border border-border bg-surface', className)}>
       {diff.map((d) => (
         <div key={d.field} className="grid grid-cols-1 gap-1 px-3 py-2 text-sm sm:grid-cols-[minmax(8rem,12rem)_1fr] sm:gap-3">
-          <dt className="text-xs font-medium text-muted sm:pt-0.5">{auditFieldLabel(d.field)}</dt>
+          <dt className="text-xs font-medium text-muted sm:pt-0.5">{fieldLabel(d.field, entity)}</dt>
           <dd className="flex min-w-0 flex-wrap items-start gap-x-2 gap-y-1">
-            {isLong(d.before) || isLong(d.after) ? (
+            {isAuditLongText(d.before) || isAuditLongText(d.after) ? (
+              <span className="w-full min-w-0">
+                <span className="mb-1.5 block font-medium text-fg">{longTextHeadline(d.before, d.after)}</span>
+                <span className="grid w-full min-w-0 gap-1.5 md:grid-cols-2">
+                  <span className="min-w-0"><span className="mb-0.5 block text-[11px] uppercase tracking-wide text-muted">Before</span><DiffValue field={d.field} value={d.before} tone="before" /></span>
+                  <span className="min-w-0"><span className="mb-0.5 block text-[11px] uppercase tracking-wide text-muted">After</span><DiffValue field={d.field} value={d.after} tone="after" /></span>
+                </span>
+              </span>
+            ) : isLong(d.before) || isLong(d.after) ? (
               <span className="grid w-full min-w-0 gap-1.5 md:grid-cols-2">
                 <span className="min-w-0"><span className="mb-0.5 block text-[11px] uppercase tracking-wide text-muted">Before</span><DiffValue field={d.field} value={d.before} tone="before" /></span>
                 <span className="min-w-0"><span className="mb-0.5 block text-[11px] uppercase tracking-wide text-muted">After</span><DiffValue field={d.field} value={d.after} tone="after" /></span>
@@ -97,7 +128,7 @@ export function AuditEntryItem({ entry, showEntity = true, timeOnly, compact }: 
       </button>
       {open && (
         <div id={panelId} className={clsx('border-t border-border bg-surface-2/50', compact ? 'px-3 py-3' : 'px-4 py-3 sm:pl-[3.75rem]')}>
-          <AuditDiffTable diff={entry.diff} />
+          <AuditDiffTable diff={entry.diff} entity={entry.entity} />
           <p className="mt-2 flex flex-wrap gap-x-3 gap-y-1 text-[11px] text-muted">
             <span className="font-mono">{entry.action}</span>
             {entry.entity && entry.entityId != null && <span>{AUDIT_ENTITY_LABELS[entry.entity]} #{entry.entityId}</span>}

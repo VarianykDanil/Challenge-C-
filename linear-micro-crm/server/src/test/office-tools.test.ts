@@ -5,9 +5,10 @@
 import { after, before, test } from 'node:test';
 import assert from 'node:assert/strict';
 import { PAY_EXPORT_HEADERS, SEARCH_KIND_LIMITS, SEARCH_MAX_RESULTS, type SearchResponse, type SearchResult } from '@lm/shared';
-import { all, run, type Db } from '../db/connection.ts';
+import { all, get, run, type Db } from '../db/connection.ts';
+import { currentDataVersion } from '../lib/cache.ts';
 import { addDays, mondayOf, todayISO } from '../lib/dates.ts';
-import { addEvent, startTestServer, type TestClient, type TestServer } from './helpers.ts';
+import { addEvent, addGauge, startTestServer, type TestClient, type TestServer } from './helpers.ts';
 
 let srv: TestServer;
 let admin: TestClient;
@@ -269,11 +270,48 @@ test('export: a week without runs answers the header line alone', async () => {
   assert.equal(String(r.json), `${PAY_EXPORT_HEADERS.sage.join(',')}\r\n`);
 });
 
-test('export: reading only — the runs are byte-for-byte the same afterwards', async () => {
+test('export: when the runs exist already it changes nothing — the runs are byte-for-byte the same afterwards', async () => {
   const snap = () => JSON.stringify(all(srv.db, 'SELECT * FROM payroll_runs ORDER BY id'));
   const before = snap();
   await admin.get(`/finance/payroll/export?weekStart=${lastMonday}&format=xero&runs=all`);
   assert.equal(snap(), before);
+});
+
+test('export: a week that has just closed gets its pending runs first, as GET /finance/payroll; the cached views are cleared then, and only then', async () => {
+  const fresh = await startTestServer();
+  try {
+    const { users, teams, campaignId } = fresh.fixture!;
+    const monday = addDays(mondayOf(todayISO()), -7);
+    const eventId = addEvent(fresh.db, { campaignId, teamId: teams.a, date: addDays(monday, 2) });
+    addGauge(fresh.db, { eventId, userId: users.rep, date: addDays(monday, 2), stops: 50, sales: 3 });
+    fresh.resetCache();
+    const runs = () => Number(get<{ n: number }>(fresh.db, 'SELECT COUNT(*) AS n FROM payroll_runs')!.n);
+    assert.equal(runs(), 0);
+    const boss = await fresh.login('admin');
+    // a cached view that does not create runs itself: cached now
+    assert.equal((await boss.get('/leaderboard')).headers.get('x-cache'), 'MISS');
+    assert.equal((await boss.get('/leaderboard')).headers.get('x-cache'), 'HIT');
+    const v0 = currentDataVersion();
+    const r = await boss.get(`/finance/payroll/export?weekStart=${monday}&format=xero`);
+    assert.equal(r.status, 200);
+    assert.ok(runs() > 0, 'the closed week\'s runs were created');
+    assert.equal(r.headers.get('x-total-count'), String(runs()), 'and exported');
+    assert.ok(currentDataVersion() > v0, 'the data version moved');
+    assert.equal((await boss.get('/leaderboard')).headers.get('x-cache'), 'MISS', 'so cached views are rebuilt');
+    // the same rows GET /finance/payroll lists for that week
+    const listed = (await boss.get(`/finance/payroll?from=${monday}&to=${addDays(monday, 6)}`)).json as { reference: string }[];
+    assert.deepEqual(listed.map((x) => x.reference).sort(), all<{ reference: string }>(fresh.db, 'SELECT reference FROM payroll_runs').map((x) => x.reference).sort());
+    // a second export creates nothing and clears nothing
+    assert.equal((await boss.get('/leaderboard')).headers.get('x-cache'), 'HIT');
+    const before = JSON.stringify(all(fresh.db, 'SELECT * FROM payroll_runs ORDER BY id'));
+    const v1 = currentDataVersion();
+    assert.equal((await boss.get(`/finance/payroll/export?weekStart=${monday}&format=sage`)).status, 200);
+    assert.equal(currentDataVersion(), v1);
+    assert.equal(JSON.stringify(all(fresh.db, 'SELECT * FROM payroll_runs ORDER BY id')), before);
+    assert.equal((await boss.get('/leaderboard')).headers.get('x-cache'), 'HIT');
+  } finally {
+    await fresh.close();
+  }
 });
 
 // ── Full demo seed: shape and caps ──────────────────────────────────────────

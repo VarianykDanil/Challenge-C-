@@ -10,6 +10,7 @@ import { bumpDataVersion, responseCache } from './lib/cache.ts';
 import { compression } from './lib/compress.ts';
 import { HttpError } from './lib/errors.ts';
 import { authenticate, pinSetupGate, requireAuth } from './middleware/auth.ts';
+import { perUserWriteLimit } from './middleware/writeLimit.ts';
 import { auditMiddleware } from './lib/audit.ts';
 import { announcementsRouter } from './routes/announcements.ts';
 import { authRouter } from './routes/auth.ts';
@@ -47,6 +48,11 @@ export interface AppOptions {
    * `loopback`) or a comma list — see `parseTrustProxy`.
    */
   trustProxy?: boolean | number | string;
+  /**
+   * The per-person limit on the 1.2 writes anyone can repeat (middleware/writeLimit.ts): writes per person per
+   * minute, default 60; 0 turns it off.
+   */
+  writeLimitPerMinute?: number;
 }
 
 /** `TRUST_PROXY` env → Express setting: unset/`0`/`false` → off; `true`; a hop count; otherwise an address list. */
@@ -141,6 +147,9 @@ export function createApp(db: Db, opts: AppOptions = {}): Express {
   // Release 1.2 slots, both pass-through until their packages land: U1's PIN gate (403 until a required PIN is set),
   // then U3's audit recorder (successful writes, with before/after snapshots).
   api.use(pinSetupGate(db));
+  // Per person, at most 60 a minute of POST /learning/*, PUT /pitches/*, POST /checkins, POST /auth/pin(/*) and
+  // POST /gauges/bulk together (429 after that); before the recorder, so a refused write is never recorded.
+  api.use(perUserWriteLimit({ perMinute: opts.writeLimitPerMinute }));
   api.use(auditMiddleware(db));
   // any write invalidates the aggregate cache before the handler runs (handlers are synchronous node:sqlite calls)
   api.use((req, _res, next) => {
