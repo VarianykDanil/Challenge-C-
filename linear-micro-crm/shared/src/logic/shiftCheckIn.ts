@@ -37,10 +37,21 @@ export function shiftCheckInUndoMsLeft(createdAt: string, nowMs: number): number
   return Math.max(0, Math.min(SHIFT_CHECK_IN_UNDO_MS, t + SHIFT_CHECK_IN_UNDO_MS - nowMs));
 }
 
-/** "on time" / "6 min late" (empty when the event start is unknown). */
+/**
+ * How late, in words: "6 min late" up to an hour ("60 min late"), then hours and minutes, "1 h 5 min late",
+ * "5 h 48 min late", or "2 h late" on a whole hour (UI QA 1.2 #5: "348 min late" was hard to read).
+ */
+export function shiftCheckInLateText(minutesLate: number): string {
+  if (minutesLate <= 60) return `${minutesLate} min late`;
+  const hours = Math.floor(minutesLate / 60);
+  const minutes = minutesLate % 60;
+  return minutes ? `${hours} h ${minutes} min late` : `${hours} h late`;
+}
+
+/** "on time" / "6 min late" / "5 h 48 min late" (empty when the event start is unknown). */
 export function shiftCheckInStatusText(status: { minutesLate: number | null; onTime: boolean }): string {
   if (status.minutesLate === null) return '';
-  return status.onTime ? 'on time' : `${status.minutesLate} min late`;
+  return status.onTime ? 'on time' : shiftCheckInLateText(status.minutesLate);
 }
 
 /** "HH:MM" of a naive or ISO timestamp as written (no zone conversion); '' when it has no time part. */
@@ -49,7 +60,7 @@ export function shiftCheckInClock(checkedInAt: string): string {
   return m ? `${m[1]}:${m[2]}` : '';
 }
 
-/** "Checked in 09:24 · on time" / "Checked in 09:36 · 6 min late" / "Checked in 09:24". */
+/** "Checked in 09:24 · on time" / "Checked in 09:36 · 6 min late" / "Checked in 15:18 · 5 h 48 min late" / "Checked in 09:24". */
 export function shiftCheckInLabel(checkedInAt: string, status: { minutesLate: number | null; onTime: boolean }): string {
   const text = shiftCheckInStatusText(status);
   return `Checked in ${shiftCheckInClock(checkedInAt)}${text ? ` · ${text}` : ''}`;

@@ -61,7 +61,9 @@ export function CheckInRollCall({ event, canManage, className }: CheckInRollCall
     return (
       <p className={clsx('flex items-center gap-1.5 text-sm', own.current.onTime ? 'text-success' : 'text-warning', className)} data-roll-call="own">
         <CheckCircle2 className="h-4 w-4 shrink-0" aria-hidden />
-        You checked in {shiftCheckInClock(own.current.checkedInAt)} · {shiftCheckInStatusText(own.current) || 'recorded'}
+        <span>
+          You checked in {shiftCheckInClock(own.current.checkedInAt)} · <span className="whitespace-nowrap">{shiftCheckInStatusText(own.current) || 'recorded'}</span>
+        </span>
       </p>
     );
   }
@@ -151,13 +153,15 @@ function TeamRollCall({ event, me, today, nowHHMM, checkIns, loading, ownChecked
                     {c.userName ?? 'Someone'}
                     {c.userId === me.id && <span className="font-normal text-muted"> (you)</span>}
                   </p>
-                  <p className="flex items-center gap-1.5 text-xs text-muted">
+                  {/* UI QA 1.2 #5: the line wraps rather than cutting "sent later" short (a long "5 h 48 min late" badge
+                      and the tag do not fit beside the time in a 320–375 px row). */}
+                  <p className="flex flex-wrap items-center gap-x-1.5 gap-y-0.5 text-xs text-muted" data-roll-call-status>
                     <span className="font-semibold tabular-nums text-fg">{shiftCheckInClock(c.checkedInAt)}</span>
                     {status && <Badge tone={c.onTime ? 'success' : 'warning'} size="sm">{status}</Badge>}
                     {c.source === 'offline' && (
-                      <span className="inline-flex min-w-0 items-center gap-1" title="Tapped without signal; the phone sent it later with the time it was tapped (never earlier than an hour before the start)">
+                      <span className="inline-flex items-center gap-1 whitespace-nowrap" title="Tapped without signal; the phone sent it later with the time it was tapped (never earlier than an hour before the start)" data-roll-call-sent-later>
                         <Smartphone className="h-3 w-3 shrink-0" aria-hidden />
-                        <span className="truncate">sent later</span>
+                        sent later
                       </span>
                     )}
                   </p>

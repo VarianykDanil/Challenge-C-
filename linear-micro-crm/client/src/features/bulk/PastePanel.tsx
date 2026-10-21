@@ -61,7 +61,21 @@ export function PastePanel({ members, onFill, onClose, disabled, className }: Pa
         icon={<MessageSquareText />}
         title="Paste from WhatsApp"
         description="Copy the team's numbers from the group chat. One person per line: a name, then stops, to table, presentations, closes, taps and sales. A time like 9:58 is read as their check-in."
-        actions={<Button variant="ghost" size="icon-sm" label="Close the paste box" onClick={onClose}><X aria-hidden /></Button>}
+        actions={
+          // UI QA 1.2 #9: 44 × 44 on a phone or a touch screen (32 × 32 with a mouse), its X where it always was: the
+          // 6 px negative margins grow the hit area around the same centre and keep the 32 px footprint, so neither the
+          // header nor its title moves.
+          <Button
+            variant="ghost"
+            size="icon-sm"
+            label="Close the paste box"
+            onClick={onClose}
+            className="max-sm:-m-1.5 max-sm:h-11 max-sm:w-11 pointer-coarse:-m-1.5 pointer-coarse:h-11 pointer-coarse:w-11"
+            data-bulk-close-paste
+          >
+            <X aria-hidden />
+          </Button>
+        }
       />
       <label htmlFor={`${uid}-text`} className="sr-only">WhatsApp message</label>
       <Textarea

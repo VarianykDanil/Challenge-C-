@@ -915,42 +915,55 @@ or an entry it behaves exactly as in 1.0.
 * **Which event.** The same rule as the card (`defaultEvent`). **Change** shows when there is more than one; the same
   event list, empty line and no-signal line when none is picked. `/quick?eventId=<id>` preselects that event (read on
   the first render, then stripped by `useActionParam`); an event the person can't count today shows **That event isn't
-  one you can count today.** above the list.
-* **Tiles.** Six, in funnel order. The whole tile is the +1 button (label, the count in tabular figures, a stripe in
-  the campaign's colour). The −1 is its own 44 px button in the top-right corner, a sibling of the tile (not nested),
-  so it never adds. Both are labelled with what they do and the current count, as on the card ("Add one person who
-  reached Sales (also adds a stop, a table, a presentation, a close and a tap), now 2"), reachable with Tab, and work
-  with Enter or Space. Under the stage's name a second line says what a tap adds (`TALLY_ADDS`): Stops **just a
-  stop**, To table **+ stop**, Presentations **+ stop, table**, Closes **+ 3 earlier**, Taps **+ 4 earlier**, Sales
-  **+ all 5 earlier** (11 px on a phone, 12 px from 640 px; "+ stop, table, pres." would need 97 px where a 360 px
-  phone's tile leaves 91, so Closes counts instead of naming). It keeps clear of the −1 like the label; held sideways
-  it sits in the tile's bottom-right corner, beside the count. The **+1** chip is grey only at the daily maximum. The
-  chip sits at the right end of the count's row; in a narrow, short tile (a container query: content at most 13rem wide and 8.75rem tall, so a phone
-  held upright with tiles up to about 164 px tall) it moves to the left of the count and the row sits at the bottom,
-  so the chip is never within about 30 px of the −1 (58 px at 360×640, 65 px at 375×667). Taps buzz briefly where the
-  phone supports vibration (`navigator.vibrate`), and `touch-action: manipulation` stops quick double taps zooming the
-  page.
+  one you can count today.** above the list. On a phone (under 640 px, or held sideways) the event's name is the
+  Change button instead (a chevron after it), and the list's names and lines wrap rather than ending in an ellipsis,
+  with the status badge under the name.
+* **Event strip** (UI QA 1.2 #6). The event's full name (campaign and venue) always shows beside the Pitch and Check in
+  icons. On a phone the campaign's colour is a stripe down the strip's left edge, as on the tiles (so it takes none of
+  the name's width), the name is 13 px and wraps (up to three lines on a phone, upright or held sideways; two held
+  sideways from 640 px), and the two icons sit 4 px apart. Check in is an icon below 640 px and held sideways. With
+  several events the Change chevron stays with the name's last word, so it is never alone on a line, and the name's
+  button reaches 6 px past the text so its focus ring stays clear of it. The strip is 50 px for a one-line name, 56 px
+  for two lines and 72 px for three: only a long name with both icons at 320–360 px upright or 568×320 sideways (e.g.
+  "Breast Cancer Now — Manchester Piccadilly station"); the longest seed names without a pitch ("Children's Hospice
+  North — Manchester Piccadilly station") take two lines from 320 px. All six tiles still fit at 320×568, 360×640 and
+  667×375. From 640 px upright it is as before (58 px), except that a long name wraps to a second line instead of an
+  ellipsis.
+* **Tiles.** Six, in funnel order. The whole tile is the +1 button (label, the count in tabular figures, a stripe in the
+  campaign's colour). The −1 is its own 44 px button in the top-right corner, a sibling of the tile (not nested), so it
+  never adds. Both are labelled with what they do and the current count, as on the card ("Add one person who reached
+  Sales (also adds a stop, a table, a presentation, a close and a tap), now 2"), reachable with Tab, and work with Enter
+  or Space. Under the stage's name a second line says what a tap adds (`TALLY_ADDS`): Stops **just a stop**, To table
+  **+ stop**, Presentations **+ stop, table**, Closes **+ 3 earlier**, Taps **+ 4 earlier**, Sales **+ all 5 earlier**
+  (11 px on a phone, 12 px from 640 px; "+ stop, table, pres." would need 97 px where a 360 px phone's tile leaves 91,
+  so Closes counts instead of naming). It keeps clear of the −1 like the label; held sideways it sits in the tile's
+  bottom-right corner, beside the count. The **+1** chip is grey only at the daily maximum. The chip sits at the right
+  end of the count's row; in a narrow, short tile (a container query: content at most 13rem wide and 8.75rem tall, so a
+  phone held upright with tiles up to about 164 px tall) it moves to the left of the count and the row sits at the
+  bottom, so the chip is never within about 30 px of the −1 (58 px at 360×640, 65 px at 375×667). Taps buzz briefly
+  where the phone supports vibration (`navigator.vibrate`), and `touch-action: manipulation` stops quick double taps
+  zooming the page.
 * **Layout.** 2 columns × 3 rows on a phone held upright, with the rows sharing the height under the header (tiles
   ≥ 88 px). 3 × 2 from 640 px wide (tiles ≥ 96 px) or held sideways. When the screen is under 481 px tall (a phone held
   sideways), the tiles go down to 80 px and the header and bar get tighter, so all six fit without scrolling. So do a
   small phone held upright (`tiny`: portrait and at most 600 px tall, e.g. 320×568). The help line sits just under the
   event header (11 px, two lines on a phone); held sideways it moves into the header, to the right of the event, so it
-  takes no height. To make room for it, the phone header is 48 px (56 px from 640 px) and tiles on a phone held upright
-  have the 88 px floor (not 96 px), so all six still fit on a 360×640 screen. There is never a horizontal scroll: the
-  hint wraps inside the bar. The count is sized to its tile in container units: up to half the tile's height, no taller
-  than the room left under the label and the "what a tap adds" line (`(100cqh − --tile-head) / 1.05`, with `--tile-head`
-  set per layout: 2.25 rem in a cramped phone tile, 2.5 rem otherwise on a phone, 2.375 / 2.625 rem from 640 px, 1.5 rem
-  held sideways), and narrow enough for its digits plus the chip (`(100cqw − 3.5rem) / (0.66 × digits)`), between
-  1.5 rem and 9 rem. All six are sized for the largest count, at least two digits, so they stay one size and step down
-  together once, when a count reaches 100. Checked at 320×568, 360×640, 375×667, 375×812, 390×844, 412×915, 667×375,
-  844×390, 768×1024, 1024×768, 1024×1366 and 1440×900, light and dark. At 320 px "Presentations" is cut short with an
-  ellipsis (it was before; every "what a tap adds" line fits).
+  takes no height. To make room for it, the phone header is 50–72 px (see Event strip; 58 px from 640 px) and tiles on a
+  phone held upright have the 88 px floor (not 96 px), so all six still fit on a 360×640 screen. There is never a
+  horizontal scroll: the hint wraps inside the bar. The count is sized to its tile in container units: up to half the
+  tile's height, no taller than the room left under the label and the "what a tap adds" line
+  (`(100cqh − --tile-head) / 1.05`, with `--tile-head` set per layout: 2.25 rem in a cramped phone tile, 2.5 rem
+  otherwise on a phone, 2.375 / 2.625 rem from 640 px, 1.5 rem held sideways), and narrow enough for its digits plus the
+  chip (`(100cqw − 3.5rem) / (0.66 × digits)`), between 1.5 rem and 9 rem. All six are sized for the largest count, at
+  least two digits, so they stay one size and step down together once, when a count reaches 100. Checked at 320×568,
+  360×640, 375×667, 375×812, 390×844, 412×915, 667×375, 844×390, 768×1024, 1024×768, 1024×1366 and 1440×900, light and
+  dark. At 320 px "Presentations" is cut short with an ellipsis (it was before; every "what a tap adds" line fits).
 * **Refused taps.** Only a −1 that later stages still need, or a +1 at the daily maximum. The hint replaces the bottom
   bar for 8 seconds, in the same box, so the tiles never move under a thumb. It is also announced to screen readers,
   and × dismisses it. Any accepted tap clears it.
 * **Bottom bar** (sticky, above the iPhone home indicator via `env(safe-area-inset-bottom)`): "N sales from M stops ·
-  1 in X", **Reset** (asks first) and a large **Finish shift**. Finish shift opens Log gauges prefilled exactly as on the
-  card: same validation, same outbox, and the tally clears once it is saved or kept on the phone.
+  1 in X", **Reset** (asks first) and a large **Finish shift**. Finish shift opens Log gauges prefilled exactly as on
+  the card: same validation, same outbox, and the tally clears once it is saved or kept on the phone.
 * **Reset's confirm** takes the bar's place at the same height, so the tiles do not move: the safe **Keep counting**
   where **Finish shift** was (and focused), the red **Reset to 0** at the far left where the summary was ("Clears all
   six counts."), and nothing where the small **Reset** was. A second tap on either familiar spot never wipes the shift.
@@ -1992,6 +2005,10 @@ CHECK IN ('button','quick','offline','leader'), created_at, UNIQUE(user_id, even
 - A check-in is on time up to 5 minutes after the start, inclusive. 09:05:00 is on time; 09:05:01 is "6 min late".
 - Labels read "Checked in 09:24 · on time" or "Checked in 09:36 · 6 min late".
 - Inside the grace a check-in reads "on time", even when `minutesLate` is between 1 and 5.
+- Up to an hour the lateness reads in minutes ("60 min late"). Above it, `shiftCheckInLateText` gives hours and
+  minutes: "1 h 1 min late", "5 h 48 min late", and "2 h late" on a whole hour. The button, its toast, the phone's
+  queued line, the roll call badge and "You checked in" all use it. On a narrow phone the roll call's status line
+  wraps, so "sent later" moves under the time rather than being cut short, and "on time" / "… late" never breaks.
 
 #### When the button applies (`shiftCheckInWindow`)
 

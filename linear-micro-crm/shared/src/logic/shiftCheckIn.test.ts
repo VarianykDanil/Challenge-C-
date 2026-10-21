@@ -14,6 +14,7 @@ import {
   resolveShiftCheckInTime,
   shiftCheckInClock,
   shiftCheckInLabel,
+  shiftCheckInLateText,
   shiftCheckInReplayOutcome,
   shiftCheckInStatus,
   shiftCheckInStatusText,
@@ -40,6 +41,23 @@ test('label: "Checked in 09:24 · on time" / "· 6 min late", the time as writte
   assert.equal(shiftCheckInStatusText({ minutesLate: 3, onTime: true }), 'on time', 'inside the grace it reads on time');
   assert.equal(shiftCheckInClock(`${DAY}T07:05:59`), '07:05');
   assert.equal(shiftCheckInClock('garbage'), '');
+});
+
+test('lateness reads in minutes up to an hour, then in hours and minutes (UI QA 1.2 #5)', () => {
+  assert.equal(shiftCheckInLateText(6), '6 min late');
+  assert.equal(shiftCheckInLateText(59), '59 min late');
+  assert.equal(shiftCheckInLateText(60), '60 min late', 'an hour exactly still reads in minutes');
+  assert.equal(shiftCheckInLateText(61), '1 h 1 min late');
+  assert.equal(shiftCheckInLateText(65), '1 h 5 min late');
+  assert.equal(shiftCheckInLateText(120), '2 h late', 'a whole hour has no "0 min"');
+  assert.equal(shiftCheckInLateText(348), '5 h 48 min late');
+  assert.equal(shiftCheckInLateText(900), '15 h late');
+  // every place that shows lateness goes through the status text and the label
+  assert.equal(shiftCheckInStatusText(shiftCheckInStatus(DAY, '09:30', `${DAY}T15:18:00`)), '5 h 48 min late');
+  assert.equal(shiftCheckInStatusText(shiftCheckInStatus(DAY, '09:30', `${DAY}T10:30:00`)), '60 min late');
+  assert.equal(shiftCheckInStatusText(shiftCheckInStatus(DAY, '09:30', `${DAY}T10:30:01`)), '1 h 1 min late', 'rounded up, as minutesLate is');
+  assert.equal(shiftCheckInLabel(`${DAY}T15:18:00`, shiftCheckInStatus(DAY, '09:30', `${DAY}T15:18:00`)), 'Checked in 15:18 · 5 h 48 min late');
+  assert.equal(shiftCheckInStatusText({ minutesLate: 348, onTime: true }), 'on time', 'the on-time flag still decides');
 });
 
 test('undo: two minutes from the moment it was written, with the server grace on top', () => {

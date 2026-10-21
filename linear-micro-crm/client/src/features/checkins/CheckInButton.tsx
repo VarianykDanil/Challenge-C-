@@ -6,7 +6,8 @@
 // reads "saved on this phone"; CheckInOutboxReplay sends it from any page. A check-in never logs gauges.
 // Mounted, each in an ErrorBoundary with fallback={null}:
 //  - pages/QuickGauges.tsx header (variant 'compact'): a 40 px button — the header is tight on a phone, so below
-//    640 px it is an icon; tapping a check-in that is done shows its time (and Undo) in a toast;
+//    640 px and held sideways it is an icon (the event's name keeps the width); tapping a check-in that is done
+//    shows its time (and Undo) in a toast;
 //  - features/dashboard/UpcomingEvents.tsx under every row dated today, and the event page's roll call card
 //    (variant 'row'): the button with the start time, then the status line with Undo.
 // It renders nothing unless it applies: a rep / leader (or admin) of the event's team, today, not cancelled, and —
@@ -14,7 +15,7 @@
 import { CheckCircle2, MapPinCheck, Smartphone, Undo2 } from 'lucide-react';
 import clsx from 'clsx';
 import type { SalesEventWithMeta } from '@lm/shared';
-import { LATE_GRACE_MINUTES, shiftCheckInLabel, shiftCheckInWindow } from '@lm/shared';
+import { LATE_GRACE_MINUTES, shiftCheckInClock, shiftCheckInLabel, shiftCheckInStatusText, shiftCheckInWindow } from '@lm/shared';
 import { Button, useToast } from '@/components/ui';
 import { isNetworkError } from '@/api/client';
 import { useCheckIn, useUndoCheckIn } from '@/api/checkins';
@@ -111,11 +112,11 @@ export function CheckInButton({ event, variant = 'row', className }: CheckInButt
           onClick={() => void tap()}
           loading={checkIn.isPending}
           leftIcon={<MapPinCheck className="h-4 w-4" aria-hidden />}
-          className={clsx('max-sm:w-10 max-sm:px-0', className)}
+          className={clsx('max-sm:w-10 max-sm:px-0 short:w-10 short:px-0', className)}
           data-checkin-button="compact"
           title={`Check in at ${event.name}`}
         >
-          <span className="sr-only sm:not-sr-only">Check in</span>
+          <span className="sr-only sm:not-sr-only short:sr-only">Check in</span>
         </Button>
       );
     }
@@ -133,7 +134,7 @@ export function CheckInButton({ event, variant = 'row', className }: CheckInButt
           })
         }
         className={clsx(
-          'focus-ring inline-flex h-10 shrink-0 items-center justify-center gap-1.5 rounded-lg px-2.5 text-sm font-semibold tabular-nums transition-colors max-sm:w-10 max-sm:px-0',
+          'focus-ring inline-flex h-10 shrink-0 items-center justify-center gap-1.5 rounded-lg px-2.5 text-sm font-semibold tabular-nums transition-colors max-sm:w-10 max-sm:px-0 short:w-10 short:px-0',
           onPhone ? 'bg-info-soft text-info' : late ? 'bg-warning-soft text-warning' : 'bg-success-soft text-success',
           className,
         )}
@@ -143,7 +144,7 @@ export function CheckInButton({ event, variant = 'row', className }: CheckInButt
         data-checkin-state={onPhone ? 'phone' : late ? 'late' : 'on-time'}
       >
         <Icon className="h-[18px] w-[18px] shrink-0" aria-hidden />
-        <span className="hidden sm:inline">{current.checkedInAt.slice(11, 16)}</span>
+        <span className="hidden sm:inline short:hidden">{current.checkedInAt.slice(11, 16)}</span>
       </button>
     );
   }
@@ -163,11 +164,16 @@ export function CheckInButton({ event, variant = 'row', className }: CheckInButt
     );
   }
   const Icon = onPhone ? Smartphone : CheckCircle2;
+  const status = shiftCheckInStatusText(current);
   return (
     <div className={clsx('flex flex-wrap items-center gap-x-2 gap-y-1', className)} data-checkin-button="row" data-checkin-state={onPhone ? 'phone' : late ? 'late' : 'on-time'}>
       <span className={clsx('inline-flex min-h-8 items-center gap-1.5 text-sm font-medium', onPhone ? 'text-info' : late ? 'text-warning' : 'text-success')}>
         <Icon className="h-4 w-4 shrink-0" aria-hidden />
-        {current.label}
+        {/* current.label, with "on time" / "5 h 48 min late" kept on one line when a narrow phone wraps it */}
+        <span>
+          Checked in {shiftCheckInClock(current.checkedInAt)}
+          {status && <> · <span className="whitespace-nowrap">{status}</span></>}
+        </span>
       </span>
       {onPhone && <span className="text-xs text-muted">saved on this phone, sends when the signal is back</span>}
       {canUndo && (

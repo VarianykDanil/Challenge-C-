@@ -7,7 +7,7 @@
 // /quick?eventId=<id> preselects an event (the Tally card's "Full screen" link).
 import { useEffect, useRef, useState } from 'react';
 import { useLocation } from 'react-router-dom';
-import { Check, Minus, Tally5, X } from 'lucide-react';
+import { Check, ChevronDown, Minus, Tally5, X } from 'lucide-react';
 import clsx from 'clsx';
 import type { GaugeKey, SalesEventWithMeta } from '@lm/shared';
 import { GAUGE_KEYS, GAUGE_LABELS, tallyPerson } from '@lm/shared';
@@ -56,27 +56,42 @@ export function QuickGaugesPage() {
   const linked = chosenId != null ? options.find((e) => e.id === chosenId) ?? null : null;
   const selected = choosing ? null : linked ?? (chosenId == null ? defaultEvent(options, stored, today) : null);
   const linkMissed = chosenId != null && !linked && !loading;
+  const canChange = !!selected && options.length > 1;
 
   return (
     <div
       className="flex min-h-[calc(100dvh-7rem-env(safe-area-inset-bottom))] flex-col gap-3 lg:min-h-[calc(100dvh-8rem-env(safe-area-inset-bottom))] short:-my-3 short:min-h-[calc(100dvh-5.5rem-env(safe-area-inset-bottom))] short:gap-2 tiny:-my-3 tiny:min-h-[calc(100dvh-5.5rem-env(safe-area-inset-bottom))] tiny:gap-2"
       data-quick-gauges
     >
-      <header className="flex min-h-12 items-center gap-3 rounded-2xl border border-border bg-surface px-3 py-1.5 shadow-card sm:min-h-14 sm:px-4 sm:py-2 short:min-h-12 short:py-1.5 tiny:min-h-12 tiny:py-1.5">
+      {/* UI QA 1.2 #6: on a phone (and held sideways) the event's name — campaign and venue — must show in full beside
+          the Pitch and Check in icons, without the strip growing much (the six tiles share the height left under it):
+          the campaign's colour is a stripe along the strip's left edge, as on the tiles below (so it takes none of the
+          name's width), the name wraps (up to three lines on a phone, two held sideways from 640 px) in a 13 px type,
+          and with several events the name itself is the "Change" button (a chevron after its last word). From 640 px
+          upright the strip is as before, except that a long name wraps to a second line. */}
+      <header className="relative flex min-h-12 items-center gap-2 rounded-2xl border border-border bg-surface px-3 py-1 shadow-card sm:min-h-14 sm:gap-3 sm:px-4 sm:py-2 short:min-h-12 short:gap-2 short:py-1 tiny:min-h-12">
+        {selected && (
+          // Clipped to the strip's rounded inner edge (16 px corners less the 1 px border), like the tiles' stripe.
+          <span className="pointer-events-none absolute inset-0 hidden overflow-hidden rounded-[calc(1rem-1px)] max-sm:block short:block" aria-hidden data-quick-colour-bar>
+            <span className="absolute inset-y-0 left-0 w-1.5" style={{ backgroundColor: selected.campaignColor }} />
+          </span>
+        )}
         <span
-          className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-primary-soft text-primary"
+          className={clsx('inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-primary-soft text-primary', selected && 'max-sm:hidden short:hidden')}
           style={selected ? { backgroundColor: `color-mix(in srgb, ${selected.campaignColor} 16%, transparent)`, color: selected.campaignColor } : undefined}
           aria-hidden
         >
           <Tally5 className="h-5 w-5" />
         </span>
-        <div className="min-w-0 flex-1">
-          {/* The topbar already reads "Quick gauges"; the strip spends its two lines on the event. */}
+        <div className="relative min-w-0 flex-1">
+          {/* The topbar already reads "Quick gauges"; the strip spends its lines on the event. */}
           <h1 className={selected ? 'sr-only' : 'text-sm font-semibold text-fg'}>Quick gauges</h1>
           {selected ? (
-            <div data-quick-event={selected.id}>
-              <p className="truncate text-sm font-semibold text-fg">{selected.name}</p>
-              <p className="truncate text-xs text-muted">
+            <div className="flex min-h-10 flex-col justify-center sm:min-h-0 short:min-h-10" data-quick-event={selected.id}>
+              <p className="line-clamp-3 break-words text-[13px] font-semibold leading-4 text-fg sm:line-clamp-2 sm:text-sm sm:leading-5 short:text-[13px] short:leading-4" data-quick-event-name>
+                {canChange ? <NameWithChevron name={selected.name} /> : selected.name}
+              </p>
+              <p className="truncate text-[11px] leading-[14px] text-muted sm:text-xs sm:leading-4 short:text-[11px] short:leading-[14px]">
                 {selected.date === today ? 'Today' : formatDateShort(selected.date)} · {formatTime(selected.startTime)}–{formatTime(selected.endTime)}
                 {selected.teamId !== me.teamId ? ` · ${selected.teamName}` : ''}
               </p>
@@ -84,24 +99,37 @@ export function QuickGaugesPage() {
           ) : (
             <p className="text-xs text-muted">Tap the furthest stage each person reached. The counts stay on this phone until you finish the shift.</p>
           )}
+          {/* Phone, or held sideways: the whole name is the Change button (a stretched, see-through button). It reaches
+              6 px past the name on each side and 4 px above and below (into the strip's padding and the gaps, short of
+              the icons), with its focus ring drawn inside that margin, so the ring never touches the text. */}
+          {canChange && (
+            <button
+              type="button"
+              onClick={() => setChoosing(true)}
+              aria-label="Change event"
+              title="Change event"
+              className="focus-ring-inset absolute -inset-x-1.5 -inset-y-1 hidden rounded-lg transition-colors [-webkit-tap-highlight-color:transparent] active:bg-fg/5 max-sm:block short:block"
+              data-quick-change="name"
+            />
+          )}
         </div>
         {/* Held sideways there is no height to spare under the header, but room across it: the help line sits here. */}
         {selected && (
           <p className="hidden w-60 shrink-0 text-[11px] leading-[14px] text-muted short:block" data-quick-help-side><TallyHelp /></p>
         )}
-        {/* Release 1.2 slots: the campaign's pitch (L2) and one-tap check-in (U4); nothing until their packages land. */}
+        {/* Release 1.2: the campaign's pitch (L2) and one-tap check-in (U4), 40 px icons on a phone, 4 px apart. */}
         {selected && (
-          <ErrorBoundary name="pitch-link" fallback={null}>
-            <PitchLink campaignCode={selected.campaignCode} campaignId={selected.campaignId} variant="compact" />
-          </ErrorBoundary>
+          <div className="flex shrink-0 items-center gap-1 empty:hidden sm:gap-3 short:gap-1">
+            <ErrorBoundary name="pitch-link" fallback={null}>
+              <PitchLink campaignCode={selected.campaignCode} campaignId={selected.campaignId} variant="compact" />
+            </ErrorBoundary>
+            <ErrorBoundary name="check-in" fallback={null}>
+              <CheckInButton event={selected} variant="compact" />
+            </ErrorBoundary>
+          </div>
         )}
-        {selected && (
-          <ErrorBoundary name="check-in" fallback={null}>
-            <CheckInButton event={selected} variant="compact" />
-          </ErrorBoundary>
-        )}
-        {selected && options.length > 1 && (
-          <Button variant="ghost" onClick={() => setChoosing(true)} className="-mr-1">Change</Button>
+        {canChange && (
+          <Button variant="ghost" onClick={() => setChoosing(true)} className="-mr-1 max-sm:hidden short:hidden" data-quick-change="button">Change</Button>
         )}
       </header>
 
@@ -127,6 +155,22 @@ export function QuickGaugesPage() {
         </Card>
       )}
     </div>
+  );
+}
+
+/** The event's name with the Change chevron after it (shown on a phone and held sideways). The last word and the
+ * chevron never part, so the chevron is never alone on a line; a last word too long to keep whole may still break. */
+function NameWithChevron({ name }: { name: string }) {
+  const cut = name.lastIndexOf(' ') + 1;
+  const last = name.slice(cut);
+  return (
+    <>
+      {name.slice(0, cut)}
+      <span className={last.length <= 20 ? 'whitespace-nowrap' : undefined}>
+        {last}
+        <ChevronDown className="ml-0.5 hidden h-3.5 w-3.5 align-[-2px] text-muted max-sm:inline short:inline" aria-hidden />
+      </span>
+    </>
   );
 }
 

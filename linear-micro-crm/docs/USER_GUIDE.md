@@ -232,11 +232,11 @@ change goes through and the payslip is marked "adjusted after payment".
 
 - On the **Dashboard**, each of today's events in *Upcoming events* has a **Check in** button, with "Starts 15:30 · 5
   min grace" next to it. Tap it when you arrive. It changes to "Checked in 15:02 · on time" (green) or "· 6 min late"
-  (amber). It does not log any gauges, and it is not a day worked.
+  (amber; over an hour it reads "· 1 h 20 min late"). It does not log any gauges, and it is not a day worked.
 - Tapped by mistake? **Undo** stays next to it for 2 minutes. After that, ask your team leader to remove it.
 - On **Quick gauges**, the button sits in the event strip at the top. On a phone it is a pin icon. Once you are checked
-  in it shows a tick (green on time, amber late) and, on wider screens, the time. Tap the tick to see the time again,
-  with **Undo** while it is still allowed.
+  in it shows a tick (green on time, amber late) and, on an iPad or a computer, the time. Tap the tick to see the time
+  again, with **Undo** while it is still allowed.
 - **No signal?** Tap **Check in** anyway. The phone keeps the time you tapped and shows "saved on this phone". A line
   under the top bar says "1 check-in waiting to send". It sends by itself when the signal is back, or tap **Send now**.
   - It must reach Linear Hub within 24 hours of the event ending. After that it is refused, and the line says so: ask
@@ -252,7 +252,8 @@ change goes through and the payslip is marked "adjusted after payment".
 
 **Team leaders and admins**
 
-- Each event's page has a **Roll call**: who has checked in and when, earliest first, with "on time" or "11 min late".
+- Each event's page has a **Roll call**: who has checked in and when, earliest first, with "on time", "11 min late"
+  or, over an hour, "1 h 20 min late".
   Today's events also list who has **not checked in yet**. The heading counts them, e.g. "6 / 8 checked in · 1 late".
 - A phone icon with "sent later" marks a check-in that was tapped without signal and sent afterwards, with the time it
   was tapped. Every check-in whose time came from the phone carries it, so such a time never looks like a live tap.
@@ -569,7 +570,8 @@ hand or an iPad on the stand.
   tally-marks button next to the bell, one tap from any screen. From the **Tally** card on the Gauges page, **Full
   screen** opens the same event there. While you are counting, the side menu button shows today's stops so far.
 * **Your event is picked for you** the same way as the Tally card: the one you are already counting today, otherwise
-  the one under way, otherwise your only event. If there are several, tap **Change** to pick another.
+  the one under way, otherwise your only event. If there are several, tap **Change** to pick another (on a phone, tap
+  the event's name: the arrow after it shows you can).
 * **Counting: one tap is one person.** Tap anywhere on the tile of the furthest stage the person reached: Stops, To
   table, Presentations, Closes, Taps or Sales. The earlier stages go up with it, exactly as on the Tally card, and the
   small line under each stage's name says what a tap adds: **just a stop**, **+ stop**, **+ stop, table**, **+ 3
