@@ -1,7 +1,7 @@
 // Release 1.2 — U5 office-tools. "Export for payroll": one pay week's unpaid runs (pending and failed transfers) as a
 // CSV for Xero Payroll or Sage Payroll (GET /finance/payroll/export, admin only; server/src/routes/payExport.ts).
 // Mounted in pages/Finance.tsx in the "Runs to pay" card header, before "Export CSV", in an ErrorBoundary.
-// `runs` are the runs the card lists: their weeks (newest first, at most four) are the choices.
+// `runs` are the runs the card lists: every week among them (newest first) is a choice, failed transfers included.
 import { useMemo, useState } from 'react';
 import { FileSpreadsheet } from 'lucide-react';
 import clsx from 'clsx';
@@ -16,15 +16,13 @@ export interface PayExportButtonProps {
   className?: string;
 }
 
-const MAX_WEEKS = 4;
-
 export function PayExportButton({ runs, className }: PayExportButtonProps) {
   const toast = useToast();
   const [busy, setBusy] = useState(false);
   const weeks = useMemo(() => {
     const counts = new Map<string, number>();
     for (const r of runs) counts.set(r.weekStart, (counts.get(r.weekStart) ?? 0) + 1);
-    return [...counts.entries()].sort((a, b) => (a[0] < b[0] ? 1 : -1)).slice(0, MAX_WEEKS);
+    return [...counts.entries()].sort((a, b) => (a[0] < b[0] ? 1 : -1));
   }, [runs]);
 
   const download = async (weekStart: string, format: PayExportFormat) => {
@@ -76,7 +74,7 @@ export function PayExportButton({ runs, className }: PayExportButtonProps) {
           disabled={busy}
           aria-label="Export for payroll"
           leftIcon={<FileSpreadsheet aria-hidden />}
-          className={clsx('px-2.5 sm:px-3', className)}
+          className={clsx('px-2.5 max-sm:h-10 max-sm:min-w-10 sm:px-3', className)}
           data-pay-export=""
         >
           <span className="hidden sm:inline">Export for payroll</span>

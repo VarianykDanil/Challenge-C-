@@ -78,9 +78,12 @@ export function formatDateTime(value: string | null | undefined): string {
  * and rounding down gave), with months and years from today's midnight beyond 30 days. Timestamps keep the distance
  * from now ("in 2 hours").
  */
-export function formatRelative(value: string | null | undefined, now: Date = new Date()): string {
+export function formatRelative(value: string | null | undefined, now: Date = new Date(), opts: { past?: boolean } = {}): string {
   const d = parseDate(value);
   if (!d) return '—';
+  // `past`: the moment has happened (sent, saved, signed off). A phone whose clock runs a few minutes behind the
+  // server would otherwise say "in 9 minutes"; up to 15 minutes ahead reads "just now".
+  if (opts.past && d.getTime() > now.getTime() && d.getTime() - now.getTime() <= 15 * 60_000) return 'just now';
   if (/^\d{4}-\d{2}-\d{2}$/.test(value ?? '')) {
     const days = differenceInCalendarDays(d, now);
     if (days === 0) return 'today';

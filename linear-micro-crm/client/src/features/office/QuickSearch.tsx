@@ -155,34 +155,38 @@ export function QuickSearch({ user, items, className, inputRef: inputRefProp, au
       className={clsx('relative', className)}
       onBlur={(e) => { if (!e.currentTarget.contains(e.relatedTarget as Node | null)) setOpen(false); }}
     >
-      <label htmlFor={`${id}-input`} className="sr-only">Search or go to a page</label>
-      <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted" aria-hidden />
-      <input
-        ref={inputRef}
-        id={`${id}-input`}
-        type="search"
-        enterKeyHint="go"
-        role="combobox"
-        aria-expanded={open}
-        aria-controls={listId}
-        aria-autocomplete="list"
-        aria-activedescendant={open && options[active] ? optionId(active) : undefined}
-        aria-keyshortcuts="Meta+K Control+K"
-        autoComplete="off"
-        spellCheck={false}
-        placeholder={placeholder}
-        value={query}
-        onChange={(e) => { setQuery(e.target.value); setOpen(true); }}
-        onFocus={() => setOpen(true)}
-        onKeyDown={onKeyDown}
-        className="focus-ring h-9 w-full rounded-lg border border-control-border bg-surface pl-9 pr-14 text-sm text-fg shadow-card transition-colors placeholder:text-subtle hover:border-muted focus:border-primary [&::-webkit-search-cancel-button]:hidden"
-      />
-      {!embedded && (
-        <kbd className="pointer-events-none absolute right-2 top-1/2 hidden -translate-y-1/2 items-center gap-0.5 rounded-md border border-border bg-surface-2 px-1.5 py-0.5 font-sans text-[10px] font-medium text-muted lg:inline-flex" aria-hidden>
-          ⌘K
-        </kbd>
-      )}
-      {pending && <Loader2 className={clsx('absolute top-1/2 h-4 w-4 -translate-y-1/2 animate-spin text-muted', embedded ? 'right-3' : 'right-12')} aria-hidden />}
+      {/* The field and its icons in their own box: in the phone panel the list below is in flow, and the icons must
+          centre on the field, not on the whole panel. */}
+      <div className="relative">
+        <label htmlFor={`${id}-input`} className="sr-only">Search or go to a page</label>
+        <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted" aria-hidden />
+        <input
+          ref={inputRef}
+          id={`${id}-input`}
+          type="search"
+          enterKeyHint="go"
+          role="combobox"
+          aria-expanded={open}
+          aria-controls={listId}
+          aria-autocomplete="list"
+          aria-activedescendant={open && options[active] ? optionId(active) : undefined}
+          aria-keyshortcuts="Meta+K Control+K"
+          autoComplete="off"
+          spellCheck={false}
+          placeholder={placeholder}
+          value={query}
+          onChange={(e) => { setQuery(e.target.value); setOpen(true); }}
+          onFocus={() => setOpen(true)}
+          onKeyDown={onKeyDown}
+          className="focus-ring h-9 w-full rounded-lg border border-control-border bg-surface pl-9 pr-14 text-sm text-fg shadow-card transition-colors placeholder:text-subtle hover:border-muted focus:border-primary [&::-webkit-search-cancel-button]:hidden"
+        />
+        {!embedded && (
+          <kbd className="pointer-events-none absolute right-2 top-1/2 hidden -translate-y-1/2 items-center gap-0.5 rounded-md border border-border bg-surface-2 px-1.5 py-0.5 font-sans text-[10px] font-medium text-muted lg:inline-flex" aria-hidden>
+            ⌘K
+          </kbd>
+        )}
+        {pending && <Loader2 className={clsx('absolute top-1/2 h-4 w-4 -translate-y-1/2 animate-spin text-muted', embedded ? 'right-3' : 'right-12')} aria-hidden />}
+      </div>
       {open && (
         <div
           className={clsx(

@@ -197,7 +197,7 @@ export function Dropdown({ trigger, items, header, align = 'end', side = 'bottom
           onClick={stop}
           onMouseDown={stop}
           style={{ top: pos?.top ?? 0, left: pos?.left ?? 0, width, visibility: pos ? 'visible' : 'hidden' }}
-          className="fixed z-[70] animate-scale-in overflow-hidden rounded-xl border border-border bg-surface p-1 text-sm shadow-pop outline-none"
+          className="scrollbar-thin fixed z-[70] max-h-[calc(100dvh-1rem)] animate-scale-in overflow-y-auto overscroll-contain rounded-xl border border-border bg-surface p-1 text-sm shadow-pop outline-none"
         >
           {header && <div className="border-b border-border px-3 py-2.5">{header}</div>}
           {items.map((it, i) => (

@@ -123,11 +123,13 @@ export function Topbar({ user, items, onLogout, onOpenMenu, menuButtonRef, title
           >
             <Search className="h-[18px] w-[18px]" aria-hidden />
           </button>
+          {/* Below lg the panel spans the screen under the top bar (it used to hang off the magnifier and run off the
+              left edge of a phone). The header's backdrop blur makes it the containing block, which is full width. */}
           {searchOpen && (
             <div
               role="dialog"
               aria-label="Search or go to a page"
-              className="absolute right-0 top-full z-40 mt-2 w-[min(22rem,calc(100vw-2rem))] animate-scale-in rounded-xl border border-border bg-surface p-2 shadow-pop"
+              className="fixed inset-x-4 top-[4.5rem] z-40 mx-auto max-w-md animate-scale-in rounded-xl border border-border bg-surface p-2 shadow-pop"
               onBlur={(e) => { if (!e.currentTarget.contains(e.relatedTarget as Node | null)) closeSearch(false); }}
             >
               <QuickSearch user={user} items={items} autoFocus embedded onNavigate={() => closeSearch(false)} onDismiss={() => closeSearch(true)} />
