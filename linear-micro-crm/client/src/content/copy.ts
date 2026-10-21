@@ -198,7 +198,8 @@ export const COPY = {
       useRecovery: 'Use a recovery code instead',
       useApp: 'Use your authenticator app instead',
       verify: 'Verify',
-      back: 'Back',
+      /** The only way back on the two-step step (the header's "Back" to the public page shows on step one only). */
+      back: 'Back to email and employee ID',
       expired: 'That sign-in attempt expired. Enter your details again to get a new code.',
       invalid: 'That code is not valid. Check your app and try again.',
       tooMany: 'Too many attempts. Wait a few minutes before trying again.',

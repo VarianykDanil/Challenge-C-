@@ -67,6 +67,8 @@ function ToastItem({ t, onDismiss }: { t: ToastMessage; onDismiss: (id: number) 
       onMouseLeave={arm}
       onFocus={disarm}
       onBlur={(e) => { if (!e.currentTarget.contains(e.relatedTarget as Node | null)) arm(); }}
+      // On phones the action and the dismiss button are at least 40 px to tap. The dismiss button fills the 40 px right
+      // padding from the top corner, so the text keeps its width and stays clear of it.
       className={clsx(
         'pointer-events-auto relative flex w-[min(92vw,360px)] items-start gap-3 overflow-hidden rounded-xl border border-border bg-surface p-3.5 pr-10 shadow-pop',
         'before:absolute before:inset-y-0 before:left-0 before:w-1 before:content-[""]',
@@ -82,7 +84,7 @@ function ToastItem({ t, onDismiss }: { t: ToastMessage; onDismiss: (id: number) 
           <button
             type="button"
             onClick={() => { t.action?.onClick(); close(); }}
-            className="focus-ring mt-2 rounded-md text-xs font-semibold text-primary underline-offset-4 hover:underline"
+            className="focus-ring mt-2 rounded-md text-xs font-semibold text-primary underline-offset-4 hover:underline max-sm:-mx-2 max-sm:-mb-2 max-sm:mt-0.5 max-sm:inline-flex max-sm:min-h-10 max-sm:items-center max-sm:px-2"
           >
             {t.action.label}
           </button>
@@ -92,7 +94,8 @@ function ToastItem({ t, onDismiss }: { t: ToastMessage; onDismiss: (id: number) 
         type="button"
         onClick={close}
         aria-label="Dismiss notification"
-        className="focus-ring absolute right-2 top-2 inline-flex h-7 w-7 items-center justify-center rounded-md text-muted transition-colors hover:bg-surface-2 hover:text-fg"
+        // On phones it sits in the corner, so its focus ring is drawn inside (the toast clips anything outside it).
+        className="focus-ring absolute right-2 top-2 inline-flex h-7 w-7 items-center justify-center rounded-md text-muted transition-colors hover:bg-surface-2 hover:text-fg max-sm:focus-ring-inset max-sm:right-0 max-sm:top-0 max-sm:h-10 max-sm:w-10 max-sm:rounded-tr-[11px]"
       >
         <X className="h-4 w-4" aria-hidden />
       </button>

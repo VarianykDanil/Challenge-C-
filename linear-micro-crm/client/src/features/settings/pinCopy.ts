@@ -33,7 +33,8 @@ export const PIN_COPY = {
     signingInAs: 'Signing in as',
     label: 'PIN',
     submit: 'Sign in',
-    back: 'Back',
+    /** The only way back on the PIN step (the header's "Back" to the public page shows on step one only). */
+    back: 'Back to email and employee ID',
     forgot: 'Forgotten it? An administrator can reset your PIN, then you sign in with your email and employee ID.',
     wrong: 'That PIN isn’t right. Check it and try again.',
     triesLeft: (n: number) => `${plural(n, 'try', 'tries')} left before your PIN locks for a while.`,

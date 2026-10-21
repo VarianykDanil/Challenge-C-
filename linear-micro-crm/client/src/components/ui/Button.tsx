@@ -35,7 +35,9 @@ const VARIANT: Record<ButtonVariant, string> = {
   ghost: 'text-muted hover:bg-surface-2 hover:text-fg active:bg-surface-3',
   soft: 'bg-primary-soft text-primary hover:bg-primary/15 active:bg-primary/20',
   danger: 'bg-danger text-status-fg shadow-card hover:brightness-110 active:brightness-95',
-  link: 'h-auto px-0 text-primary underline-offset-4 hover:underline',
+  // Text-sized on desktop; at least 44 px tall on phones so it is easy to tap (release 1.2 UI round: the sign-in "Back",
+  // the PIN gate's "Sign out" and the two-step "Use a recovery code" links were 20 px).
+  link: 'h-auto px-0 text-primary underline-offset-4 hover:underline max-sm:min-h-11',
 };
 
 export const Button = forwardRef<HTMLButtonElement, ButtonProps>(function Button(

@@ -35,8 +35,11 @@ export function RangePicker({ value, onChange, presets = PERFORMANCE_PRESETS, al
   // Release 1.2 (U5 layout fix): min-w-0 + max-w-full on the root and the pill wrapper let a flex or wrapping parent
   // shrink the picker to the room it has (the pills then scroll inside the control) instead of the pills' full width
   // pushing the page sideways. Parents that share a row with it wrap it onto its own line when it does not fit.
+  // From `sm` up the root never shrinks below its pills (sm:min-w-min): there is no fading edge there, so a squeezed
+  // row (Events at about 1440 px, next to the three filters) cut the last pill to "Custo"; the neighbours give way.
+  // On phones (max-sm) the pills and the custom dates are 40 px tall to tap, and the two dates share the row.
   return (
-    <div className={`flex min-w-0 max-w-full flex-wrap items-center gap-3 ${className ?? ''}`}>
+    <div className={`flex min-w-0 max-w-full flex-wrap items-center gap-3 sm:min-w-min ${className ?? ''}`}>
       {/* On phones the pills scroll inside the control; the fading right edge says there is more. */}
       <div className="relative inline-flex min-w-0 max-w-full after:pointer-events-none after:absolute after:inset-y-0 after:right-0 after:w-8 after:rounded-r-lg after:bg-linear-to-l after:from-bg after:to-transparent sm:after:hidden">
         <SegmentedControl<RangePreset | 'custom'>
@@ -48,17 +51,17 @@ export function RangePicker({ value, onChange, presets = PERFORMANCE_PRESETS, al
             if (v === 'custom') onChange({ ...value, preset: 'custom' });
             else onChange({ preset: v, ...presetRange(v, new Date(), clampToToday) });
           }}
-          className="max-w-full overflow-x-auto pr-6 sm:pr-0.5"
+          className="max-w-full overflow-x-auto pr-6 max-sm:h-11 sm:pr-0.5"
         />
       </div>
       {allowCustom && value.preset === 'custom' && (
-        <div className="flex flex-col gap-1">
-          <div className="flex items-center gap-2 text-sm text-muted">
+        <div className="flex flex-col gap-1 max-sm:w-full">
+          <div className="grid grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)] items-center gap-2 text-sm text-muted sm:flex">
             <label htmlFor={`${id}-from`} className="sr-only">From</label>
-            <Input id={`${id}-from`} type="date" value={draft.from} max={draft.to || undefined} onChange={(e) => edit({ ...draft, from: e.target.value })} size="sm" className="w-auto" invalid={invalid} aria-invalid={invalid || undefined} aria-describedby={invalid ? `${id}-err` : undefined} />
+            <Input id={`${id}-from`} type="date" value={draft.from} max={draft.to || undefined} onChange={(e) => edit({ ...draft, from: e.target.value })} size="sm" className="max-sm:h-10 sm:w-auto" invalid={invalid} aria-invalid={invalid || undefined} aria-describedby={invalid ? `${id}-err` : undefined} />
             <span aria-hidden>–</span>
             <label htmlFor={`${id}-to`} className="sr-only">To</label>
-            <Input id={`${id}-to`} type="date" value={draft.to} min={draft.from || undefined} onChange={(e) => edit({ ...draft, to: e.target.value })} size="sm" className="w-auto" invalid={invalid} aria-invalid={invalid || undefined} aria-describedby={invalid ? `${id}-err` : undefined} />
+            <Input id={`${id}-to`} type="date" value={draft.to} min={draft.from || undefined} onChange={(e) => edit({ ...draft, to: e.target.value })} size="sm" className="max-sm:h-10 sm:w-auto" invalid={invalid} aria-invalid={invalid || undefined} aria-describedby={invalid ? `${id}-err` : undefined} />
           </div>
           {invalid && <p id={`${id}-err`} role="alert" className="text-xs text-danger">The start date must be on or before the end date.</p>}
         </div>

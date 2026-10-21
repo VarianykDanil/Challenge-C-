@@ -196,7 +196,9 @@ export function Modal({ open, onClose, title, description, children, footer, siz
                 onClick={onClose}
                 data-modal-close
                 aria-label="Close"
-                className="focus-ring -mr-2 -mt-2 inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-lg text-muted transition-colors hover:bg-surface-2 hover:text-fg"
+                // 40 px to tap on phones. The larger margins keep its footprint in the title row at 28 x 28, as from `sm`
+                // up, so a title that fits there still fits; the icon sits 2 px further right.
+                className="focus-ring -mr-2 -mt-2 inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-lg text-muted transition-colors hover:bg-surface-2 hover:text-fg max-sm:-mb-0.5 max-sm:-mr-3 max-sm:-mt-2.5 max-sm:h-10 max-sm:w-10"
               >
                 <X className="h-[18px] w-[18px]" aria-hidden />
               </button>

@@ -1041,4 +1041,4 @@ Google Authenticator, Microsoft Authenticator, 1Password, Authy. Secrets are sto
 
 ### Client (Settings → Security)
 - Card "Two-step verification" with status (On since <date> · N recovery codes left / Off). "Set up" opens a modal: step 1 QR code (the SVG) with the manual key and the otpauth link, step 2 six-digit input (auto-advance, paste-friendly) → "Turn on", step 3 recovery codes with Copy and Download (.txt) and a "I have saved these" confirmation. "Turn off" asks for a current code (or a recovery code). "New recovery codes" asks for a code. Admin view of a person (Team → person → Edit) gets "Reset two-step verification" with confirmation.
-- Login page: after email + ID, if `requiresTwoFactor` show step two: "Enter the 6-digit code from your authenticator app", with "Use a recovery code instead", and "Back" to step one; handle 401/410/429 messages.
+- Login page: after email + ID, if `requiresTwoFactor` show step two: "Enter the 6-digit code from your authenticator app", with "Use a recovery code instead", and "Back to email and employee ID" (step one); handle 401/410/429 messages.

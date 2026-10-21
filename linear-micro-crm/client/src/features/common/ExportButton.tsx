@@ -6,6 +6,9 @@ import { Button, Tooltip, useToast, type ButtonSize, type TooltipSide } from '@/
 import { downloadCsv, toCsv, type CsvColumn } from '@/lib/csv';
 import { formatNumber } from '@/lib/format';
 
+/** Button sizes under 40 px tall. */
+const BELOW_40: ReadonlySet<ButtonSize> = new Set<ButtonSize>(['xs', 'sm', 'icon-sm', 'icon-xs']);
+
 export interface ExportButtonProps<T extends object> {
   /** Visible text (from `sm` up) and the button's accessible name. */
   label?: string;
@@ -59,7 +62,8 @@ export function ExportButton<T extends object>({
         aria-label={label}
         title={empty ? emptyHint : undefined}
         leftIcon={iconOnly ? undefined : <Download aria-hidden />}
-        className={clsx(!iconOnly && 'px-2.5 sm:px-3', className)}
+        // The smaller sizes grow to 40 x 40 on phones so they are easy to tap; from `sm` up they keep their size.
+        className={clsx(!iconOnly && 'px-2.5 sm:px-3', BELOW_40.has(size) && (iconOnly ? 'max-sm:h-10 max-sm:w-10' : 'max-sm:h-10 max-sm:min-w-10'), className)}
       >
         {iconOnly ? <Download aria-hidden /> : <span className="hidden sm:inline">{label}</span>}
       </Button>

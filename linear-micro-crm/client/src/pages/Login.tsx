@@ -281,15 +281,18 @@ export function LoginPage() {
         <div className="relative flex items-center gap-4">
           <Link
             to="/welcome"
-            aria-label={`Back to the ${BRAND.name} public page`}
+            aria-label={`${BRAND.name} public page`}
             className="focus-ring -m-1.5 inline-flex rounded-xl p-1.5 transition-colors hover:bg-ink-fg/10 focus-visible:bg-ink-fg/10"
           >
             <Logo size={36} tone="inverse" />
           </Link>
-          <Link to="/welcome" className="focus-ring inline-flex items-center gap-1 rounded-md text-sm font-medium text-ink-muted transition-colors hover:text-ink-fg">
-            <ArrowLeft className="h-4 w-4" aria-hidden />
-            Back
-          </Link>
+          {/* Step one only: the PIN and two-step steps have their own way back, to step one. */}
+          {stage === 'credentials' && (
+            <Link to="/welcome" className="focus-ring inline-flex items-center gap-1 rounded-md text-sm font-medium text-ink-muted transition-colors hover:text-ink-fg">
+              <ArrowLeft className="h-4 w-4" aria-hidden />
+              Back
+            </Link>
+          )}
         </div>
 
         <div className="relative max-w-xl">
@@ -327,18 +330,21 @@ export function LoginPage() {
       {/* ───────── Form panel ───────── */}
       <section className="relative flex min-h-dvh flex-col lg:min-h-0" aria-label="Sign in">
         <div className="flex h-16 items-center justify-between px-5 sm:px-8">
+          {/* Below lg (phones and tablets) the header links are at least 40 px tall to tap. */}
           <div className="flex items-center gap-3 lg:hidden">
             <Link
               to="/welcome"
-              aria-label={`Back to the ${BRAND.name} public page`}
-              className="focus-ring -m-1 inline-flex rounded-lg p-1 transition-colors hover:bg-surface-2 focus-visible:bg-surface-2"
+              aria-label={`${BRAND.name} public page`}
+              className="focus-ring -m-1 inline-flex min-h-10 items-center rounded-lg p-1 transition-colors hover:bg-surface-2 focus-visible:bg-surface-2"
             >
               <Logo size={30} />
             </Link>
-            <Link to="/welcome" className="focus-ring inline-flex items-center gap-1 rounded-md text-sm font-medium text-muted transition-colors hover:text-fg">
-              <ArrowLeft className="h-4 w-4" aria-hidden />
-              Back
-            </Link>
+            {stage === 'credentials' && (
+              <Link to="/welcome" className="focus-ring inline-flex min-h-10 items-center gap-1 rounded-md text-sm font-medium text-muted transition-colors hover:text-fg">
+                <ArrowLeft className="h-4 w-4" aria-hidden />
+                Back
+              </Link>
+            )}
           </div>
           <span className="hidden text-xs text-muted lg:inline">{BRAND.legalName}</span>
           <ThemeToggle />
@@ -474,7 +480,7 @@ export function LoginPage() {
         <footer className="flex flex-col items-center justify-between gap-2 px-5 py-5 text-xs text-muted sm:flex-row sm:px-8">
           <span>© {year} {BRAND.legalName}. All rights reserved.</span>
           <span className="inline-flex flex-wrap items-center justify-center gap-x-2 gap-y-1">
-            <Link to="/welcome" className="focus-ring rounded-md font-medium text-primary underline-offset-4 hover:underline">
+            <Link to="/welcome" className="focus-ring rounded-md font-medium text-primary underline-offset-4 hover:underline max-sm:inline-flex max-sm:min-h-10 max-sm:items-center">
               About {BRAND.name}
             </Link>
             <span aria-hidden>·</span>
@@ -564,7 +570,8 @@ function TwoFactorStep({ email, useRecovery, code, recoveryCode, error, locked, 
         <Button type="submit" size="lg" fullWidth loading={verifying} disabled={locked || !canSubmit} rightIcon={<ArrowRight />}>
           {t.verify}
         </Button>
-        <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-2 text-sm">
+        {/* One link per line: the way back says where it goes, so the two no longer fit side by side. */}
+        <div className="flex flex-col items-start gap-2 text-sm max-sm:gap-0">
           <Button type="button" variant="link" size="sm" onClick={onToggleRecovery} disabled={verifying}>
             {useRecovery ? t.useApp : t.useRecovery}
           </Button>
