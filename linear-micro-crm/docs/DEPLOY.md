@@ -25,11 +25,21 @@ disk. Never scale it out to two machines.
    the people, gauges and pay you already have, bring your existing database: stop Linear Hub on the laptop
    (`npm run stop`, or `npm run service:uninstall` if it runs as a service), make a fresh backup (`npm run backup`), and
    copy two files up to the server: `server/data/linear.sqlite` and `server/data/app-secret`.
-2. **The key for two-step secrets.**
+2. **The app secret (the key for two-step secrets and sign-in PINs).**
    - New install: generate a key once and keep it in your password manager: `openssl rand -hex 32`. Set it as
      `LM_APP_SECRET`.
    - Moving an existing database: keep using its `app-secret` file (set `LM_APP_SECRET_FILE` to where you put it and do
-     **not** set `LM_APP_SECRET`), or everyone with two-step verification would be locked out.
+     **not** set `LM_APP_SECRET`), or everyone with two-step verification would be locked out and no PIN would match.
+   - Sign-in PINs are hashed with this secret mixed in, so a stolen copy of the database file **on its own** is useless
+     for guessing PINs. A backup is only that safe when the key is not next to it. With `LM_APP_SECRET` (the new-install
+     route above) Linear Hub never writes the key to disk, so its backups do not contain it: keep the value in your
+     password manager, apart from the backups. With an `app-secret` file, Linear Hub's own backups folder holds a copy
+     of the key next to the database copies (so a restore keeps two-step and PINs working), and whoever gets that
+     folder can still try every 4-digit PIN in minutes: keep the whole folder private, and send it off the server only
+     to **encrypted** storage (step 7).
+   - **Back the secret up with the database** (for an `app-secret` file the backups folder does this). If the secret is
+     lost, two-step verification has to be set up again and every PIN has to be reset: `npm run pin:reset -- <email>`
+     on the server for the administrators, then the **Reset PIN** button (Team → person) for everyone else.
 3. **Environment for a real deployment** (both routes):
 
    ```ini
@@ -38,12 +48,17 @@ disk. Never scale it out to two machines.
    TZ=Europe/London
    PORT=4000
    LM_DEMO_ACCOUNTS=0      # the sign-in page shows no demo accounts and the API never publishes a login
-   TRUST_PROXY=1           # one reverse proxy in front: honour X-Forwarded-Proto (Secure cookies, HSTS)
+   TRUST_PROXY=1           # one reverse proxy in front: honour X-Forwarded-Proto/-For (Secure cookies, HSTS, per-client sign-in limits)
    COOKIE_SECURE=1         # the session cookie is only ever sent over HTTPS
    LM_APP_SECRET=…         # or LM_APP_SECRET_FILE=… (see step 2)
    ```
 
    Never set `LM_BUSINESS_NOW` on a live server (it is for demos and screenshots).
+
+   `TRUST_PROXY=1` means "exactly one proxy in front of me". Linear Hub then takes each person's address from the
+   proxy's `X-Forwarded-For`, so eight wrong sign-ins from one phone pause that phone, not everyone with that email.
+   Use `1` (not `true`, which would trust any address a client writes in the header), and only when Node is reachable
+   through the proxy alone (`HOST=127.0.0.1` in Route A; the platform's router in Route B).
 
 ---
 
@@ -203,7 +218,8 @@ to the site block and `LM_COMPRESSION=0` to the environment file.
 Linear Hub already writes a checked copy of the database to `LM_BACKUP_DIR` ten minutes after start and every night
 after 02:00 London time, keeping 30 daily and 8 weekly copies (see the README). A copy on the same server does not
 survive losing the server, so send them somewhere else every night. With [rclone](https://rclone.org) and an
-**encrypted** remote (the folder holds everyone's pay and a copy of the two-step key):
+**encrypted** remote (the folder holds everyone's pay and, with an `app-secret` file, a copy of the key for two-step
+secrets and sign-in PINs):
 
 ```bash
 sudo apt install -y rclone
@@ -302,6 +318,26 @@ snapshots for 7 days; still pull a backup off-site every week from the Shell (`l
 
 ---
 
+## If an administrator is locked out of their PIN
+
+Ten wrong PINs in a row lock a PIN for 15 minutes (longer if it keeps happening), and the sign-in screen says when it
+unlocks. Another administrator can reset it at once (Team → person → **Reset PIN**). The only administrator cannot
+reset their own in the app, so run this on the server instead (it works while Linear Hub is running):
+
+```bash
+# Route A
+cd /opt/linear-hub/app/linear-micro-crm
+sudo -u linear env DB_PATH=/var/lib/linear-hub/linear.sqlite npm run pin:reset -- you@example.co.uk
+# Fly.io: fly ssh console -C "sh -c 'cd /app && npm run pin:reset -- you@example.co.uk'"
+# Render: the Shell tab, then: npm run pin:reset -- you@example.co.uk
+```
+
+It clears that person's PIN and lock, signs them out everywhere and notes it in the audit trail; they sign in with
+their email and employee ID and choose a new PIN. The same command is the way back for everyone if the app secret was
+lost (no PIN matches without it).
+
+---
+
 ## Go-live checklist
 
 Tick every line before real people use it.
@@ -312,7 +348,9 @@ Tick every line before real people use it.
 - [ ] **Proxy and cookies**: `TRUST_PROXY=1` and `COOKIE_SECURE=1`; `curl -sI https://hub.example.co.uk/api/health`
       shows `Strict-Transport-Security`.
 - [ ] **`LM_DEMO_ACCOUNTS=0`**: the sign-in page shows no demo accounts.
-- [ ] **`LM_APP_SECRET` set** (or the `app-secret` file in place) and saved in your password manager.
+- [ ] **`LM_APP_SECRET` set** (or the `app-secret` file in place) and saved in your password manager: two-step secrets
+      and sign-in PINs depend on it. With `LM_APP_SECRET` the backups never hold the key; with the `app-secret` file
+      the backups folder holds a copy, so nobody else can read that folder and it leaves the server only encrypted.
 - [ ] **PIN required**: you set your own PIN (Settings → Security → Sign-in PIN), then switched on **Require a PIN for
       everyone** under Sign-in rules. Everyone creates one at their next tap.
 - [ ] **Two-step for administrators**: your own two-step verification is on, then **Require two-step verification for

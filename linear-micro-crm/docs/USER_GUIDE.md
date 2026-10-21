@@ -109,7 +109,11 @@ out on your other phones and laptops. **Change PIN** asks for the current one; *
 does not require PINs) takes you back to email and employee ID only.
 
 **Signing in.** After your email and employee ID, the "Enter your PIN" screen appears if you have one. Ten wrong PINs in
-a row lock it: ask an administrator to reset it, then sign in with your email and employee ID and choose a new PIN.
+a row lock it for 15 minutes, and the screen says when you can try again ("Try again after 14:35"). If it happens again
+before you get it right, the wait doubles each time (30 minutes, then an hour, up to a day). Once you sign in with the
+right PIN the count starts again from nothing. Forgotten it? Ask an administrator to reset it, then sign in with your
+email and employee ID and choose a new PIN. If your PIN locks and you did not type the wrong PINs yourself, change it
+and tell an administrator. A 6-digit PIN is much harder to guess than a 4-digit one.
 If you are away from Linear Hub for longer than the sign-out time (12 hours unless your administrator changed it), you
 sign in again.
 
@@ -126,8 +130,14 @@ else's phone.
 - **Sign out after inactivity.** 1 to 72 hours (12 by default). Shorter is safer for shared phones.
 
 **Administrators — resetting a PIN (Team → person → Edit profile → Sign-in PIN).** The badge shows **PIN set**, **No PIN**
-or **Locked**. **Reset PIN** clears it and its lock and signs them out everywhere; they sign in with their email and
-employee ID and choose a new PIN (straight away, if a PIN is required).
+or **Locked** (with the time the lock ends). **Reset PIN** clears it and its lock and signs them out everywhere; they
+sign in with their email and employee ID and choose a new PIN (straight away, if a PIN is required).
+
+**Administrators — your own PIN.** You cannot reset your own PIN from the Team page. If it is locked, wait for the time
+on the sign-in screen, or ask another administrator. If you are the only administrator, whoever looks after the server
+runs `npm run pin:reset -- your.email@linear-mcr.co.uk` there (in the `linear-micro-crm` folder): it clears your PIN and
+its lock, signs you out everywhere and notes it in the audit trail. Then sign in with your email and employee ID and set
+a new PIN.
 
 **Leaders, recruiters and reps** see only their own PIN card; the rules and resets are for administrators.
 
@@ -650,8 +660,9 @@ If the server was started with automatic backups switched off (`LM_BACKUP=0`), t
 badge and does not promise nightly copies: run `npm run backup` on the laptop yourself, or start Linear Hub again
 without `LM_BACKUP=0`.
 
-The backups folder is a full copy of everyone's details, pay and the two-step key: keep it private, never commit it to
-git or share it.
+The backups folder is a full copy of everyone's details, pay and the app secret (the key for two-step sign-in and PINs;
+with it, someone could work out a 4-digit PIN in minutes): keep it private, in your own iCloud or Drive only, never
+commit it to git or share it.
 
 To go back to a backup (for example after a mistake that deleted the wrong entries): on the laptop, stop the server
 (`npm run stop`, or `npm run service:uninstall` if it runs in the background) and run

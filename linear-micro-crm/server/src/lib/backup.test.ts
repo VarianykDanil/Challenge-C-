@@ -27,6 +27,7 @@ import {
   needsNightlyBackup,
   planRotation,
   restoreDatabase,
+  restoreKeyNotes,
   rotate,
   scheduleBackups,
 } from './backup.ts';
@@ -512,5 +513,57 @@ describe('restoreDatabase', () => {
     writeFileSync(f.secret, 'fixture-secret-0123456789abcdef\n', { mode: 0o600 });
     const again = await restoreDatabase({ dbPath: f.dbPath, candidate: r.path, port: 1, confirm: async () => true, log: () => {}, now: new Date('2026-10-19T14:05:00Z') });
     assert.equal(again.status === 'restored' ? again.secret : again.status, 'none');
+  });
+
+  test('warns when restored PINs depend on a key that is missing or different (PINs are peppered with it since 1.2)', async () => {
+    const f = fixtureDb('restore-pin-key');
+    // two peppered PINs and one 1.2.0 bare-scrypt PIN (which does not depend on the key); nobody has two-step
+    f.db.prepare(`UPDATE users SET pin_hash = 'scrypt-hmac$16384$8$1$c2FsdA==$a2V5' WHERE email IN ('remy.rep@fixture.test', 'lee.leader@fixture.test')`).run();
+    f.db.prepare(`UPDATE users SET pin_hash = 'scrypt$16384$8$1$c2FsdA==$a2V5' WHERE email = 'ada.admin@fixture.test'`).run();
+    const backups = path.join(f.dir, 'backups');
+    const r = await backupNow(f.db, { dir: backups, secretFile: null, now: new Date('2026-10-19T01:00:00Z') });
+    f.db.close();
+    rmSync(f.secret); // a new laptop, and a backup folder that never held the key
+
+    const missing = await restoreDatabase({ dbPath: f.dbPath, candidate: r.path, port: 1, confirm: async () => true, log: () => {} });
+    assert.equal(missing.status, 'restored');
+    if (missing.status !== 'restored') return;
+    assert.equal(missing.secret, 'missing');
+    assert.equal(missing.candidate.twoStepUsers, 0);
+    assert.equal(missing.candidate.pinUsers, 2, 'peppered PINs only');
+    const [warn, ...more] = restoreKeyNotes(missing.secret, missing.candidate);
+    assert.equal(more.length, 0);
+    assert.match(warn!, /^Warning: there is no app secret .* so 2 people with a sign-in PIN would be told "That PIN is not right"/);
+    assert.match(warn!, /npm run pin:reset -- <email>/);
+    assert.doesNotMatch(warn!, /two-step sign-in cannot|recovery code/, 'nobody has two-step');
+
+    // the backups folder holds a different key from the one now next to the database
+    writeFileSync(path.join(backups, 'app-secret'), 'the-key-the-pins-were-made-with\n', { mode: 0o600 });
+    writeFileSync(f.secret, 'a-key-this-laptop-generated\n', { mode: 0o600 });
+    const differs = await restoreDatabase({ dbPath: f.dbPath, candidate: r.path, port: 1, confirm: async () => true, log: () => {}, now: new Date('2026-10-19T14:07:00Z') });
+    assert.equal(differs.status === 'restored' ? differs.secret : differs.status, 'differs');
+    if (differs.status !== 'restored') return;
+    const [note] = restoreKeyNotes(differs.secret, differs.candidate);
+    assert.match(note!, /^Warning: the app secret in the backups folder .* differs .* the 2 people with a sign-in PIN would be told "That PIN is not right"/);
+    assert.match(note!, /replace the app-secret next to the database with the copy from the backups folder/);
+    assert.equal(readFileSync(f.secret, 'utf8'), 'a-key-this-laptop-generated\n', 'the live key is never overwritten');
+  });
+
+  test('restoreKeyNotes: one plain line per case, nothing when the key is fine or nobody depends on it', () => {
+    const nobody = { pinUsers: 0, twoStepUsers: 0 };
+    const both = { pinUsers: 3, twoStepUsers: 1 };
+    assert.deepEqual(restoreKeyNotes('same', both), []);
+    assert.deepEqual(restoreKeyNotes('none', both), [], 'LM_APP_SECRET set, or no copy to compare with');
+    assert.deepEqual(restoreKeyNotes('missing', nobody), []);
+    assert.match(restoreKeyNotes('installed', both)[0]!, /two-step codes and sign-in PINs keep working/);
+    assert.match(restoreKeyNotes('differs', nobody)[0]!, /^Note: .* nothing depends on it yet/);
+    const missingBoth = restoreKeyNotes('missing', both)[0]!;
+    assert.match(missingBoth, /3 people with a sign-in PIN .* and 1 person with two-step sign-in cannot finish signing in with a code/);
+    assert.match(missingBoth, /npm run pin:reset/);
+    assert.match(missingBoth, /recovery code/);
+    const twoStepOnly = restoreKeyNotes('missing', { pinUsers: 0, twoStepUsers: 2 })[0]!;
+    assert.match(twoStepOnly, /2 people with two-step sign-in/);
+    assert.doesNotMatch(twoStepOnly, /pin:reset/);
+    assert.match(restoreKeyNotes('differs', { pinUsers: 1, twoStepUsers: 0 })[0]!, /the 1 person with a sign-in PIN would be told/);
   });
 });

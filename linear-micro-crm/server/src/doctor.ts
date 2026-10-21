@@ -2,7 +2,7 @@
  * `npm run doctor`: check this machine can run Linear Hub and say exactly what to do when it cannot.
  *
  * Checks, in order: Node version and environment, the built client, the data folder, the database file, the
- * two-step encryption key, backups (age, free disk, the background service's Node), the port, and finally a real
+ * app secret (the two-step and PIN key), backups (age, free disk, the background service's Node), the port, and finally a real
  * boot of the server on a temporary database and a random port (does it answer /api/health and stay up?). Exit code
  * 1 when any check fails; warnings and notes (ℹ) do not fail it.
  */
@@ -118,18 +118,18 @@ console.log(`Linear Hub doctor — ${new Date().toISOString()}\n`);
   }
 }
 
-// 5. Two-step verification key
+// 5. The app secret (the two-step and PIN key)
 {
   if (process.env.LM_APP_SECRET) {
-    report('ok', 'LM_APP_SECRET is set (two-step secrets are encrypted with it)');
+    report('ok', 'LM_APP_SECRET is set (two-step secrets are encrypted and sign-in PINs peppered with it)');
   } else {
     const file = process.env.LM_APP_SECRET_FILE ? path.resolve(process.env.LM_APP_SECRET_FILE) : path.join(path.dirname(dbPath), 'app-secret');
     if (!existsSync(file)) {
-      report('ok', `Two-step key file not created yet (${file}): generated on first start`);
+      report('ok', `App secret file (the two-step and PIN key) not created yet (${file}): generated on first start`);
     } else {
       const mode = statSync(file).mode & 0o777;
       const tight = process.platform === 'win32' || mode === 0o600;
-      report(tight ? 'ok' : 'warn', `Two-step key file ${file} (mode ${mode.toString(8)})`, tight ? undefined : `Run:  chmod 600 "${file}"`);
+      report(tight ? 'ok' : 'warn', `App secret file (the two-step and PIN key) ${file} (mode ${mode.toString(8)})`, tight ? undefined : `Run:  chmod 600 "${file}"`);
     }
   }
 }

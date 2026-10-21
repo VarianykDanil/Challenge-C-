@@ -5,12 +5,16 @@
  * admin's PIN reset and status; the session idle timeout; and the extension's upgrade of an existing database.
  * Sessions and PINs run on the real clock, so nothing here pins the business clock.
  */
-import { afterEach, test } from 'node:test';
+import { after, afterEach, test } from 'node:test';
 import assert from 'node:assert/strict';
+import { mkdtempSync, rmSync } from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
 import { PIN_LOCK_AFTER_FAILURES } from '@lm/shared';
 import { get, openDb, run } from '../db/connection.ts';
 import { extension as pinExtension } from '../db/extensions/pin.ts';
 import { createSchema } from '../db/schema.ts';
+import { configureAppSecret } from '../lib/crypto.ts';
 import { hashPin, verifyPin } from '../lib/pin.ts';
 import { totp } from '../lib/totp.ts';
 import { LAST_SEEN_RESOLUTION_MS, purgeExpiredSessions } from '../middleware/auth.ts';
@@ -19,6 +23,12 @@ import { FIXTURE_ACCOUNTS, startTestServer, type Json, type TestClient, type Tes
 
 const GOOD_PIN = '5821';
 const OTHER_PIN = '7390';
+
+// PINs are peppered with the app secret: the first test hashes before any test server exists, so point the secret at
+// a temporary file (never server/data/app-secret).
+const secretDir = mkdtempSync(path.join(os.tmpdir(), 'linear-pin-'));
+configureAppSecret(path.join(secretDir, 'app-secret'));
+after(() => rmSync(secretDir, { recursive: true, force: true }));
 
 let srv: TestServer | null = null;
 afterEach(async () => {
@@ -55,7 +65,7 @@ async function enableTwoFactor(client: TestClient): Promise<string> {
 test('scrypt hashes: random salt, parameters in the hash, constant-time verify; malformed input is a mismatch', async () => {
   const a = await hashPin(GOOD_PIN);
   const b = await hashPin(GOOD_PIN);
-  assert.match(a, /^scrypt\$16384\$8\$1\$[A-Za-z0-9+/=]+\$[A-Za-z0-9+/=]+$/);
+  assert.match(a, /^scrypt-hmac\$16384\$8\$1\$[A-Za-z0-9+/=]+\$[A-Za-z0-9+/=]+$/);
   assert.notEqual(a, b, 'a fresh salt every time');
   assert.ok(!a.includes(GOOD_PIN));
   assert.equal(await verifyPin(a, GOOD_PIN), true);
@@ -85,7 +95,7 @@ test('set a PIN: rules, stored hashed, other sessions signed out, sign-in then n
 
   assert.equal((await rep.post('/auth/pin', { pin: GOOD_PIN })).status, 204);
   const stored = pinHashOf(fx().users.rep).h!;
-  assert.ok(stored.startsWith('scrypt$') && !stored.includes(GOOD_PIN), 'hashed, never plain');
+  assert.ok(stored.startsWith('scrypt-hmac$') && !stored.includes(GOOD_PIN), 'peppered and hashed, never plain');
   const status = (await rep.get('/auth/pin')).json;
   assert.equal(status.hasPin, true);
   assert.equal(typeof status.setAt, 'string');
@@ -142,7 +152,7 @@ test('change and remove a PIN: the current one is needed, the same one is refuse
   assert.equal((await srv!.anon().post('/auth/login', creds)).status, 200, 'back to email + employee ID');
 });
 
-test('lockout: the login limiter (8 per source and email) and the PIN lock after 10 wrong in a row; admin reset unlocks', async () => {
+test('lockout: the login limiter (8 per source and email) and the PIN lock after 10 wrong in a row; admin reset unlocks (expiry: pin-lock.test.ts)', async () => {
   await start();
   const rep = await withPin('rep');
   const creds = FIXTURE_ACCOUNTS.rep;
@@ -158,7 +168,9 @@ test('lockout: the login limiter (8 per source and email) and the PIN lock after
   assert.equal(ninth.json.details.attemptsLeft, 1);
   const tenth = await anon.post('/auth/login', { ...creds, pin: '9152' });
   assert.equal(tenth.status, 423);
-  assert.deepEqual(tenth.json.details, { requiresPin: true, reason: 'locked' });
+  assert.equal(tenth.json.details.reason, 'locked');
+  assert.equal(typeof tenth.json.details.lockedUntil, 'string', 'the lock says when it ends');
+  assert.match(tenth.json.error, /^Too many wrong PINs\. Try again after \d{2}:\d{2}/);
   const right = await anon.post('/auth/login', { ...creds, pin: GOOD_PIN });
   assert.equal(right.status, 423, 'locked even for the right PIN');
   assert.equal(anon.cookie, '');

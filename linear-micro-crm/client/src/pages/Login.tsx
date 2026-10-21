@@ -26,18 +26,21 @@ const WARN_TRIES_LEFT = 3;
 
 /**
  * Release 1.2 (U1): why the PIN step opens. 'missing' comes from a 200 `requiresPin` answer (`login()` resolves with
- * it); 'wrong' and 'locked' from a 401 / 423 error.
+ * it); 'wrong' and 'locked' from a 401 / 423 error. `message`: the server's sentence for a lock, which says when it
+ * ends ("Too many wrong PINs. Try again after 14:35, or ask an administrator to reset your PIN.").
  */
-type PinStepReason = { reason: 'missing' | LoginPinDetails['reason']; attemptsLeft?: number };
+type PinStepReason = { reason: 'missing' | LoginPinDetails['reason']; attemptsLeft?: number; message?: string };
 
 /**
  * The sign-in failed at the PIN — 401 (wrong) or 423 (locked) with `details: { requiresPin: true, reason,
- * attemptsLeft? }` (shared LoginPinDetails). Null for any other answer.
+ * attemptsLeft?, lockedUntil? }` (shared LoginPinDetails), plus the server's sentence. Null for any other answer.
  */
-function pinStop(e: unknown): LoginPinDetails | null {
+function pinStop(e: unknown): (LoginPinDetails & { message: string }) | null {
   if (!(e instanceof ApiError) || (e.status !== 401 && e.status !== 423)) return null;
   const d = e.details as Partial<LoginPinDetails> | null | undefined;
-  return d && typeof d === 'object' && d.requiresPin === true && typeof d.reason === 'string' ? (d as LoginPinDetails) : null;
+  return d && typeof d === 'object' && d.requiresPin === true && typeof d.reason === 'string'
+    ? { ...(d as LoginPinDetails), message: apiMessage(e, PIN_COPY.login.locked) }
+    : null;
 }
 
 /** The error line for a wrong PIN, with the tries left once few remain. */
@@ -102,7 +105,7 @@ export function LoginPage() {
     setPin('');
     setPinBusy(false);
     setPinLocked(stop.reason === 'locked');
-    setPinError(stop.reason === 'locked' ? PIN_COPY.login.locked : stop.reason === 'wrong' ? wrongPinMessage(stop.attemptsLeft) : null);
+    setPinError(stop.reason === 'locked' ? stop.message ?? PIN_COPY.login.locked : stop.reason === 'wrong' ? wrongPinMessage(stop.attemptsLeft) : null);
     setPinHint(stop.reason === 'missing' && stop.attemptsLeft !== undefined && stop.attemptsLeft <= WARN_TRIES_LEFT ? PIN_COPY.login.triesLeft(stop.attemptsLeft) : null);
     setPinStep(true);
   }
@@ -201,7 +204,7 @@ export function LoginPage() {
       if (stop?.reason === 'locked') {
         setPinLocked(true);
         setPinHint(null);
-        setPinError(PIN_COPY.login.locked);
+        setPinError(stop.message);
       } else if (stop) {
         setPinHint(null);
         setPinError(wrongPinMessage(stop.attemptsLeft));

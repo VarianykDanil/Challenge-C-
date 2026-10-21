@@ -1251,11 +1251,16 @@ README.md ("Backups and restore", "Run it in the background"); the switches are 
 6. Ask (`--yes`, or a typed `y`/`yes` in a terminal; no terminal and no `--yes` = cancel).
 7. Check the lock and the port again, move `<db>`, `<db>-wal`, `<db>-shm`, `<db>-journal` to
    `<db>.before-restore-<YYYY-MM-DD-HHmmss>` (+ suffix), rename staging to `<db>`.
-8. Key: if `<backup folder>/app-secret` exists and the live key file is missing, install it (0600); if both exist and
-   differ, say so and change nothing. If neither exists (and `LM_APP_SECRET` is not set) and the restored database has
-   people with two-step sign-in on, warn: they cannot finish signing in with a code until the kept `app-secret` is put
-   next to the database; otherwise they use a recovery code and an administrator resets their two-step sign-in
-   (Team › Edit › Reset two-step verification).
+8. Key (the app secret: it encrypts two-step secrets and, since 1.2, peppers every PIN; `restoreKeyNotes`): if
+   `<backup folder>/app-secret` exists and the live key file is missing, install it (0600); if both exist and differ,
+   change nothing and say so, as a warning naming how many people have a peppered PIN (`pin_hash` starting
+   `scrypt-hmac$`; 1.2.0's bare `scrypt$` hashes do not depend on the key) or two-step sign-in, with the fix (put the
+   backups folder's copy next to the database). If neither exists (and `LM_APP_SECRET` is not set) and the restored
+   database has people with a peppered PIN or two-step sign-in, warn: a right PIN gets "That PIN is not right" (and
+   locks after ten tries) and two-step codes fail until the kept `app-secret` is put next to the database; if it is
+   lost, PINs are reset (`npm run pin:reset -- <email>` for an administrator, then Reset PIN), and two-step users use
+   a recovery code and an administrator resets their two-step sign-in (Team › Edit › Reset two-step verification).
+   Nobody depending on the key: nothing is said.
 
 **Health status for admins** (`GET /health` → `backup`): `count` = matching files in the folder; `lastAt`/`file` from
 meta unless the newest file is more than a minute newer (after a restore the meta table is the backup's own, older
@@ -1544,10 +1549,29 @@ Progress lives on the device: `localStorage['lm-pitch-memorise:<userId>:<CAMPAIG
 
 ### 15.3 Sign-in PIN, stronger sessions and the deploy guide (U1)
 
-**Hashing** (`server/src/lib/pin.ts`). scrypt from `node:crypto`, N = 2^14, r = 8, p = 1, a fresh 16-byte random salt,
-32-byte key, stored as `scrypt$16384$8$1$<salt>$<key>` (base64) so the cost can be raised later without a migration.
-It runs on the libuv thread pool (no event-loop stall) and is compared with `timingSafeEqual`. A malformed PIN or
-hash is a mismatch. Nothing logs or returns a PIN or hash.
+**Hashing** (`server/src/lib/pin.ts`). The PIN is first peppered: HMAC-SHA256 of the PIN under a key derived from the
+app secret (`LM_APP_SECRET`, else the `app-secret` file next to the database; `deriveAppKey('pin-pepper')` in
+`lib/crypto.ts`, a separate key from the one that encrypts two-step secrets). That digest goes through scrypt from
+`node:crypto`, N = 2^14, r = 8, p = 1, a fresh 16-byte random salt, 32-byte key, stored as
+`scrypt-hmac$16384$8$1$<salt>$<key>` (base64) so the cost can be raised later without a migration. It runs on the libuv
+thread pool (no event-loop stall) and is compared with `timingSafeEqual`. A malformed PIN or hash is a mismatch.
+Nothing logs or returns a PIN or hash.
+
+Why the pepper: a PIN has at most a million values, so scrypt alone (about 40 ms a guess) lets anyone holding a copy of
+the database try every 4-digit PIN in minutes. The secret never sits in the database, so a copy of the database file
+**on its own** cannot be tested at all. Whether a backup is protected depends on where the key lives:
+- `LM_APP_SECRET` set: Linear Hub never writes the key to disk, so its backups do not hold it and are protected too.
+- the `app-secret` file (the default): the built-in backups folder keeps a copy of it next to the database copies
+  (§14.10, so a restore on a new laptop keeps two-step and PINs working). Whoever has that whole folder can still try
+  every 4-digit PIN in minutes, so the folder must be kept private (or only leave the machine encrypted, like the
+  rclone `crypt` remote in DEPLOY.md) as a whole, exactly like the key itself.
+
+1.2.0 stored `scrypt$…` (no pepper); those still verify, and the next right PIN at sign-in replaces the hash with a
+peppered one (`pin_set_at` unchanged; a compare-and-swap, so a PIN changed meanwhile is never overwritten).
+**Back up the app secret with the database**: for the `app-secret` file the backups folder does it; keep
+`LM_APP_SECRET` in a password manager. If it is lost, no PIN matches any more: each person's PIN must be reset
+(`npm run pin:reset -- <email>`, or the admin reset for everyone else once an admin can sign in). `npm run restore`
+warns when the restored database has peppered PINs and there is no key, or a different one (§14.10).
 
 **PIN rules** (`shared/src/logic/pin.ts`, the same on the phone and the server, checked in this order):
 `format` 4–6 ASCII digits → `repeated` one digit only (0000, 777777) → `sequence` a run up or down by one (0123, 9876,
@@ -1557,23 +1581,47 @@ they are at least four long (LM-0042 refuses 0042 and 004299). The first broken 
 
 **Sign-in with a PIN.** After the email and employee ID match (and the account is not `left`):
 
-1. The PIN is locked (`pin_failed_attempts ≥ 10`) → `423 locked` (counted against the login limiter).
+1. The PIN is locked (`pin_locked_until` is in the future, real clock) → `423 locked`, whatever was sent, and not
+   counted towards the PIN count (counted against the login limiter).
 2. No PIN sent → `200 { requiresPin: true, attemptsLeft }`, no cookie (counted against the login limiter, so the
    answer cannot be used to test email and employee ID pairs faster than a wrong ID).
 3. Otherwise the attempt is counted **before** the hash is awaited — a login-limiter failure and `pin_failed_attempts + 1`
-   — so a burst of parallel guesses meets both limits one request at a time. A right PIN resets the count to 0 (and
-   the login counters once the sign-in completes, after the two-step code if the account has one); a wrong one
-   answers `401 wrong` with `attemptsLeft = 10 − count`, or `423` on the tenth.
+   — so a burst of parallel guesses meets both limits one request at a time. A right PIN resets the count and the lock
+   (and the login counters once the sign-in completes, after the two-step code if the account has one); a wrong one
+   answers `401 wrong` with `attemptsLeft = 10 − (count mod 10)`, or `423` when the count reaches a multiple of 10.
 
-Rate limits are the login's own: 8 failures per (source address, email) in 15 minutes, 20 per email from anywhere,
-then `429`. The PIN lock is separate and persistent: 10 wrong PINs **in a row**, across every device and restart,
-lock it until an administrator resets it (a forgotten PIN takes the same route). Wrong current PINs in Settings count
-towards the same lock, plus 6 per user in 15 minutes → `429`.
+**The PIN lock** (`pinLockMinutes`). It ends by itself. When the count of wrong PINs in a row reaches 10, 20, 30 … the
+PIN locks for 15 minutes × 2^(count ÷ 10 − 1), at most 24 hours: 10 → 15 min, 20 → 30 min, 30 → 1 h, 40 → 2 h,
+50 → 4 h, 60 → 8 h, 70 → 16 h, 80 and beyond → 24 h. The count survives the end of a lock (that is what doubles it) and
+is only reset by a right PIN, an admin reset, `npm run pin:reset` or setting a new PIN. The end is stored in
+`users.pin_locked_until` (real clock, like sessions and the limiters; the business clock never moves it). Wrong current
+PINs in Settings (change or remove your PIN) count towards the same lock, plus 6 per user in 15 minutes → `429`.
 
-Worked example: a stranger who knows a rep's email and employee ID can try at most 8 PINs from one address in 15
-minutes before `429`, and 10 in total before the PIN locks: about a 1-in-1,000 chance against a 4-digit PIN that passes
-the rules. The rep then asks an admin for a reset. Without the lock the login limiter alone would allow 20 guesses per
-15 minutes from rotating addresses, nearly 2,000 a day.
+Every `423` says when it ends: "Too many wrong PINs. Try again after 14:35, or ask an administrator to reset your PIN."
+The time is the London wall-clock minute the lock ends, rounded **up** (so trying at the time shown always works), with
+"tomorrow" when it ends on the next London day, and "on 23 Oct" in the rare case rounding carries it past that.
+`details.lockedUntil` and `PinStatus.lockedUntil` carry the exact instant.
+
+An administrator cannot reset their own PIN in the app (`400`, which now names the way out: wait for the time shown,
+or run `npm run pin:reset -- <their email>` on the server). That command (`server/src/pinReset.ts`, honours `DB_PATH`)
+clears one person's PIN, count and lock, signs them out on every device and writes an audit row (no person, action
+`npm run pin:reset`, "Reset PIN from the server command: …"). Someone with no PIN gets "nothing to reset" and no audit
+row. Exit code 1 for no email, no database or no such person. It works while the server runs (one small write,
+`busy_timeout` 5 s). A PIN locked by 1.2.0 (10 or more wrong) gets an ordinary lock ending 15 minutes after the upgrade.
+
+**Login rate limits** are the login's own: 8 failures per (source address, email) in 15 minutes, 20 per email from
+anywhere, then `429`. The source is the TCP peer, or `req.ip` when `TRUST_PROXY` is set: Express then reads
+X-Forwarded-For through the trusted hops only, so behind the reverse proxy of DEPLOY.md each client has its own count
+instead of everyone sharing the proxy's. Without `TRUST_PROXY` the header is ignored, so it cannot be forged to dodge
+the limit. The same source keys the two-step code limiter.
+
+Worked example: a stranger who knows a rep's email and employee ID gets 10 guesses, then waits 15 minutes, 10 more,
+30 minutes, and so on: about 70 guesses in the first day (locks of 15 + 30 + 60 + 120 + 240 + 480 minutes, then 16
+hours), then 10 a day. Against a 4-digit PIN that passes the rules (about 9,960 left) that is roughly a 1-in-140 chance
+on the first day. If the rep signs in with the right PIN in between, the count resets and the stranger is back to
+15-minute locks, so a long campaign against someone who signs in daily could reach about 70 guesses a day. A 6-digit
+PIN (a million values) makes the same campaign about a 1-in-14,000 chance a day. The rep sees the lock message when it
+happens, which is the cue to change the PIN and tell an administrator.
 
 **Require a PIN for everyone.** `pinSetupRequired = requirePin && !hasPin`, recomputed on every request from the
 session's user row (no stale flag). Sign-in still succeeds for someone without a PIN; the gate then holds them at
@@ -1598,8 +1646,9 @@ it), so a change applies on the very next request and a read-only request costs 
 
 **Client.**
 - `pages/Login.tsx`: a PIN step between the credentials and the two-step code (masked digits-only field with a show
-  button, password-manager friendly). Wrong PIN → "That PIN isn't right" plus "N tries left before your PIN locks" when
-  3 or fewer remain; locked or `429` → the field stays disabled with the reason until Back.
+  button, password-manager friendly). Wrong PIN → "That PIN isn't right" plus "N tries left before your PIN locks for a
+  while" when 3 or fewer remain; locked → the server's own sentence with the unlock time; locked or `429` → the field
+  stays disabled with the reason until Back.
 - `auth/PinSetupGate.tsx` (around the signed-in shell) shows the lazy full-screen steps from `auth/PinSetupStep.tsx`:
   "Create your PIN" (PIN twice, the shared rules as you go) and, for administrators, "Set up two-step verification"
   (the Settings setup modal). Once that modal opens, the step stays until it closes, so the recovery codes are never
@@ -1607,7 +1656,10 @@ it), so a change applies on the very next request and a read-only request costs 
   at a time).
 - `auth/AuthProvider.tsx`: a signed-in tab coming back to the front re-reads /auth/me (at most once a minute), so an
   idle-expired or reset session shows the sign-in page straight away.
-- `features/settings/PinSettings.tsx` (Settings → Security) and `PinResetSection.tsx` (Team → edit person).
+- `features/settings/PinSettings.tsx` (Settings → Security) and `PinResetSection.tsx` (Team → edit person). A locked
+  PIN shows "Locked" with the unlock time ("Try again after 14:35, or ask an administrator to reset it"; the admin's
+  view says "until 14:35"), and the card reads its status again at that minute, so Change and Remove come back by
+  themselves. A `423` inside the Change or Remove dialog shows the server's sentence and refreshes the card.
 - Main chunk 445 kB, under the 460 kB budget: the gate is small and the steps, Settings and Login are lazy chunks.
 
 ### 15.4 Bulk gauge entry with WhatsApp paste (U2)

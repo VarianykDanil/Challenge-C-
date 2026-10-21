@@ -10,7 +10,7 @@
  * There is no usable built-in default key any more: `DEV_SECRET` only survives to *decrypt* rows written by earlier
  * releases so they can be re-encrypted under the real key (`decryptLegacy`).
  */
-import { createCipheriv, createDecipheriv, createHash, randomBytes } from 'node:crypto';
+import { createCipheriv, createDecipheriv, createHash, createHmac, randomBytes } from 'node:crypto';
 import { chmodSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 
@@ -66,6 +66,14 @@ function key(): Buffer {
   return cachedKey;
 }
 
+/**
+ * A separate 32-byte key for one purpose, derived from the application secret (HMAC-SHA256 of the purpose under the
+ * secret's key), so the PIN pepper (lib/pin.ts) never reuses the encryption key itself. Same source and cache as `key()`.
+ */
+export function deriveAppKey(purpose: string): Buffer {
+  return createHmac('sha256', key()).update(`linear-hub:${purpose}`, 'utf8').digest();
+}
+
 /** One-line start-up notice about where the key comes from (printed once; creates the file on a first start). */
 export function announceAppSecret(): void {
   if (announced) return;
@@ -73,8 +81,9 @@ export function announceAppSecret(): void {
   if (hasAppSecret()) return;
   key();
   console.log(
-    `LM_APP_SECRET is not set: two-step verification secrets are encrypted with the key in ${secretFile} ` +
-      '(generated on first start, mode 0600). Back that file up with the database, or set LM_APP_SECRET to manage the key yourself.',
+    `LM_APP_SECRET is not set: two-step verification secrets and sign-in PINs are protected with the key in ${secretFile} ` +
+      '(generated on first start, mode 0600). Back that file up with the database (the built-in backups put a copy in the ' +
+      'backups folder, so keep that folder private), or set LM_APP_SECRET to manage the key yourself.',
   );
 }
 

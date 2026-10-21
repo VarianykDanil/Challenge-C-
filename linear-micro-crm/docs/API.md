@@ -680,11 +680,11 @@ All in `server/src/routes/auth.ts`; types in `shared/src/types/pin.ts`.
 | Method | Path | Who | Body → answer |
 | --- | --- | --- | --- |
 | POST | `/auth/login` | anyone | `{ email, employeeId, pin? }` → `200 { user }` / `200 TwoFactorChallenge` as before. For an account **with a PIN**: no PIN → `200 LoginPinChallenge { requiresPin: true, attemptsLeft }` and no cookie (step two, like the two-step challenge); wrong PIN → `401`, locked → `423`, both with `LoginPinRequired` (below). A PIN sent for an account without one is ignored. |
-| GET | `/auth/pin` | signed in | → `PinStatus { hasPin, setAt, required, locked }` (yours) |
-| POST | `/auth/pin` | signed in | `{ pin, currentPin? }` → `204`. Sets a first PIN, or changes it (`currentPin` required once you have one). Signs out every **other** session of yours. `400` with `details: [{ path: 'pin' \| 'currentPin', message }]` for a refused PIN, a missing or wrong current PIN, or the same PIN again; `423` when your PIN is locked; `429` after 6 wrong current PINs in 15 minutes. |
+| GET | `/auth/pin` | signed in | → `PinStatus { hasPin, setAt, required, locked, lockedUntil? }` (yours; `lockedUntil`, the ISO instant the lock ends, only while locked) |
+| POST | `/auth/pin` | signed in | `{ pin, currentPin? }` → `204`. Sets a first PIN, or changes it (`currentPin` required once you have one). Signs out every **other** session of yours. `400` with `details: [{ path: 'pin' \| 'currentPin', message }]` for a refused PIN, a missing or wrong current PIN, or the same PIN again; `423` while your PIN is locked (the `error` says until when, as below); `429` after 6 wrong current PINs in 15 minutes. |
 | POST | `/auth/pin/remove` | signed in | `{ currentPin }` → `204`. `409` while a PIN is required for everyone, or when you have none; wrong PIN as above. |
 | GET | `/auth/pin/:userId` | admin | → `PinStatus` of anyone (never the PIN or hash); `404` unknown user, `400` bad id |
-| POST | `/auth/pin/reset/:userId` | admin | → `204`: clears the PIN and its lock, signs the person out everywhere. `400` for yourself (use Settings), `404` unknown. |
+| POST | `/auth/pin/reset/:userId` | admin | → `204`: clears the PIN and its lock, signs the person out everywhere. `400` for yourself (the message points at Settings and at `npm run pin:reset -- <your email>` on the server), `404` unknown. |
 | GET | `/auth/security-settings` | admin | → `SecuritySettings { requirePin, requireAdminTwoFactor, sessionIdleHours }` (defaults `false, false, 12`) |
 | PUT | `/auth/security-settings` | admin | `Partial<SecuritySettings>` (strict: unknown keys `400`; `sessionIdleHours` a whole number 1–72) → the full settings. `409` when switching on `requirePin` without your own PIN, or `requireAdminTwoFactor` without your own two-step verification. Switching `requireAdminTwoFactor` on signs out every other administrator who has not set up two-step verification. |
 | POST | `/auth/2fa/disable` | signed in | unchanged, plus `409` for an administrator while two-step verification is required for administrators |
@@ -694,10 +694,17 @@ All in `server/src/routes/auth.ts`; types in `shared/src/types/pin.ts`.
 ```json
 { "error": "That PIN is not right", "requiresPin": true,
   "details": { "requiresPin": true, "reason": "wrong", "attemptsLeft": 9 } }
+
+{ "error": "Too many wrong PINs. Try again after 14:35, or ask an administrator to reset your PIN.", "requiresPin": true,
+  "details": { "requiresPin": true, "reason": "locked", "lockedUntil": "2026-10-20T13:34:10.512Z" } }
 ```
 
-`reason` is `wrong` or `locked` (`attemptsLeft` is absent when locked). The flags are repeated in `details` because
-the client's `ApiError` keeps only `error` and `details`. A wrong employee ID still answers the plain
+`reason` is `wrong` or `locked`. On `wrong`, `attemptsLeft` counts down to the next lock; on `locked`, `lockedUntil` is
+when the lock ends (real clock) and `error` says it in London time, rounded up to the minute ("14:35", "14:35
+tomorrow"). Ten wrong PINs in a row lock the PIN for 15 minutes, each further ten double it (30 min, 1 h … 24 h at
+most); a right PIN or a reset clears the count (LOGIC §15.3). Tries during a lock answer `423` and are not counted.
+The flags are repeated in `details` because the client's `ApiError` keeps only `error` and `details`. A wrong employee
+ID still answers the plain
 `401 Invalid email or employee ID` and never mentions a PIN. The PIN challenge is a 200 so the everyday sign-in of a
 person with a PIN logs no failed request in the browser console.
 
@@ -714,10 +721,21 @@ person with a PIN logs no failed request in the browser console.
 - Anonymous requests pass through (requireAuth answers them). Paths are compared lower-cased without trailing slashes,
   and anything not listed stays closed.
 
-Database (`server/src/db/extensions/pin.ts`, columns only): `users.pin_hash`, `users.pin_set_at`,
-`users.pin_failed_attempts` (default 0), `sessions.last_seen_at`. Settings are the `meta` keys `ext:pin:require-pin`,
-`ext:pin:require-admin-2fa` and `ext:pin:session-idle-hours`, written only by the PUT above (absent → default). No seed
-rows: the demo accounts have no PIN.
+**Sign-in limits behind a proxy.** The login limiter (8 per source and email, 20 per email in 15 minutes) and the
+two-step code limiter key on the TCP peer, or on `req.ip` when `TRUST_PROXY` is set, so behind the reverse proxy of
+DEPLOY.md each client is counted on its own. Without `TRUST_PROXY`, `X-Forwarded-For` is ignored.
+
+**Server command.** `npm run pin:reset -- <email>` (`server/src/pinReset.ts`, honours `DB_PATH`) clears one person's
+PIN and lock and signs them out everywhere, with an audit row (no person; action `npm run pin:reset`). For the only
+administrator's own locked or forgotten PIN, or after losing the app secret. Exit code 0 when done or there was nothing
+to reset, 1 for no email, no database or no such person.
+
+Database (`server/src/db/extensions/pin.ts`, columns only): `users.pin_hash` (`scrypt-hmac$…`, peppered with the app
+secret; 1.2.0's `scrypt$…` is still read and replaced at the next sign-in), `users.pin_set_at`,
+`users.pin_failed_attempts` (default 0), `users.pin_locked_until` (when the latest lock ends, or null),
+`sessions.last_seen_at`. Settings are the `meta` keys `ext:pin:require-pin`, `ext:pin:require-admin-2fa` and
+`ext:pin:session-idle-hours`, written only by the PUT above (absent → default). No seed rows: the demo accounts have no
+PIN.
 
 ### Bulk gauge entry with WhatsApp paste (U2)
 

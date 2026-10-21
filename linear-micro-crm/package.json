@@ -23,6 +23,7 @@
     "backup": "npm run backup -w server",
     "backups": "npm run backups -w server",
     "restore": "npm run restore -w server --",
+    "pin:reset": "npm run pin:reset -w server --",
     "service:install": "npm run service:install -w server --",
     "service:uninstall": "npm run service:uninstall -w server --",
     "service:status": "npm run service:status -w server --",

@@ -13,7 +13,7 @@ import { existsSync } from 'node:fs';
 import path from 'node:path';
 import { createInterface } from 'node:readline/promises';
 import { DEFAULT_DB_PATH } from './db/seed.ts';
-import { backupDirFor, listBackups, restoreDatabase } from './lib/backup.ts';
+import { backupDirFor, listBackups, restoreDatabase, restoreKeyNotes } from './lib/backup.ts';
 import { installedServiceFile } from './service.ts';
 
 const dbPath = process.env.DB_PATH ? path.resolve(process.env.DB_PATH) : DEFAULT_DB_PATH;
@@ -84,19 +84,5 @@ if (outcome.status === 'cancelled') {
 }
 console.log(`Restored. ${outcome.dbPath} now holds the backup (${outcome.candidate.users} users, ${outcome.candidate.gauges} gauge entries).`);
 if (outcome.previous) console.log(`The database it replaced is kept as ${outcome.previous}${outcome.moved.length > 1 ? ' (with its -wal/-shm files)' : ''}.`);
-if (outcome.secret === 'installed') console.log('Put the two-step key from the backups folder in place (there was none), so two-step sign-in keeps working.');
-if (outcome.secret === 'differs') {
-  console.log(
-    'Note: the two-step key in the backups folder differs from the one next to the database. If two-step sign-in fails after the restore, ' +
-      'replace the app-secret next to the database with the copy from the backups folder.',
-  );
-}
-if (outcome.secret === 'missing' && outcome.candidate.twoStepUsers > 0) {
-  const n = outcome.candidate.twoStepUsers;
-  console.log(
-    `Warning: there is no two-step key (app-secret) next to the database or in the backup's folder, so ${n} ${n === 1 ? 'person' : 'people'} ` +
-      'with two-step sign-in cannot finish signing in with a code. Put the app-secret you kept with your backups next to the database ' +
-      "before starting, or they sign in with a recovery code and an administrator resets it (Team › Edit › Reset two-step verification).",
-  );
-}
+for (const line of restoreKeyNotes(outcome.secret, outcome.candidate)) console.log(line);
 console.log(service ? 'Start it again: npm run service:install' : 'Start it again: npm start');

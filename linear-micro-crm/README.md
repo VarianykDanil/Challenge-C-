@@ -161,7 +161,7 @@ Every command below exists in `package.json` (root) or `server/package.json`.
 | `LM_DEMO_ACCOUNTS` | unset | Set to `0` on any deployment with real users: the sign-in page then shows no demo accounts and the API never publishes a login |
 | `LM_SMART` | on | `0` switches the 1.1 smart features off: pace notes, pay estimates, payroll checks, check-in lists, the Needs-attention feed, event forecasts, streaks and the week in review answer empty, and the optional fields are left out of existing payloads. Recruitment deadlines stay on (they are workflow rules) |
 | `LM_BUSINESS_NOW` | unset (real time) | Pins the business clock — "today" and "now" for events, gauges, pay and the demo seed — to this instant, e.g. `2026-10-19T15:00:00`, for demos and screenshots out of hours (use a fresh `DB_PATH` so the seed is built around it). The clock keeps ticking from there; sessions, rate limits, two-step codes and backups stay on the real clock. The server warns at start-up while it is set. Never set it for real use |
-| `LM_APP_SECRET` | unset (generated key file) | Key material for encrypting two-step verification secrets at rest (AES-256-GCM, key = SHA-256 of the value). When unset, a random key is generated on first start into `server/data/app-secret` (mode 600, next to the database). Back that file up with the database, or set the variable to manage the key yourself |
+| `LM_APP_SECRET` | unset (generated key file) | Key material for encrypting two-step verification secrets at rest (AES-256-GCM, key = SHA-256 of the value) and for peppering sign-in PINs (HMAC-SHA256 before scrypt). When unset, a random key is generated on first start into `server/data/app-secret` (mode 600, next to the database). Back that file up with the database (the backups folder keeps a copy of it, so keep that folder private), or set the variable to manage the key yourself |
 | `LM_APP_SECRET_FILE` | `<data dir>/app-secret` | Where the generated key file lives when `LM_APP_SECRET` is unset |
 | `TRUST_PROXY` | unset (off) | Behind a TLS-terminating reverse proxy: `1` (one hop), the proxy's address or CIDR, or a comma list, so `X-Forwarded-Proto` is honoured (Secure cookies, HSTS). Leave unset otherwise |
 | `COOKIE_SECURE` | unset | Set to `1` to force the `Secure` flag on the session cookie; it is set automatically when the request arrived over HTTPS (`X-Forwarded-Proto: https`, `trust proxy` is on) |
@@ -256,6 +256,7 @@ parses, `KeepAlive` and `RunAtLoad` are true, and the environment and log path a
 | New features do not appear after updating | Either the pull did not happen or the screens were not rebuilt. Use `npm run latest`, which does both. `npm start` also rebuilds stale screens, and the server warns at start-up when they are out of date. `curl -s localhost:4000/api/health` shows the running version |
 | `git pull` says "Your local changes to package-lock.json would be overwritten" | npm rewrote that file during an install. It is generated, so discard it: `git restore package-lock.json`, then `git pull` (or just `npm run latest`, which does this for you). Installs now use `npm ci`, which never rewrites it |
 | `npm start` serves the API but the page is empty or stale | Rebuild the client: `npm run build` (the server serves `client/dist`) |
+| "Too many wrong PINs. Try again after …" and nobody else can reset that PIN (the only administrator), or no PIN works after the `app-secret` file or `LM_APP_SECRET` was lost | Wait for the time shown, or on the computer that runs Linear Hub: `npm run pin:reset -- danil@linear-mcr.co.uk` (their sign-in email; set `DB_PATH` as you do for `npm start`). It clears that person's PIN and lock and signs them out everywhere; they sign in with their email and employee ID and set a new PIN |
 
 ### Backups and restore
 
@@ -291,10 +292,13 @@ Linear Hub runs as a background service, stop it with `npm run service:uninstall
 would only start it again), restore, then `npm run service:install`.
 
 **Keep the folder private and copy it off the laptop.** It holds everyone's names and pay. It also holds
-`app-secret`, a copy of the key that encrypts two-step sign-in secrets (mode 600): without it, people with two-step
-sign-in could not sign in after restoring on a new laptop (restore puts it in place when the new laptop has none, and
-warns when there is no key anywhere). A backup on the same laptop does not survive losing the laptop: copy the folder to
-iCloud Drive or Google Drive now and then. `npm run doctor` warns when the last backup is more than 36 hours old and
+`app-secret`, a copy of the key that encrypts two-step sign-in secrets and is mixed into every sign-in PIN (mode 600):
+without it, after restoring on a new laptop people with two-step sign-in could not finish signing in and no PIN would
+match (restore puts it in place when the new laptop has none, and warns when there is no key anywhere or a different
+one). Because the key travels with the database copies, anyone with the whole folder could try every 4-digit PIN in
+minutes, so treat the folder like the key: only in your own account, never in a shared folder or sent to anyone. A
+backup on the same laptop does not survive losing the laptop: copy the folder to your own iCloud Drive or Google Drive
+now and then. `npm run doctor` warns when the last backup is more than 36 hours old and
 when the disk has less than 1 GB free; **Settings › Backups** shows the same to the owner.
 
 **Never commit the backups folder.** `server/data/backups/`, the `*.before-restore-*` copies a restore keeps and its

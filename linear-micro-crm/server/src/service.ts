@@ -209,7 +209,7 @@ export function macPrivacyWarning(spec: ServiceSpec, home: string = os.homedir()
     ['this Linear Hub folder', spec.workDir],
     ['the database (DB_PATH)', spec.env.DB_PATH],
     ['the backups folder (LM_BACKUP_DIR)', spec.env.LM_BACKUP_DIR],
-    ['the two-step key file (LM_APP_SECRET_FILE)', spec.env.LM_APP_SECRET_FILE],
+    ['the app secret file, the two-step and PIN key (LM_APP_SECRET_FILE)', spec.env.LM_APP_SECRET_FILE],
   ];
   const hits = places.flatMap(([what, p]) => {
     const root = p ? macProtectedFolder(p, home) : null;
@@ -271,7 +271,7 @@ function warnAboutEnvSecret(): void {
   if (!process.env.LM_APP_SECRET) return;
   console.warn(
     'LM_APP_SECRET is set in this terminal, but it is not copied into the service file (it would sit there in plain text). ' +
-      'Put the same value in a file readable only by you and set LM_APP_SECRET_FILE to it before installing, or two-step sign-in will not work under the service.',
+      'Put the same value in a file readable only by you and set LM_APP_SECRET_FILE to it before installing, or two-step codes and sign-in PINs will not work under the service.',
   );
 }
 

@@ -10,7 +10,8 @@
  *  - POST   /auth/pin               PinSetInput → 204 (set, or change with currentPin; other sessions are signed out)
  *  - POST   /auth/pin/remove        PinRemoveInput → 204 (remove your own PIN; 409 while a PIN is required)
  *  - GET    /auth/pin/:userId       → PinStatus (admin; anyone's PIN state, never the PIN)
- *  - POST   /auth/pin/reset/:userId → 204 (admin; clears another person's PIN and lock, and signs them out)
+ *  - POST   /auth/pin/reset/:userId → 204 (admin; clears another person's PIN and lock, and signs them out; for
+ *                                    your own, `npm run pin:reset -- <email>` on the server)
  *  - GET    /auth/security-settings → SecuritySettings (admin)
  *  - PUT    /auth/security-settings Partial<SecuritySettings> → SecuritySettings (admin)
  * The PIN gate (middleware/auth.ts `pinSetupGate`, mounted in app.ts): while `pinSetupRequired` (or, for an admin,
@@ -20,8 +21,14 @@
 
 export const PIN_MIN_LENGTH = 4;
 export const PIN_MAX_LENGTH = 6;
-/** Wrong PINs in a row (across every device) before the PIN locks; an admin's reset unlocks it. */
+/**
+ * Wrong PINs in a row (across every device) before the PIN locks. The lock ends by itself: PIN_LOCK_MINUTES the first
+ * time, doubling for each further run of PIN_LOCK_AFTER_FAILURES wrong while the count is not reset, up to
+ * PIN_LOCK_MAX_MINUTES. A right PIN, an admin's reset or `npm run pin:reset` clears the count and the lock.
+ */
 export const PIN_LOCK_AFTER_FAILURES = 10;
+export const PIN_LOCK_MINUTES = 15;
+export const PIN_LOCK_MAX_MINUTES = 24 * 60;
 /** Session idle timeout bounds (hours): default 12, admin may choose 1–72. */
 export const SESSION_IDLE_HOURS_DEFAULT = 12;
 export const SESSION_IDLE_HOURS_MIN = 1;
@@ -33,8 +40,10 @@ export interface PinStatus {
   setAt: string | null;
   /** The admin switched on "Require a PIN for everyone". */
   required: boolean;
-  /** Too many wrong PINs in a row: sign-in with the PIN is refused until an admin resets it. */
+  /** Too many wrong PINs in a row: sign-in with the PIN is refused until the lock ends or an admin resets it. */
   locked?: boolean;
+  /** While locked: when the lock ends (real clock, ISO). Absent when not locked. */
+  lockedUntil?: string;
 }
 
 /** POST /auth/pin — 4–6 digits; `currentPin` is required to change an existing PIN. */
@@ -71,17 +80,20 @@ export type LoginPinReason = 'wrong' | 'locked';
 
 /**
  * Carried in `details` too, because the client's ApiError keeps `error` and `details` only.
- * `attemptsLeft`: wrong PINs left before the lock (on 'wrong').
+ * `attemptsLeft`: wrong PINs left before the lock (on 'wrong'). `lockedUntil`: when the lock ends (on 'locked').
  */
 export interface LoginPinDetails {
   requiresPin: true;
   reason: LoginPinReason;
   attemptsLeft?: number;
+  lockedUntil?: string;
 }
 
 /**
  * POST /auth/login answers 401 with this body when the account has a PIN and a wrong one was sent, and 423 with
- * `reason: 'locked'` once the PIN is locked (whatever was sent). Both count against the login rate limit.
+ * `reason: 'locked'` while the PIN is locked (whatever was sent); the 423's `error` says when it unlocks ("Too many
+ * wrong PINs. Try again after 14:35, or ask an administrator to reset your PIN."). Both count against the login rate
+ * limit.
  */
 export interface LoginPinRequired {
   error: string;

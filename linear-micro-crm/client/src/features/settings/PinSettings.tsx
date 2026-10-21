@@ -4,20 +4,21 @@
 //  - "Sign-in rules" (administrators): require a PIN for everyone, require two-step verification for administrators,
 //    and the session idle timeout. Switching a rule on asks first; the server refuses a rule that would lock out the
 //    admin making the change, and the switches say so before anyone tries.
-import { useId, useState, type FormEvent } from 'react';
+import { useEffect, useId, useState, type FormEvent } from 'react';
 import { KeyRound, RefreshCw, Trash2 } from 'lucide-react';
 import clsx from 'clsx';
+import { useQueryClient } from '@tanstack/react-query';
 import { PIN_PROBLEM_MESSAGES, SESSION_IDLE_HOURS_DEFAULT, isPinFormatValid, pinProblem, type SecuritySettings } from '@lm/shared';
 import { ApiError } from '@/api/client';
 import { useTwoFactorStatus } from '@/api/hooks';
-import { usePinStatus, useRemovePin, useSecuritySettings, useSetPin, useUpdateSecuritySettings } from '@/api/pin';
+import { pinKeys, usePinStatus, useRemovePin, useSecuritySettings, useSetPin, useUpdateSecuritySettings } from '@/api/pin';
 import { useCurrentUser } from '@/auth/AuthProvider';
 import { Badge, Button, Modal, Select, Skeleton, Switch, useToast } from '@/components/ui';
 import { ConfirmDialog } from '@/features/common/ConfirmDialog';
 import { apiMessage, errorMessage } from '@/features/common/QueryStates';
 import { formatDate } from '@/lib/format';
 import { PinField, PinInput } from './PinInput';
-import { PIN_COPY } from './pinCopy';
+import { PIN_COPY, pinUnlockTime } from './pinCopy';
 
 export interface PinSettingsProps {
   className?: string;
@@ -44,6 +45,16 @@ function OwnPinSection() {
   const [modal, setModal] = useState<PinModal>(null);
   const s = status.data;
   const close = () => setModal(null);
+  const { refetch } = status;
+
+  // A lock ends by itself: read the status again at that minute, so Change and Remove come back without a reload.
+  const lockedUntil = s?.locked ? s.lockedUntil : undefined;
+  useEffect(() => {
+    const wait = lockedUntil ? Date.parse(lockedUntil) - Date.now() + 1000 : Number.NaN;
+    if (!Number.isFinite(wait) || wait > 2 ** 31 - 1) return;
+    const timer = setTimeout(() => void refetch(), Math.max(0, wait));
+    return () => clearTimeout(timer);
+  }, [lockedUntil, refetch]);
 
   return (
     <section aria-labelledby={`${uid}-title`} data-testid="pin-card" className="rounded-xl border border-border p-4">
@@ -69,7 +80,7 @@ function OwnPinSection() {
                 <Button variant="outline" size="xs" onClick={() => void status.refetch()} leftIcon={<RefreshCw aria-hidden />}>Try again</Button>
               </span>
             ) : s?.locked ? (
-              t.lockedHint
+              t.lockedHint(pinUnlockTime(s.lockedUntil))
             ) : s?.hasPin ? (
               <>
                 {t.setAt} <span className="font-medium text-fg">{formatDate(s.setAt)}</span>
@@ -94,7 +105,7 @@ function OwnPinSection() {
           )}
         </div>
       </div>
-      <p className="mt-3 text-xs text-muted">{t.description}</p>
+      <p className="mt-3 text-xs text-muted">{t.description} {t.lockRule}</p>
 
       {modal === 'set' && <SetPinModal changing={Boolean(s?.hasPin)} onClose={close} />}
       {modal === 'remove' && <RemovePinModal onClose={close} />}
@@ -109,9 +120,17 @@ function errorField(e: unknown): string | null {
   return typeof first?.path === 'string' ? first.path : null;
 }
 
-/** A refusal that is not about one field: locked (423), too many tries (429), network. */
+/** After a 423 the card behind the dialog should show the lock too: read the PIN status again. */
+function useRefreshOnLock(): (e: unknown) => void {
+  const qc = useQueryClient();
+  return (e) => {
+    if (e instanceof ApiError && e.status === 423) void qc.invalidateQueries({ queryKey: pinKeys.status, exact: true });
+  };
+}
+
+/** A refusal that is not about one field: locked (423, the server's sentence says until when), too many tries (429), network. */
 function generalError(e: unknown): string {
-  if (e instanceof ApiError && e.status === 423) return PIN_COPY.login.locked;
+  if (e instanceof ApiError && e.status === 423) return apiMessage(e, PIN_COPY.login.locked);
   if (e instanceof ApiError && e.status === 429) return apiMessage(e, PIN_COPY.login.tooMany);
   return apiMessage(e, 'Could not save your PIN. Try again.');
 }
@@ -121,6 +140,7 @@ function SetPinModal({ changing, onClose }: { changing: boolean; onClose: () => 
   const user = useCurrentUser();
   const toast = useToast();
   const save = useSetPin();
+  const refreshOnLock = useRefreshOnLock();
   const uid = useId();
   const [current, setCurrent] = useState('');
   const [pin, setPin] = useState('');
@@ -148,6 +168,7 @@ function SetPinModal({ changing, onClose }: { changing: boolean; onClose: () => 
       toast.success(t.savedToast, t.savedToastBody);
       onClose();
     } catch (err) {
+      refreshOnLock(err);
       const field = errorField(err);
       if (field === 'currentPin' || field === 'pin') {
         setFieldError({ field, message: apiMessage(err, 'Check this field') });
@@ -213,6 +234,7 @@ function RemovePinModal({ onClose }: { onClose: () => void }) {
   const user = useCurrentUser();
   const toast = useToast();
   const remove = useRemovePin();
+  const refreshOnLock = useRefreshOnLock();
   const uid = useId();
   const [current, setCurrent] = useState('');
   const [error, setError] = useState<string | null>(null);
@@ -226,6 +248,7 @@ function RemovePinModal({ onClose }: { onClose: () => void }) {
       toast.success(t.removedToast);
       onClose();
     } catch (err) {
+      refreshOnLock(err);
       setError(errorField(err) === 'currentPin' ? apiMessage(err, PIN_COPY.login.wrong) : generalError(err));
       setCurrent('');
     }

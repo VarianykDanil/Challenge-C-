@@ -42,7 +42,7 @@ function list(): void {
   const newestAgeH = (now - files[0]!.mtimeMs) / 3_600_000;
   if (newestAgeH > BACKUP_RULES.staleHours) console.log(`The newest is ${age(now - files[0]!.mtimeMs)}: is the server running? Run  npm run backup  now.`);
   if (!existsSync(path.join(dir, SECRET_COPY_NAME)) && !process.env.LM_APP_SECRET) {
-    console.log(`No ${SECRET_COPY_NAME} copy in the folder yet: the next backup adds it (two-step sign-in needs it after a restore).`);
+    console.log(`No ${SECRET_COPY_NAME} copy in the folder yet: the next backup adds it (two-step codes and sign-in PINs need it after a restore).`);
   }
   console.log('Restore one with:  npm run restore -- <file>   (stop the server first).');
 }
@@ -58,7 +58,7 @@ async function backup(): Promise<void> {
     const r = await backupNow(db, { dir, secretFile });
     console.log(`Backed up ${dbPath}`);
     console.log(`       to ${r.path} (${formatBytes(r.bytes)}, ${r.ms} ms).`);
-    if (r.secret === 'copied') console.log(`Copied the two-step key to ${path.join(dir, SECRET_COPY_NAME)} (mode 600).`);
+    if (r.secret === 'copied') console.log(`Copied the app secret (the two-step and PIN key) to ${path.join(dir, SECRET_COPY_NAME)} (mode 600): keep the folder private.`);
     const status = backupStatus(db, dir);
     console.log(`${status.count} backup${status.count === 1 ? '' : 's'} kept in ${dir}${r.removed.length ? ` (${r.removed.length} old one${r.removed.length === 1 ? '' : 's'} removed)` : ''}.`);
     console.log('Copy that folder to iCloud Drive or Google Drive now and then: a backup on the same laptop does not survive losing the laptop.');

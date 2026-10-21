@@ -1,7 +1,7 @@
 import { Router, type Request, type Response } from 'express';
 import { z } from 'zod';
 import {
-  PIN_LOCK_AFTER_FAILURES, PIN_PROBLEM_MESSAGES, SESSION_IDLE_HOURS_MAX, SESSION_IDLE_HOURS_MIN, pinProblem,
+  PIN_PROBLEM_MESSAGES, SESSION_IDLE_HOURS_MAX, SESSION_IDLE_HOURS_MIN, pinProblem,
   type LoginPinChallenge, type LoginPinDetails, type LoginPinReason, type LoginPinRequired, type Role, type TwoFactorChallenge,
   type UserWithTeam,
 } from '@lm/shared';
@@ -10,8 +10,9 @@ import { USER_SELECT } from '../db/queries.ts';
 import { HttpError, badRequest, conflict, notFound, unauthorized } from '../lib/errors.ts';
 import { FailureLimiter } from '../lib/limiter.ts';
 import {
-  accountFlags, clearPin, clearPinFailures, countPinAttempt, hashPin, isPinLocked, pinAttemptsLeft, pinRow, pinStatusFor,
-  readSecuritySettings, savePinHash, verifyPin, writeSecuritySettings, type PinRow,
+  accountFlags, clearPin, clearPinFailures, countPinAttempt, hashPin, isPinLocked, pinAttemptsLeft, pinHashNeedsUpgrade,
+  pinLockedMessage, pinRow, pinStatusFor, readSecuritySettings, resetPinAndSignOut, savePinHash, upgradePinHash, verifyPin,
+  writeSecuritySettings, type PinRow,
 } from '../lib/pin.ts';
 import {
   assertCodeAttemptsLeft, beginSetup, clearCodeFailures, clearTwoFactor, createChallenge, deleteChallenge, enableTwoFactor,
@@ -19,7 +20,7 @@ import {
 } from '../lib/twofactor.ts';
 import { idParam } from '../lib/validate.ts';
 import {
-  clearSessionCookie, createSession, currentUser, destroyOtherSessions, destroySession, destroyUserSessions, requireAuth, requireRole, setSessionCookie,
+  clearSessionCookie, createSession, currentUser, destroyOtherSessions, destroySession, requireAuth, requireRole, setSessionCookie,
 } from '../middleware/auth.ts';
 
 /** A PIN as typed (the rules are checked by the shared `pinProblem` and by the hash). */
@@ -66,18 +67,21 @@ const DEMO: { employeeId: string; role: Role; label: string }[] = [
 // ── login rate limit ──
 // Failed sign-ins are counted twice: per (source address, email) — 8 in 15 minutes locks that source for that email —
 // and per email from anywhere (a backstop against an attacker rotating addresses). The source is the TCP peer
-// (`req.socket.remoteAddress`), never a header the client can forge; with TRUST_PROXY set, req.ip would follow
-// X-Forwarded-For, but the limiter deliberately stays on the socket address. Both maps are bounded LRUs (10k keys)
-// swept every five minutes off the request path.
+// (`req.socket.remoteAddress`) unless `trust proxy` is configured (TRUST_PROXY, behind the reverse proxy of
+// docs/DEPLOY.md): then it is `req.ip`, which Express resolves from X-Forwarded-For through the trusted hops only, so
+// the limiter sees each client rather than the proxy, and a client cannot forge its way past the proxy's own entry.
+// Without TRUST_PROXY a forged X-Forwarded-For changes nothing. Both maps are bounded LRUs (10k keys) swept every five
+// minutes off the request path.
 export const LOGIN_MAX_FAILURES = 8;
 export const LOGIN_MAX_FAILURES_PER_EMAIL = 20;
 export const LOGIN_WINDOW_MS = 15 * 60_000;
 const loginBySource = new FailureLimiter(LOGIN_MAX_FAILURES, LOGIN_WINDOW_MS);
 const loginByEmail = new FailureLimiter(LOGIN_MAX_FAILURES_PER_EMAIL, LOGIN_WINDOW_MS);
 
-/** The TCP peer address of a request (what the limiters key on). */
+/** The client address the limiters key on: `req.ip` behind a configured trusted proxy, else the TCP peer. */
 export function clientSource(req: Request): string {
-  return req.socket?.remoteAddress ?? 'unknown';
+  const behindTrustedProxy = Boolean(req.app?.get('trust proxy'));
+  return (behindTrustedProxy ? req.ip : undefined) ?? req.socket?.remoteAddress ?? 'unknown';
 }
 
 interface LoginKeys { source: string; email: string }
@@ -119,19 +123,26 @@ export function resetLoginFailures(): void {
 const WRONG_CODE = 'That code is not valid';
 /** One message for an unknown email, a wrong ID and a deactivated account: the response never confirms a credential. */
 export const INVALID_LOGIN = 'Invalid email or employee ID';
+/** The locked sentence is built per lock (it says when it ends): lib/pin.ts `pinLockedMessage`. */
 export const PIN_MESSAGES = {
   wrong: 'That PIN is not right',
-  locked: 'Your PIN is locked after too many wrong tries. Ask an administrator to reset it.',
   wrongCurrent: 'Your current PIN is not right',
   currentNeeded: 'Enter your current PIN',
   sameAsCurrent: 'That is your current PIN. Pick a new one.',
 } as const;
 
-/** 401 (wrong) or 423 (locked) with the LoginPinRequired body; `details` repeats it for the client's ApiError. */
-function sendPinRequired(res: Response, reason: LoginPinReason, attemptsLeft?: number): void {
-  const details: LoginPinDetails = reason === 'locked' ? { requiresPin: true, reason } : { requiresPin: true, reason, attemptsLeft };
-  const body: LoginPinRequired = { error: PIN_MESSAGES[reason], requiresPin: true, details };
-  res.status(reason === 'locked' ? 423 : 401).json(body);
+/** 401 with the LoginPinRequired body; `details` repeats it for the client's ApiError. */
+function sendPinWrong(res: Response, attemptsLeft: number): void {
+  const reason: LoginPinReason = 'wrong';
+  const body: LoginPinRequired = { error: PIN_MESSAGES.wrong, requiresPin: true, details: { requiresPin: true, reason, attemptsLeft } };
+  res.status(401).json(body);
+}
+
+/** 423 with the LoginPinRequired body: "Too many wrong PINs. Try again after 14:35, or ask an administrator …". */
+function sendPinLocked(res: Response, lockedUntil: string): void {
+  const details: LoginPinDetails = { requiresPin: true, reason: 'locked', lockedUntil };
+  const body: LoginPinRequired = { error: pinLockedMessage(lockedUntil), requiresPin: true, details };
+  res.status(423).json(body);
 }
 
 export function authRouter(db: Db): Router {
@@ -146,18 +157,18 @@ export function authRouter(db: Db): Router {
   });
 
   /**
-   * Checks the current PIN of a signed-in person (change or remove). Locked → 423; wrong → 400 (423 when that was the
-   * last try). The attempt is counted before the hash is awaited and cleared when it matches.
+   * Checks the current PIN of a signed-in person (change or remove). Locked → 423 saying when it unlocks; wrong → 400
+   * (423 when that try started a lock). The attempt is counted before the hash is awaited and cleared when it matches.
    */
   async function checkCurrentPin(userId: number, row: PinRow, candidate: string | undefined): Promise<void> {
-    if (isPinLocked(row)) throw new HttpError(423, PIN_MESSAGES.locked);
+    if (isPinLocked(row)) throw new HttpError(423, pinLockedMessage(row.lockedUntil!));
     if (!candidate) throw badRequest(PIN_MESSAGES.currentNeeded, [{ path: 'currentPin', message: PIN_MESSAGES.currentNeeded }]);
     const key = String(userId);
     pinChangeByUser.assertAllowed(key);
     pinChangeByUser.record(key);
-    const failures = countPinAttempt(db, userId);
+    const attempt = countPinAttempt(db, userId);
     if (!(await verifyPin(row.hash ?? '', candidate))) {
-      if (failures >= PIN_LOCK_AFTER_FAILURES) throw new HttpError(423, PIN_MESSAGES.locked);
+      if (attempt.lockedUntil) throw new HttpError(423, pinLockedMessage(attempt.lockedUntil));
       throw badRequest(PIN_MESSAGES.wrongCurrent, [{ path: 'currentPin', message: PIN_MESSAGES.wrongCurrent }]);
     }
     pinChangeByUser.clear(key);
@@ -194,12 +205,13 @@ export function authRouter(db: Db): Router {
       throw unauthorized(INVALID_LOGIN);
     }
     // Release 1.2 (U1): an account with a PIN needs it too. Every stop here counts against the login limiter, like a
-    // wrong employee ID; a wrong PIN also counts towards the PIN lock (PIN_LOCK_AFTER_FAILURES in a row).
+    // wrong employee ID; a wrong PIN also counts towards the PIN lock (every PIN_LOCK_AFTER_FAILURES-th in a row locks
+    // it for a while: lib/pin.ts). Tries during a lock are refused, not counted.
     const pinState = pinRow(db, user.id);
     if (pinState?.hash) {
-      if (isPinLocked(pinState)) {
+      if (isPinLocked(pinState, now)) {
         recordLoginFailure(keys, now);
-        return sendPinRequired(res, 'locked');
+        return sendPinLocked(res, pinState.lockedUntil!);
       }
       if (!pin) {
         // Step two of the sign-in (no cookie yet), answered 200 like the two-step challenge.
@@ -208,14 +220,15 @@ export function authRouter(db: Db): Router {
         return res.json(challenge);
       }
       // Counted before the hash is awaited, so a burst of parallel guesses meets both limits one request at a time;
-      // a right PIN clears the PIN count (and the login counters below, once the sign-in completes).
+      // a right PIN clears the PIN count and lock (and the login counters below, once the sign-in completes).
       recordLoginFailure(keys, now);
-      const failures = countPinAttempt(db, user.id);
+      const attempt = countPinAttempt(db, user.id, now);
       if (!(await verifyPin(pinState.hash, pin))) {
-        const left = PIN_LOCK_AFTER_FAILURES - failures;
-        return left > 0 ? sendPinRequired(res, 'wrong', left) : sendPinRequired(res, 'locked');
+        return attempt.lockedUntil ? sendPinLocked(res, attempt.lockedUntil) : sendPinWrong(res, attempt.attemptsLeft);
       }
       clearPinFailures(db, user.id);
+      // A 1.2.0 hash (no pepper) is replaced now that the PIN is known to be right.
+      if (pinHashNeedsUpgrade(pinState.hash)) upgradePinHash(db, user.id, pinState.hash, await hashPin(pin));
     }
     if (isTwoFactorEnabled(db, user.id)) {
       // Step one of two: no cookie yet, and the login counters keep running until the code is right.
@@ -350,16 +363,21 @@ export function authRouter(db: Db): Router {
     res.json(status);
   });
 
-  /** Admin: a forgotten or locked PIN. Clears it and its lock and signs the person out everywhere. */
+  /**
+   * Admin: a forgotten or locked PIN. Clears it and its lock and signs the person out everywhere. Not your own: that
+   * is Settings, or (locked and no other administrator) `npm run pin:reset -- <email>` on the server.
+   */
   router.post('/pin/reset/:userId', requireRole('admin'), (req, res) => {
     const me = currentUser(req);
     const id = idParam(req, 'userId');
     if (!userById(id)) throw notFound('User');
-    if (id === me.id) throw badRequest('Use Settings → Security to change or remove your own PIN');
-    transaction(db, () => {
-      clearPin(db, id);
-      destroyUserSessions(db, id);
-    });
+    if (id === me.id) {
+      throw badRequest(
+        `Use Settings → Security to change or remove your own PIN. If it is locked and no other administrator can reset it, ` +
+          `wait for the time it shows, or run "npm run pin:reset -- ${me.email}" on the server.`,
+      );
+    }
+    resetPinAndSignOut(db, id);
     res.status(204).end();
   });
 

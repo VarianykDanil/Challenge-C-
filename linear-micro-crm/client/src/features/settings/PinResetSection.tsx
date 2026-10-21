@@ -12,7 +12,7 @@ import { Badge, Button, Skeleton, useToast } from '@/components/ui';
 import { ConfirmDialog } from '@/features/common/ConfirmDialog';
 import { errorMessage } from '@/features/common/QueryStates';
 import { formatDate, fullName } from '@/lib/format';
-import { PIN_COPY } from './pinCopy';
+import { PIN_COPY, pinUnlockTime } from './pinCopy';
 
 export interface PinResetSectionProps {
   user: UserWithTeam;
@@ -58,7 +58,11 @@ function PinResetCard({ user, className }: PinResetSectionProps) {
                 {s.locked ? t.locked : s.hasPin ? t.set : t.none}
               </Badge>
             ) : null}
-            {s?.hasPin && s.setAt && <span className="text-xs text-muted">since {formatDate(s.setAt)}</span>}
+            {s?.locked && s.lockedUntil ? (
+              <span className="text-xs text-muted" data-testid="admin-pin-locked-until">{t.lockedUntil(pinUnlockTime(s.lockedUntil))}</span>
+            ) : (
+              s?.hasPin && s.setAt && <span className="text-xs text-muted">since {formatDate(s.setAt)}</span>
+            )}
           </div>
           <p className="mt-1 text-xs leading-relaxed text-muted">{t.body}</p>
         </div>

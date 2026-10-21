@@ -7,8 +7,9 @@
  *    serving (WAL-safe; nothing is locked for longer than a page step). The copy is switched to a rollback journal
  *    so it is one self-contained file that opens anywhere, verified with `PRAGMA quick_check`, and only then renamed
  *    to `linear-YYYY-MM-DD-HHmm.sqlite` (Europe/London wall-clock time): a half-written backup never carries the name.
- *  - The two-step encryption key (app-secret) is copied once into the folder (mode 0600) when missing or different:
- *    without it, two-step secrets in a restored database cannot be decrypted.
+ *  - The app secret (the app-secret file: the key that encrypts two-step secrets and peppers sign-in PINs) is copied
+ *    once into the folder (mode 0600) when missing or different: without it, two-step secrets in a restored database
+ *    cannot be decrypted and no peppered PIN matches. So the folder as a whole is as sensitive as the key itself.
  *  - `rotate` keeps the newest file of each of the last 30 days plus the newest of each of the 8 ISO weeks before
  *    that, never deletes a file written in the last 24 hours, and never touches a file that does not match the backup
  *    naming pattern.
@@ -71,7 +72,7 @@ export const BACKUP_RULES = {
 
 /** `linear-2026-10-19-0200.sqlite`: date and HHmm in Europe/London wall-clock time. */
 export const BACKUP_FILE_RE = /^linear-(\d{4}-(?:0[1-9]|1[0-2])-(?:0[1-9]|[12]\d|3[01]))-([01]\d|2[0-3])([0-5]\d)\.sqlite$/;
-/** The copy of the two-step encryption key kept in the backup folder. */
+/** The copy of the app secret (the two-step and PIN key) kept in the backup folder. */
 export const SECRET_COPY_NAME = 'app-secret';
 /** A backup's staging file (`.linear-…-HHmm.sqlite.<pid>.partial`, plus SQLite's -wal/-shm/-journal next to it). */
 export const PARTIAL_FILE_RE = /^\.linear-[^/]*\.sqlite\.(?:\d+\.)?partial(?:-wal|-shm|-journal)?$/;
@@ -492,6 +493,11 @@ export interface DbSummary {
   latestGaugeDate: string | null;
   /** People with two-step sign-in on (their secrets need the app-secret key); 0 on a database from before two-step. */
   twoStepUsers: number;
+  /**
+   * People whose sign-in PIN is peppered with the app secret (`scrypt-hmac$…` hashes, 1.2 onwards): under any other key
+   * their PIN never matches. 1.2.0's bare `scrypt$…` hashes do not depend on the key and are not counted; 0 before PINs.
+   */
+  pinUsers: number;
 }
 
 /** Counts shown side by side before a restore. */
@@ -504,12 +510,19 @@ export function summariseDb(db: DatabaseSync): DbSummary {
   } catch {
     // no two-step columns yet: nobody has it on
   }
+  let pinUsers = 0;
+  try {
+    pinUsers = n(`SELECT COUNT(*) AS n FROM users WHERE substr(pin_hash, 1, 12) = 'scrypt-hmac$'`);
+  } catch {
+    // no PIN column yet (a database from before 1.2): nobody has a PIN
+  }
   return {
     users: n(`SELECT COUNT(*) AS n FROM users`),
     gauges: n(`SELECT COUNT(*) AS n FROM gauge_entries`),
     payrollRuns: n(`SELECT COUNT(*) AS n FROM payroll_runs`),
     latestGaugeDate: latest?.d ?? null,
     twoStepUsers,
+    pinUsers,
   };
 }
 
@@ -678,7 +691,8 @@ export type RestoreOutcome =
       moved: string[];
       /**
        * installed: the backup folder's app-secret was put in place because there was none; differs: left alone;
-       * missing: there is no key next to the database nor in the backup's folder, so two-step secrets cannot be read.
+       * missing: there is no key next to the database nor in the backup's folder, so two-step secrets cannot be read
+       * and peppered PINs never match (`restoreKeyNotes` says so).
        */
       secret: 'installed' | 'same' | 'differs' | 'missing' | 'none';
       candidate: DbSummary;
@@ -785,4 +799,58 @@ export async function restoreDatabase(opts: RestoreOptions): Promise<RestoreOutc
     // after the swap the staging name no longer exists; on a refusal or cancel this deletes the private copy
     removeDbFiles(staging);
   }
+}
+
+const people = (n: number): string => `${n} ${n === 1 ? 'person' : 'people'}`;
+
+/**
+ * What restore says about the app secret once the files are swapped. Since 1.2 the key that encrypts two-step secrets
+ * also peppers every sign-in PIN, so a restore onto a computer with no key, or with a different one, would otherwise
+ * break every PIN quietly: the right PIN gets "That PIN is not right" and locks after ten tries. Empty when there is
+ * nothing to say (same key, `LM_APP_SECRET` set, or nobody depends on a key that is missing).
+ */
+export function restoreKeyNotes(
+  secret: Extract<RestoreOutcome, { status: 'restored' }>['secret'],
+  candidate: Pick<DbSummary, 'twoStepUsers' | 'pinUsers'>,
+): string[] {
+  const { pinUsers, twoStepUsers } = candidate;
+  const pinReset =
+    `If no copy of the key is left, reset those PINs: npm run pin:reset -- <email> on this computer for an administrator, ` +
+    'then Team › person › Edit profile › Reset PIN for everyone else.';
+  const twoStepReset = 'People with two-step sign-in can use a recovery code, and an administrator resets it (Team › Edit › Reset two-step verification).';
+  if (secret === 'installed') {
+    return ['Put the app secret from the backups folder in place (there was none), so two-step codes and sign-in PINs keep working.'];
+  }
+  if (secret === 'differs') {
+    if (!pinUsers && !twoStepUsers) {
+      return [
+        'Note: the app secret in the backups folder differs from the one next to the database (left as it is). Nobody in this ' +
+          'backup has a sign-in PIN or two-step sign-in, so nothing depends on it yet.',
+      ];
+    }
+    const hurt = [
+      pinUsers ? `the ${people(pinUsers)} with a sign-in PIN would be told "That PIN is not right" (it locks after ten tries)` : '',
+      twoStepUsers ? `the ${people(twoStepUsers)} with two-step sign-in could not finish with a code` : '',
+    ].filter(Boolean);
+    return [
+      'Warning: the app secret in the backups folder (the key for two-step sign-in and PINs) differs from the one next to the ' +
+        `database, which was left as it is. If this backup was made under the backups folder's key, ${hurt.join(' and ')}: ` +
+        'before starting, replace the app-secret next to the database with the copy from the backups folder.' +
+        (pinUsers ? ` ${pinReset}` : ''),
+    ];
+  }
+  if (secret === 'missing' && (pinUsers || twoStepUsers)) {
+    const hurt = [
+      pinUsers ? `${people(pinUsers)} with a sign-in PIN would be told "That PIN is not right" (it locks after ten tries)` : '',
+      twoStepUsers ? `${people(twoStepUsers)} with two-step sign-in cannot finish signing in with a code` : '',
+    ].filter(Boolean);
+    return [
+      'Warning: there is no app secret (app-secret, the key for two-step sign-in and PINs) next to the database or in the ' +
+        `backup's folder, so ${hurt.join(' and ')}. Put the app-secret you kept with your backups next to the database ` +
+        'before starting.' +
+        (pinUsers ? ` ${pinReset}` : '') +
+        (twoStepUsers ? ` ${twoStepReset}` : ''),
+    ];
+  }
+  return [];
 }
