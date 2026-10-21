@@ -1,8 +1,8 @@
 // Release 1.2 — L1: COD pack lessons, the "in the field" and "attitude" blocks of the leadership checklist
 // (pack pages 6–10, 12, 14). Wording follows the pack; obvious typos fixed (sgns → signs, postitve → positive,
-// garuntee → guarantee, arrises → arises).
-import { IMAGES } from './images';
-import type { Lesson } from './types';
+// garuntee → guarantee, arrises → arises, footflow → footfall; the search keywords keep the pack's "footflow").
+import { IMAGES } from './images.ts';
+import type { Lesson } from './types.ts';
 
 export const GREEN_LIGHT: Lesson = {
   key: 'green-light-theory',
@@ -134,8 +134,8 @@ export const CAN_CANT: Lesson = {
   short: 'Can / can’t controls',
   checklist: ['Can / can’t controls'],
   page: '10',
-  summary: 'Put your energy into what you can control: your pitch, your pace and your attitude. The weather, the territory’s footflow and the people are not yours to control.',
-  keyPoints: ['Can controls: pitch, pace, attitude.', 'Can’t controls: weather, territory (footflow), people.'],
+  summary: 'Put your energy into what you can control: your pitch, your pace and your attitude. The weather, the territory’s footfall and the people are not yours to control.',
+  keyPoints: ['Can controls: pitch, pace, attitude.', 'Can’t controls: weather, territory (footfall), people.'],
   sections: [
     {
       blocks: [
@@ -144,7 +144,7 @@ export const CAN_CANT: Lesson = {
           columns: ['Can controls', 'Can’t controls'],
           rows: [
             ['Pitch', 'Weather'],
-            ['Pace', 'Territory (footflow)'],
+            ['Pace', 'Territory (footfall)'],
             ['Attitude', 'People'],
           ],
         },
@@ -152,8 +152,8 @@ export const CAN_CANT: Lesson = {
     },
   ],
   quiz: [
-    { q: 'Which of these is a can control?', options: ['The weather', 'Footflow', 'Your pace', 'The people'], answer: 2, why: 'Can controls: pitch, pace and attitude.' },
-    { q: 'Which of these is a can’t control?', options: ['Your pitch', 'Your attitude', 'Your pace', 'The weather'], answer: 3, why: 'Can’t controls: weather, territory (footflow) and people.' },
+    { q: 'Which of these is a can control?', options: ['The weather', 'Footfall', 'Your pace', 'The people'], answer: 2, why: 'Can controls: pitch, pace and attitude.' },
+    { q: 'Which of these is a can’t control?', options: ['Your pitch', 'Your attitude', 'Your pace', 'The weather'], answer: 3, why: 'Can’t controls: weather, territory (footfall) and people.' },
     {
       q: 'Name the three can controls.',
       options: ['Weather, territory, people', 'Pitch, pace, attitude', 'Pitch, weather, people', 'Pace, territory, attitude'],
@@ -230,7 +230,7 @@ export const STRATEGIC_PAUSE: Lesson = {
   short: 'Strategic pause',
   checklist: ['Strategic pause'],
   page: '6',
-  summary: 'Pausing to add effect. A pause in the right place shows confidence and lets the important line land.',
+  summary: 'Pausing to add effect. A strategic pause shows confidence.',
   keyPoints: ['Pausing to add effect.', 'Shows confidence.', 'Use strategic pauses in the presentation.'],
   sections: [
     {
@@ -241,7 +241,7 @@ export const STRATEGIC_PAUSE: Lesson = {
           kind: 'callout',
           tone: 'tip',
           title: 'In your pitch',
-          text: 'Pitch scripts mark a pause as “(Pause – 1 second)”: hold it, keep eye contact, let the line land, then carry on.',
+          text: 'Pitch scripts mark a pause as “(Pause - 1 Second)”.',
         },
       ],
     },

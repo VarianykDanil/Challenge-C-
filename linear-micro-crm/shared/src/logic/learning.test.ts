@@ -11,10 +11,13 @@ import {
   isLessonKey,
   isProgressionMilestoneKey,
   isTaskLesson,
+  learnedBySignOff,
   lessonStateOf,
   nextCareerLevel,
   progressionFrom,
   quizPassed,
+  selfCheckPassed,
+  withdrawTakesBackLearned,
   type ProgressionInput,
 } from './learning.ts';
 
@@ -215,4 +218,47 @@ test('deterministic and never NaN / undefined in any sentence', () => {
       for (const t of texts) assert.ok(!/NaN|undefined|null/.test(t), `${position}: ${t}`);
     }
   }
+});
+
+test('selfCheckPassed: the first pass counts for good, whatever a later retake scores', () => {
+  const at = '2026-10-20T10:00:00.000Z';
+  assert.equal(selfCheckPassed({ learnedAt: at, taughtSignedOffAt: null, quizPassedAt: at, quizScore: 3, quizTotal: 3 }), true);
+  assert.equal(selfCheckPassed({ learnedAt: at, taughtSignedOffAt: null, quizPassedAt: at, quizScore: 2, quizTotal: 3 }), true, 'passed, then a failed retake');
+  assert.equal(selfCheckPassed({ learnedAt: at, taughtSignedOffAt: at, quizPassedAt: null, quizScore: 2, quizTotal: 3 }), false, 'never passed');
+  assert.equal(selfCheckPassed({ learnedAt: at, taughtSignedOffAt: null, quizScore: 3, quizTotal: 3 }), true, 'a row without quizPassedAt: the last score');
+  assert.equal(selfCheckPassed({ learnedAt: null, taughtSignedOffAt: null, quizPassedAt: null, quizScore: null, quizTotal: null }), false);
+  assert.equal(selfCheckPassed(undefined), false);
+});
+
+test('learnedBySignOff: learned, and the self-check never passed (so a sign-off counted it)', () => {
+  const at = '2026-10-20T10:00:00.000Z';
+  const later = '2026-10-21T09:00:00.000Z';
+  assert.equal(learnedBySignOff({ learnedAt: at, taughtSignedOffAt: at, quizPassedAt: null, quizScore: null, quizTotal: null }), true);
+  assert.equal(learnedBySignOff({ learnedAt: at, taughtSignedOffAt: at, quizPassedAt: null, quizScore: 2, quizTotal: 3 }), true, 'a failed attempt, never passed');
+  assert.equal(learnedBySignOff({ learnedAt: at, taughtSignedOffAt: at, quizPassedAt: later, quizScore: 3, quizTotal: 3 }), false, 'passed afterwards');
+  assert.equal(
+    learnedBySignOff({ learnedAt: at, taughtSignedOffAt: at, quizPassedAt: later, quizScore: 2, quizTotal: 3 }),
+    false,
+    'passed afterwards, then a failed retake: the pass still counts',
+  );
+  assert.equal(learnedBySignOff({ learnedAt: '2026-10-19T10:00:00.000Z', taughtSignedOffAt: at, quizPassedAt: '2026-10-19T10:00:00.000Z', quizScore: 3, quizTotal: 3 }), false, 'self-check first');
+  assert.equal(learnedBySignOff({ learnedAt: null, taughtSignedOffAt: null }), false);
+  assert.equal(learnedBySignOff(undefined), false);
+});
+
+test('withdrawTakesBackLearned: only a "learned" the sign-off alone gave, with no pass and no teach-back since', () => {
+  const at = '2026-10-20T10:00:00.000Z';
+  const later = '2026-10-21T09:00:00.000Z';
+  const signedOnly = { learnedAt: at, taughtSignedOffAt: at, teachbackAt: null, quizPassedAt: null, quizScore: null, quizTotal: null };
+  assert.equal(withdrawTakesBackLearned(signedOnly), true);
+  assert.equal(withdrawTakesBackLearned({ ...signedOnly, quizScore: 2, quizTotal: 3 }), true, 'a failed attempt is no pass');
+  // content #12 re-review: sign-off, pass, then a failed retake → the pass keeps it learned
+  assert.equal(withdrawTakesBackLearned({ ...signedOnly, quizPassedAt: later, quizScore: 2, quizTotal: 3 }), false);
+  assert.equal(withdrawTakesBackLearned({ ...signedOnly, quizPassedAt: later, quizScore: 3, quizTotal: 3 }), false);
+  // a teach-back written after the sign-off stays, so the lesson stays learned (never "teach-back sent" with Learn ☐)
+  assert.equal(withdrawTakesBackLearned({ ...signedOnly, teachbackAt: later }), false);
+  // learned from the self-check before the sign-off
+  assert.equal(withdrawTakesBackLearned({ ...signedOnly, learnedAt: '2026-10-19T10:00:00.000Z', quizPassedAt: '2026-10-19T10:00:00.000Z' }), false);
+  assert.equal(withdrawTakesBackLearned({ ...signedOnly, taughtSignedOffAt: null }), false, 'nothing to withdraw');
+  assert.equal(withdrawTakesBackLearned(undefined), false);
 });

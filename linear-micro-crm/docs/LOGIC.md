@@ -1395,13 +1395,44 @@ checkins.
 
 ### 15.1 Learning pack: COD pack lessons, the Learn / Teach checklist and the progression tracker (L1)
 
-`shared/src/logic/learning.ts` (pure, tested in `learning.test.ts`):
+`shared/src/logic/learning.ts` and `learningQuiz.ts` (pure, tested in `learning.test.ts` and `learningQuiz.test.ts`):
 
 - **Lesson state** (`lessonStateOf`): signed off → `taught`; a written teach-back → `teachback_sent`; the self-check
   passed → `learned`; else `new`. A sign-off counts even with nothing written (the leader heard it at the whiteboard).
-- **Self-check** (`quizPassed`): learned only when every answer is right (`score === total`, total ≥ 1). The first pass
-  sets `learned_at`; a later retake records the new score but never takes "learned" away. The two practical tasks
-  ("Run an impact", "Go on a roadtrip") have no questions: **I've done this** posts 1 of 1.
+- **A sign-off also counts as learned**: signing off a lesson that is not learned yet sets `learned_at` to the
+  sign-off time (the answer says `markedLearned: true`), so the checklist never shows Teach ✓ with Learn ☐.
+  `quiz_passed_at` (`quizPassedAt`) records the first pass of the self-check and is never cleared, so "passed" does
+  not depend on the last score. `selfCheckPassed(row)`: `quizPassedAt` is set (or, for a row without it, the last
+  score passes). `learnedBySignOff(row)`: learned and the self-check never passed, so a sign-off counted it (the
+  checklist says "Learned …, at the sign-off"). **Withdrawing the sign-off** (`withdrawTakesBackLearned(row)`, the
+  same rule in the route's SQL) takes "learned" back only when the sign-off was the only reason for it: `learned_at` is
+  the sign-off time, the self-check was never passed and no teach-back has been written since. A self-check passed at
+  any point (before or after the sign-off, whatever a later retake scored) keeps it learned, and so does a teach-back
+  written after the sign-off: the teach-back stays, waiting for a sign-off, and since a teach-back can only be written
+  on a learned lesson the row never shows "teach-back sent" with Learn ☐. The withdraw dialog says which of these
+  applies. On every start the learning extension's `upgrade` repairs any older row signed off without `learned_at`
+  (learned at its sign-off time); a no-op once done. The same `upgrade` adds `quiz_passed_at` to a table made before
+  it and, only on that step, fills it in from the older rows: `learned_at` when it was not the sign-off time (a pass
+  set it) or when the last score passes.
+- **Self-check, graded by the server** (`gradeQuiz(lessonKey, answers)`): the phone sends the option picked for each
+  question (0-based) and the server marks them against `QUIZ_ANSWER_KEY`; a score sent by the phone is refused (400).
+  Every question must be answered (else 400 "Answer all 3 questions"). Learned only when every answer is right
+  (`quizPassed`: `score === total`, total ≥ 1). The first pass sets `learned_at`; a later retake records the new score
+  but never takes "learned" or the pass (`quiz_passed_at`) away. The answer says which questions were right (`correct`, one boolean per question),
+  never which option is right: after a miss the page marks only the options picked (right or wrong) and says
+  "Have another look at question 2 in the lesson"; the explanations show once all three are right. **Try again** keeps
+  the right answers and clears the wrong ones. The two practical tasks ("Run an impact", "Go on a roadtrip") have no
+  questions: **I've done this** sends no answers and records 1 of 1.
+- **Answer key** (`QUIZ_ANSWER_KEY`, `quizQuestionCount`): the right option per question for each lesson, a copy of the
+  `answer` written next to each question in `client/src/content/learning/*.ts`. `learningQuiz.test.ts` loads the
+  lessons (Node runs them with the types stripped, which is why those files import with `.ts` extensions) and fails if
+  the two ever differ, so a question's options and its answer are always changed in both places.
+- **The answers are not secret, by design.** The lessons ship to the phone with each question's `answer` and its
+  explanation (`why`, which names the right option in most questions), so anyone who opens the browser's developer
+  tools can read them, and `correct` lets a person find every answer in a few tries. Server grading stops one thing:
+  marking a lesson learned by sending a made-up score. The self-check is a learning aid; the check that counts is the
+  teach-back, read or heard and signed off by a leader. (The grading code itself, `gradeQuiz`, is not in the client
+  bundle; the answer data is.)
 - **Groups** (`LESSON_GROUP_OF`, `LESSON_GROUPS`): the pack checklist's blocks — fundamentals (5 steps, working habits,
   law of averages, impulse factors), in the field (green light, gumball + ABC days, can / can't controls, buying signs,
   strategic pause, pre-emptive strike), attitude (bamboo, attitude regain + attitude muscle), objections (bullet
@@ -1439,14 +1470,23 @@ checkins.
   next level with `requirements: []`, `weeks: []`, `headline: ''`, `enabled: false`; the dashboard card hides and the
   Progress page says the tracker is switched off. Lessons, self-checks, teach-backs and the checklist keep working.
 
-Content (`client/src/content/learning/*.ts`): every lesson keeps the pack's wording; only obvious typos are fixed
-(excitment, consolodation, uou / omn, sgns, postitve, garuntee, arrises, minimim, politcs, compeition, dependant, liason,
-comission, and the consolidation step printed as "3."). Two short explanatory notes are marked as such in muted text:
-"SW3 = N: some will, some won't, so what… next" and the law of averages line read across the six gauges. The pack
-prints no overturn for **direct debit**; the lesson says so and asks for the campaign's own. The illustrations are
-cropped from 220 dpi renders (white turned to transparency, framed panels kept opaque, 7–67 kB each, 360 kB in all)
-into `client/public/cod-pack/` — not `public/learning/`, because a folder named like the `/learning` page makes the
-production server redirect `/learning` to `/learning/` on a reload. Section anchors match `LESSON_ANCHORS`
+Content (`client/src/content/learning/*.ts`): every lesson keeps the pack's wording and adds nothing the pack does
+not say; only obvious typos are fixed (excitment, consolodation, uou / omn, sgns, postitve, garuntee, arrises, minimim,
+politcs, compeition, dependant, liason, comission, buyers remorse → buyer's remorse, footflow → footfall, and the
+consolidation step printed as "3."). Where the pack is too short to stand alone, the lesson says so and sends the
+person to their leader instead of explaining it: "SW3 = N is usually read as “some will, some won’t, so what… next”:
+check with your leader"; the law of averages keeps its numbers as printed ("00/50/40/30/10 = 3–5") with "Ask your
+leader to walk you through the pack's numbers for your campaign"; "Run an impact" and "Go on a roadtrip" (listed on
+the checklist, never described) say "The COD pack lists this task but does not describe it" and invent no steps. One
+deliberate change of the pack's words: **Assuming the role** has one dress code for everyone ("A professional image in
+the office: smart and well presented, for example a clean ironed shirt and tie, or equivalent smart office wear")
+instead of the pack's separate rules for women and men (heels, makeup), as UK guidance on equivalent dress codes
+expects. The app's own sentences write "teach-back"; the pack's names keep "teachback" (the lesson title, "3 rules of
+the teachback"). The pack prints no overturn for **direct debit**; the lesson says so and asks for the campaign's own.
+The illustrations are cropped from 220 dpi renders (white turned to transparency, framed panels kept opaque, 7–67 kB
+each, 360 kB in all; all 14 are used, the single bullet beside C.O.W.S as on page 15) into `client/public/cod-pack/` —
+not `public/learning/`, because a folder named like the `/learning` page makes the production server redirect
+`/learning` to `/learning/` on a reload. Section anchors match `LESSON_ANCHORS`
 (`/learning/pack/bullet-theory#no-time`), so L2's annotation chips and the field cards land on the right part.
 
 ### 15.2 Pitch studio: campaign pitches, annotations and practice modes (L2)

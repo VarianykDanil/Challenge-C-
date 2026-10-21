@@ -66,9 +66,14 @@ export interface LessonSection {
 export interface QuizQuestion {
   q: string;
   options: string[];
-  /** Index of the right option. */
+  /**
+   * Index of the right option. The server grades from its own copy (QUIZ_ANSWER_KEY in shared/src/logic/learningQuiz.ts);
+   * a shared test fails if the two differ, so change both together. The page never uses it to grade or to show the
+   * answer, but it is in the page's code (as is `why`), so it is not secret: server grading only refuses a made-up
+   * score (docs/LOGIC.md §15.1).
+   */
   answer: number;
-  /** Shown after checking: why that is the answer, in the pack's words. */
+  /** Shown once every answer is right: why that is the answer, in the pack's words (never after a failed attempt). */
   why: string;
 }
 
@@ -92,7 +97,7 @@ export interface Lesson {
   teachPrompt: string;
   /** Extra words for the hub's search. */
   keywords?: string[];
-  /** A practical task from the checklist (no theory in the pack): the office fills in the details. */
+  /** A practical task from the checklist (no theory in the pack): ticked as done, then "how it went" for the leader. */
   task?: boolean;
 }
 

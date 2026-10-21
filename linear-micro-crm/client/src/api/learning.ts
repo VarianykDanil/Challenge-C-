@@ -1,7 +1,20 @@
 // Release 1.2 — L1 learning-pack hooks — OWNED BY L1 (laid down by r2-foundation). Endpoints: server/src/routes/learning.ts.
 // Every key starts with 'learning', so invalidating ['learning'] refreshes all of them.
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import type { LearningProgress, LessonKey, LessonProgress, LessonQuizInput, LessonQuizResult, Progression, ProgressionMilestoneInput, ProgressionMilestoneKey, TeachbackInput, TeachbackSignoffInput, TeamLearning } from '@lm/shared';
+import type {
+  LearningProgress,
+  LessonKey,
+  LessonProgress,
+  LessonQuizInput,
+  LessonQuizResult,
+  Progression,
+  ProgressionMilestoneInput,
+  ProgressionMilestoneKey,
+  TeachbackInput,
+  TeachbackSignoffInput,
+  TeachbackSignoffResult,
+  TeamLearning,
+} from '@lm/shared';
 import { api, qs } from './client';
 
 export const learningKeys = {
@@ -39,7 +52,7 @@ function useInvalidateLearning() {
   return () => void qc.invalidateQueries({ queryKey: learningKeys.all });
 }
 
-/** POST /learning/progress/:lessonKey/quiz */
+/** POST /learning/progress/:lessonKey/quiz — the options picked; the server grades them (`correct` per question). */
 export function useSubmitQuiz() {
   const invalidate = useInvalidateLearning();
   return useMutation({
@@ -59,12 +72,12 @@ export function useSubmitTeachback() {
   });
 }
 
-/** POST /learning/progress/:userId/:lessonKey/signoff (that person's team leader, or admin) */
+/** POST /learning/progress/:userId/:lessonKey/signoff (that person's team leader, or admin); `markedLearned` when it also marked it learned. */
 export function useSignOffTeachback() {
   const invalidate = useInvalidateLearning();
   return useMutation({
     mutationFn: ({ userId, lessonKey, ...input }: TeachbackSignoffInput & { userId: number; lessonKey: LessonKey }) =>
-      api<LessonProgress>(`/learning/progress/${userId}/${lessonKey}/signoff`, { method: 'POST', json: input }),
+      api<TeachbackSignoffResult>(`/learning/progress/${userId}/${lessonKey}/signoff`, { method: 'POST', json: input }),
     onSuccess: invalidate,
   });
 }

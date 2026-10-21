@@ -1,7 +1,8 @@
 // Release 1.2 — L1: COD pack lessons, "fundamentals" block of the leadership checklist (pack pages 3–6).
 // Wording follows the pack; only obvious typos are fixed (excitment → excitement, consolodation → consolidation, the
-// consolidation step numbered 5, uou / omn → you / on, exciutment → excitement).
-import type { Lesson } from './types';
+// consolidation step numbered 5, uou / omn → you / on, exciutment → excitement, buyers → buyer’s). Nothing the pack does
+// not say: the law of averages keeps its numbers as printed and asks the leader to explain them.
+import type { Lesson } from './types.ts';
 
 export const FIVE_STEPS: Lesson = {
   key: 'five-steps',
@@ -10,13 +11,13 @@ export const FIVE_STEPS: Lesson = {
   checklist: ['5 steps to a conversation'],
   page: '3',
   summary:
-    'Every conversation in the field follows the same five steps: introduction, short story, presentation, close and consolidation. The first 7 to 10 seconds decide whether you get the rest.',
+    'Every conversation in the field follows the same five steps: introduction, short story, presentation, close and consolidation. The introduction (7 to 10 seconds) is the most important step: the 1st impression.',
   keyPoints: [
     'Introduction (7 to 10 seconds): the most important step. Smile, eye contact, excitement.',
     'Short story (10 to 15 seconds): answer who, what and why as soon as possible.',
     'Presentation: create the problem and be the solution.',
     'Close: an assumptive statement that generates a yes / no answer.',
-    'Consolidation: remind them why they signed up, to reduce buyers remorse.',
+    'Consolidation: remind them why they signed up and use feel good factors to reduce buyer’s remorse.',
   ],
   sections: [
     {
@@ -95,7 +96,7 @@ export const FIVE_STEPS: Lesson = {
         {
           kind: 'list',
           items: [
-            'Remind them **why they signed up** and use **feel good factors** to reduce **buyers remorse**.',
+            'Remind them **why they signed up** and use **feel good factors** to reduce **buyer’s remorse**.',
             'Pre-empt next steps (welcome call).',
             'Rehash long term support: “Ideally you could’ve given for a lifetime, but everyone who signed today said they do it for at least 2 years.”',
           ],
@@ -214,7 +215,7 @@ export const LAW_OF_AVERAGES: Lesson = {
   keyPoints: [
     'The more you repeat an action, the more a positive / negative outcome will occur.',
     'The more shots you take on target, the more goals you score.',
-    'Your six gauges in Linear Hub are your law of averages: stops, table, presentations, closes, taps and sales.',
+    'Your six gauges in Linear Hub (stops, to table, presentations, closes, taps and sales) count your shots on target.',
   ],
   sections: [
     {
@@ -222,11 +223,7 @@ export const LAW_OF_AVERAGES: Lesson = {
         { kind: 'definition', text: 'The more you repeat an action the more a positive / negative outcome will occur.' },
         { kind: 'p', text: 'The more shots you take on target, the more goals you score.', tone: 'lead' },
         { kind: 'callout', tone: 'key', title: 'The pack’s numbers', text: '00/50/40/30/10 = 3–5' },
-        {
-          kind: 'p',
-          text: 'Read across the funnel you log every day: people stopped, brought to the table, presented to, closed and tapped, ending in a handful of sales. Keep the first number up and the rest follow.',
-          tone: 'muted',
-        },
+        { kind: 'callout', tone: 'note', text: 'Ask your leader to walk you through the pack’s numbers for your campaign.' },
         {
           kind: 'callout',
           tone: 'tip',
@@ -314,7 +311,7 @@ export const IMPULSE_FACTORS: Lesson = {
       blocks: [
         { kind: 'definition', text: 'Take it or leave it approach.' },
         { kind: 'list', items: ['Be relaxed, lean on your back foot.', 'SW3 = N.'] },
-        { kind: 'p', text: 'SW3 = N: some will, some won’t, so what… next.', tone: 'muted' },
+        { kind: 'p', text: 'SW3 = N is usually read as “some will, some won’t, so what… next”: check with your leader.', tone: 'muted' },
       ],
     },
     {

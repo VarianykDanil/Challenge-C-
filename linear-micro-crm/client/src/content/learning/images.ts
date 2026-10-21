@@ -3,7 +3,7 @@
 // framed panels stay opaque). Sizes are the files' own, so the layout reserves the box before the image loads.
 // Not public/learning/: a folder named like the /learning page would make the production server's static handler
 // redirect /learning to /learning/ on a reload.
-import type { LessonImage } from './types';
+import type { LessonImage } from './types.ts';
 
 const img = (name: string, width: number, height: number, alt: string, caption?: string): LessonImage => ({
   src: `/cod-pack/${name}.webp`,
@@ -29,7 +29,7 @@ export const IMAGES = {
     'bamboo-comic',
     900,
     640,
-    'A six-panel comic. Day 1: a person is handed a packet of seeds by a farmer. Days 2 to 5: sun, time and water but nothing grows; the person is thoughtful, confused, glum under an umbrella, then angry. Day 6: bamboo shoots up and the person jumps for joy.',
+    'A six-panel comic. Day 1: a smiling person sows seeds from a packet beside a farmer with a pitchfork. Days 2 to 5: sun, time and water but nothing shows above ground; the person is thoughtful, confused, glum under an umbrella, then angry. Day 6: bamboo shoots up and the person jumps for joy.',
     'Days 1 to 5: sun, time and water, nothing to show. Day 6: the bamboo shoots up.',
   ),
   teachSimple: img('teachback-simple', 240, 284, 'A glowing light bulb.'),

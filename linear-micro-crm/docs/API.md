@@ -607,9 +607,9 @@ found". Validation errors → 400 `{ error: 'Validation failed', details }`.
 | Method and path | Who | Body → answer |
 | --- | --- | --- |
 | `GET /learning/progress[?userId=]` | everyone (own); `?userId`: a leader for their own team, an admin for anyone; others 403. Unknown person 404, bad id 400 | `LearningProgress`: one `LessonProgress` per lesson in checklist order, `learned`, `taught`, `total` (21) |
-| `POST /learning/progress/:lessonKey/quiz` | everyone, for themselves | `{ score, total }` (whole numbers, 1 ≤ total ≤ 10, score ≤ total) → `LessonQuizResult { passed, progress }` |
+| `POST /learning/progress/:lessonKey/quiz` | everyone, for themselves | `{ answers }`: the option picked for each question, 0-based, in question order (`[]` for the two practical tasks). **The server grades** against `QUIZ_ANSWER_KEY` → `LessonQuizResult { passed, progress, score, total, correct }`, `correct` one boolean per question (never the right option). 400 for a body without `answers` (a `{ score, total }` body is refused), a missing or extra answer ("Answer all 3 questions"), a non-whole or negative option, or answers to a task |
 | `POST /learning/progress/:lessonKey/teachback` | everyone, for themselves, once the self-check passed (else 409 "Pass the self-check first, then teach it back") | `{ text }` (trimmed, 20–4000 characters) → `LessonProgress` (state `teachback_sent`) |
-| `POST /learning/progress/:userId/:lessonKey/signoff` | the leader of that person's team, or an admin; never your own (403 "Someone else signs off your own teach-back"); another team 403 | `{ signedOff?: boolean = true }` → `LessonProgress`. `false` withdraws the sign-off |
+| `POST /learning/progress/:userId/:lessonKey/signoff` | the leader of that person's team, or an admin; never your own (403 "Someone else signs off your own teach-back"); another team 403 | `{ signedOff?: boolean = true }` → `TeachbackSignoffResult` (the `LessonProgress`, plus `markedLearned: true` when the sign-off also marked a not-yet-learned lesson learned: `learnedAt` = the sign-off time). `false` withdraws the sign-off, and with it a "learned" that only the sign-off gave; a lesson stays learned when its self-check was ever passed (`quizPassedAt`, whatever a later retake scored) or a teach-back was written since (it goes back to waiting for a sign-off) |
 | `GET /learning/team` | leader (own team, active people) or admin (everyone active, recruiters included); rep / recruiter 403 | `TeamLearning { rows, total, pending }` — `pending` (new, optional): teach-backs waiting for a sign-off, never the viewer's own, newest first, with the text |
 | `GET /learning/progression/:userId` | self; a leader for their own team; an admin for anyone | `Progression` (see Logic), plus the new optional `weeks`, `learned`, `taught`, `total`, `enabled` |
 | `PUT /learning/milestones/:userId/:key` (new) | admin only | `{ value }` (whole number 0–99) → the person's updated `Progression`. Unknown key 404 |
@@ -619,11 +619,20 @@ routes let read a person's progress or the team queue. Nothing here writes a gau
 
 New shared types (additive): `LESSON_GROUPS`, `TeachbackAwaiting`, `TeamLearning.pending?`, `ProgressionMilestoneKey`,
 `PROGRESSION_MILESTONE_KEYS`, `ProgressionMilestoneInput`, `ProgressionWeek`, `Progression.weeks? / learned? / taught? /
-total? / enabled?`. Client hook added: `useSetMilestone()` in `client/src/api/learning.ts`.
+total? / enabled?`, `LessonQuizResult.score? / total? / correct?`, `TeachbackSignoffResult` (`markedLearned?`),
+`LessonProgress.quizPassedAt?` (when the self-check was first passed; never cleared by a retake), and the grading
+helpers `QUIZ_ANSWER_KEY`, `gradeQuiz`, `quizQuestionCount`, `selfCheckPassed`, `learnedBySignOff`,
+`withdrawTakesBackLearned`, `LEARNING_LIMITS.quizMaxOptions`. The answer key is not secret: the lessons the phone
+loads carry each question's answer and explanation (see Logic §15.1); the server grading only refuses a made-up score.
+Changed before release: `LessonQuizInput` is `{ answers: number[] }` (it was `{ score, total }`, which let the phone
+mark itself learned). Client hook added: `useSetMilestone()` in `client/src/api/learning.ts`.
 
-Database (`extensions/learning.ts`, two new tables, so `upgrade` changes nothing):
+Database (`extensions/learning.ts`, two new tables; `upgrade` adds `quiz_passed_at` to a table made before it, filling
+it in once from the older rows, and repairs a row signed off without `learned_at`, from before a sign-off counted as
+learned; it reports `learning:learning_progress.quiz_passed_at` / `learning:learning_progress.learned_at` only when it
+changed something):
 
-- `learning_progress(user_id, lesson_key, learned_at, quiz_score, quiz_total, teachback_text, teachback_at,
+- `learning_progress(user_id, lesson_key, learned_at, quiz_score, quiz_total, quiz_passed_at, teachback_text, teachback_at,
   taught_signed_off_by, taught_signed_off_at, updated_at, PRIMARY KEY(user_id, lesson_key))`, with a partial index on
   teach-backs waiting for a sign-off.
 - `learning_milestones(user_id, milestone_key, value, set_by, set_at, PRIMARY KEY(user_id, milestone_key))`: the

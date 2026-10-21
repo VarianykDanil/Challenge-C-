@@ -1,10 +1,12 @@
 // Release 1.2 — L1: the pack's leadership checklist for one person, with a Learn and a Teach tick per lesson. The
-// leader of their team (or an admin) signs the Teach tick off here, with or without a written teach-back.
+// leader of their team (or an admin) signs the Teach tick off here, with or without a written teach-back. A sign-off
+// also ticks Learn when it was still empty (the server marks it learned), so Teach ✓ never sits next to Learn ☐.
+// Withdrawing takes that Learn back only when nothing else holds it (no passed self-check, no teach-back since).
 import { useState } from 'react';
 import { Link } from 'react-router-dom';
 import { Check, ChevronDown, ListChecks, Square } from 'lucide-react';
 import clsx from 'clsx';
-import { isTaskLesson, type LearningProgress, type LessonProgress } from '@lm/shared';
+import { isTaskLesson, learnedBySignOff, withdrawTakesBackLearned, type LearningProgress, type LessonProgress } from '@lm/shared';
 import { useSignOffTeachback } from '@/api/learning';
 import { Button, Card, CardHeader, ProgressBar, useToast } from '@/components/ui';
 import { ConfirmDialog, apiMessage } from '@/features/common';
@@ -45,13 +47,28 @@ export function PersonChecklist({ progress, canSignOff, self, className }: Perso
   const byKey = new Map(progress.lessons.map((l) => [l.lessonKey, l]));
   const first = progress.userName.split(' ')[0] ?? progress.userName;
 
+  /** What withdrawing a sign-off does to this lesson, in words (the server applies the same rule). */
+  const withdrawEffect = (l: LessonProgress): string => {
+    const short = LESSONS[l.lessonKey].short;
+    const word = isTaskLesson(l.lessonKey) ? 'done' : 'learned';
+    if (withdrawTakesBackLearned(l)) return `${short} goes back to not ${word}: it only counted because of this sign-off.`;
+    if (l.teachbackAt) {
+      return learnedBySignOff(l)
+        ? `${short} stays ${word}, because ${first} has written a teach-back since the sign-off. The teach-back goes back to waiting for a sign-off.`
+        : `${short} goes back to waiting for a sign-off. ${first}'s teach-back stays.`;
+    }
+    return `${short} goes back to waiting for ${first}'s teach-back.`;
+  };
+
   const sign = (l: LessonProgress, signedOff: boolean) =>
     signOff.mutate(
       { userId: progress.userId, lessonKey: l.lessonKey, signedOff },
       {
-        onSuccess: () => {
+        onSuccess: (r) => {
           setWithdraw(null);
-          if (signedOff) toast.success(`Signed off: ${LESSONS[l.lessonKey].short}`, `${first} has taught it back.`);
+          if (!signedOff) return;
+          const what = isTaskLesson(l.lessonKey) ? 'done' : 'learned';
+          toast.success(`Signed off: ${LESSONS[l.lessonKey].short}`, r.markedLearned ? `${first} has taught it back, so it counts as ${what} too.` : `${first} has taught it back.`);
         },
         onError: (e) => toast.error('Could not save the sign-off', apiMessage(e, 'Try again in a moment.')),
       },
@@ -65,7 +82,7 @@ export function PersonChecklist({ progress, canSignOff, self, className }: Perso
             className="mb-3"
             icon={<ListChecks />}
             title="Leadership checklist"
-            description={self ? `Learn each one with the self-check, then teach it back to ${who}.` : `${first}'s ticks. Sign off Teach once ${first} has taught it back, written or in person.`}
+            description={self ? `Learn each one with the self-check, then teach it back to ${who}.` : `${first}'s ticks. Sign off Teach once ${first} has taught it back, written or in person; that ticks Learn too.`}
           />
           <div className="grid gap-3 sm:grid-cols-2">
             <ProgressBar size="sm" showValue label="Learned" value={progress.learned} max={progress.total} formatValue={(v, m) => `${v} of ${m}`} tone="primary" />
@@ -115,7 +132,16 @@ export function PersonChecklist({ progress, canSignOff, self, className }: Perso
                         )}
                       </div>
                       <div className="flex justify-center">
-                        <Tick on={learned} label={learned ? `${task ? 'Done' : 'Learned'} ${formatDateShort(l.learnedAt)}` : task ? 'Not done yet' : 'Not learned yet'} />
+                        <Tick
+                          on={learned}
+                          label={
+                            learned
+                              ? `${task ? 'Done' : 'Learned'} ${formatDateShort(l.learnedAt)}${learnedBySignOff(l) ? ', at the sign-off' : ''}`
+                              : task
+                                ? 'Not done yet'
+                                : 'Not learned yet'
+                          }
+                        />
                       </div>
                       <div className="flex justify-center">
                         {canSignOff ? (
@@ -169,7 +195,7 @@ export function PersonChecklist({ progress, canSignOff, self, className }: Perso
         onConfirm={() => withdraw && sign(withdraw, false)}
         loading={signOff.isPending}
         title="Withdraw the sign-off?"
-        description={withdraw ? `${LESSONS[withdraw.lessonKey].short} goes back to waiting for ${first}'s teach-back.` : undefined}
+        description={withdraw ? withdrawEffect(withdraw) : undefined}
         confirmLabel="Withdraw"
       />
     </Card>

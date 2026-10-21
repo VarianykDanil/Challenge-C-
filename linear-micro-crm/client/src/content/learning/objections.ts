@@ -1,8 +1,8 @@
 // Release 1.2 — L1: COD pack lessons, the objections block (pack pages 15–16): bullet theory and straight line theory.
 // Wording follows the pack; obvious typos fixed (minimim → minimum). The pack gives no overturn for direct debit, so the
 // lesson says so rather than inventing one.
-import { IMAGES } from './images';
-import type { Lesson } from './types';
+import { IMAGES } from './images.ts';
+import type { Lesson } from './types.ts';
 
 /** The six chambers, in the pack's layout order around the cylinder (top, then clockwise). */
 export const BULLET_OBJECTIONS = [
@@ -79,8 +79,15 @@ export const BULLET_THEORY: Lesson = {
       id: 'cows',
       title: 'C.O.W.S',
       blocks: [
-        { kind: 'quotes', items: ['I’m sure your partner is just as lovely as yourself and wouldn’t mind contributing the bare minimum'] },
-        { kind: 'p', text: '→ **Close!**' },
+        {
+          // The pack draws a single bullet beside C.O.W.S (page 15).
+          kind: 'media',
+          image: IMAGES.bullet,
+          blocks: [
+            { kind: 'quotes', items: ['I’m sure your partner is just as lovely as yourself and wouldn’t mind contributing the bare minimum'] },
+            { kind: 'p', text: '→ **Close!**' },
+          ],
+        },
       ],
     },
     {

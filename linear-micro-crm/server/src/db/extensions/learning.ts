@@ -1,16 +1,20 @@
 /**
  * Release 1.2 — OWNED BY L1 learning-pack. Rules: ./types.ts.
  *
- *  learning_progress    one row per (person, COD pack lesson): the self-check (learned_at, last quiz score), the
- *                       teach-back in their own words, and the leader's / admin's sign-off ("taught").
+ *  learning_progress    one row per (person, COD pack lesson): the self-check (learned_at, last quiz score, when it
+ *                       was first passed), the teach-back in their own words, and the leader's / admin's sign-off
+ *                       ("taught").
  *  learning_milestones  the progression criteria the office ticks by hand (no data behind them), e.g. "4 + 1 or 3 + 2".
  *
- * Both are new tables, so an existing database needs no data step (`upgrade` changes nothing). `seed` writes demo
- * progress for a fresh demo database only, from its own random stream; it never touches a core table.
+ * Both are new tables. `upgrade` (safe on every start) adds `quiz_passed_at` to a table made before it existed and,
+ * only then, fills it in for the rows whose self-check had been passed; and it repairs a lesson signed off but never
+ * marked learned (possible before the sign-off started counting as learned): learned_at = its sign-off time, so
+ * Teach ✓ never shows with Learn ☐. It reports a name only when it changed something. `seed` writes demo progress for
+ * a fresh demo database only, from its own random stream; it never touches a core table.
  */
 import { LESSON_KEYS, type LessonKey } from '@lm/shared';
 import type { Db } from '../connection.ts';
-import type { DbExtension, SeedContext, SeedUserRef } from './types.ts';
+import { addColumnIfMissing, type DbExtension, type SeedContext, type SeedUserRef } from './types.ts';
 
 const SQL = `
 CREATE TABLE IF NOT EXISTS learning_progress (
@@ -19,6 +23,7 @@ CREATE TABLE IF NOT EXISTS learning_progress (
   learned_at TEXT,
   quiz_score INTEGER,
   quiz_total INTEGER,
+  quiz_passed_at TEXT,
   teachback_text TEXT,
   teachback_at TEXT,
   taught_signed_off_by INTEGER REFERENCES users(id) ON DELETE SET NULL,
@@ -59,8 +64,8 @@ const DEMO_TEACHBACKS: Record<LessonKey, string> = {
   'direct-indirect-marketing': 'Direct is face to face: events, B2B, door to door and telesales. Indirect is billboards, social media, newspapers, TV and radio.',
   'assuming-the-role': 'Act like a leader before you are one: professional image, help the leaders with tablets and merchandise, and be a problem solver not a problem finder.',
   'theory-of-teachback': 'Keep it simple and check people understand, write the theory at the top of the whiteboard and underline it, never make anyone feel silly, and make it a conversation not a pitch.',
-  'run-an-impact': 'I ran the impact at the morning meeting: everyone stood up, we set the targets for the day and the energy carried into the first hour.',
-  'go-on-a-roadtrip': 'Went on the roadtrip with the team. Working a new territory kept the urgency up and I learned a lot from watching the other leaders.',
+  'run-an-impact': 'Done with my leader there. It went well, and next time I will be more confident.',
+  'go-on-a-roadtrip': 'Went on the road trip with the team. Working somewhere new kept the urgency up.',
 };
 
 const DAY = 86_400_000;
@@ -82,8 +87,8 @@ function seedLearning(db: Db, ctx: SeedContext): void {
   };
   const insert = db.prepare(
     `INSERT OR IGNORE INTO learning_progress
-       (user_id, lesson_key, learned_at, quiz_score, quiz_total, teachback_text, teachback_at, taught_signed_off_by, taught_signed_off_at, updated_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+       (user_id, lesson_key, learned_at, quiz_score, quiz_total, quiz_passed_at, teachback_text, teachback_at, taught_signed_off_by, taught_signed_off_at, updated_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
   );
   const milestone = db.prepare(
     `INSERT OR IGNORE INTO learning_milestones (user_id, milestone_key, value, set_by, set_at) VALUES (?, ?, ?, ?, ?)`,
@@ -123,7 +128,7 @@ function seedLearning(db: Db, ctx: SeedContext): void {
       const signed = i < taught && by !== null;
       const signedAt = signed && teachAt !== null ? teachAt + rng.int(4, 30) * HOUR : null;
       insert.run(
-        u.id, key, iso(learnedAt), task ? 1 : 3, task ? 1 : 3,
+        u.id, key, iso(learnedAt), task ? 1 : 3, task ? 1 : 3, iso(learnedAt),
         writes ? DEMO_TEACHBACKS[key] : null, teachAt === null ? null : iso(teachAt),
         signed ? by : null, signedAt === null ? null : iso(signedAt),
         iso(signedAt ?? teachAt ?? learnedAt),
@@ -136,10 +141,33 @@ function seedLearning(db: Db, ctx: SeedContext): void {
   }
 }
 
+function upgradeLearning(db: Db): string[] {
+  const changed: string[] = [];
+  // quiz_passed_at (when the self-check was first passed) is newer than the table. When it has just been added, fill
+  // it in from what the older rows show: learned_at came from a pass unless it is the sign-off time (a sign-off gave
+  // it), and a passing last score is a pass too. Only on the step that adds the column: afterwards the self-check route
+  // keeps it, and a lesson learned at a since-withdrawn sign-off must stay "never passed".
+  const added = addColumnIfMissing(db, 'learning_progress', 'quiz_passed_at', 'TEXT');
+  if (added) {
+    changed.push(added);
+    db.prepare(
+      `UPDATE learning_progress SET quiz_passed_at = learned_at
+        WHERE learned_at IS NOT NULL
+          AND (taught_signed_off_at IS NULL OR learned_at <> taught_signed_off_at OR (quiz_total >= 1 AND quiz_score = quiz_total))`,
+    ).run();
+  }
+  // Signed off but not learned (rows from before a sign-off counted as learned): learned at the sign-off time.
+  const r = db
+    .prepare(`UPDATE learning_progress SET learned_at = taught_signed_off_at WHERE learned_at IS NULL AND taught_signed_off_at IS NOT NULL`)
+    .run();
+  if (Number(r.changes) > 0) changed.push('learning_progress.learned_at');
+  return changed;
+}
+
 export const extension: DbExtension = {
   name: 'learning',
   sql: SQL,
-  // Two new tables (created by `sql` on every start): nothing to add to an existing database.
-  upgrade: () => [],
+  // Two new tables (created by `sql` on every start), plus the column and the sign-off repair above (no-ops once done).
+  upgrade: upgradeLearning,
   seed: seedLearning,
 };

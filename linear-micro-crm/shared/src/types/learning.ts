@@ -12,8 +12,8 @@ import type { Position } from '../types.ts';
 /**
  * One lesson per COD pack topic, in the order of the pack's leadership checklist (21). Some checklist rows share a
  * lesson: "ABC days" → gumball-theory, "Attitude muscle" → attitude-regain, "Pre-management criteria" and
- * "Post-management criteria" → progression-structure. run-an-impact and go-on-a-roadtrip are short placeholders the
- * office fills in (they are practical tasks on the checklist, not theories in the pack).
+ * "Post-management criteria" → progression-structure. run-an-impact and go-on-a-roadtrip are practical tasks on the
+ * checklist that the pack lists but does not describe: the lesson asks the person to check with their leader.
  */
 export const LESSON_KEYS = [
   'five-steps',
@@ -63,11 +63,17 @@ export type LessonState = 'new' | 'learned' | 'teachback_sent' | 'taught';
 /** One row of learning_progress for one person and lesson (all null when they have not started it). */
 export interface LessonProgress {
   lessonKey: LessonKey;
-  /** Set when the self-check first passed (every answer right). */
+  /** Set when the self-check first passed (every answer right), or by a sign-off of a lesson not yet learned. */
   learnedAt: string | null;
   /** The last self-check score (right answers) and how many questions it had. */
   quizScore: number | null;
   quizTotal?: number | null;
+  /**
+   * When the self-check was first passed (every answer right; a task: ticked as done). A later retake never clears it,
+   * so it says whether the self-check was ever passed even when the last score is a miss. null when it has not been
+   * passed (the lesson can still be learned through a sign-off). New in 1.2, optional.
+   */
+  quizPassedAt?: string | null;
   /** The person's own words; only the person, their team leader and admins ever receive it (else null). */
   teachbackText: string | null;
   teachbackAt: string | null;
@@ -89,15 +95,24 @@ export interface LearningProgress {
   total: number;
 }
 
-/** POST /learning/progress/:lessonKey/quiz — the self-check result; learned when score === total (total ≥ 1). */
+/**
+ * POST /learning/progress/:lessonKey/quiz — the option picked for each question (0-based, in question order); the
+ * server grades them against the answer key (shared/src/logic/learningQuiz.ts). A practical task sends `[]` to tick it
+ * as done. A body with only `score` / `total` is refused (400): the score is never taken from the phone.
+ */
 export interface LessonQuizInput {
-  score: number;
-  total: number;
+  answers: number[];
 }
 
+/** The graded self-check; learned on the first pass (every answer right). */
 export interface LessonQuizResult {
   passed: boolean;
   progress: LessonProgress;
+  /** Right answers and questions (a task ticked as done: 1 of 1). */
+  score?: number;
+  total?: number;
+  /** One entry per question: whether the option picked was right. Never says which option is right. */
+  correct?: boolean[];
 }
 
 /** POST /learning/progress/:lessonKey/teachback — "write the theory in your own words" (saved for the leader). */
@@ -109,6 +124,14 @@ export interface TeachbackInput {
 export interface TeachbackSignoffInput {
   /** false withdraws a sign-off. Default true. */
   signedOff?: boolean;
+}
+
+/**
+ * The sign-off's answer: the lesson as it now stands. An in-person sign-off also counts as learned: when the lesson
+ * was not learned yet, the server sets `learnedAt` to the sign-off time and says so with `markedLearned: true`.
+ */
+export interface TeachbackSignoffResult extends LessonProgress {
+  markedLearned?: boolean;
 }
 
 /** One person on the checklist page (GET /learning/team). */

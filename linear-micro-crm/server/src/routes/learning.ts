@@ -2,9 +2,9 @@
  * Release 1.2 — /learning/* — OWNED BY L1 learning-pack.
  *
  *  GET  /learning/progress[?userId=]                    → LearningProgress  (own; ?userId leader: own team, admin: any) — cached
- *  POST /learning/progress/:lessonKey/quiz              LessonQuizInput → LessonQuizResult (self)
+ *  POST /learning/progress/:lessonKey/quiz              LessonQuizInput { answers } → LessonQuizResult (self; the server grades)
  *  POST /learning/progress/:lessonKey/teachback         TeachbackInput → LessonProgress (self, once the self-check passed)
- *  POST /learning/progress/:userId/:lessonKey/signoff   TeachbackSignoffInput → LessonProgress (that person's team leader, or admin; never your own)
+ *  POST /learning/progress/:userId/:lessonKey/signoff   TeachbackSignoffInput → TeachbackSignoffResult (that person's team leader, or admin; never your own)
  *  GET  /learning/team                                  → TeamLearning (leader: own team; admin: everyone active; rep / recruiter 403) — cached
  *  GET  /learning/progression/:userId                   → Progression (self; leader: own team; admin: any) — cached
  *  PUT  /learning/milestones/:userId/:key               ProgressionMilestoneInput → Progression (admin: the criteria the office ticks)
@@ -13,6 +13,11 @@
  * three GET prefixes are in CACHED_PATHS (20 s per user, cleared by any write). Teach-back text only ever reaches the
  * person, the leader of their team and admins (the only viewers these routes allow). The progression tracker is a
  * smart builder: with LM_SMART=0 it answers the level only (requirements [], headline '', enabled false).
+ *
+ * The self-check is graded here from the options picked (gradeQuiz, shared/src/logic/learningQuiz.ts); a score sent by
+ * the phone is never trusted. A sign-off of a lesson not yet learned also marks it learned (Teach ✓ never shows with
+ * Learn ☐); withdrawing that sign-off takes back only the "learned" it gave, and keeps it when the self-check was ever
+ * passed (quiz_passed_at) or a teach-back has been written since (withdrawTakesBackLearned in shared).
  */
 import { Router, type Request } from 'express';
 import { z } from 'zod';
@@ -21,12 +26,12 @@ import {
   LESSON_KEYS,
   PROGRESSION_RULES,
   careerLevelFor,
+  gradeQuiz,
   isLessonKey,
   isProgressionMilestoneKey,
   lessonStateOf,
   nextCareerLevel,
   progressionFrom,
-  quizPassed,
   type LearningProgress,
   type LessonKey,
   type LessonProgress,
@@ -37,6 +42,7 @@ import {
   type ProgressionWeek,
   type Role,
   type TeachbackAwaiting,
+  type TeachbackSignoffResult,
   type TeamLearning,
   type TeamLearningRow,
   type UserStatus,
@@ -71,6 +77,7 @@ interface ProgressRow {
   learnedAt: string | null;
   quizScore: number | null;
   quizTotal: number | null;
+  quizPassedAt: string | null;
   teachbackText: string | null;
   teachbackAt: string | null;
   taughtSignedOffBy: number | null;
@@ -79,13 +86,13 @@ interface ProgressRow {
 }
 
 const PROGRESS_SELECT = `SELECT p.lesson_key AS lessonKey, p.learned_at AS learnedAt, p.quiz_score AS quizScore, p.quiz_total AS quizTotal,
-  p.teachback_text AS teachbackText, p.teachback_at AS teachbackAt, p.taught_signed_off_by AS taughtSignedOffBy,
+  p.quiz_passed_at AS quizPassedAt, p.teachback_text AS teachbackText, p.teachback_at AS teachbackAt, p.taught_signed_off_by AS taughtSignedOffBy,
   CASE WHEN s.id IS NULL THEN NULL ELSE s.first_name || ' ' || s.last_name END AS taughtSignedOffByName,
   p.taught_signed_off_at AS taughtSignedOffAt
   FROM learning_progress p LEFT JOIN users s ON s.id = p.taught_signed_off_by`;
 
 const emptyLesson = (lessonKey: LessonKey): LessonProgress => ({
-  lessonKey, learnedAt: null, quizScore: null, quizTotal: null, teachbackText: null, teachbackAt: null,
+  lessonKey, learnedAt: null, quizScore: null, quizTotal: null, quizPassedAt: null, teachbackText: null, teachbackAt: null,
   taughtSignedOffBy: null, taughtSignedOffByName: null, taughtSignedOffAt: null, state: 'new',
 });
 
@@ -96,6 +103,7 @@ function toLesson(lessonKey: LessonKey, row: ProgressRow | undefined): LessonPro
     learnedAt: row.learnedAt,
     quizScore: row.quizScore,
     quizTotal: row.quizTotal,
+    quizPassedAt: row.quizPassedAt,
     teachbackText: row.teachbackText,
     teachbackAt: row.teachbackAt,
     taughtSignedOffBy: row.taughtSignedOffBy,
@@ -111,12 +119,15 @@ function canView(me: UserWithTeam, target: Pick<Person, 'id' | 'teamId'>): boole
   return me.role === 'leader' && me.teamId !== null && me.teamId === target.teamId;
 }
 
-const quizSchema = z
-  .object({
-    score: z.number().int().min(0).max(LEARNING_LIMITS.quizMaxQuestions),
-    total: z.number().int().min(1).max(LEARNING_LIMITS.quizMaxQuestions),
-  })
-  .refine((q) => q.score <= q.total, { message: 'score cannot be more than total', path: ['score'] });
+/** The option picked for each question (0-based). `score` / `total` from the phone are not accepted: answers or 400. */
+const quizSchema = z.object({
+  answers: z
+    .array(z.number().int().min(0).max(LEARNING_LIMITS.quizMaxOptions - 1), {
+      required_error: 'Send answers: the option picked for each question',
+      invalid_type_error: 'answers must be a list of option numbers',
+    })
+    .max(LEARNING_LIMITS.quizMaxQuestions),
+});
 
 const teachbackSchema = z.object({
   text: z.string().trim().min(LEARNING_LIMITS.teachbackMinLength, `Write at least ${LEARNING_LIMITS.teachbackMinLength} characters`).max(LEARNING_LIMITS.teachbackMaxLength),
@@ -311,18 +322,23 @@ export function learningRouter(db: Db): Router {
   router.post('/progress/:lessonKey/quiz', (req, res) => {
     const me = currentUser(req);
     const key = lessonParam(req);
-    const input = quizSchema.parse(req.body);
-    const passed = quizPassed(input.score, input.total);
+    const { answers } = quizSchema.parse(req.body);
+    const grade = gradeQuiz(key, answers);
+    if (!grade.ok) throw badRequest(grade.error);
+    const { passed, score, total, correct } = grade;
     const now = nowISO();
-    // The last score always replaces the old one; "learned" is set by the first pass and never taken away by a retake.
+    // The last score always replaces the old one; "learned" and "passed" (quiz_passed_at) are set by the first pass
+    // and never taken away by a retake, so a failed retake cannot undo a pass (not even through a withdrawn sign-off).
     run(
       db,
-      `INSERT INTO learning_progress (user_id, lesson_key, learned_at, quiz_score, quiz_total, updated_at) VALUES (?, ?, ?, ?, ?, ?)
+      `INSERT INTO learning_progress (user_id, lesson_key, learned_at, quiz_score, quiz_total, quiz_passed_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)
        ON CONFLICT(user_id, lesson_key) DO UPDATE SET quiz_score = excluded.quiz_score, quiz_total = excluded.quiz_total,
-         learned_at = COALESCE(learning_progress.learned_at, excluded.learned_at), updated_at = excluded.updated_at`,
-      [me.id, key, passed ? now : null, input.score, input.total, now],
+         learned_at = COALESCE(learning_progress.learned_at, excluded.learned_at),
+         quiz_passed_at = COALESCE(learning_progress.quiz_passed_at, excluded.quiz_passed_at), updated_at = excluded.updated_at`,
+      [me.id, key, passed ? now : null, score, total, passed ? now : null, now],
     );
-    const body: LessonQuizResult = { passed, progress: lessonRow(me.id, key) };
+    // Which questions were wrong, never which option is right.
+    const body: LessonQuizResult = { passed, progress: lessonRow(me.id, key), score, total, correct };
     res.json(body);
   });
 
@@ -345,25 +361,40 @@ export function learningRouter(db: Db): Router {
     if (target.id === me.id) throw forbidden('Someone else signs off your own teach-back');
     if (!canView(me, target)) throw forbidden('You can only sign off teach-backs from your own team');
     const now = nowISO();
+    let markedLearned = false;
     if (signedOff) {
       // An in-person teach-back can be signed off without a written one; a second sign-off keeps the first signer.
+      // It also counts as learned: a lesson not learned yet gets learned_at = the sign-off time (the self-check can
+      // still be taken; a pass never moves learned_at).
+      const wasLearned = get<{ learnedAt: string | null }>(db, `SELECT learned_at AS learnedAt FROM learning_progress WHERE user_id = ? AND lesson_key = ?`, [target.id, key]);
       run(
         db,
-        `INSERT INTO learning_progress (user_id, lesson_key, taught_signed_off_by, taught_signed_off_at, updated_at) VALUES (?, ?, ?, ?, ?)
+        `INSERT INTO learning_progress (user_id, lesson_key, learned_at, taught_signed_off_by, taught_signed_off_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)
          ON CONFLICT(user_id, lesson_key) DO UPDATE SET
            taught_signed_off_by = CASE WHEN learning_progress.taught_signed_off_at IS NULL THEN excluded.taught_signed_off_by ELSE learning_progress.taught_signed_off_by END,
            taught_signed_off_at = COALESCE(learning_progress.taught_signed_off_at, excluded.taught_signed_off_at),
+           learned_at = COALESCE(learning_progress.learned_at, learning_progress.taught_signed_off_at, excluded.learned_at),
            updated_at = excluded.updated_at`,
-        [target.id, key, me.id, now, now],
+        [target.id, key, now, me.id, now, now],
       );
+      markedLearned = !wasLearned?.learnedAt;
     } else {
+      // Withdrawn: back to where it was. A "learned" that only this sign-off gave (same time, self-check never passed,
+      // no teach-back written since) goes with it. A self-check passed at any point keeps the lesson learned, whatever
+      // the last retake scored; so does a teach-back written after the sign-off (it stays, waiting for a sign-off, and
+      // a teach-back always sits on a learned lesson). Same rule as withdrawTakesBackLearned in shared.
       run(
         db,
-        `UPDATE learning_progress SET taught_signed_off_by = NULL, taught_signed_off_at = NULL, updated_at = ? WHERE user_id = ? AND lesson_key = ?`,
+        `UPDATE learning_progress SET
+           learned_at = CASE WHEN learned_at = taught_signed_off_at AND quiz_passed_at IS NULL AND teachback_at IS NULL
+                               AND NOT COALESCE(quiz_total >= 1 AND quiz_score = quiz_total, 0) THEN NULL ELSE learned_at END,
+           taught_signed_off_by = NULL, taught_signed_off_at = NULL, updated_at = ?
+         WHERE user_id = ? AND lesson_key = ?`,
         [now, target.id, key],
       );
     }
-    res.json(lessonRow(target.id, key));
+    const body: TeachbackSignoffResult = markedLearned ? { ...lessonRow(target.id, key), markedLearned } : lessonRow(target.id, key);
+    res.json(body);
   });
 
   router.put('/milestones/:userId/:key', requireRole('admin'), (req, res) => {

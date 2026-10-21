@@ -4,7 +4,7 @@
  */
 import { after, before, test } from 'node:test';
 import assert from 'node:assert/strict';
-import { LESSON_KEYS, PROGRESSION_RULES } from '@lm/shared';
+import { LESSON_KEYS, PROGRESSION_RULES, QUIZ_ANSWER_KEY } from '@lm/shared';
 import { get } from '../db/connection.ts';
 import { setBusinessClock, toISODate } from '../lib/dates.ts';
 import { addHistory, startTestServer, withSmart, type Json, type TestClient, type TestServer } from './helpers.ts';
@@ -35,6 +35,8 @@ after(async () => {
 const fx = () => srv.fixture!;
 const gaugeRows = () => Number(get<{ n: number }>(srv.db, `SELECT COUNT(*) AS n FROM gauge_entries`)!.n);
 const lesson = (p: Json, key: string) => (p.lessons as Json[]).find((l) => l.lessonKey === key);
+/** The self-check's answers with `wrong` of them changed (0 → every answer right). */
+const answers = (key: keyof typeof QUIZ_ANSWER_KEY, wrong = 0) => QUIZ_ANSWER_KEY[key].map((a, i) => (i < wrong ? (a + 1) % 4 : a));
 
 test('GET /learning/progress: own progress, one row per lesson in checklist order, all new at first', async () => {
   const r = await rep.get('/learning/progress');
@@ -48,17 +50,17 @@ test('GET /learning/progress: own progress, one row per lesson in checklist orde
 
 test('quiz: learned only when every answer is right; a later retake keeps "learned" and records the last score', async () => {
   const before = gaugeRows();
-  let r = await rep.post('/learning/progress/five-steps/quiz', { score: 2, total: 3 });
+  let r = await rep.post('/learning/progress/five-steps/quiz', { answers: answers('five-steps', 1) });
   assert.equal(r.status, 200);
   assert.equal(r.json.passed, false);
   assert.equal(r.json.progress.state, 'new');
   assert.equal(r.json.progress.quizScore, 2);
-  r = await rep.post('/learning/progress/five-steps/quiz', { score: 3, total: 3 });
+  r = await rep.post('/learning/progress/five-steps/quiz', { answers: answers('five-steps') });
   assert.equal(r.json.passed, true);
   assert.equal(r.json.progress.state, 'learned');
   const learnedAt = r.json.progress.learnedAt;
   assert.ok(learnedAt);
-  r = await rep.post('/learning/progress/five-steps/quiz', { score: 1, total: 3 });
+  r = await rep.post('/learning/progress/five-steps/quiz', { answers: answers('five-steps', 2) });
   assert.equal(r.json.passed, false);
   assert.equal(r.json.progress.state, 'learned');
   assert.equal(r.json.progress.learnedAt, learnedAt);
@@ -70,12 +72,12 @@ test('quiz: learned only when every answer is right; a later retake keeps "learn
   assert.equal(gaugeRows(), before, 'learning never writes a gauge row');
 });
 
-test('quiz: validation and unknown lessons', async () => {
-  assert.equal((await rep.post('/learning/progress/five-steps/quiz', { score: 4, total: 3 })).status, 400);
-  assert.equal((await rep.post('/learning/progress/five-steps/quiz', { score: 0, total: 0 })).status, 400);
-  assert.equal((await rep.post('/learning/progress/five-steps/quiz', { score: 1.5, total: 3 })).status, 400);
+test('quiz: validation and unknown lessons (a score from the phone is refused; learning-selfcheck.test.ts has more)', async () => {
+  assert.equal((await rep.post('/learning/progress/five-steps/quiz', { score: 3, total: 3 })).status, 400);
+  assert.equal((await rep.post('/learning/progress/five-steps/quiz', { answers: [1, 2] })).status, 400);
+  assert.equal((await rep.post('/learning/progress/five-steps/quiz', { answers: [1, 1.5, 0] })).status, 400);
   assert.equal((await rep.post('/learning/progress/five-steps/quiz', {})).status, 400);
-  assert.equal((await rep.post('/learning/progress/not-a-lesson/quiz', { score: 1, total: 1 })).status, 404);
+  assert.equal((await rep.post('/learning/progress/not-a-lesson/quiz', { answers: [] })).status, 404);
 });
 
 test('teach-back: only after the self-check, at least a sentence, then waiting for a sign-off', async () => {
@@ -110,10 +112,12 @@ test('sign-off: the leader of the team or an admin, never your own, never anothe
   r = await leader.post(url(fx().users.rep), { signedOff: false });
   assert.equal(r.json.state, 'teachback_sent');
   assert.equal(r.json.taughtSignedOffAt, null);
-  // an in-person teach-back: signed off with nothing written
+  // an in-person teach-back: signed off with nothing written, and it counts as learned too
   r = await admin.post(url(fx().users.repB, 'strategic-pause'), {});
   assert.equal(r.json.state, 'taught');
   assert.equal(r.json.teachbackText, null);
+  assert.ok(r.json.learnedAt);
+  assert.equal(r.json.markedLearned, true);
   r = await leader.post(url(fx().users.rep), {});
   assert.equal(r.json.state, 'taught');
   const p = (await rep.get('/learning/progress')).json;
@@ -137,7 +141,7 @@ test('GET /learning/team: leader → own team only; admin → every field person
   assert.equal((await rep.get('/learning/team')).status, 403);
   assert.equal((await recruiter.get('/learning/team')).status, 403);
   // repA2 writes a teach-back so the leader has something waiting
-  await repA2.post('/learning/progress/law-of-averages/quiz', { score: 3, total: 3 });
+  await repA2.post('/learning/progress/law-of-averages/quiz', { answers: answers('law-of-averages') });
   await repA2.post('/learning/progress/law-of-averages/teachback', { text: 'The more stops I make, the more sales I get.' });
   const t = await leader.get('/learning/team');
   assert.equal(t.status, 200);
@@ -219,7 +223,7 @@ test('cached reads refresh after a write', async () => {
   const a = await repA2.get('/learning/progress');
   const b = await repA2.get('/learning/progress');
   assert.equal(b.headers.get('x-cache'), 'HIT');
-  await repA2.post('/learning/progress/working-habits/quiz', { score: 3, total: 3 });
+  await repA2.post('/learning/progress/working-habits/quiz', { answers: answers('working-habits') });
   const c = await repA2.get('/learning/progress');
   assert.equal(c.headers.get('x-cache'), 'MISS');
   assert.equal(c.json.learned, a.json.learned + 1);

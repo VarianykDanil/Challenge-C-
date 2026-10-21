@@ -32,13 +32,16 @@ field and the office.
 A lesson shows a summary and the key points, the lesson itself with the pack's pictures, then:
 
 1. **Self-check**: three questions. Get all three right (**Check my answers**) and the lesson is learned. Got one wrong?
-   The explanation shows under each question; **Try again** as often as you like.
+   It says which question to look at again (not the right answer), so read that part of the lesson; **Try again**
+   keeps your right answers, as often as you like. The explanations show once all three are right.
 2. **Teach it back**: write the theory in your own words and **Send to my leader** (people without a team leader
    send it to the office). Only you, your team leader and the office can read it. You can **Rewrite it** later. If you
    teach it at the whiteboard instead, your leader can sign it off in person.
-3. **Signed off**: your leader ticks it and the lesson shows **Taught**.
+3. **Signed off**: your leader ticks it and the lesson shows **Taught**. A sign-off counts as learned too, so if you
+   taught it at the whiteboard before taking the self-check, Learn is ticked as well.
 
-"Run an impact" and "Go on a roadtrip" are practical tasks: tap **I've done this**, then say how it went.
+"Run an impact" and "Go on a roadtrip" are practical tasks: the COD pack lists them but does not describe them, so
+ask your leader what each involves. Once you have done it, tap **I've done this**, then say how it went.
 
 **Progress** (from the Learning page, **Checklist and progress**):
 
@@ -49,7 +52,10 @@ A lesson shows a summary and the key points, the lesson itself with the pack's p
   field ladder).
 - **Leaders**: **Me** shows your own; **My team** shows the teach-backs **Waiting for your sign-off** (read them and
   tap **Sign off**), everyone's Learn / Taught counts, and on a tablet or computer the whole checklist grid. Open a
-  person to tick their Teach column (**Sign off**; tap a green **Taught** to withdraw it) and see their progression.
+  person to tick their Teach column (**Sign off**, which ticks Learn too if it was empty; tap a green **Taught** to
+  withdraw it) and see their progression. Withdrawing takes Learn back only when the sign-off was the only reason for
+  it: if they have passed the self-check (even if a later retake went wrong) or written a teach-back since, it stays
+  learned, and the dialog says which.
 - **Admins**: **Everyone** instead of My team, and on a person's progression the criteria the office confirms by hand
   (marked **Office**) have a switch or a count to set, e.g. **4 + 1 or 3 + 2** or people trained to leadership.
 

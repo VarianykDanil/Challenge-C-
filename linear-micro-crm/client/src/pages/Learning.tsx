@@ -67,7 +67,7 @@ export function LearningPage() {
               <div className="eyebrow">No. 1 Org COD pack</div>
               <h2 className="mt-1 text-xl font-bold tracking-tight text-fg">Learn it, then teach it back</h2>
               <p className="mt-1 max-w-xl text-sm leading-relaxed text-muted">
-                Each lesson ends with a three-question self-check. Pass it and the lesson is learned; write it back in your own words and your leader signs it off.
+                Each lesson ends with a three-question self-check (the two checklist tasks are ticked as done instead). Pass it and the lesson is learned; write it back in your own words and your leader signs it off.
               </p>
               {progress.isLoading ? (
                 <Skeleton className="mt-4 h-8 w-full max-w-md" />

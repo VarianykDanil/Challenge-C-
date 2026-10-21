@@ -55,10 +55,15 @@ export function isTaskLesson(key: LessonKey): boolean {
   return LESSON_GROUP_OF[key] === 'tasks';
 }
 
+// The self-check's answer key and grading (the server grades the options picked): ./learningQuiz.ts.
+export * from './learningQuiz.ts';
+
 /** Limits the server enforces (and the client mirrors). */
 export const LEARNING_LIMITS = {
-  /** A self-check has 1–10 questions (the pack lessons have 3; a task has 1). */
+  /** At most 10 answers in a self-check (the pack lessons have 3 questions; a practical task has none). */
   quizMaxQuestions: 10,
+  /** Each answer is an option number from 0 to 9 (the lessons have 4 options per question). */
+  quizMaxOptions: 10,
   /** A teach-back is at least a sentence and at most a page. */
   teachbackMinLength: 20,
   teachbackMaxLength: 4000,
@@ -73,7 +78,8 @@ export function quizPassed(score: number, total: number): boolean {
 
 /**
  * Where someone is on one lesson: signed off → taught; a teach-back written → teachback_sent; the self-check passed →
- * learned; else new. A sign-off wins even without a written teach-back (the leader heard it in person).
+ * learned; else new. A sign-off wins even without a written teach-back (the leader heard it in person), and the server
+ * sets `learnedAt` when it signs off a lesson that was not learned yet, so Teach ✓ never shows with Learn ☐.
  */
 export function lessonStateOf(row: { learnedAt: string | null; teachbackAt: string | null; taughtSignedOffAt: string | null } | null | undefined): LessonState {
   if (!row) return 'new';
@@ -81,6 +87,46 @@ export function lessonStateOf(row: { learnedAt: string | null; teachbackAt: stri
   if (row.teachbackAt) return 'teachback_sent';
   if (row.learnedAt) return 'learned';
   return 'new';
+}
+
+/** The fields of a lesson row the "how was it learned" rules read (a `LessonProgress` has them all). */
+export interface LessonLearnedFacts {
+  learnedAt: string | null;
+  taughtSignedOffAt: string | null;
+  teachbackAt?: string | null;
+  quizPassedAt?: string | null;
+  quizScore?: number | null;
+  quizTotal?: number | null;
+}
+
+/**
+ * True once the self-check has ever been passed: `quizPassedAt` is set by the first pass and never cleared, so a later
+ * failed retake does not undo it. (For a row without the field, a passing last score counts too.)
+ */
+export function selfCheckPassed(row: LessonLearnedFacts | null | undefined): boolean {
+  if (!row) return false;
+  if (row.quizPassedAt) return true;
+  return row.quizTotal != null && row.quizScore != null && quizPassed(row.quizScore, row.quizTotal);
+}
+
+/**
+ * True when the lesson is learned but the self-check was never passed. A lesson is learned in one of two ways, the
+ * self-check or an in-person sign-off, so this means a leader's sign-off counted it as learned.
+ */
+export function learnedBySignOff(row: LessonLearnedFacts | null | undefined): boolean {
+  return Boolean(row?.learnedAt) && !selfCheckPassed(row);
+}
+
+/**
+ * True when withdrawing the sign-off also takes "learned" away: the sign-off was the only reason it is learned
+ * (`learnedAt` is the sign-off time, the self-check was never passed) and no teach-back has been written since. A
+ * passed self-check (before or after the sign-off, whatever the last retake scored) keeps it learned, and so does a
+ * written teach-back (it stays, waiting for a sign-off, and a teach-back always sits on a learned lesson).
+ * server/src/routes/learning.ts applies the same rule in SQL.
+ */
+export function withdrawTakesBackLearned(row: LessonLearnedFacts | null | undefined): boolean {
+  if (!row?.taughtSignedOffAt || row.learnedAt !== row.taughtSignedOffAt) return false;
+  return !selfCheckPassed(row) && !row.teachbackAt;
 }
 
 // ───────────────────────────── Career ladder ─────────────────────────────

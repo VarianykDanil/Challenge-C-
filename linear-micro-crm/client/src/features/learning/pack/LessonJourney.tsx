@@ -1,7 +1,7 @@
 // Release 1.2 — L1: the three steps of one lesson (learn → teach it back → signed off) as a small vertical stepper.
 import { Check } from 'lucide-react';
 import clsx from 'clsx';
-import type { LessonProgress } from '@lm/shared';
+import { learnedBySignOff, type LessonProgress } from '@lm/shared';
 import type { Lesson } from '@/content/learning';
 import { useCurrentUser } from '@/auth/AuthProvider';
 import { formatDateShort } from '@/lib/format';
@@ -9,8 +9,16 @@ import { reviewerWord } from './reviewer';
 
 export function LessonJourney({ lesson, progress, className }: { lesson: Lesson; progress: LessonProgress | undefined; className?: string }) {
   const who = reviewerWord(useCurrentUser());
+  // Learned because a leader signed it off in person (the self-check is still there to take).
+  const inPerson = learnedBySignOff(progress);
   const steps = [
-    { label: lesson.task ? 'Do it' : 'Pass the self-check', done: Boolean(progress?.learnedAt), at: progress?.learnedAt, href: '#self-check' },
+    {
+      label: lesson.task ? (inPerson ? 'Done at the sign-off' : 'Do it') : inPerson ? 'Learned at the sign-off' : 'Pass the self-check',
+      done: Boolean(progress?.learnedAt),
+      at: progress?.learnedAt,
+      sub: undefined as string | undefined,
+      href: '#self-check',
+    },
     { label: lesson.task ? `Tell ${who} how it went` : 'Teach it back', done: Boolean(progress?.teachbackAt), at: progress?.teachbackAt, href: '#teach-back' },
     {
       label: `Signed off by ${who}`,

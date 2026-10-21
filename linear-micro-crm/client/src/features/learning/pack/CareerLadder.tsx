@@ -17,7 +17,7 @@ export interface CareerLadderProps {
 }
 
 const PHASE_COPY = {
-  pre: { title: 'Pre-management progression structure', description: 'From entry level to running your own office.' },
+  pre: { title: 'Pre-management progression structure', description: 'From entry level to assistant director.' },
   post: { title: 'Post-management progression structure', description: 'From your own office to overseeing seven.' },
 } as const;
 

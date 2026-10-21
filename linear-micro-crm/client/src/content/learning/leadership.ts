@@ -1,9 +1,12 @@
 // Release 1.2 — L1: COD pack lessons, the leadership block (pack pages 11, 13, 17–20) and the two practical tasks
-// from the checklist ("Run an impact", "Go on a roadtrip") that the office fills in. Wording follows the pack; obvious
-// typos fixed (politcs → politics, compeition → competition, dependant → dependent, some → someone, liason → liaison,
-// comission → commission).
-import { IMAGES } from './images';
-import type { LadderLevel, Lesson } from './types';
+// from the checklist ("Run an impact", "Go on a roadtrip"), which the pack lists but does not describe: those two say so
+// and send the person to their leader, inventing no procedure. Wording follows the pack; obvious typos fixed
+// (politcs → politics, compeition → competition, dependant → dependent, some → someone, liason → liaison,
+// comission → commission). One deliberate change: the pack's dress code ("Ladies – … heels in the office. Men – …")
+// is one rule for everyone, as UK guidance on equivalent dress codes for men and women expects. The app's own sentences
+// write "teach-back"; the pack's names keep "teachback" (the lesson title, "3 rules of the teachback").
+import { IMAGES } from './images.ts';
+import type { LadderLevel, Lesson } from './types.ts';
 
 /** The pack's career ladder: pre-management structure (page 18) and post-management (page 19). */
 export const CAREER_LADDER: LadderLevel[] = [
@@ -228,7 +231,7 @@ export const ASSUMING_THE_ROLE: Lesson = {
         {
           kind: 'list',
           items: [
-            '**Image.** Ladies – professional image, light makeup and heels in the office. Men – clean ironed shirt and tie.',
+            '**Image.** A professional image in the office: smart and well presented, for example a clean ironed shirt and tie, or equivalent smart office wear.',
             'Helping the leaders with responsibilities, i.e. helping out the team that day; on the event, organising tablets and merchandise.',
             'Be a problem solver not a problem finder.',
           ],
@@ -290,15 +293,15 @@ export const THEORY_OF_TEACHBACK: Lesson = {
   ],
   quiz: [
     {
-      q: 'What is rule 1 of the teachback?',
+      q: 'What is rule 1 of the teach-back?',
       options: ['Talk for as long as possible', 'Write the theory at the top of the whiteboard and underline it', 'Ask the newest person first', 'Hand out the pack'],
       answer: 1,
       why: 'Write the theory you’re teaching at the top of the whiteboard and underline it!',
     },
     { q: 'Someone gives the wrong answer. What do you do?', options: ['Correct them in front of everyone', 'Move on without them', 'Never make them feel silly', 'Ask them to leave'], answer: 2, why: 'Never make someone feel silly for giving the wrong answer.' },
-    { q: 'A teachback should be…', options: ['a conversation, not a pitch', 'a pitch', 'a test', 'silent'], answer: 0, why: 'Make sure it’s a conversation and not a pitch.' },
+    { q: 'A teach-back should be…', options: ['a conversation, not a pitch', 'a pitch', 'a test', 'silent'], answer: 0, why: 'Make sure it’s a conversation and not a pitch.' },
   ],
-  teachPrompt: 'Plan a five-minute teachback of any lesson in this pack using the three rules. What goes on the whiteboard, and what questions will you ask?',
+  teachPrompt: 'Plan a five-minute teach-back of any lesson in this pack using the three rules. What goes on the whiteboard, and what questions will you ask?',
   keywords: ['teachback', 'teach back', 'whiteboard', 'notes', 'training'],
 };
 
@@ -309,24 +312,24 @@ export const RUN_AN_IMPACT: Lesson = {
   checklist: ['Run an impact'],
   page: null,
   task: true,
-  summary: 'A practical task on the leadership checklist. Watch one, run one, then tell your leader how it went so they can tick it off.',
-  keyPoints: ['Watch your leader run one first.', 'Run it yourself with your leader there.', 'Write how it went below; your leader signs it off.'],
+  summary:
+    'A practical task on the leadership checklist. The COD pack lists it but does not describe it: ask your leader what it involves, then tick it as done and say how it went so they can sign it off.',
+  keyPoints: ['A task on the leadership checklist: the pack has no theory for it.', 'Ask your leader what it involves.', 'Tick it as done, write how it went; your leader signs it off.'],
   sections: [
     {
       blocks: [
+        { kind: 'callout', tone: 'note', text: 'The COD pack lists this task but does not describe it. Ask your leader to walk you through one.' },
         {
-          kind: 'callout',
-          tone: 'note',
-          title: 'Details from your office',
-          text: 'Your office adds what an impact looks like here: when you run it, who is there and what good looks like. Until then, ask your leader to walk you through one.',
+          kind: 'list',
+          ordered: true,
+          items: ['Ask your leader what an impact involves and when you can run one.', 'Do it.', 'Tick it as done and write a few lines on how it went.'],
         },
-        { kind: 'list', ordered: true, items: ['Watch your leader run an impact.', 'Run one yourself with your leader there.', 'Tick it as done and write a few lines on how it went.'] },
       ],
     },
   ],
   quiz: [],
   teachPrompt: 'How did it go? What did you do, what worked, and what would you change next time?',
-  keywords: ['impact', 'task', 'morning meeting'],
+  keywords: ['impact', 'task'],
 };
 
 export const GO_ON_A_ROADTRIP: Lesson = {
@@ -336,22 +339,18 @@ export const GO_ON_A_ROADTRIP: Lesson = {
   checklist: ['Go on a roadtrip'],
   page: null,
   task: true,
-  summary: 'A practical task on the leadership checklist: road trips are one of the 7 key areas of leadership. Go on one, then tell your leader what you learned.',
-  keyPoints: ['Road trips are one of the 7 key areas of leadership.', 'Go on one with your team.', 'Write what you learned below; your leader signs it off.'],
+  summary:
+    'A practical task on the leadership checklist: road trips are one of the 7 key areas of leadership. Ask your leader when the next one is, then tick it as done and say what you learned.',
+  keyPoints: ['Road trips are one of the 7 key areas of leadership.', 'Ask your leader when the next one is.', 'Write what you learned below; your leader signs it off.'],
   sections: [
     {
       blocks: [
-        {
-          kind: 'callout',
-          tone: 'note',
-          title: 'Details from your office',
-          text: 'Your office adds the upcoming road trips and what to bring. Until then, ask your leader when the next one is.',
-        },
-        { kind: 'list', ordered: true, items: ['Ask your leader about the next road trip.', 'Go on it and work the new territory.', 'Tick it as done and write what you learned.'] },
+        { kind: 'callout', tone: 'note', text: 'The COD pack lists this task but does not describe it. Ask your leader when the next road trip is.' },
+        { kind: 'list', ordered: true, items: ['Ask your leader about the next road trip.', 'Go on it.', 'Tick it as done and write what you learned.'] },
       ],
     },
   ],
   quiz: [],
-  teachPrompt: 'Where did you go, what was different about the territory, and what did you learn from the other leaders?',
+  teachPrompt: 'Where did you go, and what did you learn?',
   keywords: ['roadtrip', 'road trip', 'travel', 'task'],
 };

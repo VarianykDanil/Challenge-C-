@@ -1,8 +1,8 @@
 // Release 1.2 — L1 learning-pack: the COD pack as typed lessons, in the order of the pack's leadership checklist.
 // OWNED BY L1. Pages: /learning (hub), /learning/pack/:lessonKey, /learning/progress.
 import { LESSON_GROUP_OF, LESSON_GROUPS, LESSON_KEYS, type LessonGroup, type LessonKey, type LessonState } from '@lm/shared';
-import { ATTITUDE_REGAIN, BAMBOO, BUYING_SIGNS, CAN_CANT, GREEN_LIGHT, GUMBALL, PRE_EMPTIVE_STRIKE, STRATEGIC_PAUSE } from './field';
-import { FIVE_STEPS, IMPULSE_FACTORS, LAW_OF_AVERAGES, WORKING_HABITS } from './fundamentals';
+import { ATTITUDE_REGAIN, BAMBOO, BUYING_SIGNS, CAN_CANT, GREEN_LIGHT, GUMBALL, PRE_EMPTIVE_STRIKE, STRATEGIC_PAUSE } from './field.ts';
+import { FIVE_STEPS, IMPULSE_FACTORS, LAW_OF_AVERAGES, WORKING_HABITS } from './fundamentals.ts';
 import {
   ASSUMING_THE_ROLE,
   CORE_PRINCIPLES,
@@ -11,14 +11,14 @@ import {
   PROGRESSION_STRUCTURE,
   RUN_AN_IMPACT,
   THEORY_OF_TEACHBACK,
-} from './leadership';
-import { BULLET_THEORY, STRAIGHT_LINE } from './objections';
-import type { Lesson } from './types';
+} from './leadership.ts';
+import { BULLET_THEORY, STRAIGHT_LINE } from './objections.ts';
+import type { Lesson } from './types.ts';
 
-export type { Lesson, LessonBlock, LessonCard, LessonImage, LessonSection, LadderLevel, QuizQuestion, Rich } from './types';
-export { IMAGES } from './images';
-export { CAREER_LADDER } from './leadership';
-export { BULLET_OBJECTIONS } from './objections';
+export type { Lesson, LessonBlock, LessonCard, LessonImage, LessonSection, LadderLevel, QuizQuestion, Rich } from './types.ts';
+export { IMAGES } from './images.ts';
+export { CAREER_LADDER } from './leadership.ts';
+export { BULLET_OBJECTIONS } from './objections.ts';
 
 export const LESSONS: Record<LessonKey, Lesson> = {
   'five-steps': FIVE_STEPS,
