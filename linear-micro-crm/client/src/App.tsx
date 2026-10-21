@@ -7,7 +7,9 @@ import { ToastProvider, useToast } from '@/components/ui';
 import { UNAUTHENTICATED_EVENT } from '@/api/client';
 import { AuthProvider, useAuth } from '@/auth/AuthProvider';
 import { RedirectIfAuthed, RequireAuth } from '@/auth/RequireAuth';
-import { AUDIT_ROLES, BULK_GAUGE_ROLES, CAMPAIGN_ROLES, GAUGE_ROLES, RECRUITMENT_ROLES, RequireRole } from '@/auth/RequireRole';
+import {
+  AUDIT_ROLES, BULK_GAUGE_ROLES, CAMPAIGN_PAGE_ROLES, CAMPAIGN_ROLES, GAUGE_ROLES, RECRUITMENT_ROLES, RequireRole, STATEMENT_ROLES, VENUE_ROLES,
+} from '@/auth/RequireRole';
 import { PinSetupGate } from '@/auth/PinSetupGate';
 import { NotFoundPage } from '@/pages/NotFound';
 import { FullPageSpinner } from '@/features/common/FullPageSpinner';
@@ -42,6 +44,19 @@ const LearningPitchPage = lazy(() => import('@/pages/LearningPitch').then((m) =>
 const LearningProgressPage = lazy(() => import('@/pages/LearningProgress').then((m) => ({ default: m.LearningProgressPage })));
 const AuditPage = lazy(() => import('@/pages/Audit').then((m) => ({ default: m.AuditPage })));
 const BulkGaugesPage = lazy(() => import('@/pages/BulkGauges').then((m) => ({ default: m.BulkGaugesPage })));
+// Release 1.3 (r3-foundation lays down every page; each file names its owner): statements (P3), learning video (P5),
+// campaign page and the client portal (P6), interview schedule and sheet (P7), venues (P8).
+const StatementsPage = lazy(() => import('@/pages/Statements').then((m) => ({ default: m.StatementsPage })));
+const LearningVideoPage = lazy(() => import('@/pages/LearningVideo').then((m) => ({ default: m.LearningVideoPage })));
+const CampaignPagePage = lazy(() => import('@/pages/CampaignPage').then((m) => ({ default: m.CampaignPagePage })));
+const InterviewSchedulePage = lazy(() => import('@/pages/InterviewSchedule').then((m) => ({ default: m.InterviewSchedulePage })));
+const InterviewSheetPage = lazy(() => import('@/pages/InterviewSheet').then((m) => ({ default: m.InterviewSheetPage })));
+const VenuesPage = lazy(() => import('@/pages/Venues').then((m) => ({ default: m.VenuesPage })));
+const VenueDetailPage = lazy(() => import('@/pages/VenueDetail').then((m) => ({ default: m.VenueDetailPage })));
+// The client portal: its own shell and pages, never the staff AppShell (P6).
+const ClientShell = lazy(() => import('@/features/client/ClientShell').then((m) => ({ default: m.ClientShell })));
+const ClientPortalPage = lazy(() => import('@/pages/ClientPortal').then((m) => ({ default: m.ClientPortalPage })));
+const ClientSecurityPage = lazy(() => import('@/pages/ClientSecurity').then((m) => ({ default: m.ClientSecurityPage })));
 
 /**
  * Signed-in shell: one layout route for every signed-in page, the dashboard included (as the index child), so the
@@ -52,6 +67,8 @@ function ShellLayout() {
   const navigate = useNavigate();
   const { pathname } = useLocation();
   if (!user) return <Navigate to="/login" replace />;
+  // Release 1.3: a client portal account never sees the staff app — every staff path sends it to its portal.
+  if (user.role === 'client') return <Navigate to="/client" replace />;
   // Release 1.2 (U1): the PIN gate shows "Create your PIN" instead of the app while one is required (pass-through now).
   return (
     <PinSetupGate>
@@ -66,6 +83,33 @@ function ShellLayout() {
           <Outlet />
         </Suspense>
       </AppShell>
+    </PinSetupGate>
+  );
+}
+
+/**
+ * Release 1.3 (r3-foundation): the client portal's layout — client accounts only (staff are sent to their dashboard),
+ * inside U1's PIN gate (P6 makes a PIN required for client accounts), with its own lazy shell (features/client).
+ */
+function ClientLayout() {
+  const { user, logout } = useAuth();
+  const navigate = useNavigate();
+  if (!user) return <Navigate to="/login" replace />;
+  if (user.role !== 'client') return <Navigate to="/" replace />;
+  return (
+    <PinSetupGate>
+      <Suspense fallback={<FullPageSpinner label="Loading…" />}>
+        <ClientShell
+          user={user}
+          onLogout={() => {
+            void logout().finally(() => navigate('/login', { replace: true }));
+          }}
+        >
+          <Suspense fallback={<PageFallback />}>
+            <Outlet />
+          </Suspense>
+        </ClientShell>
+      </Suspense>
     </PinSetupGate>
   );
 }
@@ -144,6 +188,12 @@ export default function App() {
               </RedirectIfAuthed>
             }
           />
+          {/* Release 1.3: the client portal (P6) — Updates and Security, nothing else. */}
+          <Route path="/client" element={<RequireAuth><ClientLayout /></RequireAuth>}>
+            <Route index element={<ClientPortalPage />} />
+            <Route path="security" element={<ClientSecurityPage />} />
+            <Route path="*" element={<Navigate to="/client" replace />} />
+          </Route>
           <Route path="/" element={<HomeGate />}>
             <Route index element={<DashboardPage />} />
             <Route path="events" element={<EventsPage />} />
@@ -165,6 +215,14 @@ export default function App() {
             <Route path="learning/pitch/:campaignCode" element={<LearningPitchPage />} />
             <Route path="learning/progress" element={<LearningProgressPage />} />
             <Route path="audit" element={<RequireRole roles={AUDIT_ROLES}><AuditPage /></RequireRole>} />
+            {/* Release 1.3 pages (each file names its owner) */}
+            <Route path="finance/statements" element={<RequireRole roles={STATEMENT_ROLES}><StatementsPage /></RequireRole>} />
+            <Route path="venues" element={<RequireRole roles={VENUE_ROLES}><VenuesPage /></RequireRole>} />
+            <Route path="venues/:key" element={<RequireRole roles={VENUE_ROLES}><VenueDetailPage /></RequireRole>} />
+            <Route path="recruitment/schedule" element={<RequireRole roles={RECRUITMENT_ROLES}><InterviewSchedulePage /></RequireRole>} />
+            <Route path="recruitment/interviews/:id" element={<RequireRole roles={RECRUITMENT_ROLES}><InterviewSheetPage /></RequireRole>} />
+            <Route path="learning/videos/:id" element={<LearningVideoPage />} />
+            <Route path="campaigns/:id" element={<RequireRole roles={CAMPAIGN_PAGE_ROLES}><CampaignPagePage /></RequireRole>} />
             <Route path="*" element={<NotFoundPage />} />
           </Route>
         </Routes>

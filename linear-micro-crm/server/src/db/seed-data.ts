@@ -296,3 +296,20 @@ export const CANDIDATE_NOTES = [
   'Prefers weekday shifts.',
   'Charity work experience with a local food bank.',
 ];
+
+/**
+ * Release 1.3 (r3-foundation): the demo client portal accounts — a campaign's client signed in with an access code and
+ * their email. Inserted by the core seed after every staff member (no random draws), never listed with the staff.
+ */
+export interface ClientAccountSeed {
+  code: string;
+  campaign: string;
+  firstName: string;
+  lastName: string;
+  email: string;
+  color: string;
+}
+
+export const CLIENT_ACCOUNTS: ClientAccountSeed[] = [
+  { code: 'CL-0001', campaign: 'BCN', firstName: 'Hannah', lastName: 'Price', email: 'hannah.price@breastcancernow.example', color: '#BE185D' },
+];

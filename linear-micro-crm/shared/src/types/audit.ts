@@ -22,7 +22,19 @@ export type AuditEntity =
   | 'announcement'
   | 'expense'
   | 'learning'
-  | 'check_in';
+  | 'check_in'
+  // Release 1.3 (r3-foundation): the records the new packages write (each package's audit specs use its own).
+  | 'campaign_rate' // P1: campaign_rates
+  | 'pay_adjustment' // P1: bonuses and manual / statement adjustments
+  | 'invoice' // P2
+  | 'agreement' // P2: self-billing agreement acceptance
+  | 'statement' // P3
+  | 'video' // P5
+  | 'client_post' // P6
+  | 'client_account' // P6
+  | 'interview_question' // P7
+  | 'event_roster' // P8: bookings, filed under the event id
+  | 'export'; // P9: client-side exports (CSV / PDF), no entity id
 
 export interface AuditEntry {
   id: number;
@@ -66,4 +78,43 @@ export interface AnnouncementReadStats {
   /** Active people who could read it. */
   audience: number;
   readers?: { userId: number; name: string; readAt: string }[];
+}
+
+// ───────────────────────────── Release 1.3 (P9 audit-everything; laid down by r3-foundation) ─────────────────────────────
+//
+// Lead decision: audit "every action" = every change, every sign-in/out and failed attempt, every export or download
+// (CSV, PDF, pay export, invoice), every opening of a sensitive record (an invoice, a candidate profile, the audit
+// trail), every client-portal action and every automatic step (statement fetched, statement applied). Not every page
+// view.
+//
+// Endpoints (owned by P9):
+//  - POST /audit/events  ClientAuditEventInput → 204 (routes/auditEvents.ts, mounted at /audit/events before the audit
+//    router; any signed-in staff member; rate limited; validated kinds only). The stub answers 204 and records nothing,
+//    so callers (P4's exports, P9's RecordOpened slot) can report from day one.
+//  - GET /audit gains `kind=` (AuditEventKind) and `view=everything|changes`; GET /audit/person/:userId (Team → person →
+//    Activity) — P9's own router.
+// Server helpers (server/src/lib/audit/events.ts, owned by P9): recordSystemEvent (actor "Linear Hub"),
+// recordClientEvent, and the spec registry server/src/lib/audit/registry.ts.
+
+/** What kind of action an audit row records (the Audit page's filter). */
+export type AuditEventKind = 'change' | 'sign_in' | 'export' | 'opened' | 'automatic' | 'client';
+export const AUDIT_EVENT_KINDS: readonly AuditEventKind[] = ['change', 'sign_in', 'export', 'opened', 'automatic', 'client'];
+
+/** The two kinds a page may report itself (POST /audit/events). */
+export type ClientAuditEventKind = 'export' | 'opened';
+export type AuditExportFormat = 'csv' | 'pdf' | 'xero' | 'sage' | 'print';
+
+/** POST /audit/events — reported by the client: an export it built, or a sensitive record it opened. */
+export interface ClientAuditEventInput {
+  kind: ClientAuditEventKind;
+  /** Exports: the format. */
+  format?: AuditExportFormat;
+  /** What was exported or opened, e.g. "gauges-by-team", "invoice", "candidate". */
+  what: string;
+  /** Exports: how many rows went into the file. */
+  rows?: number;
+  filename?: string;
+  /** Opened records: which one. */
+  entity?: AuditEntity;
+  entityId?: number;
 }

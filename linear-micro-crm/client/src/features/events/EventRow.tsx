@@ -4,6 +4,9 @@ import { Clock, MapPin, Users } from 'lucide-react';
 import { EVENT_ROSTER_LOOKBACK_DAYS, inRosterWindow as inSharedRosterWindow, type SalesEventWithMeta } from '@lm/shared';
 import { Badge, ProgressBar } from '@/components/ui';
 import { EventStatusBadge, EventTypeBadge } from '@/features/common';
+import { ErrorBoundary } from '@/features/common/ErrorBoundary';
+// Release 1.3 slot (P8): the booked person's plan for the event.
+import { EventPlanStrip } from '@/features/venues/EventPlanStrip';
 import { todayISO } from '@/lib/dates';
 import { formatNumber, formatTime } from '@/lib/format';
 import { DirectionsLink } from './DirectionsLink';
@@ -65,6 +68,7 @@ export function EventRow({ event: e }: EventRowProps) {
             <ProgressBar value={e.totals.sales} max={Math.max(e.targetSales, 1)} tone={tone} size="sm" label={`${formatNumber(e.totals.sales)} / ${formatNumber(e.targetSales)} sales`} />
           )}
           {e.forecast && <EventForecastChip forecast={e.forecast} targetSales={e.targetSales} campaignCode={e.campaignCode} type={e.type} teamName={e.teamName} side="bottom" />}
+          <ErrorBoundary name="event-plan" fallback={null}><EventPlanStrip event={e} variant="row" /></ErrorBoundary>
         </span>
         <span className="flex items-center justify-between gap-3 md:justify-end">
           {roster ? (

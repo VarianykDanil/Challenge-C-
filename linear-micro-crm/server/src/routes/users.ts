@@ -46,12 +46,21 @@ export function pickAvatarColor(seed: number): string {
   return AVATAR_PALETTE[seed % AVATAR_PALETTE.length]!;
 }
 
+/**
+ * Release 1.3 (r3-foundation): client portal accounts (role 'client') are not staff — they never appear in the Team
+ * list and the routes below treat them as unknown (P6 manages them from the campaign page).
+ */
+function getStaffUser(db: Db, id: number): UserWithTeam | undefined {
+  const user = getUser(db, id);
+  return user && user.role !== 'client' ? user : undefined;
+}
+
 export function usersRouter(db: Db): Router {
   const router = Router();
 
   router.get('/', (req, res) => {
     const me = currentUser(req);
-    const where = new Where();
+    const where = new Where().add(`u.role <> 'client'`);
     const teamId = optionalIdQuery(req.query.teamId, 'teamId');
     const role = optionalString(req.query.role);
     const status = optionalString(req.query.status) ?? 'active';
@@ -75,14 +84,14 @@ export function usersRouter(db: Db): Router {
   });
 
   router.get('/:id', (req, res) => {
-    const user = getUser(db, idParam(req));
+    const user = getStaffUser(db, idParam(req));
     if (!user) throw notFound('User');
     res.json(redactUser(currentUser(req), user));
   });
 
   router.get('/:id/performance', (req, res) => {
     const me = currentUser(req);
-    const user = getUser(db, idParam(req));
+    const user = getStaffUser(db, idParam(req));
     if (!user) throw notFound('User');
     // read-only for every signed-in user; personal details on the entries are stripped below unless allowed
     const today = todayISO();
@@ -110,7 +119,8 @@ export function usersRouter(db: Db): Router {
     if (body.teamId !== null && !get(db, `SELECT 1 FROM teams WHERE id = ?`, [body.teamId])) throw badRequest('Unknown teamId');
     const payPlanId = body.payPlanId ?? defaultPayPlanId(db, body.position);
     if (!get(db, `SELECT 1 FROM pay_plans WHERE id = ?`, [payPlanId])) throw badRequest('Unknown payPlanId');
-    const count = get<{ n: number }>(db, `SELECT COUNT(*) AS n FROM users`)!.n;
+    // Release 1.3: staff only, so client portal accounts never shift the avatar colours.
+    const count = get<{ n: number }>(db, `SELECT COUNT(*) AS n FROM users WHERE role <> 'client'`)!.n;
     const r = run(
       db,
       `INSERT INTO users (employee_id, email, first_name, last_name, role, position, team_id, pay_plan_id, start_date, status, phone, avatar_color, city)
@@ -123,7 +133,7 @@ export function usersRouter(db: Db): Router {
   router.patch('/:id', requireRole('admin'), (req, res) => {
     const me = currentUser(req);
     const id = idParam(req);
-    const existing = getUser(db, id);
+    const existing = getStaffUser(db, id);
     if (!existing) throw notFound('User');
     const patch = userBody.partial().parse(req.body);
     if (patch.status === 'left' && id === me.id) throw badRequest('You cannot deactivate your own account');
@@ -150,7 +160,7 @@ export function usersRouter(db: Db): Router {
   router.post('/:id/2fa/reset', requireRole('admin'), (req, res) => {
     const me = currentUser(req);
     const id = idParam(req);
-    if (!getUser(db, id)) throw notFound('User');
+    if (!getStaffUser(db, id)) throw notFound('User');
     if (id === me.id) throw badRequest('Use Settings → Security to turn off your own two-step verification');
     clearTwoFactor(db, id);
     destroyUserSessions(db, id);

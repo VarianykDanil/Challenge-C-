@@ -266,7 +266,7 @@ export function learningRouter(db: Db): Router {
     const scopeParams = me.role === 'admin' ? [] : [me.teamId];
     const people = all<Person>(
       db,
-      `${PERSON_SELECT} WHERE u.status = 'active' ${scope}
+      `${PERSON_SELECT} WHERE u.status = 'active' AND u.role <> 'client' ${scope}
        ORDER BY (t.name IS NULL), t.name, u.first_name, u.last_name`,
       scopeParams,
     );
@@ -275,7 +275,7 @@ export function learningRouter(db: Db): Router {
       `SELECT p.user_id AS userId, p.lesson_key AS lessonKey, p.learned_at AS learnedAt, p.teachback_text AS teachbackText,
               p.teachback_at AS teachbackAt, p.taught_signed_off_at AS taughtSignedOffAt
          FROM learning_progress p JOIN users u ON u.id = p.user_id
-        WHERE u.status = 'active' ${scope}`,
+        WHERE u.status = 'active' AND u.role <> 'client' ${scope}`,
       scopeParams,
     );
     const byUser = new Map<number, Map<string, (typeof progress)[number]>>();

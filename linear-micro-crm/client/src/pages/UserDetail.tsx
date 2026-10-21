@@ -9,6 +9,11 @@ import { useCurrentUser } from '@/auth/AuthProvider';
 import { ErrorState, RangePicker, UserStatusBadge, useRangeState } from '@/features/common';
 import { PerformancePanel } from '@/features/gauges';
 import { UserFormModal } from '@/features/team';
+import { ErrorBoundary } from '@/features/common/ErrorBoundary';
+// Release 1.3 slots (administrators): invoice details (P2), client fundraiser IDs (P3), the person's activity (P9).
+import { PersonActivity } from '@/features/audit/PersonActivity';
+import { InvoiceProfileSection } from '@/features/invoices/InvoiceProfileSection';
+import { ClientRefsSection } from '@/features/statements/ClientRefsSection';
 import { formatDate, formatGBP, formatNumber, fullName } from '@/lib/format';
 import { usePageTitle } from '@/lib/usePageTitle';
 import { NotFoundPage } from './NotFound';
@@ -69,10 +74,17 @@ export function UserDetailPage() {
                 ) : <p className="text-sm text-muted">No pay plan details available.</p>}
               </Card>
             )}
+            {isAdmin && u && (
+              <>
+                <ErrorBoundary name="invoice-profile" fallback={null}><InvoiceProfileSection user={u} /></ErrorBoundary>
+                <ErrorBoundary name="client-refs" fallback={null}><ClientRefsSection user={u} /></ErrorBoundary>
+              </>
+            )}
           </div>
           <div className="min-w-0 space-y-5 lg:col-span-3">
             <RangePicker value={range} onChange={setRange} />
             <PerformancePanel data={perf.data} loading={perf.isLoading} error={perf.error} onRetry={() => void perf.refetch()} range={range} userId={Number.isFinite(userId) ? userId : undefined} />
+            {isAdmin && u && <ErrorBoundary name="person-activity" fallback={null}><PersonActivity user={u} /></ErrorBoundary>}
           </div>
         </div>
       )}

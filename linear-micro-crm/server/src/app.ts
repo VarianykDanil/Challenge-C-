@@ -35,6 +35,21 @@ import { learningRouter } from './routes/learning.ts';
 import { payExportRouter } from './routes/payExport.ts';
 import { pitchesRouter } from './routes/pitches.ts';
 import { searchRouter } from './routes/search.ts';
+// Release 1.3 (r3-foundation mounts every package's router; each file names its owner)
+import { clientGuard } from './middleware/clientGuard.ts';
+import { recordApiMount } from './lib/routeTable.ts';
+import { VIDEO_EMBED_ORIGINS, VIDEO_THUMBNAIL_ORIGINS } from './lib/videoEmbeds.ts';
+import { auditEventsRouter } from './routes/auditEvents.ts';
+import { campaignPagesRouter } from './routes/campaignPages.ts';
+import { clientRouter } from './routes/client.ts';
+import { clientAccountsRouter, clientPostsRouter } from './routes/clientOffice.ts';
+import { eventPlansRouter } from './routes/eventPlans.ts';
+import { invoicesRouter } from './routes/invoices.ts';
+import { payRouter } from './routes/pay.ts';
+import { recruitmentPlusRouter } from './routes/recruitmentPlus.ts';
+import { statementsRouter } from './routes/statements.ts';
+import { venuesRouter } from './routes/venues.ts';
+import { videosRouter } from './routes/videos.ts';
 
 export interface AppOptions {
   /** When set (production), serve the built client from this folder with an SPA fallback. */
@@ -67,7 +82,8 @@ export function parseTrustProxy(value: string | undefined): boolean | number | s
 /**
  * The Content-Security-Policy for the built client. Scripts are same-origin plus the SHA-256 of each inline
  * `<script>` in `index.html` (Vite emits the theme bootstrap inline), styles may be inline (React/Tailwind) or from
- * Google Fonts, fonts from gstatic, no framing, no foreign form targets or base URLs.
+ * Google Fonts, fonts from gstatic, no framing of the app, no foreign form targets or base URLs. Release 1.3: frames
+ * and thumbnails from the learning-video providers only (lib/videoEmbeds.ts, P5).
  */
 export function contentSecurityPolicy(staticDir?: string): string {
   const hashes: string[] = [];
@@ -83,8 +99,11 @@ export function contentSecurityPolicy(staticDir?: string): string {
     `script-src 'self'${hashes.length ? ` ${hashes.join(' ')}` : ''}`,
     "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com",
     "font-src 'self' https://fonts.gstatic.com data:",
-    "img-src 'self' data:",
+    `img-src 'self' data: ${VIDEO_THUMBNAIL_ORIGINS.join(' ')}`,
     "connect-src 'self'",
+    // Release 1.3 (P5): learning videos linked from YouTube, Vimeo or Google Drive play in an embed (lib/videoEmbeds.ts);
+    // same-origin frames stay allowed (P3 shows a statement's PDF).
+    `frame-src 'self' ${VIDEO_EMBED_ORIGINS.join(' ')}`,
     "frame-ancestors 'none'",
     "base-uri 'self'",
     "form-action 'self'",
@@ -122,6 +141,12 @@ const CACHED_PATHS = [
   '/learning/progression',
   '/pitches',
   '/search',
+  // Release 1.3: the aggregating reads (P1 breakdown, P5 team progress, P6 campaign page, P8 venues and event plans)
+  '/pay/breakdown',
+  '/videos/team',
+  '/campaigns/:id/page',
+  '/venues',
+  '/events/:id/plan',
 ];
 
 export function createApp(db: Db, opts: AppOptions = {}): Express {
@@ -144,6 +169,9 @@ export function createApp(db: Db, opts: AppOptions = {}): Express {
 
   const api = express.Router();
   api.use(authenticate(db));
+  // Release 1.3 (r3-foundation): a client portal session may call only /auth (me, logout, PIN), /health and /client;
+  // everything else answers 403 here, before any router, cache or audit step (middleware/clientGuard.ts).
+  api.use(clientGuard());
   // Release 1.2 slots, both pass-through until their packages land: U1's PIN gate (403 until a required PIN is set),
   // then U3's audit recorder (successful writes, with before/after snapshots).
   api.use(pinSetupGate(db));
@@ -156,36 +184,57 @@ export function createApp(db: Db, opts: AppOptions = {}): Express {
     if (req.method !== 'GET' && req.method !== 'HEAD' && req.method !== 'OPTIONS') bumpDataVersion();
     next();
   });
-  api.use('/health', healthRouter(db));
-  api.use('/auth', authRouter(db));
+  // Release 1.3 (r3-foundation): every router mount is recorded for the route table (lib/routeTable.ts listApiRoutes).
+  const mount = (path: string, ...handlers: RequestHandler[]) => {
+    api.use(path, ...handlers);
+    recordApiMount(app, path, handlers);
+  };
+  mount('/health', healthRouter(db));
+  mount('/auth', authRouter(db));
   api.use(CACHED_PATHS, requireAuth, responseCache());
   // requireAuth is attached per router (not globally) so unknown /api paths always get the JSON 404 below.
-  api.use('/me', requireAuth, dashboardRouter(db));
+  mount('/me', requireAuth, dashboardRouter(db));
   // Smart release 1.1: GET /me/insights (p1 composes), /me/attention (p5), /me/digest (p9).
-  api.use('/me', requireAuth, insightsRouter(db));
-  api.use('/me', requireAuth, attentionRouter(db));
-  api.use('/me', requireAuth, digestRouter(db));
-  api.use('/users', requireAuth, usersRouter(db));
-  api.use('/teams', requireAuth, teamsRouter(db));
-  api.use('/campaigns', requireAuth, campaignsRouter(db));
-  api.use('/events', requireAuth, eventsRouter(db));
+  mount('/me', requireAuth, insightsRouter(db));
+  mount('/me', requireAuth, attentionRouter(db));
+  mount('/me', requireAuth, digestRouter(db));
+  mount('/users', requireAuth, usersRouter(db));
+  mount('/teams', requireAuth, teamsRouter(db));
+  mount('/campaigns', requireAuth, campaignPagesRouter(db)); // Release 1.3 (P6), before the campaigns router
+  mount('/campaigns', requireAuth, campaignsRouter(db));
+  mount('/events', requireAuth, eventPlansRouter(db)); // Release 1.3 (P8), before the events router
+  mount('/events', requireAuth, eventsRouter(db));
   // Release 1.2 (U2): POST /gauges/bulk, before the gauges router.
-  api.use('/gauges/bulk', requireAuth, bulkGaugesRouter(db));
-  api.use('/gauges', requireAuth, gaugesRouter(db));
-  api.use('/leaderboard', requireAuth, leaderboardRouter(db));
+  mount('/gauges/bulk', requireAuth, bulkGaugesRouter(db));
+  mount('/gauges', requireAuth, gaugesRouter(db));
+  mount('/leaderboard', requireAuth, leaderboardRouter(db));
   // Release 1.2 (U5): GET /finance/payroll/export, before the finance router (its /payroll/:id would catch "export").
-  api.use('/finance/payroll/export', requireAuth, payExportRouter(db));
-  api.use('/finance', requireAuth, financeRouter(db));
-  api.use('/recruitment', requireAuth, recruitmentRouter(db));
+  mount('/finance/payroll/export', requireAuth, payExportRouter(db));
+  mount('/finance', requireAuth, financeRouter(db));
+  mount('/recruitment', requireAuth, recruitmentPlusRouter(db)); // Release 1.3 (P7), before the recruitment router
+  mount('/recruitment', requireAuth, recruitmentRouter(db));
   // Release 1.2 (U3): POST /announcements/:id/read and GET /announcements/reads, before the announcements router.
-  api.use('/announcements', requireAuth, announcementReadsRouter(db));
-  api.use('/announcements', requireAuth, announcementsRouter(db));
+  mount('/announcements', requireAuth, announcementReadsRouter(db));
+  mount('/announcements', requireAuth, announcementsRouter(db));
   // Release 1.2: learning (L1), pitches (L2), audit (U3), shift check-ins (U4), search (U5).
-  api.use('/learning', requireAuth, learningRouter(db));
-  api.use('/pitches', requireAuth, pitchesRouter(db));
-  api.use('/audit', requireAuth, auditRouter(db));
-  api.use('/checkins', requireAuth, checkinsRouter(db));
-  api.use('/search', requireAuth, searchRouter(db));
+  mount('/learning', requireAuth, learningRouter(db));
+  mount('/pitches', requireAuth, pitchesRouter(db));
+  mount('/audit/events', requireAuth, auditEventsRouter(db)); // Release 1.3 (P9), before the audit router
+  mount('/audit', requireAuth, auditRouter(db));
+  mount('/checkins', requireAuth, checkinsRouter(db));
+  mount('/search', requireAuth, searchRouter(db));
+  // Release 1.3: pay rule (P1), invoices (P2), statements (P3), videos (P5), the client portal and its office side (P6),
+  // venues (P8) and client-side audit events (P9). Routers that share a prefix with a 1.0 router are mounted before it
+  // and answer only their own paths: campaign pages (P6) before /campaigns, recruitment additions (P7) before
+  // /recruitment, event rosters and plans (P8) before /events, audit events (P9) before /audit.
+  mount('/pay', requireAuth, payRouter(db));
+  mount('/invoices', requireAuth, invoicesRouter(db));
+  mount('/statements', requireAuth, statementsRouter(db));
+  mount('/videos', requireAuth, videosRouter(db));
+  mount('/client', requireAuth, clientRouter(db));
+  mount('/client-posts', requireAuth, clientPostsRouter(db));
+  mount('/client-accounts', requireAuth, clientAccountsRouter(db));
+  mount('/venues', requireAuth, venuesRouter(db));
   api.use((_req, res) => {
     res.status(404).json({ error: 'Not found' });
   });

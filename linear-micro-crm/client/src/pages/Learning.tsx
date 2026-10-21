@@ -11,6 +11,8 @@ import { useLearningProgress } from '@/api/learning';
 import { Button, Card, EmptyState, Input, PageHeader, ProgressBar, Skeleton } from '@/components/ui';
 import { ErrorBoundary } from '@/features/common/ErrorBoundary';
 import { PitchesSection } from '@/features/learning/PitchesSection';
+// Release 1.3 slot (P5): learning videos.
+import { VideosSection } from '@/features/videos/VideosSection';
 import { FieldCards, type FieldCardKind } from '@/features/learning/pack/FieldCards';
 import { LessonPlate } from '@/features/learning/pack/LessonFigure';
 import { StateBadge } from '@/features/learning/pack/StateBadge';
@@ -105,6 +107,11 @@ export function LearningPage() {
 
         <ErrorBoundary name="pitches-section" fallback={null}>
           <PitchesSection />
+        </ErrorBoundary>
+
+        {/* Release 1.3 slot (P5): nothing until the package lands. */}
+        <ErrorBoundary name="videos-section" fallback={null}>
+          <VideosSection />
         </ErrorBoundary>
 
         {/* The COD pack lessons */}

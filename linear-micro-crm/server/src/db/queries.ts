@@ -163,13 +163,23 @@ export const PAYROLL_SELECT = `
   SELECT p.id, p.user_id AS userId, p.week_start AS weekStart, p.week_end AS weekEnd, p.days_worked AS daysWorked,
          p.sales, p.team_sales AS teamSales, p.base_pay AS basePay, p.commission, p.bonus, p.overrides, p.deductions,
          p.gross, p.due_date AS dueDate, p.paid_date AS paidDate, p.status, p.reference, p.adjusted_at AS adjustedAt,
+         p.paid_as AS paidAs, p.sales_logged AS salesLogged, p.sales_confirmed AS salesConfirmed,
+         p.sales_cancelled AS salesCancelled, p.adjustments_total AS adjustmentsTotal,
          u.first_name || ' ' || u.last_name AS userName, u.employee_id AS employeeId, u.position, t.name AS teamName
   FROM payroll_runs p
   JOIN users u ON u.id = p.user_id
   LEFT JOIN teams t ON t.id = u.team_id`;
 
+/**
+ * Release 1.3 (P1's columns, laid down by r3-foundation in db/extensions/pay.ts): left out of the payload while NULL —
+ * a run calculated by the 1.2 plan rules answers exactly as before; P1's runs carry them.
+ */
+const PAY_RULE_FIELDS = ['paidAs', 'salesLogged', 'salesConfirmed', 'salesCancelled', 'adjustmentsTotal'] as const;
+
 export function mapPayroll(row: Omit<PayrollRunWithUser, 'onTime'>): PayrollRunWithUser {
-  return { ...row, onTime: isPaidOnTime(row.dueDate, row.paidDate) };
+  const out: PayrollRunWithUser = { ...row, onTime: isPaidOnTime(row.dueDate, row.paidDate) };
+  for (const k of PAY_RULE_FIELDS) if (out[k] === null || out[k] === undefined) delete out[k];
+  return out;
 }
 
 export function listPayroll(db: Db, where: string, params: Param[], orderBy = 'p.week_start DESC, u.last_name ASC'): PayrollRunWithUser[] {
@@ -196,7 +206,7 @@ export const CANDIDATE_SELECT = `
   SELECT c.id, c.first_name AS firstName, c.last_name AS lastName, c.email, c.phone, c.city, c.source, c.stage,
          c.position_applied AS positionApplied, c.applied_at AS appliedAt, c.stage_updated_at AS stageUpdatedAt,
          c.owner_id AS ownerId, c.referred_by_id AS referredById, c.rating, c.notes, c.next_action AS nextAction,
-         c.next_action_at AS nextActionAt, c.hired_user_id AS hiredUserId,
+         c.next_action_at AS nextActionAt, c.hired_user_id AS hiredUserId, c.date_of_birth AS dateOfBirth,
          o.first_name || ' ' || o.last_name AS ownerName, r.first_name || ' ' || r.last_name AS referredByName
   FROM candidates c
   LEFT JOIN users o ON o.id = c.owner_id
@@ -207,7 +217,10 @@ const TERMINAL = new Set(['hired', 'rejected', 'withdrawn']);
 export function mapCandidate(row: CandidateRow): CandidateWithMeta {
   const until = TERMINAL.has(row.stage) ? row.stageUpdatedAt : nowISO();
   const days = Math.max(0, Math.round((new Date(until).getTime() - new Date(row.appliedAt).getTime()) / 86_400_000));
-  return { ...row, daysInPipeline: days };
+  const out: CandidateWithMeta = { ...row, daysInPipeline: days };
+  // Release 1.3 (P7's column, laid down by r3-foundation): only when recorded, so other candidates answer as before.
+  if (out.dateOfBirth === null || out.dateOfBirth === undefined) delete out.dateOfBirth;
+  return out;
 }
 
 export function listCandidates(db: Db, where: string, params: Param[], orderBy = 'c.stage_updated_at DESC'): CandidateWithMeta[] {
@@ -245,11 +258,31 @@ export function getInterview(db: Db, id: number): Interview | undefined {
 
 export const ANNOUNCEMENT_SELECT = `
   SELECT a.id, a.title, a.body, a.author_id AS authorId, u.first_name || ' ' || u.last_name AS authorName,
-         a.created_at AS createdAt, a.pinned
-  FROM announcements a JOIN users u ON u.id = a.author_id`;
+         a.created_at AS createdAt, a.pinned,
+         fc.id AS fromCampaignId, fc.code AS fromCampaignCode, fc.name AS fromCampaignName, fc.color AS fromCampaignColor
+  FROM announcements a JOIN users u ON u.id = a.author_id
+  LEFT JOIN campaigns fc ON fc.id = u.client_campaign_id AND u.role = 'client'`;
 
-export function mapAnnouncement(row: Announcement): Announcement {
-  return { ...row, pinned: Boolean(row.pinned) };
+/** An ANNOUNCEMENT_SELECT row: the announcement plus its client campaign when a client account posted it. */
+export type AnnouncementRow = Omit<Announcement, 'fromClient'> & {
+  fromCampaignId?: number | null;
+  fromCampaignCode?: string | null;
+  fromCampaignName?: string | null;
+  fromCampaignColor?: string | null;
+};
+
+/**
+ * Release 1.3 (r3-foundation, for P6): an announcement a campaign's client posted from the portal (its author is a
+ * `client` account) carries `fromClient` — the badge "From Breast Cancer Now". The office's own announcements answer
+ * exactly as before (no key).
+ */
+export function mapAnnouncement(row: AnnouncementRow): Announcement {
+  const { fromCampaignId, fromCampaignCode, fromCampaignName, fromCampaignColor, ...rest } = row;
+  const out: Announcement = { ...rest, pinned: Boolean(row.pinned) };
+  if (fromCampaignId != null) {
+    out.fromClient = { campaignId: fromCampaignId, campaignCode: fromCampaignCode ?? '', campaignName: fromCampaignName ?? '', campaignColor: fromCampaignColor ?? '' };
+  }
+  return out;
 }
 
 /**
@@ -258,7 +291,7 @@ export function mapAnnouncement(row: Announcement): Announcement {
  */
 export function listAnnouncements(db: Db, limit?: number, offset = 0): Announcement[] {
   const order = `${ANNOUNCEMENT_SELECT} ORDER BY a.pinned DESC, a.created_at DESC, a.id DESC`;
-  const rows = limit ? all<Announcement>(db, `${order} LIMIT ? OFFSET ?`, [limit, offset]) : all<Announcement>(db, `${order} LIMIT -1 OFFSET ?`, [offset]);
+  const rows = limit ? all<AnnouncementRow>(db, `${order} LIMIT ? OFFSET ?`, [limit, offset]) : all<AnnouncementRow>(db, `${order} LIMIT -1 OFFSET ?`, [offset]);
   return rows.map(mapAnnouncement);
 }
 

@@ -10,6 +10,9 @@ import { useCurrentUser } from '@/auth/AuthProvider';
 import { ErrorState, SourceBadge, StageBadge, StarRating, errorMessage } from '@/features/common';
 import { IdleBadge, MoveStageControl, ScheduleInterviewModal, StageStepper } from '@/features/recruitment';
 import { OutcomeToRecordRow } from '@/features/recruitment/RecordOutcome';
+import { ErrorBoundary } from '@/features/common/ErrorBoundary';
+// Release 1.3 slot (P9): "opened a candidate profile" for the audit trail.
+import { RecordOpened } from '@/features/audit/RecordOpened';
 import { isoToLocalInput, localInputToISO } from '@/lib/dates';
 import { formatDate, formatDateTime, formatRelative, fullName } from '@/lib/format';
 import { INTERVIEW_OUTCOME_LABELS, INTERVIEW_OUTCOME_TONES, INTERVIEW_TYPE_LABELS, optionsFrom } from '@/lib/labels';
@@ -33,6 +36,7 @@ export function CandidateDetailPage() {
 
   return (
     <>
+      {c && <ErrorBoundary name="candidate-opened" fallback={null}><RecordOpened entity="candidate" entityId={c.id} what="candidate profile" /></ErrorBoundary>}
       <PageHeader
         breadcrumbs={<Link to="/recruitment" className="inline-flex items-center gap-1 hover:underline"><ArrowLeft className="h-3 w-3" aria-hidden /> Recruitment</Link>}
         title={c ? <span className="flex items-center gap-3"><Avatar name={fullName(c)} size="lg" />{fullName(c)}</span> : <Skeleton className="h-7 w-56" />}

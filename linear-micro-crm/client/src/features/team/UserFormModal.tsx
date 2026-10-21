@@ -2,7 +2,8 @@
 import { useId, useState } from 'react';
 import { ShieldCheck, ShieldOff } from 'lucide-react';
 import type { Position, Role, UserStatus, UserWithTeam } from '@lm/shared';
-import { POSITIONS, POSITION_LABELS, ROLE_LABELS } from '@lm/shared';
+// Release 1.3: the staff roles only — client portal accounts are invited from the campaign page (P6), never here.
+import { POSITIONS, POSITION_LABELS, ROLE_LABELS, STAFF_ROLES } from '@lm/shared';
 import { Badge, Button, Field, Input, Modal, Select, useToast } from '@/components/ui';
 import { useCreateUser, usePayPlans, useResetUserTwoFactor, useTeams, useUpdateUser } from '@/api/hooks';
 import { useCurrentUser } from '@/auth/AuthProvider';
@@ -88,7 +89,7 @@ function UserForm({ onClose, user, onSaved }: { onClose: () => void; user?: User
         <Field label="Last name" required htmlFor={`${uid}-ln`} error={errors.lastName}><Input id={`${uid}-ln`} value={f.lastName} onChange={(e) => set('lastName')(e.target.value)} invalid={!!errors.lastName} /></Field>
         <Field label="Work email" required htmlFor={`${uid}-email`} error={errors.email}><Input id={`${uid}-email`} type="email" value={f.email} onChange={(e) => set('email')(e.target.value)} invalid={!!errors.email} /></Field>
         <Field label="Employee ID" required htmlFor={`${uid}-emp`} error={errors.employeeId} hint="Used with the email to sign in"><Input id={`${uid}-emp`} value={f.employeeId} onChange={(e) => set('employeeId')(e.target.value.toUpperCase())} placeholder="LM-0042" invalid={!!errors.employeeId} /></Field>
-        <Field label="Role" htmlFor={`${uid}-role`}><Select id={`${uid}-role`} value={f.role} onChange={(e) => set('role')(e.target.value)} options={optionsFrom(ROLE_LABELS)} /></Field>
+        <Field label="Role" htmlFor={`${uid}-role`}><Select id={`${uid}-role`} value={f.role} onChange={(e) => set('role')(e.target.value)} options={optionsFrom(ROLE_LABELS, STAFF_ROLES)} /></Field>
         <Field label="Position" htmlFor={`${uid}-pos`}><Select id={`${uid}-pos`} value={f.position} onChange={(e) => set('position')(e.target.value)} options={optionsFrom(POSITION_LABELS, POSITIONS)} /></Field>
         <Field label="Team" htmlFor={`${uid}-team`}><Select id={`${uid}-team`} value={f.teamId} onChange={(e) => set('teamId')(e.target.value)} placeholder="No team" options={(teams.data ?? []).map((t) => ({ value: String(t.id), label: t.name }))} /></Field>
         <Field label="Pay plan" required htmlFor={`${uid}-plan`} error={errors.payPlanId}><Select id={`${uid}-plan`} value={f.payPlanId} onChange={(e) => set('payPlanId')(e.target.value)} placeholder={plans.isLoading ? 'Loading…' : 'Choose a plan'} options={(plans.data ?? []).map((p) => ({ value: String(p.id), label: `${p.name} · ${POSITION_LABELS[p.position]}` }))} invalid={!!errors.payPlanId} /></Field>

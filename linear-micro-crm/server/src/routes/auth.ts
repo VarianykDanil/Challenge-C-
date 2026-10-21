@@ -56,6 +56,9 @@ const ONE_FACTOR_MESSAGE = { message: 'Provide a code or a recovery code', path:
 const disableBody = z.object(secondFactorFields).refine(needsOneFactor, ONE_FACTOR_MESSAGE);
 const loginTwoFactorBody = z.object({ challengeToken: z.string().trim().min(1, 'Challenge token is required').max(128), ...secondFactorFields }).refine(needsOneFactor, ONE_FACTOR_MESSAGE);
 
+/** Release 1.3: the seeded demo client portal account(s) (db/seed-data.ts CLIENT_ACCOUNTS). */
+const DEMO_CLIENT_CODES = ['CL-0001'];
+
 /** The four demo accounts from docs/API.md, in role order. */
 const DEMO: { employeeId: string; role: Role; label: string }[] = [
   { employeeId: 'LM-0001', role: 'admin', label: 'Owner' },
@@ -426,7 +429,17 @@ export function authRouter(db: Db): Router {
       if (!u || u.status === 'left' || u.role !== d.role) return res.json({ accounts: [] });
       accounts.push({ label: `${u.firstName} ${u.lastName} (${d.label})`, role: u.role, email: u.email, employeeId: u.employeeId });
     }
-    res.json({ accounts });
+    // Release 1.3 (r3-foundation): the seeded demo client portal account(s), apart from the four staff accounts (which
+    // keep their shape and order). Only an active client account with the seeded access code and no PIN is listed, so a
+    // real deployment's clients never show here. P6 shows it on the sign-in page.
+    const clientAccounts = all<UserWithTeam & { pinSet: number }>(
+      db,
+      `${USER_SELECT.replace('SELECT ', 'SELECT (u.pin_hash IS NOT NULL) AS pinSet, ')} WHERE u.role = 'client' AND upper(u.employee_id) IN (${DEMO_CLIENT_CODES.map(() => '?').join(', ')}) ORDER BY u.employee_id`,
+      DEMO_CLIENT_CODES,
+    )
+      .filter((u) => u.status !== 'left' && !u.pinSet)
+      .map((u) => ({ label: `${u.firstName} ${u.lastName} (Client)`, role: u.role, email: u.email, employeeId: u.employeeId }));
+    res.json(clientAccounts.length ? { accounts, clientAccounts } : { accounts });
   });
 
   return router;

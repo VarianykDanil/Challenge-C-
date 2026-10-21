@@ -13,6 +13,9 @@ import { announceAppSecret, appSecretFile, configureAppSecret } from './lib/cryp
 import { businessClockPinned, businessNow } from './lib/dates.ts';
 import { purgeExpiredChallenges, reencryptLegacySecrets } from './lib/twofactor.ts';
 import { purgeAuditLog } from './lib/audit.ts';
+// Release 1.3 (r3-foundation): the packages' background jobs (stubs start nothing until P2 / P3 fill them).
+import { startInvoiceJobs } from './lib/invoices.ts';
+import { startStatementJob } from './lib/statements/job.ts';
 import { purgeExpiredSessions } from './middleware/auth.ts';
 
 const dbPath = process.env.DB_PATH ? path.resolve(process.env.DB_PATH) : DEFAULT_DB_PATH;
@@ -72,6 +75,11 @@ setInterval(guarded(rollEvents), 15 * 60_000).unref();
 setInterval(guarded(purgeExpired), 15 * 60_000).unref();
 setInterval(guarded(materialisePayroll), 86_400_000).unref();
 setInterval(guarded(purgeAudit), 86_400_000).unref();
+// Release 1.3: self-billing invoices issued as weeks close and deemed accepted at 12:00 the day before payday (P2), and
+// the commission statements read from Gmail every 15 minutes (P3). Each starts its own unref'd timers; a failure to
+// start is logged and the server carries on.
+guarded(() => void startInvoiceJobs(db))();
+guarded(() => void startStatementJob(db))();
 
 // Backups (p10): dated copies of the database in <data dir>/backups (LM_BACKUP_DIR relocates it): 10 minutes after
 // start-up when the last one is over 24 h old, and nightly from LM_BACKUP_HOUR (default 02:00 London) when none is

@@ -13,6 +13,10 @@ import { GaugeEntriesTable, LogGaugesModal, TotalsKpis, gaugeEntryCsvColumns } f
 import { CheckInRollCall } from '@/features/checkins/CheckInRollCall';
 import { ErrorBoundary } from '@/features/common/ErrorBoundary';
 import { PitchLink } from '@/features/learning/PitchLink';
+// Release 1.3 slots (P8): the venue's profile link, the booked people's plan, "Who's working".
+import { EventPlanCard } from '@/features/venues/EventPlanCard';
+import { EventRosterCard } from '@/features/venues/EventRosterCard';
+import { VenueLink } from '@/features/venues/VenueLink';
 import { csvFilename } from '@/lib/csv';
 import { todayISO } from '@/lib/dates';
 import { formatDate, formatNumber, formatTime, fullName } from '@/lib/format';
@@ -96,7 +100,7 @@ export function EventDetailPage() {
             <span className="flex flex-wrap items-center gap-x-3 gap-y-1">
               <span className="inline-flex items-center gap-1"><CalendarDays className="h-3.5 w-3.5" aria-hidden />{formatDate(ev.date)}</span>
               <span className="inline-flex items-center gap-1"><Clock className="h-3.5 w-3.5" aria-hidden />{formatTime(ev.startTime)} – {formatTime(ev.endTime)}</span>
-              <span className="inline-flex items-center gap-1"><MapPin className="h-3.5 w-3.5" aria-hidden />{ev.venue}, {ev.city}<DirectionsLink variant="text" venue={ev.venue} city={ev.city} className="-my-1.5 ml-0.5" /></span>
+              <span className="inline-flex items-center gap-1"><MapPin className="h-3.5 w-3.5" aria-hidden />{ev.venue}, {ev.city}<DirectionsLink variant="text" venue={ev.venue} city={ev.city} className="-my-1.5 ml-0.5" /><ErrorBoundary name="venue-link" fallback={null}><VenueLink venue={ev.venue} city={ev.city} className="-my-1.5 ml-0.5" /></ErrorBoundary></span>
               <span className="inline-flex items-center gap-1"><Users className="h-3.5 w-3.5" aria-hidden />{formatNumber(ev.repCount)} rep{ev.repCount === 1 ? '' : 's'}</span>
             </span>
           ) : undefined
@@ -139,6 +143,13 @@ export function EventDetailPage() {
             <EventForecastChip variant="detail" forecast={ev.forecast} targetSales={ev.targetSales} campaignCode={ev.campaignCode} type={ev.type} teamName={ev.teamName} className="max-w-2xl" />
           )}
 
+          {/* Release 1.3 slot (P8): the plan for the people booked; nothing until the package lands. */}
+          {ev && (
+            <ErrorBoundary name="event-plan" fallback={null}>
+              <EventPlanCard event={ev} canManage={canManageGauges} />
+            </ErrorBoundary>
+          )}
+
           {ev && showRoster && (
             <NotLoggedYet
               loading={teamQ.isLoading}
@@ -152,6 +163,13 @@ export function EventDetailPage() {
           {ev && (
             <ErrorBoundary name="check-in-roll-call" fallback={null}>
               <CheckInRollCall event={ev} canManage={canManageGauges} />
+            </ErrorBoundary>
+          )}
+
+          {/* Release 1.3 slot (P8): who is booked on the event; nothing until the package lands. */}
+          {ev && (
+            <ErrorBoundary name="event-roster" fallback={null}>
+              <EventRosterCard event={ev} canManage={canManageGauges} />
             </ErrorBoundary>
           )}
 

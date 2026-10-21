@@ -73,6 +73,40 @@ export const COPY = {
       title: 'Bulk entry',
       description: "Log the whole team's gauges for one event in one go, or paste them from WhatsApp.",
     },
+    // Release 1.3 (r3-foundation): the new pages' titles. Packages put the rest of their copy in their own files and do
+    // not edit this one (the lead may reword an entry).
+    venues: {
+      title: 'Venues',
+      description: 'Every venue the team has worked, with the numbers that show what a good day there takes.',
+    },
+    statements: {
+      title: 'Statements',
+      description: "The clients' commission statements: what each charity confirmed, and the corrections to pay.",
+    },
+    interviewSchedule: {
+      title: 'Interview schedule',
+      description: 'Every interview by day, with the interviewer and the candidate.',
+    },
+    interviewSheet: {
+      title: 'Interview',
+      description: "The questions asked and the candidate's answers, in the interviewer's words.",
+    },
+    learningVideo: {
+      title: 'Video',
+      description: 'Recorded interviews and talks to watch as part of learning.',
+    },
+    campaignPage: {
+      title: 'Campaign',
+      description: "The client's brief, their updates and announcements, and how the campaign is going.",
+    },
+    clientPortal: {
+      title: 'Updates',
+      description: 'Post an update, an announcement or a commission change for the Linear MCR team.',
+    },
+    clientSecurity: {
+      title: 'Security',
+      description: 'Your sign-in PIN.',
+    },
   },
 
   /** Empty-state copy for lists that have nothing to show yet. */

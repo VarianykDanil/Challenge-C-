@@ -9,6 +9,11 @@ import { useLearningProgress } from '@/api/learning';
 import { useCurrentUser } from '@/auth/AuthProvider';
 import { Card, CardHeader, PageHeader, SkeletonCard, Tabs } from '@/components/ui';
 import { ErrorState } from '@/features/common';
+import { ErrorBoundary } from '@/features/common/ErrorBoundary';
+// Release 1.3 slots: required videos in the checklist (P5); "Download PDF" of the progress (P4, once PDFs are ready).
+import { ProgressPdfButton } from '@/features/pdf/ProgressPdfButton';
+import { VideoProgressSection } from '@/features/videos/VideoProgressSection';
+import { PDF_EXPORTS_READY } from '@/lib/pdf';
 import { CareerLadder } from '@/features/learning/pack/CareerLadder';
 import { PersonChecklist } from '@/features/learning/pack/PersonChecklist';
 import { ProgressionPanel } from '@/features/learning/pack/ProgressionPanel';
@@ -39,6 +44,7 @@ export function LearningProgressPage() {
         breadcrumbs={toLearning}
         title="Progress"
         description="The pack’s leadership checklist: learn each lesson, then teach it back. And what your next level needs, from your own numbers."
+        actions={PDF_EXPORTS_READY && view === 'me' ? <ErrorBoundary name="progress-pdf" fallback={null}><ProgressPdfButton /></ErrorBoundary> : undefined}
         tabs={
           manages ? (
             <Tabs
@@ -54,7 +60,11 @@ export function LearningProgressPage() {
         }
       />
       {view === 'team' ? (
-        <TeamChecklist isAdmin={me.role === 'admin'} personHref={(id) => (id === me.id ? '/learning/progress' : `/learning/progress?userId=${id}`)} />
+        <>
+          <TeamChecklist isAdmin={me.role === 'admin'} personHref={(id) => (id === me.id ? '/learning/progress' : `/learning/progress?userId=${id}`)} />
+          {/* Release 1.3 slot (P5): the team's required videos; nothing until the package lands. */}
+          <ErrorBoundary name="video-progress-team" fallback={null}><VideoProgressSection view="team" /></ErrorBoundary>
+        </>
       ) : (
         <OwnView userId={me.id} isAdmin={me.role === 'admin'} showLadder={careerLevelFor(me.position) !== null} />
       )}
@@ -78,6 +88,8 @@ function OwnView({ userId, isAdmin, showLadder }: { userId: number; isAdmin: boo
           <ErrorState error={progress.error} onRetry={() => void progress.refetch()} title="Could not load your checklist" />
         )}
       </div>
+      {/* Release 1.3 slot (P5): the required videos; nothing until the package lands. */}
+      <ErrorBoundary name="video-progress" fallback={null}><VideoProgressSection view="me" userId={userId} /></ErrorBoundary>
       {showLadder && (
         <Card>
           <CardHeader title="The ladder" description="Pre- and post-management progression structure (COD pack pages 18–19)." />
@@ -98,16 +110,25 @@ function PersonView({ userId, isAdmin }: { userId: number; isAdmin: boolean }) {
   );
   return (
     <>
-      <PageHeader breadcrumbs={back} title={name ?? 'Progress'} description={name ? `${name.split(' ')[0]}’s leadership checklist and progression.` : undefined} />
+      <PageHeader
+        breadcrumbs={back}
+        title={name ?? 'Progress'}
+        description={name ? `${name.split(' ')[0]}’s leadership checklist and progression.` : undefined}
+        actions={PDF_EXPORTS_READY ? <ErrorBoundary name="progress-pdf" fallback={null}><ProgressPdfButton userId={userId} /></ErrorBoundary> : undefined}
+      />
       {progress.isLoading ? (
         <SkeletonCard lines={8} />
       ) : progress.isError || !progress.data ? (
         <ErrorState error={progress.error} onRetry={() => void progress.refetch()} title="Could not load this person’s progress" />
       ) : (
-        <div className="grid grid-cols-[minmax(0,1fr)] gap-5 lg:grid-cols-2 lg:items-start">
-          <PersonChecklist progress={progress.data} canSignOff self={false} />
-          <ProgressionPanel userId={userId} canEditMilestones={isAdmin} self={false} />
-        </div>
+        <>
+          <div className="grid grid-cols-[minmax(0,1fr)] gap-5 lg:grid-cols-2 lg:items-start">
+            <PersonChecklist progress={progress.data} canSignOff self={false} />
+            <ProgressionPanel userId={userId} canEditMilestones={isAdmin} self={false} />
+          </div>
+          {/* Release 1.3 slot (P5): nothing until the package lands. */}
+          <ErrorBoundary name="video-progress-person" fallback={null}><VideoProgressSection view="person" userId={userId} /></ErrorBoundary>
+        </>
       )}
     </>
   );

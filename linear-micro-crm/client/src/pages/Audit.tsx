@@ -13,6 +13,11 @@ import { COPY } from '@/content/copy';
 import { AuditEntryItem } from '@/features/audit/AuditEntryItem';
 import { auditDayHeading } from '@/features/audit/dayHeading';
 import { ErrorState } from '@/features/common';
+import { ErrorBoundary } from '@/features/common/ErrorBoundary';
+// Release 1.3 slots: "opened the audit trail" for the trail itself (P9); "Download PDF" of this view (P4, once ready).
+import { RecordOpened } from '@/features/audit/RecordOpened';
+import { AuditPdfButton } from '@/features/pdf/AuditPdfButton';
+import { PDF_EXPORTS_READY } from '@/lib/pdf';
 import { toISODate } from '@/lib/dates';
 import { formatNumber, fullName } from '@/lib/format';
 import { usePageTitle } from '@/lib/usePageTitle';
@@ -113,7 +118,9 @@ export function AuditPage() {
         title={COPY.nav.audit.title}
         description={COPY.nav.audit.description}
         icon={<History aria-hidden />}
+        actions={PDF_EXPORTS_READY ? <ErrorBoundary name="audit-pdf" fallback={null}><AuditPdfButton entries={data?.rows ?? []} filters={[]} /></ErrorBoundary> : undefined}
       />
+      <ErrorBoundary name="audit-opened" fallback={null}><RecordOpened entity={null} entityId={null} what="audit trail" /></ErrorBoundary>
 
       <Card className="mb-4" padded={false}>
         <form className="grid grid-cols-2 gap-3 p-3 sm:p-4 xl:grid-cols-[minmax(0,1.6fr)_repeat(4,minmax(0,1fr))]" role="search" onSubmit={(e) => { e.preventDefault(); update({ q: search.trim() }); }}>

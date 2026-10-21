@@ -11,6 +11,16 @@ export const GAUGE_ROLES: Role[] = ['admin', 'leader', 'rep'];
 export const AUDIT_ROLES: Role[] = ['admin'];
 /** Release 1.2: /gauges/bulk (U2) — leaders for their own team, admins for any. */
 export const BULK_GAUGE_ROLES: Role[] = ['admin', 'leader'];
+/** Release 1.3: every staff role (venues P8, learning videos P5, the campaign page P6 — the server trims what each sees). */
+export const STAFF_ROLES_ALL: Role[] = ['admin', 'leader', 'recruiter', 'rep'];
+/** Release 1.3: /venues, /venues/:key (P8). */
+export const VENUE_ROLES: Role[] = STAFF_ROLES_ALL;
+/** Release 1.3: /finance/statements (P3). */
+export const STATEMENT_ROLES: Role[] = ['admin'];
+/** Release 1.3: /campaigns/:id (P6): admins and leaders in full, reps and recruiters the brief without money. */
+export const CAMPAIGN_PAGE_ROLES: Role[] = STAFF_ROLES_ALL;
+/** Release 1.3: /client, /client/security (P6) — client portal accounts only. */
+export const CLIENT_ROLES: Role[] = ['client'];
 
 export function RequireRole({ roles, children }: { roles: Role[]; children: ReactNode }) {
   const { user } = useAuth();

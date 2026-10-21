@@ -1,5 +1,9 @@
 // "Download as CSV" button for card and page header action areas. Shows the label from `sm` up and
 // collapses to the icon on phones (the label stays as the accessible name).
+// Release 1.3 — OWNED BY P4 pdf-everywhere: P4 turns it into "Export ▾ CSV / PDF" (lib/pdf exportTablePdf, from the
+// same columns and rows) once lib/pdf PDF_EXPORTS_READY is true, and reports every export to the audit trail
+// (api/auditEvents.ts reportAuditEvent). The props below are the contract: every call site keeps working unchanged
+// (the PDF title defaults to one derived from the file name); `pdf*` props refine the PDF where a page knows better.
 import { Download } from 'lucide-react';
 import clsx from 'clsx';
 import { Button, Tooltip, useToast, type ButtonSize, type TooltipSide } from '@/components/ui';
@@ -24,6 +28,16 @@ export interface ExportButtonProps<T extends object> {
   emptyHint?: string;
   /** Where the tooltip opens; `bottom` by default so it is not clipped by a card's top edge. */
   tooltipSide?: TooltipSide;
+  /** Release 1.3 (P4): false leaves PDF out of the menu for this table (default: offered once PDF_EXPORTS_READY). */
+  pdf?: boolean;
+  /** Release 1.3 (P4): the PDF's title (default: derived from `filename`). */
+  pdfTitle?: string;
+  /** Release 1.3 (P4): lines under the title — the filters on screen. */
+  pdfFilters?: string[];
+  /** Release 1.3 (P4): a totals row for the PDF, keyed by column key (formatted). */
+  pdfTotals?: Partial<Record<string, string>>;
+  /** Release 1.3 (P9): what the audit trail calls this export, e.g. "gauges-by-team" (default: from `filename`). */
+  auditWhat?: string;
 }
 
 export function ExportButton<T extends object>({

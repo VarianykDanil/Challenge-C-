@@ -2,6 +2,8 @@ import { Megaphone, Pin } from 'lucide-react';
 import type { Announcement } from '@lm/shared';
 import { EmptyState } from '@/components/ui';
 import { AnnouncementReads } from '@/features/audit/AnnouncementReads';
+// Release 1.3 slot (P6): "From Breast Cancer Now" on what a campaign's client posted.
+import { AnnouncementSourceBadge } from '@/features/client/AnnouncementSourceBadge';
 import { ErrorBoundary } from '@/features/common/ErrorBoundary';
 import { formatRelative } from '@/lib/format';
 import { COPY } from '@/content/copy';
@@ -12,6 +14,7 @@ export function AnnouncementItem({ announcement: a }: { announcement: Announceme
     <li className="rounded-lg border border-border bg-surface-2 p-3">
       <div className="flex items-start justify-between gap-2">
         <h4 className="min-w-0 break-words text-sm font-semibold text-fg">{a.title}</h4>
+        <ErrorBoundary name="announcement-source" fallback={null}><AnnouncementSourceBadge announcement={a} /></ErrorBoundary>
         {a.pinned && <Pin className="h-3.5 w-3.5 shrink-0 text-accent" aria-label="Pinned" />}
       </div>
       <p className="mt-1 whitespace-pre-line break-words text-sm text-muted">{a.body}</p>

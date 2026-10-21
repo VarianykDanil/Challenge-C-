@@ -1,8 +1,7 @@
 import { Router } from 'express';
 import { z } from 'zod';
-import type { Announcement } from '@lm/shared';
 import { get, run, type Db } from '../db/connection.ts';
-import { ANNOUNCEMENT_SELECT, listAnnouncements, mapAnnouncement } from '../db/queries.ts';
+import { ANNOUNCEMENT_SELECT, listAnnouncements, mapAnnouncement, type AnnouncementRow } from '../db/queries.ts';
 import { nowISO } from '../lib/dates.ts';
 import { offsetQuery, optionalIdQuery } from '../lib/validate.ts';
 import { currentUser, requireRole } from '../middleware/auth.ts';
@@ -37,7 +36,7 @@ export function announcementsRouter(db: Db): Router {
     const r = run(db, `INSERT INTO announcements (title, body, author_id, created_at, pinned) VALUES (?, ?, ?, ?, ?)`, [
       input.title, input.body, me.id, nowISO(), input.pinned,
     ]);
-    const row = get<Announcement>(db, `${ANNOUNCEMENT_SELECT} WHERE a.id = ?`, [r.lastInsertRowid])!;
+    const row = get<AnnouncementRow>(db, `${ANNOUNCEMENT_SELECT} WHERE a.id = ?`, [r.lastInsertRowid])!;
     res.status(201).json(mapAnnouncement(row));
   });
 

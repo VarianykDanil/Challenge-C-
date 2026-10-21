@@ -7,6 +7,10 @@ import { Badge, Button, Modal, Skeleton } from '@/components/ui';
 import { usePayslip } from '@/api/hooks';
 import { ErrorBoundary, ErrorState, OnTimeBadge, PayrollStatusBadge } from '@/features/common';
 import { EntityHistory } from '@/features/audit/EntityHistory';
+// Release 1.3 slots: the invoice's Accept / Dispute bar (P2), the 1.3 pay breakdown (P1), "opened" for the trail (P9).
+import { RecordOpened } from '@/features/audit/RecordOpened';
+import { InvoiceActionsBar } from '@/features/invoices/InvoiceActionsBar';
+import { PayBreakdown } from '@/features/pay/PayBreakdown';
 import { GaugeEntriesTable } from '@/features/gauges';
 import { formatDate, formatDateTime, formatGBP, formatNumber, formatRangeLabel } from '@/lib/format';
 import { PAYROLL_STATUS_LABELS } from '@/lib/labels';
@@ -159,6 +163,13 @@ function PayslipBody({ run }: { run: PayrollRunWithUser }) {
         <span className="text-muted">Due {formatDate(run.dueDate)}{run.paidDate ? ` · paid ${formatDate(run.paidDate)}` : ''}</span>
         {run.teamName && <Badge tone="neutral">{run.teamName}</Badge>}
       </div>
+      {/* Release 1.3 slots (P2, P9): nothing until the packages land. */}
+      <ErrorBoundary name="invoice-actions" fallback={null}>
+        <InvoiceActionsBar run={run} className="print:hidden" />
+      </ErrorBoundary>
+      <ErrorBoundary name="payslip-opened" fallback={null}>
+        <RecordOpened entity="payroll_run" entityId={run.id} what="payslip" />
+      </ErrorBoundary>
       {adjustedAt && (
         <p className="rounded-lg border border-warning/40 bg-warning/10 p-3 text-xs text-warning print:hidden" role="note">
           This payslip was recalculated on {formatDateTime(adjustedAt)}, after it had been paid — gauges logged or corrected late changed the figures below. The difference is settled separately.
@@ -205,6 +216,10 @@ function PayslipBody({ run }: { run: PayrollRunWithUser }) {
           )}
         </div>
       </div>
+      {/* Release 1.3 slot (P1): the week under the base-or-commission rule; nothing until the package lands. */}
+      <ErrorBoundary name="pay-breakdown" fallback={null}>
+        <PayBreakdown run={run} />
+      </ErrorBoundary>
       <div className="min-w-0">
         <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted">The week's gauges</div>
         <GaugeEntriesTable rows={p?.entries ?? []} loading={q.isLoading} showPerson={false} emptyMessage={isRecruiter ? 'Recruiters do not log gauges' : 'No gauge entries this week'} />

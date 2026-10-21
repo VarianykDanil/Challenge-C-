@@ -48,6 +48,10 @@ const KIND_LABELS: Record<AttentionKind, string> = {
   payroll: 'Payroll',
   recruitment: 'Recruitment',
   security: 'Security',
+  // Release 1.3 (r3-foundation): the kinds the packages' attention providers add (P2, P3, P6).
+  invoices: 'Invoices',
+  statements: 'Statements',
+  client: 'Client updates',
 };
 
 /** Groups in the order their first (most severe, newest) item appears in the sorted feed. */

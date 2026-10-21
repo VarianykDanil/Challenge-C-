@@ -1,0 +1,187 @@
+/**
+ * Release 1.3 — P2 invoices contracts (laid down by r3-foundation; OWNED BY P2, which may add fields and types).
+ *
+ * Owner's decision 1 (quote): "Everyone who works in the field is SELF-EMPLOYED. Each week Linear Hub issues a
+ * SELF-BILLING INVOICE on the person's behalf (Linear MCR Limited issues it, the supplier is the person). The person
+ * ACCEPTS it, or DISPUTES it so the office checks."
+ * Lead decisions: deemed accepted if not disputed by 12:00 the day before payday; Mark paid needs accepted or deemed
+ * accepted, else an admin override with a reason (audited); a disputed invoice is held until the office resolves it;
+ * each person accepts the versioned self-billing agreement once before their first invoice can be accepted.
+ *
+ * Endpoints (server/src/routes/invoices.ts, mounted at /invoices, owned by P2; stubs: reads empty, writes 501):
+ *  - GET  /invoices/agreement                → SelfBillingAgreement (the current text + whether I accepted it)
+ *  - POST /invoices/agreement/accept         → SelfBillingAgreement (records version, time, IP)
+ *  - GET  /invoices/profile                  → InvoiceProfile (mine); PUT /invoices/profile InvoiceProfileInput
+ *  - GET  /invoices/profile/:userId          → InvoiceProfile (admin); PUT /invoices/profile/:userId (admin)
+ *  - GET  /invoices?userId=&weekStart=&status= → InvoiceSummary[] (own; leader: own team; admin: all)
+ *  - GET  /invoices/by-run/:runId            → Invoice (scoped like the payslip)
+ *  - GET  /invoices/:id                      → Invoice
+ *  - POST /invoices/:id/accept               → Invoice (the supplier only)
+ *  - POST /invoices/:id/dispute  InvoiceDisputeInput → Invoice (the supplier only)
+ *  - GET  /invoices/disputes                 → InvoiceDisputeRow[] (admin)
+ *  - POST /invoices/:id/resolve  InvoiceResolveInput → Invoice (admin: 'reissue' = fix and reissue, 'keep' = keep as it is)
+ *  - GET  /invoices/company, PUT /invoices/company CompanySettingsInput → CompanySettings (admin; GET also field roles:
+ *    the customer block of their own invoice)
+ * Server helpers called from finance.ts (wired by the foundation; stubs do nothing): lib/invoices.ts
+ * `assertInvoicePayable(db, run, me, body)` before POST /finance/payroll/:id/pay, `withInvoiceSummaries(db, runs, me)`
+ * on every payroll list / payslip answer, and `startInvoiceJobs(db)` from index.ts (issue on week close, deem accepted).
+ * Tables (server/src/db/extensions/invoices.ts): self_billing_agreements, invoices; users columns address_line1,
+ * address_line2, address_town, postcode, utr, vat_number; meta `ext:invoices:company` (CompanySettings JSON),
+ * `ext:invoices:seq:<YYYY>` (the number sequence).
+ */
+import type { PayLineKind } from './pay.ts';
+
+/** The agreement text's version; bump when the wording changes (everyone accepts again). */
+export const SELF_BILLING_AGREEMENT_VERSION = '2026-10';
+
+/** "LM-SB-2026-000123": prefix, year, six-digit sequence per year. */
+export const INVOICE_NUMBER_PREFIX = 'LM-SB';
+
+export type InvoiceStatus = 'issued' | 'accepted' | 'deemed_accepted' | 'disputed' | 'resolved';
+
+export interface SelfBillingAgreement {
+  version: string;
+  title: string;
+  /** Plain text, paragraphs separated by blank lines. */
+  body: string;
+  /** When the signed-in person accepted this version (null: not yet). */
+  acceptedAt: string | null;
+}
+
+/** A party on the invoice: the supplier (the person) or the customer (Linear MCR Limited). */
+export interface InvoiceParty {
+  name: string;
+  addressLines: string[];
+  postcode: string | null;
+  /** Customer only. */
+  companyNumber?: string | null;
+  /** Supplier only, optional. */
+  utr?: string | null;
+  /** null → the invoice says "Not VAT registered". */
+  vatNumber?: string | null;
+}
+
+export interface InvoiceLine {
+  kind: PayLineKind | 'correction';
+  description: string;
+  quantity?: number;
+  unitPrice?: number;
+  amount: number;
+  /** false: shown for the explanation but not part of the total (e.g. the base when commission applied). */
+  paid: boolean;
+  campaignId?: number;
+  sourceWeekStart?: string;
+}
+
+/** What the payroll rows and lists carry (PayrollRunWithUser.invoice). */
+export interface InvoiceSummary {
+  id: number;
+  number: string;
+  status: InvoiceStatus;
+  /** 1, then 2… after "Fix and reissue". */
+  version: number;
+  issuedAt: string;
+  acceptedAt: string | null;
+  disputedAt: string | null;
+  /** ISO: 12:00 the day before payday; after it an un-disputed invoice counts as accepted. */
+  deemedAcceptedAt: string;
+  total: number;
+}
+
+export interface InvoiceDisputeLine {
+  /** Index in Invoice.lines. */
+  line: number;
+  /** "I made 18 sales, not 16". */
+  note?: string;
+}
+
+export interface InvoiceDispute {
+  reason: string;
+  lines: InvoiceDisputeLine[];
+  at: string;
+}
+
+export interface InvoiceResolution {
+  action: 'reissue' | 'keep';
+  note: string;
+  by: number | null;
+  byName?: string | null;
+  at: string;
+}
+
+/** GET /invoices/:id — the full document (screen, print and P4's PDF primitives). */
+export interface Invoice extends InvoiceSummary {
+  payrollRunId: number;
+  userId: number;
+  weekStart: string;
+  weekEnd: string;
+  /** Payday (the run's due date). */
+  dueDate: string;
+  supplier: InvoiceParty;
+  customer: InvoiceParty;
+  lines: InvoiceLine[];
+  /** "Self-billed invoice issued by Linear MCR Limited on behalf of the supplier under a self-billing agreement". */
+  selfBillingNote: string;
+  signatory: { name: string; signatureUrl: string | null };
+  /** "Accepted electronically by Jordan Lee on Thu 22 Oct 2026, 14:05"; null while not accepted. */
+  acceptance: { by: string; at: string; deemed: boolean } | null;
+  dispute: InvoiceDispute | null;
+  resolution: InvoiceResolution | null;
+}
+
+export interface InvoiceDisputeInput {
+  reason: string;
+  lines: InvoiceDisputeLine[];
+}
+
+export interface InvoiceResolveInput {
+  action: 'reissue' | 'keep';
+  /** Shown to the person. */
+  note: string;
+}
+
+/** Finance → Company → Disputes. */
+export interface InvoiceDisputeRow {
+  invoice: InvoiceSummary;
+  userId: number;
+  userName: string;
+  weekStart: string;
+  dispute: InvoiceDispute;
+  /** Our figure for the disputed lines and the run. */
+  ours: { total: number; salesLogged?: number; salesConfirmed?: number };
+}
+
+/** The person's details printed as the supplier (users columns). */
+export interface InvoiceProfile {
+  userId: number;
+  name: string;
+  addressLine1: string | null;
+  addressLine2: string | null;
+  addressTown: string | null;
+  postcode: string | null;
+  utr: string | null;
+  vatNumber: string | null;
+}
+
+export type InvoiceProfileInput = Partial<Omit<InvoiceProfile, 'userId' | 'name'>>;
+
+/** Settings → Company (meta `ext:invoices:company`). */
+export interface CompanySettings {
+  legalName: string;
+  addressLines: string[];
+  postcode: string | null;
+  companyNumber: string | null;
+  signatoryName: string;
+  /** Served by P2's own route; null when none uploaded. */
+  signatureUrl: string | null;
+}
+
+export interface CompanySettingsInput {
+  legalName?: string;
+  addressLines?: string[];
+  postcode?: string | null;
+  companyNumber?: string | null;
+  signatoryName?: string;
+  /** data:image/png;base64,… (≤ 200 KB) or null to remove. */
+  signatureImage?: string | null;
+}

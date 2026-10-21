@@ -70,7 +70,7 @@ const GAUGE_ICONS: Record<GaugeKey, LucideIcon> = {
   sales: PoundSterling,
 };
 
-const ROLE_TONE: Record<Role, 'primary' | 'accent' | 'info' | 'success'> = { admin: 'accent', leader: 'primary', recruiter: 'info', rep: 'success' };
+const ROLE_TONE: Record<Role, 'primary' | 'accent' | 'info' | 'success'> = { admin: 'accent', leader: 'primary', recruiter: 'info', rep: 'success', client: 'info' };
 
 /** Stage-to-stage benchmarks in funnel order, paired with the gauges they connect. */
 const BENCHMARKS = RATIO_KEYS.map((key, i) => ({ key, from: GAUGE_KEYS[i]!, to: GAUGE_KEYS[i + 1]!, value: BENCHMARK_RATIOS[key] }));

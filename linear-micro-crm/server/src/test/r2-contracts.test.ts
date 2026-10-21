@@ -11,13 +11,14 @@ import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
 import { openDb, type Db } from '../db/connection.ts';
 import { EXTENSIONS, upgradeExtensions } from '../db/extensions/index.ts';
-import { createSchema, SCHEMA_SQL } from '../db/schema.ts';
+import { createSchema, SCHEMA_SQL, upgradeSchema } from '../db/schema.ts';
 import { seed } from '../db/seed.ts';
 import { setBusinessClock, todayISO } from '../lib/dates.ts';
 import { startTestServer, type TestClient, type TestServer } from './helpers.ts';
 
 test('extensions: five, in the fixed order, with unique names and the DbExtension shape', () => {
-  assert.deepEqual(EXTENSIONS.map((e) => e.name), ['learning', 'pitches', 'pin', 'audit', 'checkins']);
+  // Release 1.3 appends its extensions after these five (r3-contracts.test.ts checks the whole list).
+  assert.deepEqual(EXTENSIONS.slice(0, 5).map((e) => e.name), ['learning', 'pitches', 'pin', 'audit', 'checkins']);
   for (const e of EXTENSIONS) {
     assert.equal(typeof e.sql, 'string', `${e.name}.sql`);
     assert.equal(typeof e.upgrade, 'function', `${e.name}.upgrade`);
@@ -58,27 +59,38 @@ test('a fresh demo seed (with every extension seed) is deterministic and adds no
   assert.equal(a.users, a.stats.users, 'extensions add no users');
 });
 
-/** The core tables: what the core schema alone creates (extension tables are left out). */
-function coreTables(): string[] {
+/**
+ * The core tables and their core columns: what the core schema and the core column upgrades alone create (extension
+ * tables, and the columns extensions add to core tables, are left out).
+ */
+function coreColumns(): Map<string, string[]> {
   const db = openDb(':memory:');
   try {
     db.exec(SCHEMA_SQL);
-    return (db.prepare(`SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%' ORDER BY name`).all() as { name: string }[])
+    upgradeSchema(db);
+    const tables = (db.prepare(`SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%' ORDER BY name`).all() as { name: string }[])
       .map((r) => r.name);
+    return new Map(tables.map((t) => [t, (db.prepare(`PRAGMA table_info(${t})`).all() as { name: string }[]).map((c) => c.name)]));
   } finally {
     db.close();
   }
 }
 
 /**
- * A sha256 per core table over every row and column (rows sorted, so the order rows went in does not matter). In `meta`
- * the extensions' own `ext:%` keys are left out: an extension may record its flags; every core key is compared.
+ * A sha256 per core table over every row and every CORE column (rows sorted, so the order rows went in does not
+ * matter). In `meta` the extensions' own `ext:%` keys are left out: an extension may record its flags; every core key
+ * is compared. Release 1.3 (r3-foundation): columns an extension added to a core table are its own — its seed may fill
+ * them on core rows (extensions/types.ts) — so they are left out; any inserted or deleted row still changes the hash.
+ * The one row exception the plan makes: announcements a client portal account posted (P6's published demo posts).
  */
 function coreHashes(db: Db): Record<string, string> {
   const out: Record<string, string> = {};
-  for (const table of coreTables()) {
-    const where = table === 'meta' ? ` WHERE key NOT LIKE 'ext:%'` : '';
-    const rows = (db.prepare(`SELECT * FROM ${table}${where}`).all() as Record<string, unknown>[]).map((r) => JSON.stringify(r)).sort();
+  for (const [table, columns] of coreColumns()) {
+    const where =
+      table === 'meta' ? ` WHERE key NOT LIKE 'ext:%'`
+      : table === 'announcements' ? ` WHERE author_id NOT IN (SELECT id FROM users WHERE role = 'client')`
+      : '';
+    const rows = (db.prepare(`SELECT ${columns.map((c) => `"${c}"`).join(', ')} FROM ${table}${where}`).all() as Record<string, unknown>[]).map((r) => JSON.stringify(r)).sort();
     out[table] = `${rows.length}:${createHash('sha256').update(rows.join('\n')).digest('hex')}`;
   }
   return out;

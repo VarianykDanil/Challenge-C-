@@ -79,11 +79,11 @@ export function authenticate(db: Db): RequestHandler {
   return (req, _res, next) => {
     const token = (req.cookies as Record<string, string | undefined> | undefined)?.[SESSION_COOKIE];
     if (!token) return next();
-    const row = get<UserWithTeam & { expiresAt: string; seenAt: string; totpOn: number; pinOn: number }>(
+    const row = get<UserWithTeam & { expiresAt: string; seenAt: string; totpOn: number; pinOn: number; clientCampaign: number | null }>(
       db,
       `${USER_SELECT.replace(
         'SELECT ',
-        'SELECT s.expires_at AS expiresAt, COALESCE(s.last_seen_at, s.created_at) AS seenAt, (u.totp_enabled_at IS NOT NULL) AS totpOn, (u.pin_hash IS NOT NULL) AS pinOn, ',
+        'SELECT s.expires_at AS expiresAt, COALESCE(s.last_seen_at, s.created_at) AS seenAt, (u.totp_enabled_at IS NOT NULL) AS totpOn, (u.pin_hash IS NOT NULL) AS pinOn, u.client_campaign_id AS clientCampaign, ',
       )} JOIN sessions s ON s.user_id = u.id WHERE s.token = ?`,
       [token],
     );
@@ -96,10 +96,16 @@ export function authenticate(db: Db): RequestHandler {
       return next(); // requireAuth answers 401
     }
     if (now - seenMs >= LAST_SEEN_RESOLUTION_MS) run(db, `UPDATE sessions SET last_seen_at = ? WHERE token = ?`, [new Date(now).toISOString(), token]);
-    const { expiresAt: _expires, seenAt: _seen, totpOn, pinOn, ...user } = row;
+    const { expiresAt: _expires, seenAt: _seen, totpOn, pinOn, clientCampaign, ...user } = row;
     const twoFactorEnabled = Boolean(totpOn);
     // The caller's own flags ride on req.user so /auth/me and the dashboard's `user` carry them; other users' rows never do.
-    req.user = { ...user, twoFactorEnabled, ...accountFlags(settings, { role: user.role, hasPin: Boolean(pinOn), twoFactorEnabled }) };
+    // Release 1.3 (r3-foundation): a client portal session also carries its campaign (staff sessions never do).
+    req.user = {
+      ...user,
+      twoFactorEnabled,
+      ...accountFlags(settings, { role: user.role, hasPin: Boolean(pinOn), twoFactorEnabled }),
+      ...(user.role === 'client' ? { clientCampaignId: clientCampaign ?? null } : {}),
+    };
     req.sessionToken = token;
     next();
   };

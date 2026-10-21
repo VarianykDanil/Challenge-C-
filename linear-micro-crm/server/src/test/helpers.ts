@@ -14,6 +14,11 @@
  *
  * Every server gets a fresh response cache and login limiter; the app secret goes to a temp folder (never
  * server/data). Run with the server test script (TZ=Europe/London). Node runs each test file in its own process.
+ *
+ * Release 1.3 (r3-foundation): `srv.login('client')` signs in a client portal account — the seeded demo client (Hannah
+ * Price, Breast Cancer Now, CL-0001) with `seed: true`; with the fixture, a client of the fixture campaign
+ * (cleo.client@fixture.test, CL-0001) created on first use, so no other test sees an extra user.
+ * addClientUser(db, …) adds more client accounts.
  */
 import { mkdtempSync, rmSync } from 'node:fs';
 import http from 'node:http';
@@ -93,6 +98,8 @@ export const DEMO_ACCOUNTS = {
   leader: { email: 'amelia.hart@linear-mcr.co.uk', employeeId: 'LM-0002' },
   recruiter: { email: 'priya.shah@linear-mcr.co.uk', employeeId: 'LM-0003' },
   rep: { email: 'jordan.lee@linear-mcr.co.uk', employeeId: 'LM-0010' },
+  /** Release 1.3: the demo client portal account (Breast Cancer Now). */
+  client: { email: 'hannah.price@breastcancernow.example', employeeId: 'CL-0001' },
 } as const satisfies Record<string, Credentials>;
 
 export type DemoRole = keyof typeof DEMO_ACCOUNTS;
@@ -105,6 +112,8 @@ export const FIXTURE_ACCOUNTS = {
   rep: { email: 'remy.rep@fixture.test', employeeId: 'FX-0004' },
   repA2: { email: 'rita.rep@fixture.test', employeeId: 'FX-0005' },
   repB: { email: 'bo.rep@fixture.test', employeeId: 'FX-0006' },
+  /** Release 1.3: a client portal account of the fixture campaign — created on the first login('client'). */
+  client: { email: 'cleo.client@fixture.test', employeeId: 'CL-0001' },
 } as const satisfies Record<string, Credentials>;
 
 export type FixtureAccount = keyof typeof FIXTURE_ACCOUNTS;
@@ -198,6 +207,32 @@ export function addHistory(db: Db, h: HistoryInput): string[] {
     }
   }
   return dates;
+}
+
+export interface ClientUserInput {
+  campaignId: number;
+  email?: string;
+  /** The access code (default: the next free CL-xxxx). */
+  employeeId?: string;
+  firstName?: string;
+  lastName?: string;
+  status?: 'active' | 'left';
+}
+
+/**
+ * Release 1.3: insert a client portal account directly (role and position 'client', no team, the owner's pay plan),
+ * as P6's invite will. Returns its id.
+ */
+export function addClientUser(db: Db, c: ClientUserInput): number {
+  const n = Number(get<{ n: number | null }>(db, `SELECT MAX(CAST(substr(employee_id, 4) AS INTEGER)) AS n FROM users WHERE employee_id LIKE 'CL-%'`)?.n ?? 0) + 1;
+  const code = c.employeeId ?? `CL-${String(n).padStart(4, '0')}`;
+  const plan = get<{ id: number }>(db, `SELECT id FROM pay_plans ORDER BY (position = 'owner') DESC, id ASC LIMIT 1`)!.id;
+  return run(
+    db,
+    `INSERT INTO users (employee_id, email, first_name, last_name, role, position, team_id, pay_plan_id, start_date, status, phone, avatar_color, city, client_campaign_id)
+     VALUES (?, ?, ?, ?, 'client', 'client', NULL, ?, ?, ?, NULL, '#BE185D', NULL, ?)`,
+    [code, c.email ?? `client${n}@client.test`, c.firstName ?? 'Cleo', c.lastName ?? 'Client', plan, todayISO(), c.status ?? 'active', c.campaignId],
+  ).lastInsertRowid;
 }
 
 /** The small, date-relative fixture described at the top of this file. */
@@ -316,6 +351,10 @@ export async function startTestServer(opts: StartOptions = {}): Promise<TestServ
     async login(who, pin) {
       const client = new TestClient(base);
       const creds = credentials(who);
+      // Release 1.3: the fixture's client account exists only once a test signs in as it.
+      if (who === 'client' && fixture && !get(db, `SELECT 1 FROM users WHERE lower(employee_id) = lower(?)`, [creds.employeeId])) {
+        addClientUser(db, { campaignId: fixture.campaignId, email: creds.email, employeeId: creds.employeeId });
+      }
       const r = await client.post('/auth/login', pin === undefined ? creds : { ...creds, pin });
       if (r.status !== 200 || !client.cookie) throw new Error(`login ${JSON.stringify(who)} → ${r.status} ${JSON.stringify(r.json)}`);
       return client;

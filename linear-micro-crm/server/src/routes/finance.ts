@@ -20,6 +20,7 @@ import { EXPENSE_SELECT, PAY_PLAN_SELECT, Where, getExpense, getPayPlan, getPayr
 import { addDays, eachMonday, mondayOf, sundayOf, todayISO } from '../lib/dates.ts';
 import { badRequest, conflict, forbidden, notFound } from '../lib/errors.ts';
 import { GAUGE_COMMISSION_SQL, GAUGE_FROM, GAUGE_PAYOUT_SQL, MONDAY_SQL, mondayOfSql } from '../lib/metrics.ts';
+import { assertInvoicePayable, withInvoiceSummaries } from '../lib/invoices.ts';
 import { estimateWeekPayroll, nextPay } from '../lib/pay.ts';
 import { redactPayroll } from '../lib/scope.ts';
 import { smartEnabled } from '../lib/smart/enabled.ts';
@@ -96,7 +97,8 @@ export function financeRouter(db: Db): Router {
       if (userId) where.add('p.user_id = ?', userId);
       if (teamId) where.add('u.team_id = ?', teamId);
     }
-    res.json(withPayrollFlags(db, listPayroll(db, `${where}`, where.params).map((r) => redactPayroll(me, r)), me));
+    // Release 1.3 (P2): each run carries its self-billing invoice summary once one is issued (lib/invoices.ts).
+    res.json(withInvoiceSummaries(db, withPayrollFlags(db, listPayroll(db, `${where}`, where.params).map((r) => redactPayroll(me, r)), me), me));
   });
 
   // ── my earnings ── (declared before /payroll/:id so the literal path wins)
@@ -107,7 +109,7 @@ export function financeRouter(db: Db): Router {
     const weeksRaw = Number(req.query.weeks ?? 12);
     const weeks = Number.isInteger(weeksRaw) && weeksRaw > 0 ? Math.min(weeksRaw, 104) : 12;
     const since = addDays(mondayOf(today), -weeks * 7);
-    const runs = listPayroll(db, 'WHERE p.user_id = ? AND p.week_start >= ?', [me.id, since]);
+    const runs = withInvoiceSummaries(db, listPayroll(db, 'WHERE p.user_id = ? AND p.week_start >= ?', [me.id, since]), me);
     const settled = runs.filter((r) => r.paidDate !== null);
     const pay = nextPay(db, me, today);
     res.json({
@@ -142,7 +144,7 @@ export function financeRouter(db: Db): Router {
     if (!allowed) throw forbidden('You cannot view this payslip');
     const plan = getPayPlan(db, target.payPlanId);
     const entries = listGauges(db, 'WHERE g.user_id = ? AND g.date BETWEEN ? AND ?', [run_.userId, run_.weekStart, run_.weekEnd], 'g.date ASC');
-    const [shown] = withPayrollFlags(db, [redactPayroll(me, run_)], me);
+    const [shown] = withInvoiceSummaries(db, withPayrollFlags(db, [redactPayroll(me, run_)], me), me);
     res.json({ ...shown!, plan, entries });
   });
 
@@ -159,6 +161,9 @@ export function financeRouter(db: Db): Router {
     if (date > today) throw badRequest('paidDate cannot be in the future');
     if (date < existing.weekEnd) throw badRequest(`paidDate cannot be before the pay week ends (${existing.weekEnd})`);
     const status = payrollStatusFor(existing.dueDate, date, today); // 'paid' or 'late'
+    // Release 1.3 (P2): Mark paid needs the self-billing invoice accepted or deemed accepted, else an admin override with
+    // a reason (lib/invoices.ts; allows everything until P2 lands).
+    assertInvoicePayable(db, existing, currentUser(req), req.body);
     run(db, `UPDATE payroll_runs SET paid_date = ?, status = ? WHERE id = ?`, [date, status, id]);
     res.json(getPayroll(db, id));
   });

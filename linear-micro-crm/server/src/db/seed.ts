@@ -258,7 +258,7 @@ export function seed(db: Db, today: string = D.todayISO(), options: SeedOptions 
       return u.skill + (u.skillEnd - u.skill) * t;
     };
     const baseStops: Record<Position, number> = {
-      trainee: 50, field_rep: 68, team_leader: 75, crew_leader: 80, assistant_owner: 75, owner: 70, recruiter: 0,
+      trainee: 50, field_rep: 68, team_leader: 75, crew_leader: 80, assistant_owner: 75, owner: 70, recruiter: 0, client: 0,
     };
 
     function genGauges(u: SeededUser, ev: SeededEvent): GaugeTotals {
@@ -712,6 +712,25 @@ export function seed(db: Db, today: string = D.todayISO(), options: SeedOptions 
     // money rates are captured per entry (campaign payout, the person's plan commission) — fill them for the seeded rows
     backfillGaugeRates(db);
 
+    // ── Release 1.3 (r3-foundation): the demo client portal account(s) ──
+    // Inserted last among the users and without the core random stream, so every other row is exactly as before. Not in
+    // `users` (the staff): extensions get them as ctx.clients. role/position 'client', no team, the owner's pay plan
+    // (users.pay_plan_id is required; a client is never payable: lib/pay.ts payableUsers leaves clients out), no PIN —
+    // so the demo sign-in works (P6 makes a PIN required for real client accounts).
+    const clientPlan = plans.get('owner')!;
+    const clients = S.CLIENT_ACCOUNTS.flatMap((c) => {
+      const campaign = campaigns.get(c.campaign);
+      if (!campaign) return [];
+      const r = run(
+        db,
+        `INSERT INTO users (employee_id, email, first_name, last_name, role, position, team_id, pay_plan_id, start_date, status, phone, avatar_color, city, client_campaign_id)
+         VALUES (?, ?, ?, ?, 'client', 'client', NULL, ?, ?, 'active', NULL, ?, NULL, ?)`,
+        [c.code, c.email, c.firstName, c.lastName, clientPlan.id, D.addDays(thisMonday, -28), c.color, campaign.id],
+      );
+      return [{ id: r.lastInsertRowid, employeeId: c.code, firstName: c.firstName, lastName: c.lastName, email: c.email, campaignId: campaign.id }];
+    });
+    stats.users += clients.length;
+
     // ── Release 1.2 database extensions (db/extensions): their demo rows, last, from the rows created above ──
     // Each extension draws from its own random stream (ctx.rng), so the core data above never changes.
     if (options.extensionSeeds !== false) seedExtensions(db, {
@@ -721,6 +740,7 @@ export function seed(db: Db, today: string = D.todayISO(), options: SeedOptions 
         id: u.id, employeeId: u.employeeId, firstName: u.firstName, lastName: u.lastName, role: u.role, position: u.position,
         teamId: u.teamId, status: u.status, startDate: u.startDate,
       })),
+      clients,
       teams: db.prepare(`SELECT id, name, leader_id AS leaderId FROM teams ORDER BY id`).all() as { id: number; name: string; leaderId: number | null }[],
       campaigns: [...campaigns.values()].map((c) => ({ id: c.id, code: c.code, name: c.name })),
       events: events.map((e) => ({ ...e })),

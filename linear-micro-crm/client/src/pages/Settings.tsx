@@ -9,6 +9,14 @@ import { useHealth, useTwoFactorStatus, type HealthInfo } from '@/api/hooks';
 import { useCurrentUser } from '@/auth/AuthProvider';
 import { ErrorBoundary, UserStatusBadge, errorMessage } from '@/features/common';
 import { PinSettings } from '@/features/settings/PinSettings';
+// Release 1.3 slots: Settings → Invoices and Company (P2), Pay (P1), Integrations (P3), Learning videos (P5),
+// Recruitment's question bank (P7). Each renders a whole card, or nothing.
+import { CompanySettingsSection } from '@/features/invoices/CompanySettingsSection';
+import { InvoiceSettingsSection } from '@/features/invoices/InvoiceSettingsSection';
+import { PaySettingsSection } from '@/features/pay/PaySettingsSection';
+import { QuestionBankSection } from '@/features/recruitment/QuestionBankSection';
+import { IntegrationsSection } from '@/features/statements/IntegrationsSection';
+import { VideoSettingsSection } from '@/features/videos/VideoSettingsSection';
 import { RecoveryCodesModal, TwoFactorDisableModal, TwoFactorSetupModal } from '@/features/settings';
 import { formatDate, formatDateTime, formatRelative, fullName, pluralise } from '@/lib/format';
 import { useTheme, type Theme } from '@/components/layout';
@@ -68,7 +76,20 @@ export function SettingsPage() {
 
           <SecurityCard />
 
+          {/* Release 1.3 slots (nothing until the packages land) */}
+          <ErrorBoundary name="settings-invoices" fallback={null}><InvoiceSettingsSection /></ErrorBoundary>
+          {(user.role === 'admin' || user.role === 'recruiter') && <ErrorBoundary name="settings-questions" fallback={null}><QuestionBankSection /></ErrorBoundary>}
+
           {user.role === 'admin' && <BackupsCard />}
+
+          {user.role === 'admin' && (
+            <>
+              <ErrorBoundary name="settings-pay" fallback={null}><PaySettingsSection /></ErrorBoundary>
+              <ErrorBoundary name="settings-company" fallback={null}><CompanySettingsSection /></ErrorBoundary>
+              <ErrorBoundary name="settings-integrations" fallback={null}><IntegrationsSection /></ErrorBoundary>
+              <ErrorBoundary name="settings-videos" fallback={null}><VideoSettingsSection /></ErrorBoundary>
+            </>
+          )}
         </div>
 
         <div className="min-w-0 space-y-6">

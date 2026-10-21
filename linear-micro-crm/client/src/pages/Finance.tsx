@@ -10,6 +10,8 @@ import { useCampaigns, useDeleteExpense, useExpenses, useFinanceSummary, useMyFi
 import { useCurrentUser } from '@/auth/AuthProvider';
 import { ChartSkeleton, ColourChip, ConfirmDialog, ErrorBoundary, ErrorState, ExportButton, KpiSkeletons, RangePicker, StopRowEvents, errorMessage, useRangeState } from '@/features/common';
 import { PayExportButton } from '@/features/office/PayExportButton';
+// Release 1.3 slot (P2): disputed self-billing invoices, at the top of Company.
+import { DisputesCard } from '@/features/invoices/DisputesCard';
 import { AddExpenseModal, FlaggedRunsList, LazyBulkPayBar, PayrollRunsTable, PayslipModal, campaignFinanceCsvColumns, expenseCsvColumns, financeWeekCsvColumns, payrollRunCsvColumns, payrollRunsRange, useBulkMarkPaid, warningFlags, type PayrollRunSelection } from '@/features/finance';
 import { FORECAST_LABEL, bonusLine, forecastMethod, forecastNoRangeReason, forecastRange } from '@/features/smart/weekPayCopy';
 import { csvFilename, sortRows } from '@/lib/csv';
@@ -349,6 +351,8 @@ function Company({ onOpen, scrollToRuns = false, onScrolled }: { onOpen: (r: Pay
 
   return (
     <div className="space-y-6">
+      {/* Release 1.3 slot (P2): nothing until the package lands. */}
+      <ErrorBoundary name="invoice-disputes" fallback={null}><DisputesCard /></ErrorBoundary>
       <RangePicker value={range} onChange={setRange} presets={['last_4_weeks', 'last_12_weeks', 'quarter', 'this_month', 'last_month']} />
       {summary.isError ? <ErrorState error={summary.error} onRetry={() => void summary.refetch()} /> : (
         <>

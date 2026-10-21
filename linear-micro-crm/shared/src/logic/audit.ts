@@ -12,6 +12,15 @@ export const AUDIT_ENTITIES: readonly AuditEntity[] = [
   'learning', 'check_in',
 ];
 
+/**
+ * Release 1.3 (r3-foundation): the entities the 1.3 packages record. Kept apart from AUDIT_ENTITIES (the 1.2 filter
+ * list) so the /audit filter is unchanged until P9 audit-everything decides how to list them; isAuditEntity accepts both.
+ */
+export const AUDIT_ENTITIES_R3: readonly AuditEntity[] = [
+  'campaign_rate', 'pay_adjustment', 'invoice', 'agreement', 'statement', 'video', 'client_post', 'client_account',
+  'interview_question', 'event_roster', 'export',
+];
+
 export const AUDIT_ENTITY_LABELS: Record<AuditEntity, string> = {
   payroll_run: 'Pay run',
   gauge_entry: 'Gauge entry',
@@ -25,10 +34,22 @@ export const AUDIT_ENTITY_LABELS: Record<AuditEntity, string> = {
   expense: 'Expense',
   learning: 'Learning',
   check_in: 'Check-in',
+  // Release 1.3 (r3-foundation)
+  campaign_rate: 'Campaign rate',
+  pay_adjustment: 'Pay adjustment',
+  invoice: 'Invoice',
+  agreement: 'Self-billing agreement',
+  statement: 'Commission statement',
+  video: 'Video',
+  client_post: 'Client post',
+  client_account: 'Client account',
+  interview_question: 'Interview question',
+  event_roster: 'Event booking',
+  export: 'Export',
 };
 
 export function isAuditEntity(value: unknown): value is AuditEntity {
-  return typeof value === 'string' && (AUDIT_ENTITIES as readonly string[]).includes(value);
+  return typeof value === 'string' && ((AUDIT_ENTITIES as readonly string[]).includes(value) || (AUDIT_ENTITIES_R3 as readonly string[]).includes(value));
 }
 
 /** Keys (any depth, case-insensitive) replaced by "[redacted]" before a snapshot is stored. U3 owns the list. */

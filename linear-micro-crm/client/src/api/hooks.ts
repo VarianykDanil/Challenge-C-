@@ -158,7 +158,8 @@ const num = (v: number | null | undefined): number | undefined => (v == null ? u
 // ───────────────────────────── Auth / misc ─────────────────────────────
 
 export function useDemoAccounts() {
-  return useQuery({ queryKey: keys.demoAccounts, queryFn: () => api<{ accounts: DemoAccount[] }>('/auth/demo-accounts'), staleTime: Infinity });
+  // Release 1.3: `clientAccounts` — the seeded demo client portal account(s), apart from the four staff accounts (P6 shows them).
+  return useQuery({ queryKey: keys.demoAccounts, queryFn: () => api<{ accounts: DemoAccount[]; clientAccounts?: DemoAccount[] }>('/auth/demo-accounts'), staleTime: Infinity });
 }
 /** Alias used by the Designer's Login page (`pickDemoAccounts()`); it is the same query hook. */
 export const pickDemoAccounts = useDemoAccounts;

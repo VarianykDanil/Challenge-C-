@@ -35,6 +35,16 @@
  *  - search            command palette query rules                                      (U5)
  *  - payExport         payroll export rows and CSV (Xero, Sage)                          (U5)
  *  - lessonTitles      lesson key → title, for summaries the server writes                (UC fix group)
+ *
+ * Release 1.3 (r3-foundation lays down every module so nobody else edits this file; owners replace stub bodies):
+ *  - payRule           base-or-commission week pay and its explanation                   (P1)
+ *  - invoices          self-billing invoice number and the deemed-accepted moment        (P2)
+ *  - statements        commission statement column detection and name matching           (P3)
+ *  - exportFormat      CSV / PDF export helpers (orientation, safe text)                 (P4)
+ *  - videos            learning video topics, embed URLs, watched rule                   (P5)
+ *  - clientPortal      client post labels, access codes                                  (P6)
+ *  - recruitmentPlus   candidate age, Under 18, timeline                                 (P7)
+ *  - venues            venue key, event plan maths                                       (P8)
  */
 export * from './gauges.ts';
 export * from './finance.ts';
@@ -64,3 +74,12 @@ export * from './shiftCheckIn.ts';
 export * from './search.ts';
 export * from './payExport.ts';
 export * from './lessonTitles.ts';
+// Release 1.3
+export * from './payRule.ts';
+export * from './invoices.ts';
+export * from './statements.ts';
+export * from './exportFormat.ts';
+export * from './videos.ts';
+export * from './clientPortal.ts';
+export * from './recruitmentPlus.ts';
+export * from './venues.ts';

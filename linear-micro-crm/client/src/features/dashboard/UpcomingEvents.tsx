@@ -10,6 +10,8 @@ import { CheckInButton } from '@/features/checkins/CheckInButton';
 import { ErrorBoundary } from '@/features/common/ErrorBoundary';
 import { EventStatusBadge } from '@/features/common';
 import { DirectionsLink, EventForecastChip } from '@/features/events';
+// Release 1.3 slot (P8): the booked person's plan for each event.
+import { EventPlanStrip } from '@/features/venues/EventPlanStrip';
 import { todayISO } from '@/lib/dates';
 import { formatDateShort, formatRelative, formatTime } from '@/lib/format';
 import { actionHref } from '@/lib/useActionParam';
@@ -64,6 +66,7 @@ export function UpcomingEvents({ events }: { events: SalesEventWithMeta[] }) {
                     </span>
                     <span className="mt-0.5 flex items-start gap-1 text-xs text-muted"><MapPin className="mt-0.5 h-3 w-3 shrink-0" aria-hidden /><span className="min-w-0 truncate">{e.venue}, {e.city} · {e.teamName}</span></span>
                     {forecast && <EventForecastChip forecast={forecast} targetSales={e.targetSales} campaignCode={e.campaignCode} type={e.type} teamName={e.teamName} side="bottom" className="mt-1" />}
+                    <ErrorBoundary name="event-plan" fallback={null}><EventPlanStrip event={e} variant="upcoming" className="mt-1" /></ErrorBoundary>
                   </span>
                 </span>
               </Link>

@@ -22,6 +22,8 @@ export const POSITION_LABELS: Record<Position, string> = {
   assistant_owner: 'Assistant Owner',
   owner: 'Owner',
   recruiter: 'Recruiter',
+  // Release 1.3: a campaign's client portal account (never offered in the staff forms: POSITIONS leaves it out).
+  client: 'Client',
 };
 
 export const ROLE_LABELS: Record<Role, string> = {
@@ -29,6 +31,8 @@ export const ROLE_LABELS: Record<Role, string> = {
   leader: 'Leader',
   recruiter: 'Recruiter',
   rep: 'Representative',
+  // Release 1.3: the client portal (staff forms list STAFF_ROLES only).
+  client: 'Client',
 };
 
 export const STAGE_LABELS: Record<CandidateStage, string> = {

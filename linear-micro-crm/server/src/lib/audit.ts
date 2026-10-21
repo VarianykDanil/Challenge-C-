@@ -22,7 +22,9 @@ import { createHash } from 'node:crypto';
 import type { RequestHandler, Response } from 'express';
 import { redactAuditSnapshot, type AuditEntity } from '@lm/shared';
 import type { Db } from '../db/connection.ts';
-import { matchAuditRoute, type AuditCall, type AuditDone, type AuditRouteSpec } from './auditSpecs.ts';
+import type { AuditCall, AuditDone, AuditRouteSpec } from './auditSpecs.ts';
+// Release 1.3 (r3-foundation): writes are matched against the spec registry (the 1.3 packages' specs, then the 1.2 ones).
+import { matchAuditSpec } from './audit/registry.ts';
 
 /** One audit row to write (snapshots are redacted before they are stored). */
 export interface AuditRecord {
@@ -157,7 +159,7 @@ export function auditMiddleware(db: Db): RequestHandler {
     if (!WRITE_METHODS.has(req.method)) return next();
     let ctx: AuditState | null = null;
     try {
-      const match = matchAuditRoute(req.method, req.path);
+      const match = matchAuditSpec(req.method, req.path);
       if (match?.spec.skip) return next();
       const call: AuditCall = { method: req.method, path: req.path, params: match?.params ?? {}, body: req.body, me: req.user ?? null };
       let state: unknown;

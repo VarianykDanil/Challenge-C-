@@ -1,7 +1,7 @@
 // Sidebar — owned by the Product Designer.
 import { NavLink } from 'react-router-dom';
 import {
-  CalendarDays, Circle, Gauge, GraduationCap, History, Info, LayoutDashboard, Megaphone, PanelLeftClose, PanelLeftOpen, Settings, Tally5, Trophy, UserPlus, Users, Wallet, X,
+  CalendarDays, Circle, FileSpreadsheet, Gauge, GraduationCap, History, Info, LayoutDashboard, MapPinned, Megaphone, PanelLeftClose, PanelLeftOpen, Settings, ShieldCheck, Tally5, Trophy, UserPlus, Users, Wallet, X,
   type LucideIcon,
 } from 'lucide-react';
 import clsx from 'clsx';
@@ -11,6 +11,9 @@ import { useAuth } from '@/auth/AuthProvider';
 import { localDayISO, useStoredTallies } from '@/features/gauges/tallyStore';
 import { Logo, LogoMark } from '../brand/Logo';
 import { Tooltip } from '../ui/Tooltip';
+import { ErrorBoundary } from '@/features/common/ErrorBoundary';
+// Release 1.3 slot (P6): unread client posts on the Campaigns item.
+import { CampaignsNavBadge } from '@/features/client/CampaignsNavBadge';
 import type { NavItem } from './nav';
 
 /** lucide icons keyed by the `icon` string in nav.ts. Add here when adding a nav item. */
@@ -18,6 +21,8 @@ export const NAV_ICONS: Record<string, LucideIcon> = {
   LayoutDashboard, CalendarDays, Gauge, Tally5, Trophy, UserPlus, Wallet, Megaphone, Users, Settings, Info,
   // Release 1.2
   GraduationCap, History,
+  // Release 1.3: Venues (P8), Statements (P3), the client portal's Security (P6)
+  MapPinned, FileSpreadsheet, ShieldCheck,
 };
 
 /** Today's running stop count across this person's unfinished tallies on this phone, or null when none is under way. */
@@ -140,7 +145,7 @@ export function Sidebar({ items, collapsed, onToggleCollapsed, drawer, onClose, 
                 const link = (
                   <NavLink
                     to={item.to}
-                    end={item.to === '/'}
+                    end={item.end ?? item.to === '/'}
                     onClick={drawer ? onClose : undefined}
                     className={({ isActive }) =>
                       clsx(
@@ -155,6 +160,11 @@ export function Sidebar({ items, collapsed, onToggleCollapsed, drawer, onClose, 
                         {isActive && !compact && <span className="absolute left-0 top-2 bottom-2 w-[3px] rounded-r-full bg-primary" aria-hidden />}
                         <Icon className={clsx('h-[18px] w-[18px] shrink-0 transition-transform duration-150', !isActive && 'group-hover:scale-105')} strokeWidth={isActive ? 2.25 : 2} aria-hidden />
                         {!compact && <span className="truncate">{item.label}</span>}
+                        {item.to === '/campaigns' && (
+                          <ErrorBoundary name="campaigns-badge" fallback={null}>
+                            <CampaignsNavBadge compact={compact} />
+                          </ErrorBoundary>
+                        )}
                       </>
                     )}
                   </NavLink>

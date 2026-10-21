@@ -16,6 +16,8 @@ import { useCurrentUser } from '@/auth/AuthProvider';
 import { CheckInButton } from '@/features/checkins/CheckInButton';
 import { ErrorBoundary } from '@/features/common/ErrorBoundary';
 import { PitchLink } from '@/features/learning/PitchLink';
+// Release 1.3 slot (P8): the thin "Aim" strip under the header.
+import { EventPlanStrip } from '@/features/venues/EventPlanStrip';
 import { LogGaugesModal } from '@/features/gauges/LogGaugesModal';
 import { TallyEventPicker } from '@/features/gauges/TallyEventPicker';
 import { TallyHelp } from '@/features/gauges/TallyHelp';
@@ -132,6 +134,9 @@ export function QuickGaugesPage() {
           <Button variant="ghost" onClick={() => setChoosing(true)} className="-mr-1 max-sm:hidden short:hidden" data-quick-change="button">Change</Button>
         )}
       </header>
+
+      {/* Release 1.3 slot (P8): nothing until the package lands. */}
+      {selected && <ErrorBoundary name="event-plan" fallback={null}><EventPlanStrip event={selected} variant="quick" /></ErrorBoundary>}
 
       {loading ? (
         <div className={GRID} aria-hidden>

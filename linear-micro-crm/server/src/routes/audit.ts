@@ -273,7 +273,8 @@ export function announcementReadsRouter(db: Db): Router {
       res.json([]);
       return;
     }
-    const active = Number(get<{ n: number }>(db, `SELECT COUNT(*) AS n FROM users WHERE status = 'active'`)!.n);
+    // (release 1.3: client portal accounts are not part of the audience)
+    const active = Number(get<{ n: number }>(db, `SELECT COUNT(*) AS n FROM users WHERE status = 'active' AND role <> 'client'`)!.n);
     const annIds = announcements.map((a) => a.id);
     const reads = all<{ announcementId: number; userId: number; name: string; readAt: string }>(
       db,

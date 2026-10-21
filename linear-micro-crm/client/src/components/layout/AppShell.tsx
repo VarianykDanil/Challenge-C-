@@ -12,6 +12,8 @@ import { OutboxBanner } from '@/features/gauges/OutboxBanner';
 import { getOutbox } from '@/features/gauges/outbox';
 // Release 1.2 slot (U4): replays check-ins queued without signal, whatever page is open.
 import { CheckInOutboxReplay } from '@/features/checkins/CheckInOutboxReplay';
+// Release 1.3 slot (P2): the self-billing agreement, shown once to each field person who has not accepted it.
+import { AgreementPrompt } from '@/features/invoices/AgreementPrompt';
 import { FOCUSABLE } from '../ui/Modal';
 import { NAV_ITEMS } from './nav';
 import { Sidebar, SIDEBAR_COLLAPSED_WIDTH, SIDEBAR_WIDTH } from './Sidebar';
@@ -186,6 +188,9 @@ export function AppShell({ user, onLogout, children, title, fluid }: AppShellPro
           </ErrorBoundary>
           <ErrorBoundary name="checkin-outbox" fallback={null}>
             <CheckInOutboxReplay user={user} />
+          </ErrorBoundary>
+          <ErrorBoundary name="agreement-prompt" fallback={null}>
+            <AgreementPrompt user={user} />
           </ErrorBoundary>
         </div>
         <main

@@ -221,7 +221,8 @@ export function recruitmentRouter(db: Db): Router {
         const base = staffEmailLocalPart(candidate.firstName, candidate.lastName);
         let email = `${base}@linear-mcr.co.uk`;
         for (let i = 2; get(db, `SELECT 1 FROM users WHERE lower(email) = ?`, [email]); i++) email = `${base}${i}@linear-mcr.co.uk`;
-        const count = get<{ n: number }>(db, `SELECT COUNT(*) AS n FROM users`)!.n;
+        // Release 1.3: staff only, so client portal accounts never shift the avatar colours.
+        const count = get<{ n: number }>(db, `SELECT COUNT(*) AS n FROM users WHERE role <> 'client'`)!.n;
         const r = run(
           db,
           `INSERT INTO users (employee_id, email, first_name, last_name, role, position, team_id, pay_plan_id, start_date, status, phone, avatar_color, city)

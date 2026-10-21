@@ -2,6 +2,9 @@ import { useEffect, useRef } from 'react';
 import type { PayrollRunWithUser } from '@lm/shared';
 import { Avatar, Badge, Button, DataTable, Tooltip, type Column } from '@/components/ui';
 import { OnTimeBadge, PayrollStatusBadge, StopRowEvents } from '@/features/common';
+import { ErrorBoundary } from '@/features/common/ErrorBoundary';
+// Release 1.3 slot (P2): the self-billing invoice's status on each run.
+import { InvoiceStatusBadge } from '@/features/invoices/InvoiceStatusBadge';
 import { todayISO } from '@/lib/dates';
 import { formatDate, formatDateTime, formatGBP, formatNumber, formatRangeLabel } from '@/lib/format';
 import { runAdjustedAt, warningFlags } from './PayslipModal';
@@ -116,6 +119,7 @@ export function PayrollRunsTable({ rows, loading, showUser, onRowClick, onMarkPa
         return (
           <span className="flex flex-wrap items-center gap-1.5">
             <PayrollStatusBadge status={r.status} />
+            <ErrorBoundary name="invoice-status" fallback={null}><InvoiceStatusBadge run={r} /></ErrorBoundary>
             {/* Pending runs and failed transfers past their due date are both overdue money. */}
             {owed && r.dueDate < today ? <Badge tone="danger">Overdue</Badge> : <OnTimeBadge value={r.onTime} labels={{ yes: 'On time', no: 'Late', none: r.status === 'pending' ? 'Awaiting' : 'Unpaid' }} />}
             {adjustedAt && <Badge tone="warning" title={`Recalculated ${formatDateTime(adjustedAt)}`}>Adjusted after payment</Badge>}

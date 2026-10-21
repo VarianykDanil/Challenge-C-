@@ -47,6 +47,7 @@ import { addDays, nowHHMM, nowISO, todayISO } from '../lib/dates.ts';
 import { eventForecasts } from '../lib/smart/eventForecast.ts';
 import { countOverdueActions } from './recruitment.ts';
 import { smartEnabled } from '../lib/smart/enabled.ts';
+import { providerAttentionItems, withProviderItems } from '../lib/attention/index.ts';
 import { currentUser } from '../middleware/auth.ts';
 
 const DAY_MS = 86_400_000;
@@ -100,7 +101,8 @@ export function attentionInput(db: Db, me: UserWithTeam, now: AttentionNow): Att
 
   // (4) active members in scope: leader own team, admin everyone, rep / recruiter only themself (no query)
   let members: Member[] = [self];
-  if (me.role === 'admin') members = all<Member>(db, `${MEMBER_SELECT} WHERE status = 'active' ORDER BY id`);
+  // (release 1.3: client portal accounts are not members of anything)
+  if (me.role === 'admin') members = all<Member>(db, `${MEMBER_SELECT} WHERE status = 'active' AND role <> 'client' ORDER BY id`);
   else if (me.role === 'leader' && me.teamId !== null) members = all<Member>(db, `${MEMBER_SELECT} WHERE team_id = ? AND status = 'active' ORDER BY id`, [me.teamId]);
 
   // (5) runs: own unpaid (≤ 52 weeks) or paid in the last 7 days; admin also every pending run in the to-pay window and
@@ -181,7 +183,10 @@ export function attentionInput(db: Db, me: UserWithTeam, now: AttentionNow): Att
 /** The whole feed for `me` (empty and flagged `disabled` with LM_SMART=0). */
 export function buildAttentionFeed(db: Db, me: UserWithTeam, now: AttentionNow = attentionNow()): AttentionFeed {
   if (!smartEnabled()) return { items: [], generatedAt: now.nowISO, disabled: true };
-  return { items: attentionItems(attentionInput(db, me, now), now), generatedAt: now.nowISO };
+  // Release 1.3 (r3-foundation): the packages' providers (invoices P2, statements P3, client posts P6) join the 1.1 items,
+  // sorted and capped by the same rules; with none the feed is exactly the 1.1 feed (lib/attention/index.ts).
+  const core = attentionItems(attentionInput(db, me, now), now);
+  return { items: withProviderItems(core, providerAttentionItems(db, me, now)), generatedAt: now.nowISO };
 }
 
 export function attentionRouter(db: Db): Router {

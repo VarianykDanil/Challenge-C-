@@ -75,7 +75,7 @@ export function searchPeople(db: Db, me: UserWithTeam, tokens: string[], q: stri
        SELECT u.id, u.first_name AS firstName, u.last_name AS lastName, u.position, t.name AS teamName, u.status,
               u.avatar_color AS avatarColor, ${hay} AS hay, lower(u.first_name || ' ' || u.last_name) AS title
        FROM users u LEFT JOIN teams t ON t.id = u.team_id
-       ${admin ? '' : `WHERE u.status <> 'left'`}
+       WHERE u.role <> 'client'${admin ? '' : ` AND u.status <> 'left'`}
      ) WHERE ${words.sql}
      ORDER BY rank, CASE status WHEN 'active' THEN 0 WHEN 'on_leave' THEN 1 ELSE 2 END, lastName, firstName, id
      LIMIT ?`,

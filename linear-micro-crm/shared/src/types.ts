@@ -9,10 +9,31 @@
  *  - IDs are positive integers assigned by the database.
  */
 
+// Release 1.3 (r3-foundation): optional fields on core types reference the package contract files (type-only imports).
+import type { AnnouncementSource } from './types/client.ts';
+import type { InvoiceSummary } from './types/invoices.ts';
+import type { PaidAs } from './types/pay.ts';
+import type { EventBookingSummary } from './types/venues.ts';
+
 // ───────────────────────────── People ─────────────────────────────
 
-/** Permission role used by the API and the UI navigation. */
-export type Role = 'admin' | 'leader' | 'recruiter' | 'rep';
+/**
+ * Permission role used by the API and the UI navigation. Release 1.3 (r3-foundation): `client` is a campaign's client
+ * (the charity or company) signed in to the client portal. A client session may call ONLY /auth/* (me, logout, PIN),
+ * /health and /client/* — the server's client guard (middleware/clientGuard.ts) answers 403 to everything else, and a
+ * client never appears in a staff list (Team, search, payroll, leaderboards, read receipts).
+ */
+export type Role = 'admin' | 'leader' | 'recruiter' | 'rep' | 'client';
+
+/** The four staff roles (everyone who works for Linear MCR), in the order the Team form lists them. */
+export const STAFF_ROLES = ['admin', 'leader', 'recruiter', 'rep'] as const satisfies readonly Role[];
+export type StaffRole = (typeof STAFF_ROLES)[number];
+/** Every role, staff first (release 1.3 adds `client`). */
+export const ROLES: readonly Role[] = [...STAFF_ROLES, 'client'];
+/** True for the four staff roles; false for `client` (and anything else). */
+export function isStaffRole(role: string | null | undefined): role is StaffRole {
+  return (STAFF_ROLES as readonly string[]).includes(role ?? '');
+}
 
 /** Career ladder used by face-to-face sales organisations. */
 export type Position =
@@ -23,7 +44,9 @@ export type Position =
   | 'assistant_owner'
   | 'owner'
   /** Office-based recruiter (no field sales; paid Mon–Fri, bonus on hires). */
-  | 'recruiter';
+  | 'recruiter'
+  /** Release 1.3: a client portal account (role `client`); never in POSITIONS, never paid, never in a staff list. */
+  | 'client';
 
 export const POSITIONS: Position[] = [
   'trainee',
@@ -68,6 +91,11 @@ export interface UserWithTeam extends User {
   pinSetupRequired?: boolean;
   /** Release 1.2 (U1): true while admins must use two-step verification and this admin has not set it up. */
   twoFactorSetupRequired?: boolean;
+  /**
+   * Release 1.3 (r3-foundation, used by P6): the campaign a `client` account belongs to (users.client_campaign_id).
+   * Present on /auth/me for client accounts only; absent for staff.
+   */
+  clientCampaignId?: number | null;
 }
 
 export interface Team {
@@ -143,6 +171,11 @@ export interface SalesEventWithMeta extends SalesEvent {
    * GET /events/:id to completed and live events dated today − 2 … today. Absent otherwise (and with LM_SMART=0).
    */
   roster?: EventRosterCount;
+  /**
+   * Release 1.3 (P8 venue-insights): who is booked on the event (event_roster), attached by P8's routes when the
+   * caller may see it. Absent until P8 lands. Not the p6 `roster` above (that counts who has LOGGED it).
+   */
+  bookings?: EventBookingSummary;
 }
 
 // ───────────────────────────── Gauges ─────────────────────────────
@@ -258,6 +291,19 @@ export interface PayrollRun {
   reference: string;
   /** Set when an admin changed the week's gauges after the run was paid: the payslip shows "adjusted after payment". */
   adjustedAt?: string | null;
+  /**
+   * Release 1.3 (P1 pay-rule; columns laid down by r3-foundation in db/extensions/pay.ts). Present only once P1 has
+   * written them for the run (absent, never null, on runs calculated by the 1.2 plan rules):
+   *  - paidAs: which of base or commission the week paid (decision 2: the higher one, a tie pays commission);
+   *  - salesLogged / salesConfirmed / salesCancelled: subs logged in gauges, confirmed by the clients' statements (or
+   *    equal to logged until a statement confirms the period) and cancelled (logged − confirmed, never negative);
+   *  - adjustmentsTotal: the sum of the adjustment lines (corrections from earlier weeks) included in `gross`.
+   */
+  paidAs?: PaidAs;
+  salesLogged?: number;
+  salesConfirmed?: number;
+  salesCancelled?: number;
+  adjustmentsTotal?: number;
 }
 
 export interface PayrollRunWithUser extends PayrollRun {
@@ -272,6 +318,11 @@ export interface PayrollRunWithUser extends PayrollRun {
    * GET /finance/payroll/:id for admins only and only on pending / failed runs. Absent for every other role.
    */
   flags?: PayrollFlag[];
+  /**
+   * Release 1.3 (P2 invoices): the self-billing invoice for this run, attached by the finance routes through
+   * lib/invoices.ts `withInvoiceSummaries` once P2 lands (absent until an invoice is issued).
+   */
+  invoice?: InvoiceSummary;
 }
 
 export type ExpenseCategory =
@@ -387,6 +438,11 @@ export interface Candidate {
   nextActionAt: string | null;
   /** Set when stage becomes `hired` and a User record is created. */
   hiredUserId: number | null;
+  /**
+   * Release 1.3 (P7 recruitment-plus; column candidates.date_of_birth laid down by r3-foundation): YYYY-MM-DD.
+   * Present only when recorded (absent otherwise). Recruitment roles only, like every candidate field.
+   */
+  dateOfBirth?: string;
 }
 
 export interface CandidateWithMeta extends Candidate {
@@ -445,6 +501,11 @@ export interface Announcement {
   authorName?: string;
   createdAt: string;
   pinned: boolean;
+  /**
+   * Release 1.3 (P6 client-portal): set when a campaign's client posted it from the client portal (the author is a
+   * `client` account), for the "From Breast Cancer Now" badge. Absent for the office's own announcements.
+   */
+  fromClient?: AnnouncementSource;
 }
 
 export interface LeaderboardRow {
@@ -722,7 +783,12 @@ export interface CheckInPerson {
   reasons: CheckInReason[];
 }
 
-export type AttentionKind = 'gauges' | 'pay' | 'payroll' | 'events' | 'recruitment' | 'security';
+/**
+ * Release 1.3 (r3-foundation) adds three kinds, each filled by one package through the server's attention provider
+ * registry (server/src/lib/attention/index.ts): `invoices` (P2: issued, deemed accepted soon, disputed, resolved),
+ * `statements` (P3: a commission statement needs review) and `client` (P6: a new client post).
+ */
+export type AttentionKind = 'gauges' | 'pay' | 'payroll' | 'events' | 'recruitment' | 'security' | 'invoices' | 'statements' | 'client';
 export type AttentionSeverity = 'info' | 'warning' | 'danger';
 
 /** p5 — one item in the role-scoped "Needs attention" feed (no table: derived on every request). */

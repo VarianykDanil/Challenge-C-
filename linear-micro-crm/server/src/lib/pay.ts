@@ -30,7 +30,8 @@ export const RECRUITER_HIRES_SQL = `
 
 /**
  * People who can earn in the Mon–Sun week starting `monday`: started by that Sunday and either still active or with
- * gauges recorded that week (so a leaver's final week is still paid). Optionally limited to one team.
+ * gauges recorded that week (so a leaver's final week is still paid). Optionally limited to one team. Release 1.3:
+ * never a client portal account (role 'client').
  */
 export function payableUsers(db: Db, monday: string, teamId: number | null = null): (PayUser & { employeeId: string })[] {
   const sunday = sundayOf(monday);
@@ -38,7 +39,7 @@ export function payableUsers(db: Db, monday: string, teamId: number | null = nul
     db,
     `SELECT u.id, u.employee_id AS employeeId, u.team_id AS teamId, u.pay_plan_id AS payPlanId, u.role, u.start_date AS startDate
      FROM users u
-     WHERE u.start_date <= ?
+     WHERE u.start_date <= ? AND u.role <> 'client'
        AND (u.status = 'active' OR EXISTS (SELECT 1 FROM gauge_entries g WHERE g.user_id = u.id AND g.date BETWEEN ? AND ?))
        ${teamId ? 'AND u.team_id = ?' : ''}
      ORDER BY u.id`,

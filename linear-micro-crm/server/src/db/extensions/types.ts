@@ -31,6 +31,21 @@
  *    extension seeds; your own `ext:%` keys in `meta` are allowed). Never insert a gauge_entries or payroll_runs row
  *    (a stray gauge row pays a day's base). Read business time from ctx.today / ctx.nowIso, never `new Date()`.
  *  - Never import db/schema.ts or db/seed.ts from an extension (import cycle); the helpers below cover column checks.
+ *
+ * Release 1.3 (r3-foundation) adds seven extensions (pay P1, invoices P2, statements P3, videos P5, client P6,
+ * recruitment P7, venues P8) and two rules:
+ *  - The foundation laid down each 1.3 extension's tables and columns (its `sql` and `upgrade`); they are the contract
+ *    other packages build on. The owner may ADD columns (addColumnIfMissing in `upgrade`, so a database created at the
+ *    foundation commit upgrades too) and tables, but never renames or drops what the foundation created.
+ *  - `seed` may UPDATE the columns ITS OWN extension added to a core table, on core rows (e.g. client.ts filling
+ *    campaigns.long_description, invoices.ts filling users.address_line1 for the demo people). Every other rule above
+ *    stands: no inserts or deletes of core rows, no change to a core column. r2/r3-contracts.test.ts hash the core
+ *    columns only (the columns SCHEMA_SQL and the core column upgrades create), so such a seed passes.
+ *  - The one core-row insert the plan asks for: client.ts (P6) may insert `announcements` rows AUTHORED BY a client
+ *    account (ctx.clients) for its published demo posts; the contract tests leave those rows out of the hash.
+ *  - Core demo rows the plan asks for are written by the CORE seed (db/seed.ts), never by an extension: the demo client
+ *    account (foundation) and the 1.3 pay plans, payroll runs, bonuses and cancellations (P1, who owns db/seed.ts's pay
+ *    sections and seed-data.ts PAY_PLANS in 1.3).
  */
 import type { EventStatus, EventType, Position, Role, UserStatus } from '@lm/shared';
 import type { Db } from '../connection.ts';
@@ -73,13 +88,27 @@ export interface SeedEventRef {
   status: EventStatus;
 }
 
+/** Release 1.3: a client portal account of the demo seed (role 'client'); never in `users`. */
+export interface SeedClientRef {
+  id: number;
+  /** The access code, e.g. "CL-0001". */
+  employeeId: string;
+  firstName: string;
+  lastName: string;
+  email: string;
+  campaignId: number;
+}
+
 /** What `seed` passes to every extension: the rows it just created and the business clock it used. */
 export interface SeedContext {
   /** The business date the demo was built around (YYYY-MM-DD). */
   today: string;
   /** The business clock at seed time (ISO timestamp). */
   nowIso: string;
+  /** The staff (every role but `client`), as before 1.3. */
   users: readonly SeedUserRef[];
+  /** Release 1.3: the demo client accounts (P6 seeds their posts). */
+  clients: readonly SeedClientRef[];
   teams: readonly SeedTeamRef[];
   campaigns: readonly SeedCampaignRef[];
   events: readonly SeedEventRef[];
