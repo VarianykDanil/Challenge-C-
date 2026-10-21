@@ -5,7 +5,8 @@
 // from ANY page: on mount, on the window 'online' event and when api/client.ts announces the server is reachable
 // again (NETWORK_EVENT going from offline to online — not on every answer, so a server error can never loop),
 // single-flight. While something waits it shows one slim line ("1 check-in waiting to send · Send now"); a check-in
-// Linear Hub refused (the event was cancelled, it is over a week old…) stays listed with the reason until dismissed.
+// Linear Hub refused (the event was cancelled, it reached Linear Hub more than 24 hours after the event ended…) stays
+// listed with Linear Hub's reason, word for word, until dismissed.
 // Kept small: it is part of the always-loaded shell (no date library).
 import { useCallback, useEffect } from 'react';
 import { useQueryClient } from '@tanstack/react-query';

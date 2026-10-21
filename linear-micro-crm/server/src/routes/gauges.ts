@@ -8,6 +8,7 @@ import { businessNow, mondayOf, normaliseCheckIn, nowHHMM, nowISO, toBusinessISO
 import { badRequest, conflict, forbidden, notFound } from '../lib/errors.ts';
 import { GAUGE_FROM, summaryRows, type SummaryGroup } from '../lib/metrics.ts';
 import { assertCanWriteGauge, canManageTeam, isAdmin, redactEntry } from '../lib/scope.ts';
+import { assertCheckInNotLocked, stampCheckInAuthor } from '../lib/shiftCheckIns.ts';
 import { gaugeCount, idParam, isoDate, isoTimestamp, limitQuery, offsetQuery, optionalIdQuery, parseRange } from '../lib/validate.ts';
 import { currentUser } from '../middleware/auth.ts';
 
@@ -139,9 +140,9 @@ export function gaugesRouter(db: Db): Router {
     assertGaugeIntegrity(me, target, event, body.date, { checkUser: true });
     assertFunnel(body);
     assertWeekUnpaidFor(db, me, body.userId, body.date); // 409 once the week's run is paid, unless admin
-    const existing = get<{ id: number; checkedInAt: string | null; notes: string | null }>(
+    const existing = get<{ id: number; userId: number; checkedInAt: string | null; checkedInBy: number | null; notes: string | null }>(
       db,
-      `SELECT id, checked_in_at AS checkedInAt, notes FROM gauge_entries WHERE event_id = ? AND user_id = ? AND date = ?`,
+      `SELECT id, user_id AS userId, checked_in_at AS checkedInAt, checked_in_by AS checkedInBy, notes FROM gauge_entries WHERE event_id = ? AND user_id = ? AND date = ?`,
       [body.eventId, body.userId, body.date],
     );
     // An `id` means "I am editing that entry": if the key now points elsewhere (or nowhere) the client must PATCH
@@ -153,6 +154,8 @@ export function gaugesRouter(db: Db): Router {
     if (existing) {
       // omitted key → keep the stored value; explicit null → clear it
       const checkedInAt = body.checkedInAt === undefined ? existing.checkedInAt : checkInFor(body.checkedInAt);
+      // a time a leader or admin recorded for me is theirs to change (review 1.2 S3); counts and notes stay editable
+      assertCheckInNotLocked(db, me, existing, { kind: 'time', checkedInAt });
       const notes = body.notes === undefined ? existing.notes : body.notes;
       transaction(db, () => {
         run(
@@ -160,6 +163,7 @@ export function gaugesRouter(db: Db): Router {
           `UPDATE gauge_entries SET stops = ?, table_count = ?, presentations = ?, closes = ?, taps = ?, sales = ?, checked_in_at = ?, notes = ?, submitted_at = ? WHERE id = ?`,
           [body.stops, body.table, body.presentations, body.closes, body.taps, body.sales, checkedInAt, notes, now, existing.id],
         );
+        stampCheckInAuthor(db, existing.id, existing.checkedInAt, me.id); // who set the check-in time (review 1.2 S3)
         syncPayrollForEntry(db, key, today); // the week's unpaid run follows the gauges, in the same transaction
       });
       return res.status(200).json(getGauge(db, existing.id));
@@ -173,6 +177,7 @@ export function gaugesRouter(db: Db): Router {
          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         [body.eventId, body.userId, body.date, body.stops, body.table, body.presentations, body.closes, body.taps, body.sales, checkedInAt, body.notes ?? null, now, snap.payout, snap.commission],
       );
+      stampCheckInAuthor(db, r.lastInsertRowid, undefined, me.id);
       syncPayrollForEntry(db, key, today);
       return r.lastInsertRowid;
     });
@@ -206,7 +211,13 @@ export function gaugesRouter(db: Db): Router {
     if (next.userId !== existing.userId || mondayOf(next.date) !== mondayOf(existing.date)) assertWeekUnpaidFor(db, me, next.userId, next.date);
     const checkedInAt = patch.checkedInAt === undefined ? existing.checkedInAt : checkInFor(patch.checkedInAt);
     // the rate snapshot stays with the entry unless it is re-pointed at another event or person
-    const stored = get<{ payout: number | null; commission: number | null }>(db, `SELECT payout_per_sale AS payout, commission_per_sale AS commission FROM gauge_entries WHERE id = ?`, [id])!;
+    const stored = get<{ payout: number | null; commission: number | null; checkedInBy: number | null }>(
+      db,
+      `SELECT payout_per_sale AS payout, commission_per_sale AS commission, checked_in_by AS checkedInBy FROM gauge_entries WHERE id = ?`,
+      [id],
+    )!;
+    // a time a leader or admin recorded for me is theirs to change, and it does not travel with a move I make (review 1.2 S3)
+    assertCheckInNotLocked(db, me, { userId: existing.userId, checkedInAt: existing.checkedInAt, checkedInBy: stored.checkedInBy }, moved ? { kind: 'move' } : { kind: 'time', checkedInAt });
     const snap = next.eventId !== existing.eventId || next.userId !== existing.userId || stored.payout === null ? rateSnapshot(db, event, target) : { payout: stored.payout, commission: stored.commission ?? 0 };
     const today = todayISO();
     transaction(db, () => {
@@ -215,6 +226,9 @@ export function gaugesRouter(db: Db): Router {
         `UPDATE gauge_entries SET event_id = ?, user_id = ?, date = ?, stops = ?, table_count = ?, presentations = ?, closes = ?, taps = ?, sales = ?, checked_in_at = ?, notes = ?, submitted_at = ?, payout_per_sale = ?, commission_per_sale = ? WHERE id = ?`,
         [next.eventId, next.userId, next.date, next.stops, next.table, next.presentations, next.closes, next.taps, next.sales, checkedInAt, next.notes ?? null, nowISO(), snap.payout, snap.commission, id],
       );
+      // who set the check-in time (review 1.2 S3): moving the entry to another event or day keeps the time's author;
+      // re-pointing it at another person makes the time the mover's
+      stampCheckInAuthor(db, id, next.userId !== existing.userId ? undefined : existing.checkedInAt, me.id);
       syncPayrollForEntry(db, { userId: existing.userId, eventId: existing.eventId, date: existing.date }, today);
       if (moved) syncPayrollForEntry(db, { userId: next.userId, eventId: next.eventId, date: next.date }, today);
     });
@@ -227,6 +241,11 @@ export function gaugesRouter(db: Db): Router {
     const existing = getGauge(db, id);
     if (!existing) throw notFound('Gauge entry');
     if (!canManageTeam(me, existing.teamId) && !(me.role === 'leader' && existing.userId === me.id)) throw forbidden('Only leaders of the team or admins can delete gauge entries');
+    if (existing.checkInOnBehalf) {
+      // a leader deleting their own day whose arrival time an admin recorded (review 1.2 S3)
+      const by = get<{ by: number | null }>(db, `SELECT checked_in_by AS by FROM gauge_entries WHERE id = ?`, [id])!.by;
+      assertCheckInNotLocked(db, me, { userId: existing.userId, checkedInAt: existing.checkedInAt, checkedInBy: by }, { kind: 'delete' });
+    }
     assertWeekUnpaidFor(db, me, existing.userId, existing.date);
     const today = todayISO();
     transaction(db, () => {

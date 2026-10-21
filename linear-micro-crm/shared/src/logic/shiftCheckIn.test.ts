@@ -1,6 +1,12 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { SHIFT_CHECK_IN_QUEUE_LIMIT, SHIFT_CHECK_IN_UNDO_GRACE_MS, SHIFT_CHECK_IN_UNDO_MS } from '../types/checkins.ts';
+import {
+  SHIFT_CHECK_IN_EARLY_MINUTES,
+  SHIFT_CHECK_IN_QUEUE_LIMIT,
+  SHIFT_CHECK_IN_REPLAY_HOURS,
+  SHIFT_CHECK_IN_UNDO_GRACE_MS,
+  SHIFT_CHECK_IN_UNDO_MS,
+} from '../types/checkins.ts';
 import {
   addToShiftCheckInQueue,
   canUndoShiftCheckIn,
@@ -60,7 +66,7 @@ test('window: open all day until the end time (arriving early counts), then ende
 });
 
 test('time: a live tap records now, only on the event day and until the event ends', () => {
-  const base = { eventDate: DAY, endTime: '17:00', requested: null, now: `${DAY}T09:24:10`, today: DAY };
+  const base = { eventDate: DAY, startTime: '09:00', endTime: '17:00', requested: null, now: `${DAY}T09:24:10`, today: DAY };
   assert.deepEqual(resolveShiftCheckInTime(base), { ok: true, checkedInAt: `${DAY}T09:24:10` });
   assert.deepEqual(resolveShiftCheckInTime({ ...base, now: `${DAY}T17:00:00` }), { ok: true, checkedInAt: `${DAY}T17:00:00` });
   const late = resolveShiftCheckInTime({ ...base, now: `${DAY}T17:00:01` });
@@ -68,25 +74,62 @@ test('time: a live tap records now, only on the event day and until the event en
   assert.match(!late.ok ? late.error : '', /closed at 17:00/);
   const otherDay = resolveShiftCheckInTime({ ...base, today: '2026-10-16', now: '2026-10-16T09:00:00' });
   assert.equal(otherDay.ok, false);
+  // a live tap has no early bound: arriving two hours early with signal records the time it was tapped
+  assert.deepEqual(resolveShiftCheckInTime({ ...base, now: `${DAY}T07:00:00` }), { ok: true, checkedInAt: `${DAY}T07:00:00` });
 });
 
 test('time: a replayed offline tap keeps its time, within the rules', () => {
-  const base = { eventDate: DAY, endTime: '17:00', requested: `${DAY}T08:55:00`, now: `${DAY}T11:00:00`, today: DAY };
+  const base = { eventDate: DAY, startTime: '09:00', endTime: '17:00', requested: `${DAY}T08:55:00`, now: `${DAY}T11:00:00`, today: DAY };
   assert.deepEqual(resolveShiftCheckInTime(base), { ok: true, checkedInAt: `${DAY}T08:55:00` });
-  // sent the next day (no signal all evening): still accepted with the tapped time
+  // sent the next morning (no signal all evening): still accepted with the tapped time
   assert.deepEqual(resolveShiftCheckInTime({ ...base, today: '2026-10-16', now: '2026-10-16T08:00:00' }), { ok: true, checkedInAt: `${DAY}T08:55:00` });
   // a phone clock 3 minutes ahead is "now"; 10 minutes ahead is refused
   assert.deepEqual(resolveShiftCheckInTime({ ...base, requested: `${DAY}T11:03:00` }), { ok: true, checkedInAt: `${DAY}T11:00:00` });
   const future = resolveShiftCheckInTime({ ...base, requested: `${DAY}T11:10:00` });
   assert.equal(future.ok, false);
   assert.match(!future.ok ? future.error : '', /future/);
-  // another day's time, after the end, or more than 7 days old
+  // another day's time, or after the end
   assert.equal(resolveShiftCheckInTime({ ...base, requested: '2026-10-14T08:55:00' }).ok, false);
   assert.equal(resolveShiftCheckInTime({ ...base, requested: `${DAY}T17:30:00`, now: `${DAY}T18:00:00` }).ok, false);
-  assert.equal(resolveShiftCheckInTime({ ...base, today: '2026-10-22', now: '2026-10-22T09:00:00' }).ok, true, '7 days later is still fine');
-  const old = resolveShiftCheckInTime({ ...base, today: '2026-10-23', now: '2026-10-23T09:00:00' });
-  assert.equal(old.ok, false);
-  assert.match(!old.ok ? old.error : '', /7 days/);
+});
+
+test('time: an offline tap is never earlier than 60 minutes before the start (an earlier one is recorded as that)', () => {
+  const base = { eventDate: DAY, startTime: '09:00', endTime: '17:00', requested: `${DAY}T08:00:00`, now: `${DAY}T11:00:00`, today: DAY };
+  assert.equal(SHIFT_CHECK_IN_EARLY_MINUTES, 60);
+  assert.deepEqual(resolveShiftCheckInTime(base), { ok: true, checkedInAt: `${DAY}T08:00:00` }, 'exactly 60 minutes before is kept');
+  assert.deepEqual(resolveShiftCheckInTime({ ...base, requested: `${DAY}T07:59:59` }), { ok: true, checkedInAt: `${DAY}T08:00:00` });
+  // the reviewer's case: a time just after midnight, long before anyone arrived, is not a free "on time" from 00:00
+  assert.deepEqual(resolveShiftCheckInTime({ ...base, requested: `${DAY}T00:00:01` }), { ok: true, checkedInAt: `${DAY}T08:00:00` });
+  // still on time under the grace rule, so arriving early without signal never costs anyone
+  assert.equal(shiftCheckInStatus(DAY, '09:00', `${DAY}T08:00:00`).onTime, true);
+  // sent before that bound has even come round (tapped 07:00, sent 07:30): Linear Hub's own clock is the floor
+  assert.deepEqual(resolveShiftCheckInTime({ ...base, requested: `${DAY}T07:00:00`, now: `${DAY}T07:30:00` }), { ok: true, checkedInAt: `${DAY}T07:30:00` });
+  // an event starting before 01:00: the event's own date is the bound
+  assert.deepEqual(resolveShiftCheckInTime({ ...base, startTime: '00:30', requested: `${DAY}T00:00:01` }), { ok: true, checkedInAt: `${DAY}T00:00:01` });
+  // seconds on the start time are ignored, as everywhere else
+  assert.deepEqual(resolveShiftCheckInTime({ ...base, startTime: '09:00:00', requested: `${DAY}T06:00:00` }), { ok: true, checkedInAt: `${DAY}T08:00:00` });
+});
+
+test('time: an offline tap must reach Linear Hub within 24 hours of the event ending', () => {
+  const base = { eventDate: DAY, startTime: '09:00', endTime: '17:00', requested: `${DAY}T08:55:00`, now: `${DAY}T11:00:00`, today: DAY };
+  assert.equal(SHIFT_CHECK_IN_REPLAY_HOURS, 24);
+  const next = '2026-10-16';
+  assert.deepEqual(resolveShiftCheckInTime({ ...base, today: next, now: `${next}T17:00:00` }), { ok: true, checkedInAt: `${DAY}T08:55:00` }, 'exactly 24 hours after the end');
+  const late = resolveShiftCheckInTime({ ...base, today: next, now: `${next}T17:00:01` });
+  assert.equal(late.ok, false);
+  assert.equal(
+    !late.ok ? late.error : '',
+    'This check-in reached Linear Hub more than 24 hours after the event ended at 17:00, so it cannot be recorded. Ask your team leader to record your arrival time.',
+  );
+  // a week later (the first 1.2 build allowed 7 days) is refused too
+  assert.equal(resolveShiftCheckInTime({ ...base, today: '2026-10-22', now: '2026-10-22T09:00:00' }).ok, false);
+  // the 24 hours are counted on the wall clock: the October clock change (25 Oct 2026) never moves the deadline
+  const sat = '2026-10-24';
+  const overChange = { ...base, eventDate: sat, requested: `${sat}T08:55:00`, today: '2026-10-25' };
+  assert.equal(resolveShiftCheckInTime({ ...overChange, now: '2026-10-25T17:00:00' }).ok, true);
+  assert.equal(resolveShiftCheckInTime({ ...overChange, now: '2026-10-25T17:01:00' }).ok, false);
+  // a live tap is never a replay: the end-time rule already covers it
+  assert.equal(resolveShiftCheckInTime({ ...base, requested: null, today: next, now: `${next}T09:00:00` }).ok, false);
 });
 
 test('naiveDiffMs never shifts by a daylight-saving change', () => {

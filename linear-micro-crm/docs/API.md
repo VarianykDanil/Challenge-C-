@@ -86,6 +86,15 @@ unless the requester is an `admin` or the row is the requester themselves. `GET 
 - Each entry **snapshots the money rates** in force when it is first logged (the campaign's `payoutPerSale`, the person's plan `commissionPerSale`); revenue, commission and margin aggregates read those snapshots, so editing a campaign payout or a pay plan only affects days logged from then on (an entry moved to another event/person takes fresh rates).
 - `PATCH /gauges/:id` partial `GaugeUpsertInput` → `GaugeEntryWithMeta` — **the edit path** for an existing entry (moving it to another event/user is rejected with `400` when that key is taken; `null` clears `checkedInAt`/`notes`; an `id` in the body is ignored). The same integrity rules apply to the resulting entry (the user-status rule only when `userId` changes, so leavers' history stays editable); both the week the entry leaves and the week it lands in must be unpaid (or the caller an admin).
 - `DELETE /gauges/:id` (leader/admin) → `204`; `409` when the week is paid (unless admin).
+- **Arrival time recorded on someone's behalf** (release 1.2, review S3). `GaugeEntry.checkInOnBehalf` (optional,
+  additive) is `true` when a leader or admin recorded the entry's `checkedInAt` for the person: that time then counts
+  for punctuality over the person's own one-tap check-in (see `POST /checkins`). It is `false` otherwise, and wherever
+  `checkedInAt` is withheld from the viewer. The person themself (unless an admin) may still edit the entry's counts
+  and notes, but cannot change or clear that time, move the entry to another event, day or person, or delete it:
+  **`403 { error: 'Your team leader recorded your arrival time on these gauges. Ask them to change it.' }`** ("An
+  admin recorded…" when an admin did; "…Ask them to move the entry." / "…Ask them to delete the entry." for a move or
+  a delete). Sending the same time back, in any spelling, or leaving it out is not a change. `POST /gauges/bulk`
+  reports the same sentence as a row error.
 - `GET /gauges/summary?groupBy=user|team|campaign|day|week&from&to&teamId&campaignId&userId` → `GaugeSummaryRow[]` sorted by sales desc (day/week: chronological). `key` is the id (or date), `label` the display name.
 - `GET /leaderboard?period=week|month|quarter&metric=sales|conversion&teamId` → `LeaderboardRow[]` (up to 200 rows, i.e. everyone ranked) with the response header `X-Total-Count` = number of people ranked (exposed through CORS). **Competition ranking:** everyone with the same value of the chosen metric shares one rank and the next distinct value skips ahead (1, 2, 2, 4); the other metric only decides the order of the rows inside a tie. `movement` compares with the same to-date span of the previous week/month/quarter (see Dashboard `previous`).
 
@@ -855,17 +864,33 @@ Body `ShiftCheckInInput`: `{ eventId, date?, checkedInAt?, source? }`.
   Recruiters get 403.
 - **Live tap** (no `checkedInAt`): the server stamps the business clock (`toBusinessISO(businessNow())`, naive London
   wall-clock time). It only works on the event's date, up to the event's end time.
-- **Offline replay** (`checkedInAt` given; `source` defaults to `'offline'`): the phone sends the time it was tapped.
-  That time must be on the event's date and not after the event's end. It cannot be in the future either, but a phone
-  clock up to 5 minutes ahead is taken as now. The event must be no more than 7 days ago. Zoned input is converted to
-  London wall-clock time, as for gauges.
+- **Offline replay** (`checkedInAt` given): the phone sends the time it was tapped. It is always recorded with
+  `source: 'offline'` (the roll call's "sent later"), whatever `source` the request carries.
+  - The time must be on the event's date and not after the event's end.
+  - It cannot be in the future, but a phone clock up to 5 minutes ahead is taken as now.
+  - It must arrive within **24 hours of the event's end** (it was 7 days in the first 1.2 build). Later, the answer is
+    400 "This check-in reached Linear Hub more than 24 hours after the event ended at 17:00, so it cannot be
+    recorded. Ask your team leader to record your arrival time."
+  - It is never earlier than **60 minutes before the event's start**: an earlier time is recorded as that bound (still
+    on time), or as the business clock now if the request arrives before the bound. The answer's `checkedInAt` is the
+    time recorded.
+  - Zoned input is converted to London wall-clock time, as for gauges.
 - `date` defaults to the date of `checkedInAt`, or else the business date. It must be the event's date.
-- `source` is one of `'button' | 'quick' | 'offline'`. `'leader'` is reserved and refused.
+- `source` is one of `'button' | 'quick' | 'offline'`. `'leader'` is reserved and refused. The recorded source is
+  `'offline'` exactly when the request carries `checkedInAt`; otherwise `'quick'` when sent, else `'button'` (a live
+  tap sent with `'offline'` is recorded as `'button'`). So a time supplied by the phone is never shown to a leader as
+  a live tap (review 1.2 S3).
 - **Idempotent:** the key is `(user, event, date)`. A first check-in answers **201** `ShiftCheckIn`. If one already
   exists, the answer is **200** with that row, whatever time the request carries: the first check-in stands. A phone
   that replays a tap whose answer was lost is simply told "done".
 - **Errors:** 400 for validation and time rules (the messages are worded for people, e.g. "Check-in closed at 17:00,
   when the event ended"). 403 for the wrong team or a recruiter. 404 for an unknown event. 409 for a cancelled event.
+- **Punctuality:** a check-in counts over the gauge entry's own check-in time, unless a leader or admin recorded that
+  time on the person's behalf (`POST /gauges`, `PATCH /gauges/:id` or `POST /gauges/bulk` for someone else): then
+  their time counts. The gauge routes record who set the time in `gauge_entries.checked_in_by`, and gauge entries
+  answer it as `checkInOnBehalf`. A time saved for someone that equals their check-in to the minute (Log gauges fills
+  the field with it, without the seconds) stays theirs, so the precise check-in still counts. Moving an entry to
+  another event or day keeps its time's author.
 
 #### `DELETE /checkins/:id`: undo or remove
 
@@ -889,7 +914,7 @@ Answers `ShiftCheckInList` `{ eventId, checkIns }`, earliest first. 400 without 
 | --- | --- |
 | `id`, `userId`, `userName`, `eventId`, `date` | The row. |
 | `checkedInAt` | Naive London wall-clock time, `YYYY-MM-DDTHH:MM:SS`. Same format as `GaugeEntry.checkedInAt`. |
-| `source` | `'button'` (dashboard or event page), `'quick'` (Quick gauges), `'offline'` (sent later by the phone). |
+| `source` | `'button'` (dashboard or event page), `'quick'` (Quick gauges), `'offline'` (sent later by the phone: always when the phone supplied the time). |
 | `createdAt` | ISO instant the row was written (business clock). |
 | `minutesLate` | Whole minutes after the start, rounded up; 0 when early. |
 | `onTime` | Within the 5-minute grace. |

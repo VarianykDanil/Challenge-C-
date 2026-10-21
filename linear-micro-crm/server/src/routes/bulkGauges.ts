@@ -16,13 +16,14 @@
  */
 import { Router } from 'express';
 import { z } from 'zod';
-import { GAUGE_LABELS, validateGaugeFunnel, type BulkGaugeResult, type BulkRowError, type GaugeEntryWithMeta, type UserWithTeam } from '@lm/shared';
+import { GAUGE_LABELS, validateGaugeFunnel, type BulkGaugeResult, type BulkRowError, type UserWithTeam } from '@lm/shared';
 import { all, run, transaction, type Db } from '../db/connection.ts';
 import { affectedPayUsers, assertWeekUnpaidFor, syncPayrollRun } from '../db/maintenance.ts';
-import { GAUGE_SELECT, USER_SELECT, getEvent } from '../db/queries.ts';
+import { GAUGE_SELECT, USER_SELECT, getEvent, mapGauge, type GaugeRow } from '../db/queries.ts';
 import { mondayOf, nowISO, todayISO } from '../lib/dates.ts';
 import { HttpError, badRequest, notFound } from '../lib/errors.ts';
 import { assertCanWriteGauge, redactEntry } from '../lib/scope.ts';
+import { assertCheckInNotLocked, stampCheckInAuthor } from '../lib/shiftCheckIns.ts';
 import { isoDate } from '../lib/validate.ts';
 import { currentUser, requireRole } from '../middleware/auth.ts';
 import { assertGaugeIntegrity, checkInFor, gaugeBody, rateSnapshot } from './gauges.ts';
@@ -84,6 +85,15 @@ export function bulkGaugesRouter(db: Db): Router {
       (ids.length ? all<UserWithTeam>(db, `${USER_SELECT} WHERE u.id IN (${ids.map(() => '?').join(', ')})`, ids) : []).map((u) => [u.id, u]),
     );
 
+    // Existing entries for the day, one query: a bulk row updates them exactly as POST /gauges does.
+    const existing = new Map(
+      all<{ id: number; userId: number; checkedInAt: string | null; checkedInBy: number | null; notes: string | null }>(
+        db,
+        `SELECT id, user_id AS userId, checked_in_at AS checkedInAt, checked_in_by AS checkedInBy, notes FROM gauge_entries WHERE event_id = ? AND date = ?`,
+        [event.id, body.date],
+      ).map((e) => [e.userId, e]),
+    );
+
     // Every row is checked, so the person sees every problem at once.
     const problems: BulkRowError[] = [];
     const valid: { row: Row; target: UserWithTeam; checkedInAt: string | null | undefined }[] = [];
@@ -113,6 +123,9 @@ export function bulkGaugesRouter(db: Db): Router {
       collect(errors, () => assertWeekUnpaidFor(db, me, target.id, body.date)); // paid week: 409 on a single entry
       let checkedInAt: string | null | undefined;
       if (row.checkedInAt !== undefined) collect(errors, () => (checkedInAt = checkInFor(row.checkedInAt)));
+      // a leader's own row whose arrival time an admin recorded: that time is the admin's to change (review 1.2 S3)
+      const prev = existing.get(target.id);
+      if (prev && checkedInAt !== undefined) collect(errors, () => assertCheckInNotLocked(db, me, prev, { kind: 'time', checkedInAt: checkedInAt ?? null }));
       if (errors.length) problems.push({ index, userId: row.userId, errors });
       else valid.push({ row, target, checkedInAt });
     });
@@ -121,14 +134,6 @@ export function bulkGaugesRouter(db: Db): Router {
       throw badRequest(`${n} row${n === 1 ? '' : 's'} need${n === 1 ? 's' : ''} fixing — nothing was saved`, { rows: problems });
     }
 
-    // Existing entries for the day, one query: a bulk row updates them exactly as POST /gauges does.
-    const existing = new Map(
-      all<{ id: number; userId: number; checkedInAt: string | null; notes: string | null }>(
-        db,
-        `SELECT id, user_id AS userId, checked_in_at AS checkedInAt, notes FROM gauge_entries WHERE event_id = ? AND date = ?`,
-        [event.id, body.date],
-      ).map((e) => [e.userId, e]),
-    );
     const now = nowISO();
     const today = todayISO();
     // The rate snapshot depends on the event's campaign and the person's pay plan only.
@@ -152,6 +157,7 @@ export function bulkGaugesRouter(db: Db): Router {
             `UPDATE gauge_entries SET stops = ?, table_count = ?, presentations = ?, closes = ?, taps = ?, sales = ?, checked_in_at = ?, notes = ?, submitted_at = ? WHERE id = ?`,
             [row.stops, row.table, row.presentations, row.closes, row.taps, row.sales, checkedInAt === undefined ? prev.checkedInAt : checkedInAt, row.notes === undefined ? prev.notes : row.notes, now, prev.id],
           );
+          stampCheckInAuthor(db, prev.id, prev.checkedInAt, me.id); // who set the check-in time (review 1.2 S3)
           out.push(prev.id);
           updated++;
         } else {
@@ -162,6 +168,7 @@ export function bulkGaugesRouter(db: Db): Router {
              VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
             [event.id, target.id, body.date, row.stops, row.table, row.presentations, row.closes, row.taps, row.sales, checkedInAt ?? null, row.notes ?? null, now, snap.payout, snap.commission],
           );
+          stampCheckInAuthor(db, r.lastInsertRowid, undefined, me.id);
           out.push(r.lastInsertRowid);
           created++;
         }
@@ -176,7 +183,8 @@ export function bulkGaugesRouter(db: Db): Router {
     });
 
     const order = new Map(savedIds.map((id, i) => [id, i]));
-    const entries = all<GaugeEntryWithMeta>(db, `${GAUGE_SELECT} WHERE g.id IN (${savedIds.map(() => '?').join(', ')})`, savedIds)
+    const entries = all<GaugeRow>(db, `${GAUGE_SELECT} WHERE g.id IN (${savedIds.map(() => '?').join(', ')})`, savedIds)
+      .map(mapGauge)
       .sort((a, b) => order.get(a.id)! - order.get(b.id)!)
       .map((e) => redactEntry(me, e));
     const result: BulkGaugeResult = { created, updated, entries };

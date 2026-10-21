@@ -20,6 +20,7 @@ import {
 } from '@lm/shared';
 import { all, get, type Db, type Param } from './connection.ts';
 import { nowISO } from '../lib/dates.ts';
+import { CHECK_IN_ON_BEHALF_SQL } from '../lib/shiftCheckIns.ts';
 
 // ── Users ───────────────────────────────────────────────────────────────────
 
@@ -117,7 +118,8 @@ export function getEvent(db: Db, id: number): SalesEventWithMeta | undefined {
 
 export const GAUGE_SELECT = `
   SELECT g.id, g.event_id AS eventId, g.user_id AS userId, g.date, g.stops, g.table_count AS "table", g.presentations,
-         g.closes, g.taps, g.sales, g.checked_in_at AS checkedInAt, g.notes, g.submitted_at AS submittedAt,
+         g.closes, g.taps, g.sales, g.checked_in_at AS checkedInAt, ${CHECK_IN_ON_BEHALF_SQL} AS checkInOnBehalf,
+         g.notes, g.submitted_at AS submittedAt,
          u.first_name || ' ' || u.last_name AS userName, u.position AS userPosition, u.avatar_color AS userAvatarColor,
          u.team_id AS teamId, t.name AS teamName,
          e.name AS eventName, e.start_time AS eventStartTime, e.date AS eventDate, e.campaign_id AS campaignId,
@@ -128,14 +130,22 @@ export const GAUGE_SELECT = `
   JOIN events e ON e.id = g.event_id
   JOIN campaigns c ON c.id = e.campaign_id`;
 
+/** A GAUGE_SELECT row as the API answers it: SQLite's 0/1 for checkInOnBehalf as a boolean (review 1.2 S3). */
+export type GaugeRow = Omit<GaugeEntryWithMeta, 'checkInOnBehalf'> & { checkInOnBehalf: number | boolean | null };
+
+export function mapGauge(row: GaugeRow): GaugeEntryWithMeta {
+  return { ...row, checkInOnBehalf: row.checkInOnBehalf === 1 || row.checkInOnBehalf === true };
+}
+
 export function listGauges(db: Db, where: string, params: Param[], orderBy = 'g.date DESC, g.submitted_at DESC', limit?: number, offset = 0): GaugeEntryWithMeta[] {
   const lim = limit ? ` LIMIT ${Math.max(1, Math.floor(limit))}` : '';
   const off = offset > 0 ? `${lim || ' LIMIT -1'} OFFSET ${Math.floor(offset)}` : lim;
-  return all<GaugeEntryWithMeta>(db, `${GAUGE_SELECT} ${where} ORDER BY ${orderBy}${off}`, params);
+  return all<GaugeRow>(db, `${GAUGE_SELECT} ${where} ORDER BY ${orderBy}${off}`, params).map(mapGauge);
 }
 
 export function getGauge(db: Db, id: number): GaugeEntryWithMeta | undefined {
-  return get<GaugeEntryWithMeta>(db, `${GAUGE_SELECT} WHERE g.id = ?`, [id]);
+  const row = get<GaugeRow>(db, `${GAUGE_SELECT} WHERE g.id = ?`, [id]);
+  return row ? mapGauge(row) : undefined;
 }
 
 // ── Finance ─────────────────────────────────────────────────────────────────

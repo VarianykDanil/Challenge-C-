@@ -163,6 +163,12 @@ export interface GaugeEntry extends GaugeTotals {
   date: string;
   /** ISO timestamp the rep checked in at the event, null if not recorded. */
   checkedInAt: string | null;
+  /**
+   * Release 1.2 (review S3): true when a leader or admin recorded `checkedInAt` on the person's behalf. That time then
+   * counts for punctuality over the person's own one-tap check-in, and the person cannot change it themself. False
+   * or absent otherwise, and whenever `checkedInAt` is withheld from the viewer.
+   */
+  checkInOnBehalf?: boolean;
   notes: string | null;
   submittedAt: string;
 }

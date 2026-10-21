@@ -26,10 +26,16 @@ export const SHIFT_CHECK_IN_UNDO_MS = 2 * 60_000;
 export const SHIFT_CHECK_IN_UNDO_GRACE_MS = 15_000;
 
 /**
- * A check-in kept on the phone may be sent up to this many days after the event (a phone that stayed without signal
- * over a weekend); older ones are refused and the phone shows why.
+ * A check-in kept on the phone must reach Linear Hub within this many hours of the event's end; a later one is refused
+ * and the phone shows why (review 1.2 S3: it was 7 days).
  */
-export const SHIFT_CHECK_IN_REPLAY_DAYS = 7;
+export const SHIFT_CHECK_IN_REPLAY_HOURS = 24;
+
+/**
+ * The earliest time a check-in kept on the phone can carry: this many minutes before the event's start. An earlier
+ * tap is recorded as that time, which is still on time (review 1.2 S3). A live tap has no such bound.
+ */
+export const SHIFT_CHECK_IN_EARLY_MINUTES = 60;
 
 /** A phone clock up to this far ahead of Linear Hub's is treated as "now" rather than refused as a future time. */
 export const SHIFT_CHECK_IN_CLOCK_SKEW_MS = 5 * 60_000;
@@ -71,6 +77,10 @@ export interface ShiftCheckInInput {
    * event's date, and not after the event's end time.
    */
   checkedInAt?: string;
+  /**
+   * 'button' (default) or 'quick' for a live tap. A check-in that carries `checkedInAt` is always recorded as
+   * 'offline' ("sent later"), whatever is sent here (review 1.2 S3).
+   */
   source?: ShiftCheckInSource;
 }
 

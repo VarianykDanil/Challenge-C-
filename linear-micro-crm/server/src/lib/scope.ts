@@ -58,6 +58,8 @@ export function canSeeEntryDetails(me: UserWithTeam, owner: { id: number; teamId
 }
 
 /** Nulls `checkedInAt` and `notes` on an entry unless `me` may see them (`teamId` on the entry is the owner's team). */
-export function redactEntry<T extends { userId: number; teamId: number | null; checkedInAt: string | null; notes: string | null }>(me: UserWithTeam, entry: T): T {
-  return canSeeEntryDetails(me, { id: entry.userId, teamId: entry.teamId }) ? entry : { ...entry, checkedInAt: null, notes: null };
+export function redactEntry<T extends { userId: number; teamId: number | null; checkedInAt: string | null; notes: string | null; checkInOnBehalf?: boolean }>(me: UserWithTeam, entry: T): T {
+  if (canSeeEntryDetails(me, { id: entry.userId, teamId: entry.teamId })) return entry;
+  // who recorded the check-in time goes with the time itself (review 1.2 S3)
+  return { ...entry, checkedInAt: null, notes: null, ...(entry.checkInOnBehalf !== undefined ? { checkInOnBehalf: false } : {}) };
 }

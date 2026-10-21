@@ -7,7 +7,10 @@
  *
  * Who checks in: reps and leaders at their own team's events, admins at any event (the gauge rule); recruiters never.
  * A check-in never creates, edits or reads into a gauge row and never counts as a day worked: pay counts distinct
- * gauge dates only. Punctuality (lib/shiftCheckIns.ts) prefers it over the gauge entry's own time. Not the 1.1
+ * gauge dates only. Punctuality (lib/shiftCheckIns.ts) prefers it over the gauge entry's own time, unless a leader or
+ * admin recorded that time on the person's behalf. A time sent later from a phone is bounded (shared
+ * resolveShiftCheckInTime: from 60 minutes before the start, sent within 24 hours of the end) and is always recorded
+ * with source 'offline', so leaders see it as "sent later". Not the 1.1
  * "Check in with…" list (lib/smart/checkIns.ts). Types: shared/src/types/checkins.ts; rules: shared logic/shiftCheckIn.ts.
  */
 import { Router } from 'express';
@@ -67,9 +70,19 @@ export function checkinsRouter(db: Db): Router {
       return;
     }
 
-    const time = resolveShiftCheckInTime({ eventDate: event.date, endTime: event.endTime, requested, now: toBusinessISO(businessNow()), today: todayISO() });
+    const time = resolveShiftCheckInTime({
+      eventDate: event.date,
+      startTime: event.startTime,
+      endTime: event.endTime,
+      requested,
+      now: toBusinessISO(businessNow()),
+      today: todayISO(),
+    });
     if (!time.ok) throw badRequest(time.error);
-    const source = body.source ?? (requested ? 'offline' : 'button');
+    // 'offline' ("sent later" on the roll call) exactly when the phone supplied the time, whatever the request says:
+    // a time from the phone is never shown to a leader as a live tap (review 1.2 S3). Without one it is Linear Hub's
+    // own time, so a live tap from Quick gauges or anywhere else.
+    const source = requested !== null ? 'offline' : body.source === 'quick' ? 'quick' : 'button';
     const r = run(
       db,
       `INSERT INTO check_ins (user_id, event_id, date, checked_in_at, source, created_at) VALUES (?, ?, ?, ?, ?, ?)

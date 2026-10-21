@@ -9,13 +9,17 @@
  *    punctuality compares like with like against the event's start time.
  *  - `created_at` is the ISO instant the row was written (business clock); the 2-minute self-undo counts from it.
  *  - The unique key makes POST /checkins idempotent: a phone replaying a tap, or a second tap, never adds a row.
- *  - Nothing to upgrade: the table is new in 1.2 (an existing database gets it from `sql` on its next start).
+ *  - The table is new in 1.2 (an existing database gets it from `sql` on its next start).
+ *  - `upgrade` adds `gauge_entries.checked_in_by` (review 1.2 S3): who set the gauge entry's check-in time, written
+ *    by the gauge routes (lib/shiftCheckIns.ts stampCheckInAuthor). When it is someone other than the entry's person
+ *    (a leader or admin logging on their behalf), that time wins over the person's own check-in for punctuality.
+ *    Nullable, no data step: rows written before it, and seeded rows, read as "not known", so the check-in wins.
  *  - `seed` (fresh demo only): today's started events get the check-ins a real morning would have: everyone who
  *    logged today and recorded a check-in time taps in at that very time, so punctuality reads exactly as before.
  *    It reads gauge_entries and writes check_ins only.
  */
 import type { Db } from '../connection.ts';
-import type { DbExtension, SeedContext } from './types.ts';
+import { addColumnIfMissing, type DbExtension, type SeedContext } from './types.ts';
 
 const SQL = `
 CREATE TABLE IF NOT EXISTS check_ins (
@@ -74,6 +78,6 @@ function seedCheckIns(db: Db, ctx: SeedContext): void {
 export const extension: DbExtension = {
   name: 'checkins',
   sql: SQL,
-  upgrade: () => [],
+  upgrade: (db) => [addColumnIfMissing(db, 'gauge_entries', 'checked_in_by', 'INTEGER')].filter((c): c is string => c !== null),
   seed: seedCheckIns,
 };

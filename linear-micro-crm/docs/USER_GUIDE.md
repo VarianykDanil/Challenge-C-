@@ -213,9 +213,15 @@ change goes through and the payslip is marked "adjusted after payment".
   with **Undo** while it is still allowed.
 - **No signal?** Tap **Check in** anyway. The phone keeps the time you tapped and shows "saved on this phone". A line
   under the top bar says "1 check-in waiting to send". It sends by itself when the signal is back, or tap **Send now**.
-  If Linear Hub refuses it (say the event was cancelled), the line explains why. Tap **×** to dismiss it.
+  - It must reach Linear Hub within 24 hours of the event ending. After that it is refused, and the line says so: ask
+    your team leader to record your arrival time instead.
+  - A tap more than an hour before the start is recorded as one hour before the start. That is still on time.
+  - If Linear Hub refuses it (say the event was cancelled), the line explains why. Tap **×** to dismiss it.
 - On an event's page you see **Your check-in**: the button today, or "You checked in 09:24 · on time" afterwards.
 - When you **Log gauges**, **Checked in at** is already filled with your check-in time. You can still change it.
+- If your team leader records your arrival time when they log your gauges, their time counts for punctuality instead
+  of your check-in. You can still change your counts and notes, but not that time: **Checked in at** is greyed out
+  and says "recorded for you by a leader or admin". Ask them if it needs changing.
 - The **Check in** button only appears on the day of the event, until the event ends.
 
 **Team leaders and admins**
@@ -223,12 +229,18 @@ change goes through and the payslip is marked "adjusted after payment".
 - Each event's page has a **Roll call**: who has checked in and when, earliest first, with "on time" or "11 min late".
   Today's events also list who has **not checked in yet**. The heading counts them, e.g. "6 / 8 checked in · 1 late".
 - A phone icon with "sent later" marks a check-in that was tapped without signal and sent afterwards, with the time it
-  was tapped.
+  was tapped. Every check-in whose time came from the phone carries it, so such a time never looks like a live tap.
 - **Remove (×)** takes a check-in away at any time. For example, someone checked in from the wrong place. Punctuality
   for that day then goes back to the time on their gauges, if any. Gauges and pay are not affected.
+- **Recording someone's arrival time yourself.** When you log a person's gauges (one at a time or with bulk entry)
+  with a **Checked in at** time, your time counts for their punctuality, even if their phone sends an earlier
+  check-in later, and they cannot change it themselves. Leave the field empty, or keep the check-in time the form
+  fills in, and their own check-in counts, to the second. Editing their counts without changing the time keeps
+  whichever time counted before. The field's hint says which time will count, for example "the time you save here
+  counts instead" or "punctuality uses it unless you change the time here".
 - Your own **Check in** button is in the roll call's header until you have checked in.
 - Punctuality on dashboards, profiles, the week in review and the **Check in with…** list now uses check-in times
-  where there are any.
+  where there are any, except where a leader or admin recorded the time on someone's gauges.
 
 **Recruiters** see no check-in buttons or roll calls.
 

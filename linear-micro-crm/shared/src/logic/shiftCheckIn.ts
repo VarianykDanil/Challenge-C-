@@ -9,8 +9,9 @@
  */
 import {
   SHIFT_CHECK_IN_CLOCK_SKEW_MS,
+  SHIFT_CHECK_IN_EARLY_MINUTES,
   SHIFT_CHECK_IN_QUEUE_LIMIT,
-  SHIFT_CHECK_IN_REPLAY_DAYS,
+  SHIFT_CHECK_IN_REPLAY_HOURS,
   SHIFT_CHECK_IN_UNDO_MS,
 } from '../types/checkins.ts';
 import { isCheckInOnTime, minutesLate } from './punctuality.ts';
@@ -74,15 +75,23 @@ export function naiveDiffMs(a: string, b: string): number {
   return pb - pa;
 }
 
-/** The calendar date `days` before `date` (YYYY-MM-DD, UTC arithmetic). */
-function minusDays(date: string, days: number): string {
-  const d = new Date(`${date}T00:00:00Z`);
-  d.setUTCDate(d.getUTCDate() - days);
-  return d.toISOString().slice(0, 10);
+/**
+ * The earliest naive time a check-in sent later from a phone can carry at an event starting `startTime` on
+ * `eventDate`: SHIFT_CHECK_IN_EARLY_MINUTES before the start, never before the event's own date (an event starting
+ * before 01:00). Null when the start time does not read.
+ */
+function earliestOfflineTime(eventDate: string, startTime: string): string | null {
+  const m = /^(\d{2}):(\d{2})/.exec(startTime);
+  if (!m) return null;
+  const minutes = Math.max(0, Number(m[1]) * 60 + Number(m[2]) - SHIFT_CHECK_IN_EARLY_MINUTES);
+  const two = (n: number) => String(n).padStart(2, '0');
+  return `${eventDate}T${two(Math.floor(minutes / 60))}:${two(minutes % 60)}:00`;
 }
 
 export interface ShiftCheckInTimeInput {
   eventDate: string;
+  /** "HH:MM" (seconds ignored): bounds how early a check-in sent later from a phone can be. */
+  startTime: string;
   /** "HH:MM" */
   endTime: string;
   /** The time the check-in carries (naive, already normalised), or null for "now". */
@@ -97,9 +106,13 @@ export type ShiftCheckInTimeResult = { ok: true; checkedInAt: string } | { ok: f
 
 /**
  * Which time a new check-in records, or why it is refused (400). `requested` null means a live tap: the time is
- * `now`, so the event must be today and not over. A replayed offline tap keeps its own time, which must be on the
- * event's date, not after the event's end, not in the future (a phone clock up to SHIFT_CHECK_IN_CLOCK_SKEW_MS ahead
- * is taken as now), and from the last SHIFT_CHECK_IN_REPLAY_DAYS days.
+ * `now`, so the event must be today and not over (no early bound: arriving early is the point). A replayed offline
+ * tap keeps its own time, within these bounds (review 1.2 S3):
+ *  - it must be on the event's date and not after the event's end;
+ *  - it cannot be in the future (a phone clock up to SHIFT_CHECK_IN_CLOCK_SKEW_MS ahead is taken as now);
+ *  - it must reach Linear Hub within SHIFT_CHECK_IN_REPLAY_HOURS of the event's end, counted on the wall clock;
+ *  - it is never earlier than SHIFT_CHECK_IN_EARLY_MINUTES before the start: an earlier time is recorded as that
+ *    (still on time), or as `now` when the replay arrives before that bound has come round.
  */
 export function resolveShiftCheckInTime(i: ShiftCheckInTimeInput): ShiftCheckInTimeResult {
   const end = `${i.eventDate}T${i.endTime.slice(0, 5)}:00`;
@@ -111,14 +124,22 @@ export function resolveShiftCheckInTime(i: ShiftCheckInTimeInput): ShiftCheckInT
   }
   let at = i.requested;
   if (at.slice(0, 10) !== i.eventDate) return { ok: false, error: "A check-in is recorded on the event's day" };
+  if (naiveDiffMs(end, i.now) > SHIFT_CHECK_IN_REPLAY_HOURS * 3_600_000) {
+    return {
+      ok: false,
+      error: `This check-in reached Linear Hub more than ${SHIFT_CHECK_IN_REPLAY_HOURS} hours after the event ended at ${endLabel}, so it cannot be recorded. Ask your team leader to record your arrival time.`,
+    };
+  }
   if (at > i.now) {
     const ahead = naiveDiffMs(i.now, at);
     if (!(ahead <= SHIFT_CHECK_IN_CLOCK_SKEW_MS)) return { ok: false, error: 'Check-in time cannot be in the future' };
     at = i.now; // a phone clock slightly ahead: it happened now
   }
   if (at > end) return { ok: false, error: `Check-in closed at ${endLabel}, when the event ended` };
-  if (i.eventDate < minusDays(i.today, SHIFT_CHECK_IN_REPLAY_DAYS)) {
-    return { ok: false, error: `Check-ins saved on a phone can be sent for up to ${SHIFT_CHECK_IN_REPLAY_DAYS} days` };
+  const earliest = earliestOfflineTime(i.eventDate, i.startTime);
+  if (earliest !== null) {
+    const floor = earliest < i.now ? earliest : i.now;
+    if (at < floor) at = floor;
   }
   return { ok: true, checkedInAt: at };
 }

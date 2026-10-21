@@ -312,8 +312,17 @@ function LogGaugesForm({ onClose, event, defaultUserId, entry, onSaved, prefill,
     autoCheckIn.current = { key: checkInKey, value: shiftCheckInValue };
   }, [checkInKey, shiftCheckInValue, checkIn, lookupPending, existing]);
 
+  // Review 1.2 S3: a check-in time a leader or admin recorded on the person's behalf counts over their own one-tap
+  // check-in, and the person cannot change it themself (the server answers 403): the field is disabled for them and
+  // the stored time is what an update keeps. Admins are never locked out.
+  const storedEntry = entry ?? (existing && existing.id === prefilledId ? existing : null);
+  const storedOnBehalf = prefilledId != null && !!storedEntry?.checkInOnBehalf;
+  const forSomeoneElse = userId != null && userId !== me.id;
+  const checkInLocked = storedOnBehalf && !forSomeoneElse && me.role !== 'admin';
+  const checkInValue = checkInLocked ? baseline.checkIn : checkIn;
+
   // Smart default 2: "Checking in? Use now" around the start of today's event; it never fills itself.
-  const showCheckInChip = smart && !!selectedEvent && selectedEvent.date === today && prefilledId == null && !checkIn && !shiftCheckIn && inCheckInWindow(selectedEvent.startTime, nowHHMM);
+  const showCheckInChip = !checkInLocked && smart && !!selectedEvent && selectedEvent.date === today && prefilledId == null && !checkIn && !shiftCheckIn && inCheckInWindow(selectedEvent.startTime, nowHHMM);
 
   const repName = () => {
     if (entry) return entry.userName;
@@ -333,7 +342,7 @@ function LogGaugesForm({ onClose, event, defaultUserId, entry, onSaved, prefill,
       fields.notes = notes.trim() || null;
     } else {
       // An update only sends what changed: omitted keys keep the stored values, an explicit null clears them.
-      if (checkIn !== baseline.checkIn) fields.checkedInAt = checkIn || null;
+      if (checkInValue !== baseline.checkIn) fields.checkedInAt = checkInValue || null;
       if (notes.trim() !== baseline.notes.trim()) fields.notes = notes.trim() || null;
     }
     const keep = (): boolean => {
@@ -401,9 +410,26 @@ function LogGaugesForm({ onClose, event, defaultUserId, entry, onSaved, prefill,
           ? "No signal — Linear Hub checks this day for an earlier entry before it's sent."
           : 'Gauges are logged against the event date.';
   const eventStartHint = selectedEvent ? `Event starts ${selectedEvent.startTime} · 5 min grace` : 'Optional';
+  // Which time punctuality will use once this is saved (review 1.2 S3, server lib/shiftCheckIns.ts): the person's
+  // one-tap check-in, unless a leader or admin records another time for them. A time equal to the check-in to the
+  // minute (what this form fills in) is the check-in's; an update that leaves the time alone keeps whose it was.
+  const checkInSent = prefilledId == null || checkInValue !== baseline.checkIn;
+  const checkInCounts = !shiftCheckIn
+    ? null
+    : checkInLocked
+      ? 'recorded for you by a leader or admin, so this time counts — ask them if it needs changing'
+      : !forSomeoneElse || !checkInValue || checkInValue === shiftCheckInValue
+        ? 'punctuality uses it'
+        : checkInSent
+          ? 'the time you save here counts instead'
+          : storedOnBehalf
+            ? 'the time recorded here counts instead'
+            : 'punctuality uses it unless you change the time here';
   const checkInHint = shiftCheckIn
-    ? `${shiftCheckIn.label.replace('Checked in', 'One-tap check-in')}${shiftCheckIn.where === 'phone' ? ' (saved on this phone)' : ''} — punctuality uses it · ${eventStartHint}`
-    : eventStartHint;
+    ? `${shiftCheckIn.label.replace('Checked in', 'One-tap check-in')}${shiftCheckIn.where === 'phone' ? ' (saved on this phone)' : ''} — ${checkInCounts} · ${eventStartHint}`
+    : checkInLocked
+      ? `Recorded for you by a leader or admin — ask them if it needs changing · ${eventStartHint}`
+      : eventStartHint;
   const submitLabel = keepOnPhone ? 'Save on this phone' : prefilledId ? 'Update gauges' : lookupPending || autoRepPending ? 'Checking for an existing entry…' : 'Save gauges';
   const eventPlaceholder = loggable.isLoading ? 'Loading events…' : events.length ? 'Choose an event' : loggable.offline ? 'No signal — no events loaded yet' : 'No events in the last three weeks';
   const eventHint = autoEventId != null && eventId === autoEventId ? "Today's event selected" : loggable.fromCache && !event && !entry ? 'No signal — showing events already loaded on this phone' : undefined;
@@ -498,8 +524,8 @@ function LogGaugesForm({ onClose, event, defaultUserId, entry, onSaved, prefill,
       <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
         <Field as="div" label="Checked in at" className="min-w-0" hint={checkInHint}>
           <div className="flex gap-2">
-            <Input id={`${uid}-checkin`} aria-label="Checked in at" type="datetime-local" value={checkIn} onChange={(e) => { userTyped.current = true; checkInTouched.current = true; setCheckIn(e.target.value); }} className="min-w-0" />
-            <Button type="button" variant="outline" aria-label="Set check-in time to now" onClick={() => { userTyped.current = true; checkInTouched.current = true; setCheckIn(nowLocalInput()); }}>Now</Button>
+            <Input id={`${uid}-checkin`} aria-label="Checked in at" type="datetime-local" value={checkInValue} disabled={checkInLocked} data-checkin-locked={checkInLocked || undefined} onChange={(e) => { if (checkInLocked) return; userTyped.current = true; checkInTouched.current = true; setCheckIn(e.target.value); }} className="min-w-0" />
+            <Button type="button" variant="outline" aria-label="Set check-in time to now" disabled={checkInLocked} onClick={() => { userTyped.current = true; checkInTouched.current = true; setCheckIn(nowLocalInput()); }}>Now</Button>
           </div>
           {showCheckInChip && (
             <button

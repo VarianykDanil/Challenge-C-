@@ -130,7 +130,10 @@ function TeamRollCall({ event, me, today, nowHHMM, checkIns, loading, ownChecked
             </span>
           </h2>
           <p className="mt-0.5 text-xs text-muted">
-            {isToday ? 'One-tap check-ins as people arrive. Punctuality uses these times; gauges are logged separately.' : 'One-tap check-ins at this event. Punctuality uses these times.'}
+            {/* review 1.2 S3: a time a leader or admin records on someone's gauges counts over their check-in */}
+            {isToday
+              ? 'One-tap check-ins as people arrive. Punctuality uses these times unless you record someone’s arrival time on their gauges. Gauges are logged separately.'
+              : 'One-tap check-ins at this event. Punctuality uses these times, except where a leader recorded someone’s arrival time on their gauges.'}
           </p>
         </div>
         {showOwnButton && <CheckInButton event={event} variant="row" />}
@@ -152,7 +155,7 @@ function TeamRollCall({ event, me, today, nowHHMM, checkIns, loading, ownChecked
                     <span className="font-semibold tabular-nums text-fg">{shiftCheckInClock(c.checkedInAt)}</span>
                     {status && <Badge tone={c.onTime ? 'success' : 'warning'} size="sm">{status}</Badge>}
                     {c.source === 'offline' && (
-                      <span className="inline-flex min-w-0 items-center gap-1" title="Tapped without signal; the phone sent it later with the time it was tapped">
+                      <span className="inline-flex min-w-0 items-center gap-1" title="Tapped without signal; the phone sent it later with the time it was tapped (never earlier than an hour before the start)">
                         <Smartphone className="h-3 w-3 shrink-0" aria-hidden />
                         <span className="truncate">sent later</span>
                       </span>

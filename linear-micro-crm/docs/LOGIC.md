@@ -1893,7 +1893,10 @@ query for the teams of the people in its snapshots.
 CHECK IN ('button','quick','offline','leader'), created_at, UNIQUE(user_id, event_id, date))`, plus
 `idx_check_ins_event(event_id, date)`.
 
-- The table is new, so `upgrade()` has nothing to do. An existing database gets the table from `sql` on its next start.
+- The table is new. An existing database gets it from `sql` on its next start.
+- `upgrade()` adds one nullable column, `gauge_entries.checked_in_by`: who set the gauge entry's check-in time. There
+  is no data step. Rows written before it, and seeded rows, are "not known", which the punctuality rule below treats
+  like the person's own time.
 - Demo seed: on a fresh demo only, today's started (live or completed) events get a check-in for everyone who logged
   gauges today with a check-in time, at exactly that time. Sources are 30% `quick`, the rest `button`. Absentees show
   as "not checked in" on the roll call. The seed reads `gauge_entries` but never writes a core table, so the
@@ -1916,22 +1919,69 @@ CHECK IN ('button','quick','offline','leader'), created_at, UNIQUE(user_id, even
 
 #### Time rules (`resolveShiftCheckInTime`)
 
-See the API section above. The future check uses `SHIFT_CHECK_IN_CLOCK_SKEW_MS` (5 minutes) and the age check uses
-`SHIFT_CHECK_IN_REPLAY_DAYS` (7). Naive times compare as strings. Differences between them are taken as if both were
-UTC, so a daylight-saving change never shifts them.
+- **Live tap** (no time sent): the business clock now. Only on the event's date, up to its end time. There is no early
+  bound: arriving early is the point.
+- **Sent later from a phone** (a time sent), checked in this order:
+  1. The time must be on the event's date.
+  2. It must reach Linear Hub within `SHIFT_CHECK_IN_REPLAY_HOURS` (24) hours of the event's end. An event ending
+     17:00 on Tuesday accepts it until 17:00 on Wednesday. Later, the answer is 400 "This check-in reached Linear Hub
+     more than 24 hours after the event ended at 17:00, so it cannot be recorded. Ask your team leader to record your
+     arrival time." (It was 7 days in the first 1.2 build.)
+  3. It cannot be in the future. A phone clock up to `SHIFT_CHECK_IN_CLOCK_SKEW_MS` (5 minutes) ahead is taken as now.
+  4. It cannot be after the event's end.
+  5. It is never earlier than `SHIFT_CHECK_IN_EARLY_MINUTES` (60) minutes before the start. An earlier time is
+     recorded as that bound: a 09:00 start records a 07:10 tap (or a made-up 00:00:01) as 08:00, which is still on
+     time. If the phone sends it before the bound has come round (tapped 07:00, sent 07:30), the business clock now is
+     recorded. An event starting before 01:00 is bounded by its own date. Recording the bound instead of refusing
+     means that arriving early without signal never costs anyone their check-in.
+- Naive times compare as strings. Differences between them, the 24 hours included, are taken as if both were UTC, so
+  a daylight-saving change never shifts them.
 
 #### Punctuality (`lib/metrics.ts` `punctualityFor`, `lib/smart/digest.ts`, `lib/smart/checkIns.ts`)
 
-- **Which time counts:** a logged day's check-in time is the one-tap check-in for the same person, event and date when
-  there is one. Otherwise it is the gauge entry's own `checked_in_at`, as in 1.1. The SQL is
-  `LEFT JOIN check_ins ci ON (user, event, date)` with `COALESCE(ci.checked_in_at, g.checked_in_at)`
-  (`lib/shiftCheckIns.ts`: `SHIFT_CHECK_IN_JOIN`, `CHECKED_IN_AT_SQL`). The unique key makes it one index lookup per
-  gauge row, and there are no extra queries.
+- **Which time counts**, for a logged day:
+  1. The gauge entry's own `checked_in_at`, when a leader or admin recorded it on the person's behalf
+     (`checked_in_by` is someone other than the entry's person; only leaders and admins may write another person's
+     gauges).
+  2. Otherwise the one-tap check-in for the same person, event and date, when there is one.
+  3. Otherwise the gauge entry's own `checked_in_at`, as in 1.1.
+- **The SQL:** `LEFT JOIN check_ins ci ON (user, event, date)` with
+  `CASE WHEN g.checked_in_at IS NOT NULL AND g.checked_in_by IS NOT NULL AND g.checked_in_by <> g.user_id THEN
+  g.checked_in_at ELSE COALESCE(ci.checked_in_at, g.checked_in_at) END` (`lib/shiftCheckIns.ts`:
+  `SHIFT_CHECK_IN_JOIN`, `CHECKED_IN_AT_SQL`). The unique key makes it one index lookup per gauge row, and there are
+  no extra queries.
+- **Who set the time** (`stampCheckInAuthor`, called in the same transaction by `POST /gauges`, `PATCH /gauges/:id`
+  and `POST /gauges/bulk`):
+  1. No time: no author.
+  2. A write that keeps the time (leaves it out, the form sends it back unchanged, or the entry moves to another
+     event or day without its time changing): its author stays. A rep who edits their counts never takes over a time
+     their leader recorded, a leader who edits or moves a rep's entry never takes over the rep's own time, and a
+     time the leader recorded stays the leader's when they move the entry.
+  3. A new or changed time that equals the person's own one-tap check-in for that event and day, to the minute: the
+     person's. Log gauges fills the field with the check-in without its seconds, so a leader saving that is not
+     recording a different time. The precise check-in keeps counting: a 09:05:40 tap stays 6 minutes late.
+  4. Any other new or changed time, or an entry re-pointed at another person: the person saving it.
+- **The person cannot undo a time recorded for them** (`assertCheckInNotLocked`, review 1.2 S3). On their own entry,
+  when someone else recorded the time, the person (any role but admin) gets 403 for changing or clearing the time,
+  moving the entry to another event, day or person, or deleting it (leaders may delete their own days): "Your team
+  leader recorded your arrival time on these gauges. Ask them to change it." ("An admin…" when an admin did; "…Ask
+  them to move the entry." / "…Ask them to delete the entry."). Counts and notes stay editable, and sending the same
+  time back is not a change. Without this, a rep could retype the time by a minute, become its author and let their
+  own check-in count again. `POST /gauges/bulk` reports it as a row error, so a leader's own row cannot undo an
+  admin's time either. Gauge entries answer `checkInOnBehalf` (`CHECK_IN_ON_BEHALF_SQL`), stripped with
+  `checkedInAt` by `redactEntry`.
 - **What counts as a sample:** still the gauge rows. A check-in on its own (no gauges logged yet) is not a punctuality
   sample. It counts once the day is logged.
 - **Removing a check-in:** punctuality falls back to the gauge entry's own time.
-- **When the two disagree:** for example, the gauge says 08:55 and the tap says 09:20. The tap counts. A leader who
-  wants the gauge time to count removes the check-in from the roll call.
+- **When the two disagree:**
+  - The leader logged the rep's day with 10:30 and the rep's phone later sent a check-in at 08:55: the leader's 10:30
+    counts. The roll call still shows the check-in, marked "sent later".
+  - The rep logged their own day with 08:55 and tapped at 09:20: the tap counts. A leader who wants a different time
+    to count records it on the rep's gauge entry, or removes the check-in from the roll call.
+- **A rep's own gauge time** is still theirs to change, as in 1.1. A time their leader recorded is not (see above).
+- **Source:** a check-in that carries a time from the phone is always recorded as `'offline'`, whatever the request
+  says, so leaders see "sent later" on every time the phone supplied (an online phone cannot pass a back-dated time
+  off as a live tap). Without a time it is `'quick'` when sent, else `'button'`.
 
 #### Pay integrity
 
@@ -1939,6 +1989,8 @@ UTC, so a daylight-saving change never shifts them.
 - Pay counts distinct gauge dates (`weekPayFor`), so a check-in is never a day worked.
 - Tested in `server/src/test/shift-checkins.test.ts`: there is no gauge row, no payroll run, `weekPayFor` is unchanged,
   and the dashboard shows `days` 0 after check-ins.
+- The time rules and which time counts are tested in `shared/src/logic/shiftCheckIn.test.ts` and
+  `server/src/test/checkins-precedence.test.ts` (the review's probe: a leader's 10:30 against the rep's 08:55 tap).
 
 #### Offline (`client/src/features/checkins/outbox.ts`)
 
@@ -1967,7 +2019,15 @@ UTC, so a daylight-saving change never shifts them.
 - **What it never replaces:** a time that was typed, set with **Now** or the chip, or already stored on the entry.
 - **Changing the selection:** picking another person or event removes the time the form filled in, or swaps it for
   the new choice's check-in.
-- **Hint:** the field's hint names the check-in, e.g. "One-tap check-in 09:17 · on time — punctuality uses it".
+- **Hint:** the field's hint names the check-in and says which time will count once saved, e.g. "One-tap check-in
+  09:17 · on time — punctuality uses it". Logging for someone else (a leader or admin):
+  - the field is empty, or holds the check-in's own minute (as filled in): "— punctuality uses it";
+  - a new entry, or a time changed from the stored one: "— the time you save here counts instead";
+  - an update that leaves a stored time alone: "— the time recorded here counts instead" when a leader or admin
+    recorded it (`checkInOnBehalf`), else "— punctuality uses it unless you change the time here".
+- **Locked time:** on the person's own entry whose time a leader or admin recorded, the field and **Now** are
+  disabled, the update never sends the time, and the hint says "recorded for you by a leader or admin, so this time
+  counts — ask them if it needs changing" (admins are never locked).
 - **Chip:** the "Checking in? Use now" chip is hidden when there is a check-in.
 
 ### 15.7 Search palette, payroll export and the Gauges layout fix (U5)
