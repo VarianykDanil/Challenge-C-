@@ -246,6 +246,11 @@ export interface ConfirmedSalesRow {
   confirmed: number;
   /** P3: the statement row(s) it came from. */
   statementRowIds?: number[];
+  /**
+   * P3 (re-review fix): the person was on the statement this one replaces but is not on this one, so `confirmed` is
+   * their week as logged; the sentence says "Not on BCN's corrected statement: back to the 22 subs logged".
+   */
+  notOnStatement?: boolean;
 }
 
 export interface ApplyConfirmedSalesOptions {
@@ -253,6 +258,12 @@ export interface ApplyConfirmedSalesOptions {
   actorId: number | null;
   /** true: compute the effect only (the statement page's preview); nothing is written. */
   dryRun?: boolean;
+  /**
+   * The applied statement this one replaces (P3, same campaign and period). Its correction lines still on an unpaid
+   * week are handed to `statementId` first, inside the same savepoint, so each is updated in place rather than a
+   * second line added (re-review fix: P1 re-keys its own lines; P3 never writes pay_adjustments).
+   */
+  replacesStatementId?: number | null;
 }
 
 /** What applying a statement does to one person's week. */

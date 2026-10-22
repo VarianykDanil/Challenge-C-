@@ -36,10 +36,16 @@ const invalidateRoster = (qc: ReturnType<typeof useQueryClient>, eventId: number
   void qc.invalidateQueries({ queryKey: ['events'] });
 };
 
-/** PUT /events/:id/roster — the leader books their team members. */
+/**
+ * PUT /events/:id/roster — the leader books their team members. Edit bookings sends the changes it made ({ add,
+ * remove }), so someone who booked themself while the list was open stays booked (re-review fix).
+ */
 export function useSaveEventRoster(eventId: number) {
   const qc = useQueryClient();
-  return useMutation({ mutationFn: (userIds: number[]) => api<EventBooking[]>(`/events/${eventId}/roster`, { method: 'PUT', json: { userIds } }), onSuccess: () => invalidateRoster(qc, eventId) });
+  return useMutation({
+    mutationFn: (changes: { add: number[]; remove: number[] }) => api<EventBooking[]>(`/events/${eventId}/roster`, { method: 'PUT', json: changes }),
+    onSuccess: () => invalidateRoster(qc, eventId),
+  });
 }
 
 /** POST / DELETE /events/:id/roster/me — "I'm working this". */

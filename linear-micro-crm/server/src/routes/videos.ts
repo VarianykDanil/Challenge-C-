@@ -37,6 +37,7 @@ import {
   VIDEO_AUDIENCES,
   VIDEO_LIMITS,
   VIDEO_MAX_BYTES,
+  VIDEO_PROGRESS_PER_MINUTE,
   VIDEO_TOPICS,
   creditedWatchSeconds,
   isVideoComplete,
@@ -71,11 +72,13 @@ import { all, get, placeholders, run, type Db } from '../db/connection.ts';
 import { LEADERS_CAN_ADD_META_KEY } from '../db/extensions/videos.ts';
 import { bumpDataVersion } from '../lib/cache.ts';
 import { nowISO } from '../lib/dates.ts';
-import { HttpError, badRequest, conflict, forbidden, notFound } from '../lib/errors.ts';
+import { HttpError, badRequest, conflict, forbidden, notFound, tooManyRequests } from '../lib/errors.ts';
+import { FailureLimiter } from '../lib/limiter.ts';
 import { idParam } from '../lib/validate.ts';
 import {
   diskSpaceAt,
   formatByteSize,
+  holdUploadRoom,
   isJpeg,
   mp4DurationSeconds,
   parseRangeHeader,
@@ -253,8 +256,13 @@ function allowLongUpload(req: Request, res: Response): void {
   });
 }
 
+export const VIDEO_PROGRESS_LIMIT_MESSAGE = `That is more than ${VIDEO_PROGRESS_PER_MINUTE} progress reports for this video in a minute. What you watch is kept and counted from your next report.`;
+
 export function videosRouter(db: Db): Router {
   const router = Router();
+  // Re-review fix: progress reports per person and video (real clock; the player sends about 4 a minute and treats a
+  // refusal as "send again later", keeping what was seen)
+  const reports = new FailureLimiter(VIDEO_PROGRESS_PER_MINUTE, 60_000);
   // unfinished uploads a stopped server left behind (nothing to do, and nothing created, while there is no folder yet)
   try {
     removeStaleUploads(videosPathFor(db));
@@ -499,6 +507,8 @@ export function videosRouter(db: Db): Router {
       }
     }
     allowLongUpload(req, res);
+    // the room it needs is held while it arrives, so a second upload at the same time is measured against what is left
+    const held = holdUploadRoom(Number.isFinite(declared) && declared > 0 ? declared : 0);
     let fields: z.infer<typeof uploadFieldsSchema> | null = null;
     let received;
     try {
@@ -506,11 +516,14 @@ export function videosRouter(db: Db): Router {
         onVideoStart: (f) => {
           fields = uploadFieldsSchema.parse({ ...f });
         },
+        onVideoBytes: (n) => held.wrote(n),
       });
     } catch (err) {
       // a refused upload may still be arriving: close the connection rather than read the rest of it
       res.setHeader('Connection', 'close');
       throw err;
+    } finally {
+      held.release();
     }
     const { video, poster } = received;
     let finalName: string | null = null;
@@ -675,6 +688,9 @@ export function videosRouter(db: Db): Router {
     const me = currentUser(req);
     const v = visibleRow(me, idParam(req));
     const input = progressSchema.parse(req.body);
+    const limitKey = `${me.id}|${v.id}`;
+    if (reports.count(limitKey) >= reports.maxFailures) throw tooManyRequests(VIDEO_PROGRESS_LIMIT_MESSAGE);
+    reports.record(limitKey);
     const upload = v.kind === 'upload';
     if (input.markWatched && upload) {
       throw badRequest('An uploaded video counts as watched once you have seen 90% of it');
@@ -714,7 +730,9 @@ export function videosRouter(db: Db): Router {
     // in the ranges and counts as the credit refills)
     const limits = watchCreditLimits();
     const nowMs = progressNowMs();
-    const available = watchCreditAt(prev?.creditAt == null ? null : { creditS: Number(prev.creditS ?? 0), atMs: Number(prev.creditAt) }, nowMs, limits.rate, limits.maxS);
+    // a new viewing (the first report, or the first after a long break) starts with a small credit: the player's
+    // report when it starts playing sets the clock (re-review fix)
+    const available = watchCreditAt(prev?.creditAt == null ? null : { creditS: Number(prev.creditS ?? 0), atMs: Number(prev.creditAt) }, nowMs, limits.rate, limits.maxS, limits.startS, limits.gapS);
     const credited = creditedWatchSeconds(before, Math.min(claimed, cap), available);
     const watched = Math.min(credited.watchedS, cap);
     const position = input.ended ? 0 : Math.min(cap, Math.round(input.positionS ?? Number(prev?.positionS ?? 0)));
@@ -724,7 +742,9 @@ export function videosRouter(db: Db): Router {
       const byWatching = isVideoComplete(watched, length);
       if (byWatching || input.markWatched) {
         completedAt = now;
-        marked = !byWatching;
+        // re-review fix: 90% of a length only the viewer's own player reported (a link with no length of its own) is
+        // their own word, like Mark as watched: stored as Marked until the link has a length (completeViewsAtLength)
+        marked = !byWatching || ownLength === null;
       }
     }
     run(
@@ -741,7 +761,9 @@ export function videosRouter(db: Db): Router {
     // A report that makes a video watched changes what the cached team view shows: it clears the cache itself, so the
     // reports in between need not (see lib/videos/progress.ts isVideoProgressReport).
     if ((completedAt && !prev?.completedAt) || othersDone > 0) bumpDataVersion();
-    const body: VideoProgress = { videoId: v.id, watchedS: watched, positionS: position, completedAt, lastAt: now, marked };
+    // seen but over the credit: the player sends again until it is counted (re-review fix)
+    const owedS = Math.max(0, Math.floor(Math.min(claimed, cap) - watched));
+    const body: VideoProgress = { videoId: v.id, watchedS: watched, positionS: position, completedAt, lastAt: now, marked, owedS };
     res.json(body);
   });
 

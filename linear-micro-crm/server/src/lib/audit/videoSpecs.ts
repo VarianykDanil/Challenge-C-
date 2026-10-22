@@ -9,8 +9,10 @@
  *  POST   /videos/:id/poster "Added a still to video “…”" (the editor's browser, the first time it opens an upload)
  *  PUT    /videos/settings   "Changed learning video settings: leaders can add videos no → yes" (same values: nothing)
  *  POST   /videos/:id/progress  a viewing, not a change: one row only when it makes the video watched for that person
- *                            ("Watched “…”", or "Marked “…” as watched" for a Google Drive link); every other report
- *                            (every 15 s while a video plays) writes nothing.
+ *                            ("Watched “…”", or "Marked “…” as watched" for a Google Drive link), and one when an
+ *                            editor's player gave the video its length ("Set the length of video “…” to 1:04 (from
+ *                            Danil Varianyk’s player); counted 2 people as watched"); every other report (every 15 s
+ *                            while a video plays) writes nothing. PATCH and the still say whom a new length counted.
  * Snapshots use readable values (topic, audience, length "9:58", size "312 MB") and never a file path.
  */
 import {
@@ -81,11 +83,20 @@ function added(db: Db, done: AuditDone): AuditDraft[] {
 interface Before {
   id: number | null;
   before: Snap | null;
+  /** Viewings watched before the call (a length arriving counts the people who had already seen 90% of it). */
+  completed: number;
 }
+
+/** How many viewings of the video are watched. */
+const completedViews = (db: Db, id: number | null): number =>
+  id ? Number(get<{ n: number }>(db, `SELECT COUNT(*) AS n FROM video_views WHERE video_id = ? AND completed_at IS NOT NULL`, [id])?.n ?? 0) : 0;
+
+/** "; counted 2 people as watched" (re-review fix: a side effect of a length arriving is on the trail too). */
+const countedText = (n: number) => (n > 0 ? `; counted ${n} ${n === 1 ? 'person' : 'people'} as watched` : '');
 
 const loadBefore = (db: Db, call: AuditCall): Before => {
   const id = toId(call.params.id);
-  return { id, before: id ? videoSnapshot(db, id) : null };
+  return { id, before: id ? videoSnapshot(db, id) : null, completed: completedViews(db, id) };
 };
 
 /** "description, length 10:00 → 9:58": a description is named, never quoted (it can be long). */
@@ -100,6 +111,9 @@ const leadersCanAdd = (db: Db): boolean => get<{ value: string }>(db, `SELECT va
 interface ProgressBefore {
   id: number | null;
   completedAt: string | null;
+  /** The video's length before the report (an editor's player may give it one). */
+  length: number | null;
+  completed: number;
 }
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -131,7 +145,8 @@ export const AUDIT_SPECS: readonly AuditRouteSpec<any>[] = [
       if (before && after && !diff.length) return [];
       const text = changeText(diff);
       const name = quoted(after ?? before);
-      return [{ entity: 'video', entityId: id, summary: text ? `Updated video ${name}: ${text}` : `Updated video ${name}`, before, after }];
+      const counted = countedText(completedViews(db, id) - (state?.completed ?? 0));
+      return [{ entity: 'video', entityId: id, summary: `${text ? `Updated video ${name}: ${text}` : `Updated video ${name}`}${counted}`, before, after }];
     },
   } satisfies AuditRouteSpec<Before>,
   {
@@ -144,7 +159,8 @@ export const AUDIT_SPECS: readonly AuditRouteSpec<any>[] = [
       const before = state?.before ?? null;
       const name = quoted(after ?? before);
       const lengthAdded = !before?.length && after?.length;
-      return [{ entity: 'video', entityId: id, summary: `${before?.still ? 'Replaced the still of' : 'Added a still to'} video ${name}${lengthAdded ? ` (length ${String(after!.length)})` : ''}`, before, after }];
+      const counted = countedText(completedViews(db, id) - (state?.completed ?? 0));
+      return [{ entity: 'video', entityId: id, summary: `${before?.still ? 'Replaced the still of' : 'Added a still to'} video ${name}${lengthAdded ? ` (length ${String(after!.length)})` : ''}${counted}`, before, after }];
     },
   } satisfies AuditRouteSpec<Before>,
   {
@@ -160,19 +176,37 @@ export const AUDIT_SPECS: readonly AuditRouteSpec<any>[] = [
     pattern: '/videos/:id/progress',
     before(db, call): ProgressBefore {
       const id = toId(call.params.id);
-      if (!id || !call.me) return { id, completedAt: null };
+      const length = id ? (get<{ d: number | null }>(db, `SELECT duration_s AS d FROM learning_videos WHERE id = ?`, [id])?.d ?? null) : null;
+      if (!id || !call.me) return { id, completedAt: null, length, completed: 0 };
       const row = get<{ completedAt: string | null }>(db, `SELECT completed_at AS completedAt FROM video_views WHERE video_id = ? AND user_id = ?`, [id, call.me.id]);
-      return { id, completedAt: row?.completedAt ?? null };
+      return { id, completedAt: row?.completedAt ?? null, length, completed: completedViews(db, id) };
     },
     after(db, done, state: ProgressBefore | undefined) {
       const res = isRecord(done.response) ? done.response : {};
       const id = state?.id ?? null;
-      if (!id || state?.completedAt || typeof res.completedAt !== 'string') return []; // still watching, or watched before
+      if (!id) return [];
+      const drafts: AuditDraft[] = [];
       const video = videoSnapshot(db, id);
+      const ownNow = !state?.completedAt && typeof res.completedAt === 'string';
+      // re-review fix: an editor's player gave the video its length (and so counted the people who had seen 90% of it)
+      const lengthNow = get<{ d: number | null }>(db, `SELECT duration_s AS d FROM learning_videos WHERE id = ?`, [id])?.d ?? null;
+      if (state && state.length === null && lengthNow !== null) {
+        const who = done.me ? `${done.me.firstName} ${done.me.lastName}` : 'an editor';
+        const others = completedViews(db, id) - state.completed - (ownNow ? 1 : 0);
+        drafts.push({
+          entity: 'video',
+          entityId: id,
+          summary: `Set the length of video ${quoted(video)} to ${formatVideoLength(Number(lengthNow))} (from ${who}’s player)${countedText(others)}`,
+          before: { length: null },
+          after: { length: formatVideoLength(Number(lengthNow)) },
+        });
+      }
+      if (!ownNow) return drafts; // still watching, or watched before
       // the route says how it became watched (a "Mark as watched" on a video already seen to 90% is a watch)
       const marked = typeof res.marked === 'boolean' ? res.marked : isRecord(done.body) && done.body.markWatched === true;
       const progress = { watched: formatVideoLength(Number(res.watchedS ?? 0)), length: video?.length ?? null };
-      return [{ entity: 'video', entityId: id, summary: marked ? `Marked ${quoted(video)} as watched` : `Watched ${quoted(video)}`, before: null, after: progress }];
+      drafts.push({ entity: 'video', entityId: id, summary: marked ? `Marked ${quoted(video)} as watched` : `Watched ${quoted(video)}`, before: null, after: progress });
+      return drafts;
     },
   } satisfies AuditRouteSpec<ProgressBefore>,
 ];

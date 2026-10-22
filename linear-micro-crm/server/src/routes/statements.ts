@@ -43,13 +43,14 @@ import {
 import { all, get, placeholders, run, transaction, type Db } from '../db/connection.ts';
 import { bumpDataVersion } from '../lib/cache.ts';
 import { nowISO } from '../lib/dates.ts';
-import { HttpError, badRequest, conflict, notFound } from '../lib/errors.ts';
+import { HttpError, badRequest, conflict, notFound, tooManyRequests } from '../lib/errors.ts';
+import { FailureLimiter } from '../lib/limiter.ts';
 import { idParam, isoDate } from '../lib/validate.ts';
 import { currentUser, requireRole } from '../middleware/auth.ts';
 import { recordClientEvent } from '../lib/audit/events.ts';
 import { ensureStatementFile } from '../lib/statements/demo.ts';
 import { sha256Of } from '../lib/statements/files.ts';
-import { checkMail, readMailSettings, saveMailSettings, testMailConnection } from '../lib/statements/mail.ts';
+import { checkMail, isCheckRunning, readMailSettings, saveMailSettings, testMailConnection } from '../lib/statements/mail.ts';
 import { looksLikePdf } from '../lib/statements/pdf.ts';
 import {
   applyStatement,
@@ -69,6 +70,18 @@ import {
 } from '../lib/statements/store.ts';
 
 const STATUSES = ['parsed', 'needs_review', 'applied', 'failed'] as const satisfies readonly StatementStatus[];
+
+/**
+ * Re-review fix: per-person limits, counted per router (in memory, real clock; lib/limiter.ts). A Check now that
+ * starts a check opens a Gmail connection (a press while one is running shares it and does not count); an upload
+ * that is read costs the PDF worker up to 20 MB (a duplicate, refused before reading, does not count). The 15-minute
+ * job is not limited.
+ */
+export const STATEMENT_CHECKS_PER_WINDOW = 12;
+export const STATEMENT_UPLOADS_PER_WINDOW = 30;
+export const STATEMENT_LIMIT_WINDOW_MS = 10 * 60_000;
+export const STATEMENT_CHECKS_LIMIT_MESSAGE = `That is more than ${STATEMENT_CHECKS_PER_WINDOW} Gmail checks in 10 minutes. Linear Hub also checks by itself every 15 minutes, so wait a few minutes before you press Check now again.`;
+export const STATEMENT_UPLOADS_LIMIT_MESSAGE = `That is more than ${STATEMENT_UPLOADS_PER_WINDOW} statement uploads in 10 minutes. Wait a few minutes, then upload the rest.`;
 
 const listQuery = z.object({
   campaignId: z.coerce.number().int().positive().optional(),
@@ -157,6 +170,12 @@ export function statementsRouter(db: Db): Router {
   const router = Router();
   // Every /statements path is the office's (this router has the prefix to itself).
   router.use(requireRole('admin'));
+  const checks = new FailureLimiter(STATEMENT_CHECKS_PER_WINDOW, STATEMENT_LIMIT_WINDOW_MS, 1_000);
+  const uploads = new FailureLimiter(STATEMENT_UPLOADS_PER_WINDOW, STATEMENT_LIMIT_WINDOW_MS, 1_000);
+  /** 429 with `message` once the person has used up `limiter` (FailureLimiter's own words are about sign-in attempts). */
+  const assertUnder = (limiter: FailureLimiter, key: string, message: string) => {
+    if (limiter.count(key) >= limiter.maxFailures) throw tooManyRequests(message);
+  };
 
   router.get('/', (req, res) => {
     const q = listQuery.parse(req.query);
@@ -174,8 +193,13 @@ export function statementsRouter(db: Db): Router {
   router.post('/mail/test', async (_req, res) => {
     res.json(await testMailConnection(db));
   });
-  router.post('/check-now', async (_req, res) => {
-    res.json(await checkMail(db));
+  router.post('/check-now', async (req, res) => {
+    const key = String(currentUser(req).id);
+    assertUnder(checks, key, STATEMENT_CHECKS_LIMIT_MESSAGE);
+    const shared = isCheckRunning();
+    const result = checkMail(db); // 409 straight away when Gmail is not set up (not counted)
+    if (!shared) checks.record(key);
+    res.json(await result);
   });
 
   // ── senders ──
@@ -264,14 +288,26 @@ export function statementsRouter(db: Db): Router {
     if (!buf || !buf.length) throw badRequest('The upload was empty. Choose the statement PDF again.');
     if (!looksLikePdf(buf)) throw new HttpError(422, 'This file is not a PDF. Upload the statement as the PDF the client sent.');
     if (q.campaignId && !campaignExists(db, q.campaignId)) throw notFound('Campaign');
-    const dup = existingStatement(db, sha256Of(buf));
+    const key = String(currentUser(req).id);
+    let dup = existingStatement(db, sha256Of(buf));
+    let replacedFailed: number | null = null;
+    if (dup && statementSummary(db, dup)?.status === 'failed') {
+      // re-review fix: the same bytes as a statement that could not be read (a timeout, a reader that stopped) are
+      // read afresh, as its message says to do; the failed copy is discarded first
+      assertUnder(uploads, key, STATEMENT_UPLOADS_LIMIT_MESSAGE);
+      deleteStatement(db, dup);
+      replacedFailed = dup;
+      dup = null;
+    }
     if (dup) {
       const s = statementSummary(db, dup)!;
       throw new HttpError(409, `This PDF is already here: the ${[s.campaignCode, 'statement'].filter(Boolean).join(' ')} for ${formatStatementPeriod(s.periodStart, s.periodEnd)}, received ${dayLabel(s.receivedAt)}.`, { statementId: dup });
     }
+    assertUnder(uploads, key, STATEMENT_UPLOADS_LIMIT_MESSAGE);
+    uploads.record(key);
     const r = await ingestStatement(db, { buf, fileName: safeFileName(q.fileName), source: 'upload', receivedAt: nowISO(), campaignId: q.campaignId ?? null });
     if (r.duplicate) throw new HttpError(409, 'This PDF is already here.', { statementId: r.statementId });
-    res.status(201).json(statementSummary(db, r.statementId));
+    res.status(201).json(replacedFailed ? { ...statementSummary(db, r.statementId), replacedFailedId: replacedFailed } : statementSummary(db, r.statementId));
   });
 
   // ── one statement ──

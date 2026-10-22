@@ -17,7 +17,7 @@ import { DEMO_STATEMENTS_META_KEY, ensureStatementFile } from '../lib/statements
 import { configurePdfReadTimeout, extractPdfItems, looksLikePdf, stopPdfWorker } from '../lib/statements/pdf.ts';
 import { renderStatementPdf, type StatementPdfSpec } from '../lib/statements/render.ts';
 import { NO_TABLE_MESSAGE, NO_TEXT_MESSAGE, readStatementPdf } from '../lib/statements/store.ts';
-import { todayISO } from '../lib/dates.ts';
+import { setBusinessClock, todayISO } from '../lib/dates.ts';
 
 let dir: string;
 before(() => {
@@ -136,6 +136,29 @@ test('the demo seed: three statements whose PDFs, drawn on first open, read back
       assert.equal(Buffer.compare((await ensureStatementFile(db, r.id))!, pdf!), 0, 'the second open reads the stored file');
     }
   } finally {
+    db.close();
+  }
+});
+
+test('the demo statements leave the office off: the owners are not on field pay (seeded on Wed 21 Oct 2026, when they sold for CHN)', () => {
+  const db = openDb(':memory:');
+  setBusinessClock(new Date('2026-10-21T15:00:00'));
+  try {
+    createSchema(db);
+    seed(db, '2026-10-21');
+    const admins = (db.prepare(`SELECT first_name || ' ' || last_name AS name FROM users WHERE role = 'admin'`).all() as { name: string }[]).map((a) => a.name);
+    const chn = db.prepare(`SELECT s.id, s.table_json AS tableJson FROM statements s JOIN campaigns c ON c.id = s.campaign_id WHERE c.code = 'CHN' AND s.table_json IS NOT NULL`).get() as { id: number; tableJson: string };
+    // they did log CHN sales in the statement's four weeks…
+    const sold = db.prepare(
+      `SELECT COUNT(*) AS n FROM gauge_entries g JOIN events e ON e.id = g.event_id JOIN campaigns c ON c.id = e.campaign_id JOIN users u ON u.id = g.user_id
+        WHERE c.code = 'CHN' AND u.role = 'admin' AND g.sales > 0 AND g.date BETWEEN (SELECT period_start FROM statements WHERE id = ?) AND (SELECT period_end FROM statements WHERE id = ?)`,
+    ).get(chn.id, chn.id) as { n: number };
+    assert.ok(sold.n > 0, 'the fixture case: the owners have CHN gauges in the period');
+    // …but the client's statement lists the field team only
+    for (const name of admins) assert.ok(!chn.tableJson.includes(name), `${name} is not on the CHN statement`);
+    assert.equal((db.prepare(`SELECT COUNT(*) AS n FROM statement_rows r JOIN users u ON u.id = r.user_id WHERE u.role = 'admin'`).get() as { n: number }).n, 0);
+  } finally {
+    setBusinessClock(null);
     db.close();
   }
 });

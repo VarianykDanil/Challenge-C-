@@ -298,12 +298,12 @@ export function venueShifts(db: Db, today: string, key: string): ShiftRow[] {
   });
 }
 
-/** Active people booked per upcoming event at the venue (one query; for the profile's events list). */
+/** People booked per upcoming event at the venue, not those who have left (one query; for the profile's events list). */
 function bookedCounts(db: Db, eventIds: readonly number[]): Map<number, number> {
   if (!eventIds.length) return new Map();
   const rows = all<{ eventId: number; n: number }>(
     db,
-    `SELECT r.event_id AS eventId, COUNT(*) AS n FROM event_roster r JOIN users u ON u.id = r.user_id AND u.status = 'active'
+    `SELECT r.event_id AS eventId, COUNT(*) AS n FROM event_roster r JOIN users u ON u.id = r.user_id AND u.status <> 'left'
      WHERE r.event_id IN (${placeholders(eventIds.length)}) GROUP BY r.event_id`,
     [...eventIds],
   );

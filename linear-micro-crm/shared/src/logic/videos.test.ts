@@ -31,6 +31,8 @@ import {
   videoThumbnailUrl,
   videoVisibleTo,
   watchCreditAt,
+  VIDEO_WATCH_CREDIT_START_S,
+  VIDEO_WATCH_SESSION_GAP_S,
   watchedRangesSeconds,
   watchSessionRanges,
 } from './videos.ts';
@@ -191,12 +193,16 @@ test('watched at 90 % of the length, worked by hand: 598 s × 0.9 = 538.2 s', ()
 test('watch credit, worked by hand: double speed from a two-minute credit; waiting refills it, never past two minutes', () => {
   assert.equal(VIDEO_WATCH_RATE, 2);
   assert.equal(VIDEO_WATCH_CREDIT_MAX_S, 120);
-  // a first report: the full 120 s
-  assert.equal(watchCreditAt(null, 1_000_000), 120);
+  assert.equal(VIDEO_WATCH_CREDIT_START_S, 40);
+  assert.equal(VIDEO_WATCH_SESSION_GAP_S, 600);
+  // a first report starts a viewing with 40 s (re-review fix: it was the full 120 s)
+  assert.equal(watchCreditAt(null, 1_000_000), 40);
   // 30 s left, 15 s later: 30 + 2 × 15 = 60 s
   assert.equal(watchCreditAt({ creditS: 30, atMs: 1_000_000 }, 1_015_000), 60);
-  // 0 left, an hour later: capped at 120 s (waiting never saves up more)
-  assert.equal(watchCreditAt({ creditS: 0, atMs: 0 }, 3_600_000), 120);
+  // 0 left, 5 minutes later: capped at 120 s (waiting never saves up more)
+  assert.equal(watchCreditAt({ creditS: 0, atMs: 0 }, 300_000), 120);
+  // 0 left, an hour later: a new viewing, 40 s again (a credit is never banked between viewings)
+  assert.equal(watchCreditAt({ creditS: 0, atMs: 0 }, 3_600_000), 40);
   // a clock set back: nothing added, nothing taken
   assert.equal(watchCreditAt({ creditS: 40, atMs: 2_000_000 }, 1_000_000), 40);
   // 100 counted, the report claims 600, 120 s of credit: 220 counted, 0 left
@@ -229,7 +235,7 @@ test('watch credit: honest viewers never run short; a report every 100 ms gains 
     credit = { creditS: r.creditS, atMs: t * 1000 };
   }
   assert.equal(watched, 600);
-  // someone claiming the whole 600 s every 100 ms for 60 s: 120 s at the start + 2 × 60 s = 240 s, not 600
+  // someone claiming the whole 600 s every 100 ms for 60 s: 40 s at the start + 2 × 60 s = 160 s, not 600
   credit = null;
   watched = 0;
   for (let ms = 0; ms <= 60_000; ms += 100) {
@@ -237,7 +243,7 @@ test('watch credit: honest viewers never run short; a report every 100 ms gains 
     watched = r.watchedS;
     credit = { creditS: r.creditS, atMs: ms };
   }
-  assert.ok(watched <= 240 && watched >= 238, String(watched));
+  assert.ok(watched <= 160 && watched >= 158, String(watched));
 });
 
 test('the player session: playing extends a range, a seek starts a new one, skipping ahead counts nothing', () => {

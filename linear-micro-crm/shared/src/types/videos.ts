@@ -89,6 +89,11 @@ export interface VideoProgress {
   lastAt: string | null;
   /** P5: counted as watched by "Mark as watched" (a link whose player cannot report), not by seeing 90 % of it. */
   marked?: boolean;
+  /**
+   * P5 (re-review fix), POST /videos/:id/progress only: seconds the report showed as seen that are not counted yet
+   * (over the watch credit). The player sends again while this is above 0; nothing seen is lost.
+   */
+  owedS?: number;
 }
 
 export interface LearningVideo {

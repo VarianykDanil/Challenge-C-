@@ -29,6 +29,9 @@ export interface PaidRunColumns {
   sales: number;
   teamSales: number;
   breakdownJson: string | null;
+  /** What the run paid in commission and plan bonus (a 1.2 run is corrected at the rate it was paid at). */
+  commission?: number;
+  bonus?: number;
 }
 
 export interface PaidWeek {
@@ -153,6 +156,25 @@ function legacyPlanWeek(db: Db, user: PayUser, monday: string, run: PaidRunColum
   const plan = getPayPlan(db, user.payPlanId);
   const gross = !plan || facts.hires !== null
     ? null
-    : (sales: number) => planGross(plan, Number(run.daysWorked), sales, Number(run.teamSales), Number(run.deductions));
+    : (sales: number) => planGross(asPaidPlan(plan, run, salesPaid), Number(run.daysWorked), sales, Number(run.teamSales), Number(run.deductions));
   return planWeek(paid, asPaid, gross, salesPaid);
+}
+
+/**
+ * The plan a 1.2 run was paid by, as far as its own columns tell (re-review fix: the person may have moved to another
+ * plan since): the commission per sale it paid (commission ÷ sales), and its plan bonus — kept at today's plan's
+ * threshold when that plan pays the same bonus, else held as paid. Only what moves with the sales matters (the week
+ * is anchored on what was paid); with no sales paid, today's plan is all there is to go on.
+ */
+function asPaidPlan(plan: PayPlan, run: PaidRunColumns, salesPaid: number): PayPlan {
+  const commission = Number(run.commission);
+  const bonus = Number(run.bonus);
+  const out = { ...plan };
+  if (salesPaid > 0 && Number.isFinite(commission)) out.commissionPerSale = round2(commission / salesPaid);
+  if (Number.isFinite(bonus) && bonus > 0) {
+    const sameBonus = plan.bonusAmount === bonus && plan.bonusThreshold > 0 && plan.bonusThreshold <= salesPaid;
+    out.bonusAmount = bonus;
+    out.bonusThreshold = sameBonus ? plan.bonusThreshold : 0;
+  }
+  return out;
 }

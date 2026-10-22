@@ -84,6 +84,9 @@ team sees only their own pay.
 **Server helpers for other packages** (`server/src/lib/payRule.ts`, STABLE):
 
 - `applyConfirmedSales(db, rows, { statementId, actorId, dryRun })` → `ApplyResult` `{ people[], totalDifference }` for P3's statements. Each person gets `{ before, after, difference, effect: 'recalculated' | 'adjustment' | 'no-change', targetWeekStart, adjustmentId, sentence }`. `dryRun` writes nothing.
+  - Last fix round: `replacesStatementId` (the applied statement this one replaces) hands that statement's correction lines still on unpaid weeks to `statementId` first, in the same savepoint, so each is updated in place. P3 no longer writes `pay_adjustments` itself. It must be another statement's id (400 otherwise).
+  - A row with `notOnStatement: true` (P3's "dropped" people: on the replaced statement, not on this one) is worded "Not on BCN's corrected statement: back to the 22 subs logged, so the earlier correction is withdrawn." (also "…; the week's pay goes from £90.00 to £135.00 (not paid yet)." and "…: no change.").
+- `DELETE /pay/adjustments/:id` now answers 400 when removing a bonus (or another positive line) would take a finished unpaid week below £0. The answer is "Removing this would take Bo's pay for w/c 5 Oct below £0 (−£40.00), so it could not be paid. Remove or reduce the lines that take money off that week first." Nothing is removed.
 - `addCampaignRate(db, input, actorId)` for P6's approved client changes (`source: 'client'`, `clientPostId`). A missing `repRate` or `payoutRate` keeps the one in effect on the date.
 - `recordCampaignRateChange(db, id, before, after, actorId)` is called by the Campaigns routes when a rate changes in the Campaigns form.
 - Breakdown, adjustments and recalculation: `weekPayBreakdown`, `addPayAdjustment` (P2's disputes), `recalculateUnpaidRuns` and `nextUnpaidWeek`.
@@ -183,6 +186,11 @@ team sees only their own pay.
 
 **Elsewhere:**
 
+- **Last fix round:**
+  - An **unpaid** run made by the 1.2 code (a plan week from before the rule date, with no stored calculation) is treated like a paid one. Its breakdown shows the run's own columns once a fresh calculation no longer equals them, for example after a change of pay plan or team (a plan or team change does not recalculate it). So the breakdown, the invoice lines and **Mark paid** agree. The breakdown says: "These are the figures this pay run was made with, which is what will be paid. A fresh calculation would differ (for example after a change of pay plan)."
+  - A paid 1.2 week is corrected at the rate it was paid at: commission ÷ sales from the run, not the plan the person is on today. Its plan bonus is held as paid, unless today's plan pays the same bonus at a threshold the week reached; then a cancellation below that threshold takes the bonus back.
+  - A statement's correction line takes its kind from the sign of its own total: a negative total is 'cancellation' and a positive one is 'statement'. Its words follow the total too. An older statement re-read after a newer one (2 cancelled, but +£10) now reads "Paid for 30, 2 cancelled by FXC, which changes the week's earlier correction: +£10.00 on the pay for w/c 12 Oct." Its note says "FXC confirmed 28 of the 30 paid for, which changes the week's earlier correction". The totals were always right.
+  - Corrections that Linear Hub moves off a week with no work are recorded as an automatic step (`SYSTEM pay.carry_forward`, entity `pay_adjustment`): "Moved 1 correction (−£20) for Megan Shaw from w/c 5 Oct to w/c 19 Oct: no work that week". One row covers the whole move, even when a run of empty or paid weeks moves the lines several times. A preview that is rolled back leaves no row. The seed writes none.
 - Payroll flags never warn "near the bonus" in a 1.3 week (there is none).
 - The digest counts no plan bonus.
 - Smoke checks every seeded run is `base` or `commission` with no overrides, and that Company → By campaign commission equals subs × rate.
@@ -223,6 +231,7 @@ team sees only their own pay.
   - A paid week cannot take a line; choose the next unpaid week.
   - A line on a past week the person did not work goes on their next unpaid week; the message after **Add adjustment** says which ("−£20.00 on w/c 5 Oct: no work in w/c 14 Sep, so it goes on the next unpaid week").
   - Taking off more than a finished week pays is refused; split it over two weeks.
+  - Removing a bonus that made room for a deduction is refused in the same way: remove or reduce the deduction first.
 
 **Administrators: Settings → Pay.**
 
@@ -239,6 +248,7 @@ team sees only their own pay.
 - **The demo rates are illustrative** (BCN £20, CHN £18, VLT £35, FCB £15 a sub to the rep). Set the real rates with **Add a rate** before the first 1.3 payday.
 - **A dispute settlement is not netted against a later statement.** If P2's office settles "I made 18, not 16" with a dispute line and the client's statement later confirms the 18, the statement's correction is worked out without that line (a dispute may be about something else, such as a missed day). Check a statement's preview against open disputes for the same week.
 - Statements for a 1.2 week paid by the 1.2 code start from the run's own sales; when gauges at several campaigns of that week were changed after payment, the split of those sales per campaign is approximate (the difference is put on the campaigns with the most sales).
+- An unpaid week from before the rule date that the 1.2 code worked out keeps its figures when someone's plan or team changes. Its breakdown shows those figures, and they are what **Mark paid** pays. To pay it on the new plan, change any of that week's gauges (the run is then worked out again), or settle the difference with an adjustment.
 - Applying a statement of 477 rows (every person, campaign and week of 8 weeks of the demo) takes about 100 ms, a dry run about 95 ms; applying it again changes nothing.
 - For the lead and the other packages:
   - The dated-rate takeover runs inside `rollForwardEventStatuses` (P1's `db/maintenance.ts`), which the foundation's 15-minute sweep in `index.ts` already calls. The lead may prefer its own call in `index.ts`: `applyDatedRates(db)`.

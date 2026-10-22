@@ -40,6 +40,8 @@ export interface EventBooking {
   bookedByName?: string | null;
   bookedAt: string;
   source: RosterSource;
+  /** Re-review fix: booked but on leave now (still booked and counted; the leader may take them off). */
+  onLeave?: boolean;
 }
 
 /** On SalesEventWithMeta.bookings: how many are booked and whether the caller is. */
@@ -61,10 +63,11 @@ export interface EventAim {
   steps: EventPlanStep[];
 }
 
-export interface EventRosterInput {
-  /** The complete list of people booked (replaces the leader-booked list; self-bookings stay unless removed here). */
-  userIds: number[];
-}
+/**
+ * PUT /events/:id/roster: either the complete list (`userIds`, replaces the roster) or the changes (`add` / `remove`,
+ * re-review fix: Edit bookings sends these, so someone who tapped "I'm working this" meanwhile stays booked).
+ */
+export type EventRosterInput = { userIds: number[] } | { add?: number[]; remove?: number[] };
 
 /** One step of the plan: "about 120 stops" with a range. */
 export interface EventPlanStep {

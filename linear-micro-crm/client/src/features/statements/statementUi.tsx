@@ -3,7 +3,8 @@
 import { CheckCircle2, CircleAlert, CircleDashed, FileWarning } from 'lucide-react';
 import { STATEMENT_STATUS_LABELS, formatStatementPeriod, type ApplyPersonResult, type StatementStatus } from '@lm/shared';
 import { Badge, type BadgeTone } from '@/components/ui';
-import { formatGBP } from '@/lib/format';
+import { todayISO } from '@/lib/dates';
+import { formatDateShort, formatGBP } from '@/lib/format';
 
 const TONE: Record<StatementStatus, BadgeTone> = { parsed: 'info', needs_review: 'warning', applied: 'success', failed: 'danger' };
 const ICON = { parsed: CircleDashed, needs_review: CircleAlert, applied: CheckCircle2, failed: FileWarning } as const;
@@ -35,9 +36,23 @@ export function signedGBP(n: number): string {
   return `${n < 0 ? '−' : '+'}${formatGBP(Math.abs(n), { cents: true })}`;
 }
 
-/** One person's lines of P1's pay effect, summed: the difference and the sentences. */
+/** "w/c 28 Sep" — with the year when it is not this year's ("w/c 11 Oct 2027"), so a far date shows as one. */
+export function statementWeekLabel(monday: string): string {
+  const d = /^(\d{4})-(\d{2})-(\d{2})/.exec(monday);
+  if (!d) return `w/c ${monday}`;
+  const short = formatDateShort(monday);
+  return d[1] === todayISO().slice(0, 4) ? `w/c ${short}` : `w/c ${short} ${d[1]}`;
+}
+
+/**
+ * One person's lines of P1's pay effect, summed: the difference and the sentences. Over several pay weeks each
+ * sentence says which week it is about (re-review fix: "w/c 28 Sep: 1 cancelled by CHN, but the base still applied: no
+ * change.").
+ */
 export function personEffect(people: readonly ApplyPersonResult[] | undefined, userId: number): { difference: number; sentences: string[] } | null {
-  const mine = (people ?? []).filter((p) => p.userId === userId);
+  const mine = (people ?? []).filter((p) => p.userId === userId).sort((a, b) => a.weekStart.localeCompare(b.weekStart));
   if (!mine.length) return null;
-  return { difference: Math.round(mine.reduce((s, p) => s + p.difference, 0) * 100) / 100, sentences: mine.map((p) => p.sentence).filter(Boolean) };
+  const weeks = new Set(mine.map((p) => p.weekStart)).size;
+  const sentences = mine.filter((p) => p.sentence).map((p) => (weeks > 1 ? `${statementWeekLabel(p.weekStart)}: ${p.sentence}` : p.sentence));
+  return { difference: Math.round(mine.reduce((s, p) => s + p.difference, 0) * 100) / 100, sentences };
 }

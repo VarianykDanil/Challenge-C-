@@ -33,7 +33,7 @@ export function StatementsPage() {
 }
 
 const backToFinance = (
-  <Link to="/finance" className="inline-flex items-center gap-1 hover:underline max-sm:min-h-10">
+  <Link to="/finance" className="inline-flex items-center gap-1 hover:underline max-sm:min-h-10 pointer-coarse:min-h-10">
     <ArrowLeft className="h-3 w-3" aria-hidden /> Finance
   </Link>
 );
@@ -197,7 +197,7 @@ function MailStrip() {
           {m.lastError && <span className="mt-0.5 block font-medium text-danger">{m.lastError}</span>}
         </span>
       </span>
-      <Link to="/settings#integrations" className="inline-flex shrink-0 items-center gap-1 text-primary hover:underline max-sm:min-h-10">
+      <Link to="/settings#integrations" className="inline-flex shrink-0 items-center gap-1 text-primary hover:underline max-sm:min-h-10 pointer-coarse:min-h-10">
         <SettingsIcon className="h-3.5 w-3.5" aria-hidden /> Settings → Integrations
       </Link>
     </Card>

@@ -401,13 +401,21 @@ export function isVideoComplete(watchedS: number, durationS: number | null | und
 /**
  * How fast the seconds watched may grow, so a progress report cannot count more than a player could have shown in
  * the time since: at most double speed (2 s of video for each second of the clock), from a credit of up to two
- * minutes. The credit refills at that rate between reports and each report spends what it adds; a first report starts
- * with the full two minutes. A viewer at normal or double speed never runs short (the player reports every 15 s, and
- * at least once a minute in a background tab). What a report claims beyond the credit stays in the parts seen and is
- * counted by later reports as the credit refills.
+ * minutes. The credit refills at that rate between reports and each report spends what it adds. A viewing starts with
+ * VIDEO_WATCH_CREDIT_START_S (40 s: two reports at double speed plus a margin) — the first report, or the first after
+ * VIDEO_WATCH_SESSION_GAP_S without one — and the player reports when it starts playing, so the clock runs from then
+ * (re-review fix: a first report used to get the full two minutes, enough to make a 2-minute upload watched at once).
+ * A viewer at normal or double speed never runs short (the player reports every 15 s, and at least once a minute in a
+ * background tab). What a report claims beyond the credit stays in the parts seen, is answered as `owedS`, and is
+ * counted by later reports as the credit refills (the player sends again while anything is owed).
  */
 export const VIDEO_WATCH_RATE = 2;
 export const VIDEO_WATCH_CREDIT_MAX_S = 120;
+export const VIDEO_WATCH_CREDIT_START_S = 40;
+/** No report for this long: the next one starts a new viewing (VIDEO_WATCH_CREDIT_START_S), never a banked credit. */
+export const VIDEO_WATCH_SESSION_GAP_S = 10 * 60;
+/** Progress reports per person per video per minute (the player sends about 4: every 15 s, pause, end). */
+export const VIDEO_PROGRESS_PER_MINUTE = 30;
 
 /** The credit left after the last report, and when that was (milliseconds of the real clock). */
 export interface WatchCredit {
@@ -415,10 +423,22 @@ export interface WatchCredit {
   atMs: number;
 }
 
-/** The credit available at `nowMs`: what was left plus `rate` seconds per second since, up to `maxS` (a first report: `maxS`). */
-export function watchCreditAt(prev: WatchCredit | null | undefined, nowMs: number, rate = VIDEO_WATCH_RATE, maxS = VIDEO_WATCH_CREDIT_MAX_S): number {
-  if (!prev || !Number.isFinite(prev.creditS) || !Number.isFinite(prev.atMs) || !Number.isFinite(nowMs)) return maxS;
+/**
+ * The credit available at `nowMs`: what was left plus `rate` seconds per second since, up to `maxS`. A new viewing
+ * (no report before, or none for `gapS`) starts with `startS`.
+ */
+export function watchCreditAt(
+  prev: WatchCredit | null | undefined,
+  nowMs: number,
+  rate = VIDEO_WATCH_RATE,
+  maxS = VIDEO_WATCH_CREDIT_MAX_S,
+  startS = VIDEO_WATCH_CREDIT_START_S,
+  gapS = VIDEO_WATCH_SESSION_GAP_S,
+): number {
+  const start = Math.min(maxS, startS);
+  if (!prev || !Number.isFinite(prev.creditS) || !Number.isFinite(prev.atMs) || !Number.isFinite(nowMs)) return start;
   const elapsedS = Math.max(0, (nowMs - prev.atMs) / 1000); // a clock set back gives nothing, never a negative credit
+  if (elapsedS > gapS) return start;
   return Math.min(maxS, Math.max(0, prev.creditS) + rate * elapsedS);
 }
 

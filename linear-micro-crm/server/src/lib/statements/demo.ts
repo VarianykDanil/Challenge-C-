@@ -54,7 +54,7 @@ function loggedFor(db: Db, campaignId: number, from: string, to: string): Logged
     `SELECT g.user_id AS userId, u.role, u.first_name || ' ' || u.last_name AS name, u.first_name AS firstName, u.last_name AS lastName,
             g.date, SUM(g.sales) AS sales
        FROM gauge_entries g JOIN events e ON e.id = g.event_id JOIN users u ON u.id = g.user_id
-      WHERE e.campaign_id = ? AND g.date BETWEEN ? AND ? AND u.role <> 'client'
+      WHERE e.campaign_id = ? AND g.date BETWEEN ? AND ? AND u.role NOT IN ('client', 'admin')
       GROUP BY g.user_id, g.date HAVING SUM(g.sales) > 0
       ORDER BY g.date, u.last_name, u.first_name`,
     [campaignId, from, to],

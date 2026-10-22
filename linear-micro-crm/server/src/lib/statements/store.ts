@@ -12,11 +12,13 @@
  *     period replaces what the person logged that day, and another applied statement for any of the same days blocks
  *     Apply. Weeks where the statement has nothing for a person are not sent.
  *  4. applyStatement(db, id, actorId): calls applyConfirmedSales and records the allocation per person and week, the
- *     effect, and the campaign's columns (when it had none), in one savepoint. Paid runs are never touched here: P1
- *     turns a paid week's difference into an adjustment. A statement for exactly the same period as an applied one
- *     replaces it: that one's correction lines still on unpaid weeks are handed to the new statement first, so P1
- *     updates them in place (one line per person, week and campaign), and people only the old one listed go back to
- *     their logged subs.
+ *     effect, and the campaign's columns (when it had none), in one savepoint. Paid runs and pay lines are never
+ *     touched here: P1 turns a paid week's difference into an adjustment. A statement for exactly the same period as an
+ *     applied one replaces it: P1 hands that one's correction lines still on unpaid weeks to the new statement first
+ *     (applyConfirmedSales' replacesStatementId), so it updates them in place (one line per person, week and
+ *     campaign), and people only the old one listed go back to their logged subs (kept on the applied record).
+ *  Re-review fixes: a sign-up dated after today or far outside the period blocks Apply; a listed person's days with
+ *  no row are reported and hold the statement for review.
  *
  * Status: 'failed' (no text / no table / not a PDF), 'needs_review' (something to fix; the campaign's columns not saved
  * yet; rows dated outside the period; an email Gmail could not confirm came from the sender; or it would replace an
@@ -775,7 +777,8 @@ export function statementPlan(db: Db, st: StatementDb, rows: readonly RowDb[]): 
       for (const w of [...before.keys()].sort()) {
         const wk = weekOf(userId, w, [P], null);
         n += wk.logged;
-        out.push({ userId, campaignId: st.campaignId, weekStart: w, confirmed: wk.weekConfirmed, statementRowIds: [] });
+        // P1 words their line "Not on BCN's corrected statement: back to the 22 subs logged" (re-review fix)
+        out.push({ userId, campaignId: st.campaignId, weekStart: w, confirmed: wk.weekConfirmed, statementRowIds: [], notOnStatement: true });
       }
       dropped.push({ userId, userName: who.get(userId)!, logged: n, confirmedBefore: [...before.values()].reduce((a, b) => a + b, 0) });
     }
@@ -796,6 +799,115 @@ export function statementPlan(db: Db, st: StatementDb, rows: readonly RowDb[]): 
 // ───────────────────────────── blockers, warnings, status ─────────────────────────────
 
 const plural = (n: number, one: string, many = `${one}s`) => `${n} ${n === 1 ? one : many}`;
+const DOW = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+const MON = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+
+/**
+ * How far outside its period a row's own days may reach before Apply is blocked (re-review fix): a sign-up dated the
+ * day before is normal, a date months away is a typo'd year or a US-format date.
+ */
+export const STATEMENT_DATE_SLACK_DAYS = 31;
+
+/** "Thu 14 Oct 2027": a day with its year (a far date must show it). */
+function dayWithYear(iso: string): string {
+  const d = new Date(`${iso.slice(0, 10)}T12:00:00`);
+  return Number.isNaN(d.getTime()) ? iso.slice(0, 10) : `${DOW[d.getDay()]} ${d.getDate()} ${MON[d.getMonth()]} ${d.getFullYear()}`;
+}
+
+/** "w/c 28 Sep" (with the year when it is not this year's). */
+function weekLabel(monday: string, today = todayISO()): string {
+  const d = new Date(`${monday.slice(0, 10)}T12:00:00`);
+  if (Number.isNaN(d.getTime())) return `w/c ${monday}`;
+  return `w/c ${d.getDate()} ${MON[d.getMonth()]}${monday.slice(0, 4) === today.slice(0, 4) ? '' : ` ${d.getFullYear()}`}`;
+}
+
+/**
+ * Rows whose own dates cannot be right (re-review fix): a sign-up dated after today, or a row reaching more than
+ * STATEMENT_DATE_SLACK_DAYS outside the statement's period. Apply is blocked until the dates are checked (a row can be
+ * marked as not one of ours); otherwise the confirmation would be written for a week far away and take that week over.
+ */
+function implausibleDates(st: StatementDb, rows: readonly RowDb[], today = todayISO()): string[] {
+  if (!st.periodStart || !st.periodEnd) return [];
+  const P: Span = { start: st.periodStart, end: st.periodEnd };
+  const counting = countingRows(rows);
+  const isFuture = (r: RowDb) => (r.saleDate ?? r.periodStart ?? '') > today;
+  const future = counting.filter(isFuture);
+  const far = counting.filter((r) => {
+    if (isFuture(r)) return false;
+    const x = rowSpan(r, P);
+    return x.start < addDays(P.start, -STATEMENT_DATE_SLACK_DAYS) || x.end > addDays(P.end, STATEMENT_DATE_SLACK_DAYS);
+  });
+  const say = (list: readonly RowDb[], why: string): string => {
+    const r = list[0]!;
+    const who = r.userName ?? r.name ?? r.fundraiserRef ?? 'someone';
+    const when = r.saleDate ? dayWithYear(r.saleDate) : formatStatementPeriod(r.periodStart, r.periodEnd);
+    if (list.length === 1) {
+      return `${r.saleDate ? `A sign-up for ${who} is dated` : `A row for ${who} covers`} ${when}, ${why}. Check the dates with the PDF, or mark the row as not one of ours.`;
+    }
+    const what = list.every((x) => x.saleDate) ? `${list.length} sign-ups are dated` : `${list.length} rows have dates`;
+    return `${what} ${why} (the first: ${who}, ${when}). Check the dates with the PDF, or mark the rows as not one of ours.`;
+  };
+  const out: string[] = [];
+  if (future.length) out.push(say(future, 'after today'));
+  if (far.length) out.push(say(far, `more than ${STATEMENT_DATE_SLACK_DAYS} days outside the statement's period (${formatStatementPeriod(P.start, P.end)})`));
+  return out;
+}
+
+/** A listed person's sales on days in the statement's period that none of their rows covers. */
+export interface SilentDays {
+  userId: number;
+  userName: string;
+  /** The Mondays of the weeks those days are in. */
+  weeks: string[];
+  logged: number;
+}
+
+/**
+ * Re-review fix: someone listed on a totals statement whose rows (each with its own period) leave some of the
+ * statement's days out. Those days count as 0 confirmed, so every sale they logged then counts as cancelled — the
+ * client may mean that, or may have left a row out. Apply still works; a warning says which weeks, and the statement
+ * never applies itself (refreshStatus). A per-sub statement lists each successful sub, so a week with none of theirs
+ * is read as 0 on purpose and is not reported. One grouped query, only when a row has a period of its own.
+ */
+export function silentDays(db: Db, st: StatementDb, rows: readonly RowDb[]): SilentDays[] {
+  if (!st.campaignId || !st.periodStart || !st.periodEnd) return [];
+  const P: Span = { start: st.periodStart, end: st.periodEnd };
+  const byPerson = new Map<number, RowDb[]>();
+  for (const r of rows) if (r.userId !== null) byPerson.set(r.userId, [...(byPerson.get(r.userId) ?? []), r]);
+  const gaps = new Map<number, Span[]>();
+  for (const [userId, list] of byPerson) {
+    if (list.some((r) => r.saleDate) || !list.some((r) => r.periodStart || r.periodEnd)) continue;
+    const spans = list.map((r) => rowSpan(r, P));
+    const out: Span[] = [];
+    for (let d = P.start; d <= P.end; d = addDays(d, 1)) {
+      if (inSpans(d, spans)) continue;
+      const last = out[out.length - 1];
+      if (last && addDays(last.end, 1) === d) last.end = d;
+      else out.push({ start: d, end: d });
+    }
+    if (out.length) gaps.set(userId, out);
+  }
+  if (!gaps.size) return [];
+  const ids = [...gaps.keys()];
+  const found = new Map<number, { name: string; logged: number; weeks: Set<string> }>();
+  for (const g of all<{ userId: number; date: string; sales: number; name: string }>(
+    db,
+    `SELECT g.user_id AS userId, g.date, SUM(g.sales) AS sales, u.first_name || ' ' || u.last_name AS name
+       FROM gauge_entries g JOIN events e ON e.id = g.event_id JOIN users u ON u.id = g.user_id
+      WHERE e.campaign_id = ? AND g.date BETWEEN ? AND ? AND g.user_id IN (${placeholders(ids.length)})
+      GROUP BY g.user_id, g.date HAVING SUM(g.sales) > 0`,
+    [st.campaignId, P.start, P.end, ...ids],
+  )) {
+    if (!inSpans(g.date, gaps.get(g.userId)!)) continue;
+    const f = found.get(g.userId) ?? { name: g.name, logged: 0, weeks: new Set<string>() };
+    f.logged += Number(g.sales);
+    f.weeks.add(mondayOf(g.date));
+    found.set(g.userId, f);
+  }
+  return [...found]
+    .map(([userId, f]) => ({ userId, userName: f.name, logged: f.logged, weeks: [...f.weeks].sort() }))
+    .sort((a, b) => a.userName.localeCompare(b.userName));
+}
 
 /** Why Apply is not possible yet, in plain words. */
 function blockersFor(db: Db, st: StatementDb, rows: readonly RowDb[], problems: readonly string[]): string[] {
@@ -809,6 +921,7 @@ function blockersFor(db: Db, st: StatementDb, rows: readonly RowDb[], problems: 
   const unmatched = rows.filter((r) => r.match === 'none').length;
   if (unmatched) out.push(`${plural(unmatched, 'row is', 'rows are')} not matched to anyone yet: pick the person, or mark the row as not one of ours.`);
   else if (rows.length && !rows.some((r) => r.userId !== null)) out.push('Every row is marked as not one of ours, so there is nothing to apply.');
+  out.push(...implausibleDates(st, rows));
   if (st.campaignId && st.periodStart && st.periodEnd) {
     const P: Span = { start: st.periodStart, end: st.periodEnd };
     const mine = spansOf(P, countingRows(rows));
@@ -841,7 +954,8 @@ function outsidePeriodCount(st: { periodStart: string | null; periodEnd: string 
 /**
  * Sets the status from what the statement still needs ('applied' and 'failed' stay as they are). 'parsed' (ready, and
  * an email in that state applies itself) needs: nothing blocking, the campaign's saved columns, every row inside the
- * period, for an email Gmail's confirmation that it came from the sender, and no applied statement it would replace.
+ * period, for an email Gmail's confirmation that it came from the sender, no applied statement it would replace, and
+ * no listed person with sales on days the statement has no row for them (silentDays).
  */
 export function refreshStatus(db: Db, id: number): StatementStatus {
   const st = loadStatement(db, id);
@@ -856,7 +970,8 @@ export function refreshStatus(db: Db, id: number): StatementStatus {
     st.mappingSource === 'template' &&
     outsidePeriodCount(st, rows) === 0 &&
     (st.source !== 'email' || st.senderVerified === 1) &&
-    !replacedStatement(db, st);
+    !replacedStatement(db, st) &&
+    !silentDays(db, st, rows).length;
   const status: StatementStatus = ready ? 'parsed' : 'needs_review';
   if (status !== st.status) run(db, `UPDATE statements SET status = ? WHERE id = ?`, [status, id]);
   return status;
@@ -905,8 +1020,6 @@ export function statementSummary(db: Db, id: number): StatementSummary | null {
   return row ? toSummary(row) : null;
 }
 
-const DOW = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
-const MON = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
 /** "Thu 15 Oct" for a timestamp or a date. */
 export function statementDayLabel(iso: string | null | undefined): string {
   if (!iso) return 'an earlier day';
@@ -953,13 +1066,28 @@ function warningsFor(db: Db, st: StatementDb, table: StoredTable | null, rows: r
   }
   if (plan.dropped.length) {
     const names = plan.dropped.map((d) => d.userName).join(', ');
-    out.push(`${plural(plan.dropped.length, 'person is', 'people are')} on the statement this replaces but not on this one (${names}): their weeks go back to the subs they logged.`);
+    out.push(
+      applied
+        ? `${plural(plan.dropped.length, 'person was', 'people were')} on the statement this replaced but not on this one (${names}): their weeks went back to the subs they logged.`
+        : `${plural(plan.dropped.length, 'person is', 'people are')} on the statement this replaces but not on this one (${names}): their weeks go back to the subs they logged.`,
+    );
+  }
+  if (!applied) {
+    const silent = silentDays(db, st, rows);
+    const sales = [st.campaignCode, 'sales'].filter(Boolean).join(' ');
+    const weeks = (x: SilentDays) => x.weeks.map((w) => weekLabel(w)).join(', ');
+    if (silent.length === 1) {
+      const x = silent[0]!;
+      out.push(`${x.userName} logged ${x.logged} ${x.logged === 1 ? sales.replace(/sales$/, 'sale') : sales} on days this statement has no row for them (${weeks(x)}): they count as cancelled. Check with the PDF before you press Apply.`);
+    } else if (silent.length > 1) {
+      const list = silent.slice(0, 4).map((x) => `${x.userName}: ${x.logged} in ${weeks(x)}`).join('; ');
+      out.push(`${silent.length} people logged ${sales} on days this statement has no row for them (${list}${silent.length > 4 ? '; …' : ''}): they count as cancelled. Check with the PDF before you press Apply.`);
+    }
   }
   if (plan.notListed.length) {
     const sales = [st.campaignCode, 'sales'].filter(Boolean).join(' ');
     out.push(`${plural(plan.notListed.length, 'person', 'people')} logged ${sales} in this period but ${plan.notListed.length === 1 ? 'is' : 'are'} not on the statement; their pay does not change.`);
   }
-  void db;
   return out;
 }
 
@@ -990,25 +1118,16 @@ function replacedByLink(db: Db, st: StatementDb): AppliedLink | null {
 }
 
 /**
- * Runs `fn` (P1's applyConfirmedSales) with the corrections of the statement being replaced handed to this one: their
- * lines still waiting on an unpaid week (kind cancellation / statement) take this statement's id, so P1 updates each
- * line in place ("2 cancelled: paid for 22, confirmed 20") instead of adding a second, contradictory one. Inside one
- * savepoint with whatever `after` writes; `preview` rolls everything back (the pay preview). P1 materialises last week's
- * runs only outside a transaction, so that is done first.
+ * Runs `fn` (P1's applyConfirmedSales; given `replacesStatementId` when this statement replaces an applied one, P1
+ * hands that one's corrections still waiting on an unpaid week to this statement and updates each line in place —
+ * "2 cancelled: paid for 22, confirmed 20" — instead of adding a second, contradictory one; P3 never writes
+ * pay_adjustments itself) inside one savepoint with whatever `after` writes; `preview` rolls everything back (the pay
+ * preview). P1 materialises last week's runs only outside a transaction, so that is done first.
  */
-function withReplacement<T>(db: Db, statementId: number, replaced: AppliedLink | null, preview: boolean, fn: () => T, after?: (out: T) => void): T {
+function withReplacement<T>(db: Db, preview: boolean, fn: () => T, after?: (out: T) => void): T {
   ensurePayrollMaterialised(db, todayISO());
   db.exec('SAVEPOINT p3_apply');
   try {
-    if (replaced) {
-      run(
-        db,
-        `UPDATE pay_adjustments SET statement_id = ?
-          WHERE statement_id = ? AND kind IN ('cancellation', 'statement')
-            AND NOT EXISTS (SELECT 1 FROM payroll_runs p WHERE p.user_id = pay_adjustments.user_id AND p.week_start = pay_adjustments.target_week_start AND p.status IN ('paid', 'late'))`,
-        [statementId, replaced.id],
-      );
-    }
     const out = fn();
     after?.(out);
     if (preview) db.exec('ROLLBACK TO p3_apply');
@@ -1030,16 +1149,24 @@ export function statementDetail(db: Db, id: number): StatementDetail {
   const mapping = parseJson<StatementColumnMapping>(st.mappingJson, {});
   const problems = table ? statementRowsFromTable(table, mapping).problems : [];
   const applied = st.status === 'applied';
-  const plan: StatementPlan = applied ? { people: appliedPeople(db, id), notListed: [], dropped: [], rows: [], allocations: [] } : statementPlan(db, st, rows);
+  // an applied statement keeps the people it dropped next to P1's effect (re-review fix: they used to vanish from it)
+  const stored = applied ? parseJson<(ApplyResult & { dropped?: StatementDropped[] }) | null>(st.effectJson, null) : null;
+  const plan: StatementPlan = applied
+    ? { people: appliedPeople(db, id), notListed: [], dropped: stored?.dropped ?? [], rows: [], allocations: [] }
+    : statementPlan(db, st, rows);
   const blockers = blockersFor(db, st, rows, problems);
   const replaced = replacedStatement(db, st);
   let effect: ApplyResult | null = null;
   const warnings = warningsFor(db, st, table, rows, plan, replaced);
-  if (applied) effect = parseJson<ApplyResult | null>(st.effectJson, null);
-  else if (plan.rows.length && !blockers.length) {
+  if (applied) {
+    if (stored) {
+      const { dropped: _dropped, ...result } = stored;
+      effect = result;
+    }
+  } else if (plan.rows.length && !blockers.length) {
     try {
       effect = replaced
-        ? withReplacement(db, id, replaced, true, () => applyConfirmedSales(db, plan.rows, { statementId: id, actorId: null, dryRun: true }))
+        ? withReplacement(db, true, () => applyConfirmedSales(db, plan.rows, { statementId: id, actorId: null, dryRun: true, replacesStatementId: replaced.id }))
         : applyConfirmedSales(db, plan.rows, { statementId: id, actorId: null, dryRun: true });
     } catch (err) {
       console.error(`Statement ${id}: the pay preview failed`, err);
@@ -1162,12 +1289,21 @@ export function deleteStatement(db: Db, id: number): void {
   bumpDataVersion();
 }
 
-/** A one-line account of an apply, for the audit trail and the job log. */
-export function applySentence(st: { campaignCode: string | null; periodStart: string | null; periodEnd: string | null }, people: readonly StatementPersonSummary[], effect: ApplyResult | null): string {
+/**
+ * A one-line account of an apply, for the audit trail and the job log. The people a replacement dropped are counted
+ * too ("1 person back to the subs they logged"): their pay change is in the total.
+ */
+export function applySentence(
+  st: { campaignCode: string | null; periodStart: string | null; periodEnd: string | null },
+  people: readonly StatementPersonSummary[],
+  effect: ApplyResult | null,
+  dropped: readonly StatementDropped[] = [],
+): string {
   const cancelled = people.reduce((s, p) => s + p.cancelled, 0);
   const diff = effect?.totalDifference ?? 0;
   const money = diff === 0 ? 'no change to pay' : `${diff < 0 ? '−' : '+'}£${Math.abs(diff).toFixed(2)} on the next pay runs`;
-  return `${st.campaignCode ?? 'Statement'} ${formatStatementPeriod(st.periodStart, st.periodEnd)}: ${plural(people.length, 'person', 'people')}, ${plural(cancelled, 'cancelled sub')}, ${money}`;
+  const back = dropped.length ? `, ${plural(dropped.length, 'person', 'people')} back to the subs they logged` : '';
+  return `${st.campaignCode ?? 'Statement'} ${formatStatementPeriod(st.periodStart, st.periodEnd)}: ${plural(people.length, 'person', 'people')}${back}, ${plural(cancelled, 'cancelled sub')}, ${money}`;
 }
 
 /**
@@ -1191,10 +1327,8 @@ export function applyStatement(db: Db, id: number, actorId: number | null): Stat
   const at = nowISO();
   const effect = withReplacement(
     db,
-    id,
-    replaced,
     false,
-    () => applyConfirmedSales(db, plan.rows, { statementId: id, actorId }),
+    () => applyConfirmedSales(db, plan.rows, { statementId: id, actorId, replacesStatementId: replaced?.id ?? null }),
     (result) => {
       run(db, `DELETE FROM statement_allocations WHERE statement_id = ?`, [id]);
       const insert = db.prepare(
@@ -1207,12 +1341,14 @@ export function applyStatement(db: Db, id: number, actorId: number | null): Stat
         saveTemplate(db, st.campaignId, mappingByHeader(table.headers, mapping), actorId);
         run(db, `UPDATE statements SET mapping_source = 'template' WHERE id = ?`, [id]);
       }
-      run(db, `UPDATE statements SET status = 'applied', applied_at = ?, applied_by = ?, effect_json = ?, error = NULL WHERE id = ?`, [at, actorId, JSON.stringify(result), id]);
+      // the people it dropped are kept with the effect, so the applied page still explains their part of the total
+      const kept = plan.dropped.length ? { ...result, dropped: plan.dropped } : result;
+      run(db, `UPDATE statements SET status = 'applied', applied_at = ?, applied_by = ?, effect_json = ?, error = NULL WHERE id = ?`, [at, actorId, JSON.stringify(kept), id]);
     },
   );
   bumpDataVersion();
   if (actorId === null) {
-    recordSystemEvent(db, { name: 'statements.apply', summary: `Applied a statement automatically: ${applySentence(st, plan.people, effect)}`, entity: 'statement', entityId: id });
+    recordSystemEvent(db, { name: 'statements.apply', summary: `Applied a statement automatically: ${applySentence(st, plan.people, effect, plan.dropped)}`, entity: 'statement', entityId: id });
   }
   return statementDetail(db, id);
 }

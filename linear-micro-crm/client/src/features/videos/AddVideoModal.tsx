@@ -3,8 +3,8 @@
 // player is recognised as you type). Either way: title, what it covers, topic, who it is for, required. After adding,
 // the video's page opens (an upload's still and length are taken there, from the server's copy).
 // While a video uploads, nothing cancels it without asking: Escape and Back ask "Stop the upload?" (Keep uploading /
-// Stop the upload), closing or reloading the tab gets the browser's "Leave site?", and only Cancel upload stops it at
-// once (useUploadGuard).
+// Stop the upload), closing or reloading the tab gets the browser's "Leave site?", Ctrl+K / ⌘K (the search, whose
+// pages would close the form) waits until it has finished, and only Cancel upload stops it at once (useUploadGuard).
 import { useCallback, useEffect, useId, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { CheckCircle2, FileVideo, Link2, Upload } from 'lucide-react';
@@ -89,7 +89,21 @@ function AddVideoForm({ onClose, onBusy, askStop, onAskStop }: AddVideoFormProps
   const guard = useUploadGuard(uploading, () => onAskStop('back'));
 
   useEffect(() => onBusy(uploading), [uploading, onBusy]);
-  // the form going away some other way (another page opened from the search) cancels the upload too
+  // re-review fix: while it uploads, Ctrl+K / ⌘K does not open the search over the form (a page chosen there would
+  // close the form and cancel the upload): the key is caught before the top bar's own listener hears it
+  useEffect(() => {
+    if (!uploading) return;
+    const onKey = (e: KeyboardEvent) => {
+      if ((e.metaKey || e.ctrlKey) && !e.altKey && e.key.toLowerCase() === 'k') {
+        e.preventDefault();
+        e.stopImmediatePropagation();
+        toast.info(t.searchWaits);
+      }
+    };
+    window.addEventListener('keydown', onKey, true);
+    return () => window.removeEventListener('keydown', onKey, true);
+  }, [uploading, toast, t.searchWaits]);
+  // the form going away some other way cancels the upload too
   useEffect(() => () => abortRef.current?.abort(), []);
   useEffect(() => {
     if (askStop) keepRef.current?.focus();

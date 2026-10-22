@@ -10,7 +10,9 @@
  *                                         The leader's view of someone the office booked from another team is built
  *                                         from the venue's numbers only (`limited`: no own ratios, no good day).
  *  GET    /events/:id/roster           → EventBooking[] (every staff role: event pages already name who logged)
- *  PUT    /events/:id/roster  EventRosterInput → EventBooking[] (the admin, or the leader of the event's team)
+ *  PUT    /events/:id/roster  EventRosterInput → EventBooking[] (the admin, or the leader of the event's team): the whole
+ *                                         list { userIds }, or the changes { add, remove } (Edit bookings sends these,
+ *                                         so a self-booking made meanwhile is kept)
  *  POST   /events/:id/roster/me        → EventBooking[] ("I'm working this": the admin; a leader or rep of the team)
  *  DELETE /events/:id/roster/me        → EventBooking[] ("I can't make it": anyone booked)
  * Bookings are open while the event is scheduled or live and dated today or later (409 otherwise). Rules:
@@ -23,16 +25,22 @@ import type { Db } from '../db/connection.ts';
 import { getEvent } from '../db/queries.ts';
 import { todayISO } from '../lib/dates.ts';
 import { forbidden, notFound } from '../lib/errors.ts';
-import { ROSTER_MAX_PEOPLE, bookSelf, listRoster, rosterPeople, saveRoster, unbookSelf } from '../lib/eventRoster.ts';
+import { ROSTER_MAX_PEOPLE, bookSelf, changeRoster, listRoster, rosterPeople, saveRoster, unbookSelf } from '../lib/eventRoster.ts';
 import { canManageTeam } from '../lib/scope.ts';
 import { smartEnabled } from '../lib/smart/enabled.ts';
 import { idParam, optionalIdQuery } from '../lib/validate.ts';
 import { eventPlansFor } from '../lib/venueInsights.ts';
 import { currentUser, requireRole } from '../middleware/auth.ts';
 
-const rosterBody = z.object({
-  userIds: z.array(z.number().int().positive()).max(ROSTER_MAX_PEOPLE),
-});
+const ids = z.array(z.number().int().positive()).max(ROSTER_MAX_PEOPLE);
+/** The whole list ({ userIds }), or the changes Edit bookings made ({ add, remove }: nobody else is touched). */
+const rosterBody = z.union([
+  z.object({ userIds: ids }).strict(),
+  z
+    .object({ add: ids.optional(), remove: ids.optional() })
+    .strict()
+    .refine((b) => b.add !== undefined || b.remove !== undefined, 'Send userIds, or the changes: add and remove'),
+]);
 
 export function eventPlansRouter(db: Db): Router {
   const router = Router();
@@ -67,7 +75,7 @@ export function eventPlansRouter(db: Db): Router {
     const event = eventOr404(idParam(req));
     if (!canManageTeam(me, event.teamId)) throw forbidden("Leaders can only book people on their own team's events");
     const body = rosterBody.parse(req.body);
-    res.json(saveRoster(db, me, event, body.userIds));
+    res.json('userIds' in body ? saveRoster(db, me, event, body.userIds) : changeRoster(db, me, event, body.add ?? [], body.remove ?? []));
   });
 
   router.post('/:id/roster/me', requireRole('admin', 'leader', 'rep'), (req, res) => {

@@ -246,6 +246,27 @@ test('applySentence: recalculated and confirmed-as-logged weeks', () => {
   );
 });
 
+test('applySentence (re-review fixes): a total that goes the other way from the subs, and someone not on a corrected statement', () => {
+  const base = { campaignCode: 'BCN', before: { gross: 300, paidAs: 'commission' as const }, after: { gross: 300, paidAs: 'commission' as const }, targetWeekStart: '2026-10-26' };
+  // an older statement re-read after a newer one took more off: 2 cancelled, but the line gives £10 back
+  assert.equal(
+    applySentence({ ...base, logged: 30, confirmed: 28, paidFor: 30, effect: 'adjustment', difference: 30, correctionTotal: 10 }),
+    "Paid for 30, 2 cancelled by BCN, which changes the week's earlier correction: +£10.00 on the pay for w/c 26 Oct.",
+  );
+  assert.equal(
+    applySentence({ ...base, logged: 20, confirmed: 22, paidFor: 20, effect: 'adjustment', difference: 40, correctionTotal: 0, notOnStatement: true }),
+    "Not on BCN's corrected statement: back to the 22 subs logged, so the earlier correction is withdrawn.",
+  );
+  assert.equal(
+    applySentence({ ...base, logged: 3, confirmed: 3, effect: 'recalculated', before: { gross: 90, paidAs: 'commission' }, after: { gross: 135, paidAs: 'commission' }, difference: 45, notOnStatement: true }),
+    "Not on BCN's corrected statement: back to the 3 subs logged; the week's pay goes from £90.00 to £135.00 (not paid yet).",
+  );
+  assert.equal(
+    applySentence({ ...base, logged: 1, confirmed: 1, effect: 'no-change', difference: 0, notOnStatement: true }),
+    "Not on BCN's corrected statement: back to the 1 sub logged: no change.",
+  );
+});
+
 function round(n: number): number {
   return Math.round(n * 100) / 100;
 }

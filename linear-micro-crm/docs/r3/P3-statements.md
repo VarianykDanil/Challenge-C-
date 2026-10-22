@@ -28,7 +28,16 @@ Every `/statements` path is **admin only** (router-wide). Anonymous → 401; a c
 | `GET /statements/mail` | `MailSettings` + `lastFetchAt`, `checkEveryMinutes` (15). Never the app password, only `hasPassword`. |
 | `PUT /statements/mail` `{ address?, appPassword?, enabled? }` | → `MailSettings`. The app password is 16 letters (Google shows four groups of four; spaces are fine; 400 otherwise), stored encrypted (`lib/crypto.ts` `encrypt`, the app-secret key); `''` removes it. `enabled: true` needs an address and a password (400). Removing either turns the check off. A new address forgets where the last check got to. |
 | `POST /statements/mail/test` | `MailTestResult` `{ ok, message }` — "Connected to Gmail as matt@… (read-only). 2 emails from your statement senders in the last 60 days." or the failure in plain words (also kept as `lastError`). 409 when no address / password is saved. One test at a time (presses while one runs share it) and at most one connection every 10 seconds: a quicker press answers the last result, so the button can never get the account throttled by Google; a new address or app password is tested afresh. |
-| `POST /statements/check-now` | `CheckNowResult` `{ checked, fetched, parsed, applied, errors[] }` — one check now (a check already running is shared). 409 when Gmail is not set up. |
+| `POST /statements/check-now` | `CheckNowResult` `{ checked, fetched, parsed, applied, errors[] }` — one check now (a check already running is shared). 409 when Gmail is not set up. 429 after 12 checks by the same person in 10 minutes: "That is more than 12 Gmail checks in 10 minutes. Linear Hub also checks by itself every 15 minutes, so wait a few minutes before you press Check now again." A press that shares a running check, and a 409, do not count. The 15-minute job is not limited. |
+
+**Last fix round:**
+
+- **Upload limit.** `POST /statements/upload` answers 429 after 30 PDFs read for the same person in 10 minutes: "That is more than 30 statement uploads in 10 minutes. Wait a few minutes, then upload the rest." A duplicate, refused before reading, does not count. The counters are in P3's router (`STATEMENT_CHECKS_PER_WINDOW`, `STATEMENT_UPLOADS_PER_WINDOW`), not `middleware/writeLimit.ts`.
+- **A failed PDF can be uploaded again.** The same bytes as a statement with status `failed` (a reader that timed out or stopped) are no longer refused with 409. The failed copy is discarded and the PDF is read afresh: 201, with `replacedFailedId` in the answer. Its audit row ends "(it replaces the copy received before, which could not be read either)" when it fails again. A statement that was read is still a duplicate (409).
+- **`StatementDetail.dropped` stays on an applied replacement** (kept with the effect in `effect_json`; `effect` is still P1's `ApplyResult` as it was). Its warning reads "1 person was on the statement this replaced but not on this one (Oliver Bennett): their weeks went back to the subs they logged." Their pay lines are sent with `notOnStatement: true`, so P1 words them "Not on BCN's corrected statement: back to the 22 subs logged, …".
+- **The Apply audit row counts them:** "Applied the BCN statement for 28 Sep – 4 Oct 2026: 1 person, 1 person back to the subs they logged, 0 cancelled subs, +£40.00 on the next pay runs". The automatic `SYSTEM statements.apply` row does the same.
+- **New blockers** (409 on Apply, listed in `blockers`): "A sign-up for Rhys Morgan is dated Thu 14 Oct 2027, after today. Check the dates with the PDF, or mark the row as not one of ours." and "… more than 31 days outside the statement's period (12–18 Oct 2026). …". Several rows: "3 sign-ups are dated after today (the first: …)". A totals row with its own period reads "A row for … covers …".
+- **New warning (holds the statement in Needs review):** "Rhys Morgan logged 4 FCB sales on days this statement has no row for them (w/c 28 Sep): they count as cancelled. Check with the PDF before you press Apply." It appears for a totals statement whose rows for a person each have their own period and leave some of the statement's days out.
 
 Audit (`server/src/lib/audit/statementSpecs.ts`): every write above has a spec — "Changed the Gmail statements settings:
 address matt@gmail.com, app password saved, automatic check on" (never the password, and nothing when nothing
@@ -175,8 +184,25 @@ change payroll runs, which a seed must not).
 **Tables and columns** (P3 adds to its own `statements` table: `table_json`, `mapping_json`, `mapping_source`,
 `layout`, `effect_json`, `sender`, `subject`, `superseded_by`, `sender_verified`; new table `statement_allocations
 (statement_id, user_id, campaign_id, week_start, logged, confirmed, week_confirmed)`). Nothing is added to core tables.
-The one write outside P3's tables is the hand-over above: `UPDATE pay_adjustments SET statement_id` for a replaced
-statement's lines still waiting on an unpaid week.
+P3 writes nothing outside its own tables (last fix round). The hand-over of a replaced statement's lines that still wait
+on an unpaid week is P1's: `applyConfirmedSales(…, { replacesStatementId })`.
+
+**Last fix round: dates and silent weeks.**
+
+- A row's own date (a sign-up date, or the start of a totals row's own period) **after today**, or a row reaching
+  **more than 31 days** (`STATEMENT_DATE_SLACK_DAYS`) outside the statement's period, blocks Apply. A typo'd year or a
+  US-format date would otherwise write a confirmation for a week far away, which would take over what the person logs
+  that week. Rows marked "not one of ours" do not count.
+- **Silent days** (`silentDays`). A person listed only on totals rows that each have their own period may have days
+  in the statement's period that none of their rows covers. Those days count as 0 confirmed (the rule is unchanged), so
+  their logged sales there count as cancelled. A warning names the person, the sales and the weeks, and the statement
+  never applies itself. It costs one grouped query, made only when a row has its own period. A per-sub statement lists
+  each successful sub, so a week with none of a person's subs is read as 0 on purpose and is not reported.
+- Week labels on the statement page show the year when it is not this year ("w/c 11 Oct 2027"). When a person's pay
+  effect spans several weeks, each sentence starts with its week ("w/c 28 Sep: 1 cancelled by CHN, but the base still
+  applied: no change.").
+- The demo statements leave out admin users (the owners are not on field pay). On some seed dates they had CHN gauges
+  and showed up with figures P1 did not pay.
 
 ## User guide
 
@@ -254,12 +280,13 @@ failing.
   same period replaces the old one completely: people only the old copy listed go back to their logged subs. A statement
   that overlaps an applied one only in part, or whose rows are dated in another applied statement's days, is refused
   rather than guessed.
-- **For the lead and P1 (merge):** (1) replacing a statement moves the old statement's correction lines that still wait
-  on an unpaid week to the new statement (`pay_adjustments.statement_id`) so P1's `applyConfirmedSales` updates them in
-  place — the only write P3 makes outside its own tables; P1 may prefer an explicit `replacesStatementId` option. (2)
+- **A listed person's days with no row count as cancelled** (they are not "kept as logged" like people the statement
+  does not list at all). The statement now says so and waits for you. Tell us if you would rather such days kept the
+  logged figure.
+- **For the lead and P1 (merge):** (1) done in the last fix round: P1's `applyConfirmedSales` takes `replacesStatementId`
+  and re-keys its own lines, and P3 no longer writes `pay_adjustments`. (2)
   When the old correction was already paid out, P1 adds a second line for the difference and its sentence reads "Paid for
   22, 2 cancelled by BCN, so +£40.00" (relative to what was paid, not to the corrected figure); P1 owns that wording. (3)
-  Statement uploads (admin only, 20 MB each) are not in `middleware/writeLimit.ts`'s limited routes; the lead may add
-  `/statements/upload` there.
+  Done in the last fix round: uploads and Check now have their own per-person limits in P3's router.
 - The demo database has three statements (BCN, CHN and a CHN remittance advice) and none applied, so you can try
   Apply. An upgraded 1.2 database starts with none, no senders and no client IDs.

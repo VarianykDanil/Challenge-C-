@@ -390,6 +390,11 @@ export function senderAuthenticated(headerLines: readonly { key: string; line: s
 
 let running: Promise<CheckNowResult> | null = null;
 
+/** True while a check is under way (a Check now press then shares it: routes/statements.ts does not count it). */
+export function isCheckRunning(): boolean {
+  return running !== null;
+}
+
 /**
  * One check of the mailbox (POST /statements/check-now and the 15-minute job). A check already running is shared, not
  * started twice. Never throws for a mail problem: the result's `errors` (and Settings → Integrations) say what went wrong.

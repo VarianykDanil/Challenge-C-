@@ -1,8 +1,9 @@
 /**
  * P5 learning-videos: what a progress report may count (review r3 P5 findings 2, 3, 5 and 6).
  *  - the watch credit: a report adds at most what a player at double speed could have shown since the last one
- *    (from a two-minute credit, on the real clock), so "watched" cannot be claimed in one POST; honest viewers at
- *    normal or double speed lose nothing (worked by hand with a fake clock);
+ *    (up to a two-minute credit, on the real clock; a new viewing starts with 40 s — last fix round), so "watched"
+ *    cannot be claimed in one POST; honest viewers at normal or double speed lose nothing (worked by hand with a fake
+ *    clock);
  *  - a bare `watchedS` (no ranges) counts for a link only, never for an upload;
  *  - an upload without a length of its own is never made watched by a length a non-editor's player reports: it
  *    counts once it has a length (an editor's player, the still step or Edit video), for everyone who has seen 90%;
@@ -61,7 +62,7 @@ async function addUpload(title: string, seconds: number | null): Promise<number>
 
 const report = (who: TestClient, id: number, body: Json) => who.post(`/videos/${id}/progress`, body);
 
-test('an upload is not watched by one report: a bare count adds nothing, a claim of every second gets the two-minute credit', async () => {
+test('an upload is not watched by one report: a bare count adds nothing, a claim of every second gets the 40 s start credit', async () => {
   const forty = await addUpload('Forty seconds', 40);
   // the reviewer's report: {watchedS: 40} with no ranges on a 40 s upload
   let r = await report(rep, forty, { watchedS: 40 });
@@ -70,24 +71,24 @@ test('an upload is not watched by one report: a bare count adds nothing, a claim
   assert.equal(r.json.completedAt, null);
 
   const ten = await addUpload('Ten minutes', 600);
-  // every second claimed at once: 120 s counted (the credit), not watched
+  // every second claimed at once: 40 s counted (a new viewing's credit), not watched
   r = await report(rep, ten, { watchedS: 600, positionS: 600, ranges: [[0, 600]] });
-  assert.equal(r.json.watchedS, 120);
+  assert.equal(r.json.watchedS, 40);
   assert.equal(r.json.completedAt, null);
   // the same claim again at once: nothing more (the credit is spent and no time has passed)
   r = await report(rep, ten, { watchedS: 600, ranges: [[0, 600]] });
-  assert.equal(r.json.watchedS, 120);
-  // claimed again every 15 s: + 30 s a time (double speed). 120 + 30 × 13 = 510 is short of 540 (90% of 600);
-  // the 14th makes 540: watched after 14 × 15 s = 3.5 minutes, as fast as playing it at double speed could
-  for (let i = 1; i <= 13; i++) {
+  assert.equal(r.json.watchedS, 40);
+  // claimed again every 15 s: + 30 s a time (double speed). 40 + 30 × 16 = 520 is short of 540 (90% of 600);
+  // the 17th makes 550: watched after 17 × 15 s = 4.25 minutes, no faster than playing it at double speed could
+  for (let i = 1; i <= 16; i++) {
     tick(15);
     r = await report(rep, ten, { watchedS: 600, ranges: [[0, 600]] });
-    assert.equal(r.json.watchedS, 120 + 30 * i);
+    assert.equal(r.json.watchedS, 40 + 30 * i);
   }
   assert.equal(r.json.completedAt, null);
   tick(15);
   r = await report(rep, ten, { watchedS: 600, ranges: [[0, 600]] });
-  assert.equal(r.json.watchedS, 540);
+  assert.equal(r.json.watchedS, 550);
   assert.ok(r.json.completedAt);
 });
 
@@ -102,14 +103,16 @@ test('honest viewers lose nothing: normal speed counts every second; a report ev
   }
   assert.ok(r!.json.completedAt, '270 of 300 s is 90%');
 
-  // someone sending the whole video every 100 ms for 10 s: 120 s at the start + 2 × 10 s = 140 s
+  // someone sending the whole video every 100 ms for 3 s: 40 s at the start + 2 × 2.9 s ≈ 45 s; the 31st report in a
+  // minute is refused (the per-person limit, last fix round)
   const other = await addUpload('Five minutes again', 300);
-  for (let i = 0; i < 100; i++) {
+  for (let i = 0; i < 30; i++) {
     r = await report(repB, other, { watchedS: 300, ranges: [[0, 300]] });
     clockMs += 100;
   }
-  assert.ok(r!.json.watchedS >= 138 && r!.json.watchedS <= 140, String(r!.json.watchedS));
+  assert.ok(r!.json.watchedS >= 44 && r!.json.watchedS <= 46, String(r!.json.watchedS));
   assert.equal(r!.json.completedAt, null);
+  assert.equal((await report(repB, other, { watchedS: 300, ranges: [[0, 300]] })).status, 429);
   // a viewer whose reports were lost for two minutes: what is over the credit counts on the next reports
   const lost = await addUpload('Lost signal', 600);
   tick(15);
@@ -126,10 +129,11 @@ test('honest viewers lose nothing: normal speed counts every second; a report ev
 test('a link still counts a bare count (within the credit): its player may not send ranges', async () => {
   const link = await admin.post('/videos', { title: 'Speak', topic: 'pitching', url: 'https://www.youtube.com/watch?v=eIho2S0ZahI', durationS: 598 });
   tick(60);
-  let r = await report(rep, link.json.id, { watchedS: 50, positionS: 50 });
-  assert.equal(r.json.watchedS, 50);
+  let r = await report(rep, link.json.id, { watchedS: 30, positionS: 30 });
+  assert.equal(r.json.watchedS, 30);
   r = await report(rep, link.json.id, { watchedS: 598 });
-  assert.equal(r.json.watchedS, 120, '50 + the 70 s of credit left');
+  assert.equal(r.json.watchedS, 40, '30 + the 10 s of credit left');
+  assert.equal(r.json.owedS, 558);
   assert.equal(r.json.completedAt, null);
 });
 
@@ -141,7 +145,9 @@ test('an upload with no length is never watched by a length a non-editor reports
   assert.equal(r.json.completedAt, null, 'not watched');
   assert.equal(r.json.watchedS, 2);
   assert.equal((await admin.get(`/videos/${id}`)).json.durationS, null, 'and the video keeps no length');
-  // a genuine viewer: 0–100 of what their player says is 100 s
+  // a genuine viewer: 0–100 of what their player says is 100 s (their player reported when it started, 30 s before)
+  await report(repA2, id, { watchedS: 0 });
+  tick(30);
   r = await report(repA2, id, { watchedS: 100, ranges: [[0, 100]], durationS: 100 });
   assert.equal(r.json.watchedS, 100);
   assert.equal(r.json.completedAt, null);
@@ -158,6 +164,8 @@ test('an upload with no length is never watched by a length a non-editor reports
   // the same through the editor's own player (a WebM learns its length as it plays)
   const other = await addUpload('No length either', null);
   tick(60);
+  await report(repA2, other, { watchedS: 0 });
+  tick(30);
   await report(repA2, other, { watchedS: 95, ranges: [[0, 95]], durationS: 100 });
   r = await report(admin, other, { watchedS: 10, ranges: [[0, 10]], durationS: 100.4 });
   assert.equal((await admin.get(`/videos/${other}`)).json.durationS, 100);
@@ -169,6 +177,9 @@ test('"Marked" is stored: a real watch stays a watch when the length changes; Ma
   const link = await admin.post('/videos', { title: 'Body language', topic: 'interviews', url: 'https://www.youtube.com/watch?v=Ks-_Mh1QhMc', durationS: 100 });
   const id = link.json.id as number;
   tick(60);
+  await report(rep, id, { watchedS: 0 });
+  await report(repB, id, { watchedS: 0 });
+  tick(30);
   let r = await report(rep, id, { watchedS: 95, ranges: [[0, 95]] });
   assert.ok(r.json.completedAt);
   assert.equal(r.json.marked, false);
@@ -199,13 +210,14 @@ test('a report that makes a video watched clears the response cache itself (the 
   assert.equal(isVideoProgressReport('GET', '/videos/12/progress'), false);
   const id = await addUpload('Cache', 20);
   tick(60);
-  // app.ts bumps once for every write today; the route adds its own bump only when the report makes it watched
+  // app.ts leaves progress reports out of its blanket bump (the P5 merge note, applied in the last fix round); the
+  // route bumps itself only when the report makes it watched
   let v0 = currentDataVersion();
   await report(rep, id, { watchedS: 5, ranges: [[0, 5]] });
-  assert.equal(currentDataVersion() - v0, 1, 'still watching: only the app’s blanket bump');
+  assert.equal(currentDataVersion() - v0, 0, 'still watching: the cached views stay warm');
   v0 = currentDataVersion();
   await report(rep, id, { watchedS: 19, ranges: [[0, 19]] });
-  assert.equal(currentDataVersion() - v0, 2, 'watched now: the route’s own bump too');
+  assert.equal(currentDataVersion() - v0, 1, 'watched now: the route’s own bump');
 });
 
 test('an upload is refused before it is read when the disk has no room for it (507), with words', async () => {

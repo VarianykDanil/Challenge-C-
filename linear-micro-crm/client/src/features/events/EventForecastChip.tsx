@@ -49,6 +49,20 @@ function bookedText(f: Pick<EventForecast, 'expectedReps'>, booked: number): str
 }
 
 /**
+ * The detail heading's booked part (re-review copy fix): "for the 4 booked", or "2 booked, about 6 expected" with each
+ * half kept whole on a phone (it used to read "for the 2 booked, 6 expected" and break before "expected").
+ */
+function DetailBooked({ f, booked }: { f: Pick<EventForecast, 'expectedReps'>; booked: number }) {
+  const expected = Math.round(f.expectedReps);
+  if (expected <= booked) return <span className="whitespace-nowrap">for the {formatNumber(booked)} booked</span>;
+  return (
+    <>
+      <span className="whitespace-nowrap">{formatNumber(booked)} booked,</span> <span className="whitespace-nowrap">about {formatNumber(expected)} expected</span>
+    </>
+  );
+}
+
+/**
  * ["expect ≈ 14 (8–20)", "· 5 reps usually"]: the two halves a narrow cell may break between (never inside one).
  * Release 1.3 (P8): with people booked the second half reads "· 4 booked" (or "· 4 booked, 6 expected").
  */
@@ -124,7 +138,10 @@ export function EventForecastChip({ forecast: f, targetSales, campaignCode, type
         <div className="flex flex-wrap items-center gap-2">
           <span className="inline-flex items-center gap-1 text-sm font-medium text-fg">
             <Sparkles className="h-3.5 w-3.5 shrink-0 text-accent" aria-hidden />
-            Estimate: about {formatNumber(Math.round(f.expectedSales))} sales · {booked > 0 ? `for the ${bookedText(f, booked)}` : `usually ${pluralise(Math.max(1, Math.round(f.expectedReps)), 'rep')}`}
+            <span>
+              Estimate: about {formatNumber(Math.round(f.expectedSales))} sales ·{' '}
+              {booked > 0 ? <DetailBooked f={f} booked={booked} /> : `usually ${pluralise(Math.max(1, Math.round(f.expectedReps)), 'rep')}`}
+            </span>
           </span>
           <ForecastFlag flag={f.flag} />
         </div>

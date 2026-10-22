@@ -89,7 +89,10 @@ export function EventRosterCard({ event, canManage, className }: EventRosterCard
               <Avatar name={b.userName} color={b.avatarColor} size="sm" />
               <span className="flex flex-col leading-tight">
                 <span className="text-sm font-medium text-fg">{b.userId === me.id ? 'You' : b.userName}</span>
-                <span className="text-[11px] text-muted">{bookedByText(b, me.id)}</span>
+                <span className="text-[11px] text-muted">
+                  {bookedByText(b, me.id)}
+                  {b.onLeave && <span className="font-medium text-warning"> · on leave</span>}
+                </span>
               </span>
             </li>
           ))}
@@ -132,7 +135,10 @@ function EditBookingsModal({ event, roster, onClose }: EditBookingsModalProps) {
   const save = useSaveEventRoster(event.id);
   const isAdmin = me.role === 'admin';
   const users = useUsers(isAdmin ? { status: 'active' } : { teamId: event.teamId, status: 'active' });
-  const [picked, setPicked] = useState<Set<number>>(() => new Set(roster.map((b) => b.userId)));
+  // who was booked when the list opened: the save sends what changed from it, never the whole list (someone who taps
+  // "I'm working this" meanwhile stays booked)
+  const [opened] = useState<Set<number>>(() => new Set(roster.map((b) => b.userId)));
+  const [picked, setPicked] = useState<Set<number>>(() => new Set(opened));
 
   const groups = useMemo(() => {
     const list = (users.data ?? []).filter((u) => FIELD_ROLES.has(u.role) && u.startDate <= event.date && (isAdmin || u.teamId === event.teamId || u.id === me.id));
@@ -162,7 +168,7 @@ function EditBookingsModal({ event, roster, onClose }: EditBookingsModalProps) {
   const allTeam = teamIds.length > 0 && teamIds.every((id) => picked.has(id));
 
   const onSave = () =>
-    save.mutate([...picked], {
+    save.mutate({ add: [...picked].filter((id) => !opened.has(id)), remove: [...opened].filter((id) => !picked.has(id)) }, {
       onSuccess: (r) => {
         toast.success('Bookings saved', `${pluralise(r.length, 'person', 'people')} booked`);
         onClose();

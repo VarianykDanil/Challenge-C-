@@ -35,7 +35,7 @@ import { Badge, Button, Card, CardHeader, DataTable, Field, Input, PageHeader, S
 import { ConfirmDialog } from '@/features/common/ConfirmDialog';
 import { ErrorState, apiMessage } from '@/features/common/QueryStates';
 import { formatDate, formatDateShort, formatDateTime, formatGBP, fullName, pluralise } from '@/lib/format';
-import { CampaignChip, StatementStatusBadge, periodLabel, personEffect, signedGBP } from './statementUi';
+import { CampaignChip, StatementStatusBadge, periodLabel, personEffect, signedGBP, statementWeekLabel } from './statementUi';
 
 interface Props {
   id: number;
@@ -43,7 +43,7 @@ interface Props {
   onOpen: (id: number | null) => void;
 }
 
-const weekLabel = (monday: string) => `w/c ${formatDateShort(monday)}`;
+const weekLabel = statementWeekLabel;
 
 export function StatementDetailView({ id, onBack, onOpen }: Props) {
   const q = useStatement(id);
@@ -54,7 +54,7 @@ export function StatementDetailView({ id, onBack, onOpen }: Props) {
   const [confirm, setConfirm] = useState<null | 'apply' | 'discard'>(null);
 
   const back = (
-    <Link to="/finance/statements" className="inline-flex items-center gap-1 hover:underline max-sm:min-h-10" onClick={(e) => { e.preventDefault(); onBack(); }}>
+    <Link to="/finance/statements" className="inline-flex items-center gap-1 hover:underline max-sm:min-h-10 pointer-coarse:min-h-10" onClick={(e) => { e.preventDefault(); onBack(); }}>
       <ArrowLeft className="h-3 w-3" aria-hidden /> Statements
     </Link>
   );
@@ -391,7 +391,8 @@ function PayCard({ s }: { s: StatementDetail }) {
         <div className="border-t border-border px-5 py-3 text-sm" data-testid="dropped">
           <span className="font-medium text-fg">On the statement it replaces, not on this one: </span>
           <span className="text-muted">
-            {s.dropped!.map((d) => `${d.userName} (${d.confirmedBefore} confirmed then, ${d.logged} logged)`).join(', ')}. Their weeks go back to the subs they logged.
+            {s.dropped!.map((d) => `${d.userName} (${d.confirmedBefore} confirmed then, ${d.logged} logged)`).join(', ')}.{' '}
+            {s.status === 'applied' ? 'Their weeks went back to the subs they logged.' : 'Their weeks go back to the subs they logged.'}
           </span>
           {s.dropped!.map((d) => {
             const e = personEffect(effect?.people, d.userId);

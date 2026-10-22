@@ -135,10 +135,43 @@ export function uploadReserveBytes(totalBytes: number): number {
   return Math.min(UPLOAD_RESERVE_MAX_BYTES, Math.floor(Math.max(0, totalBytes) / 10));
 }
 
-/** Bytes an upload may take on this disk now (never negative). */
-export function uploadRoomBytes(space: DiskSpace): number {
-  return Math.max(0, space.freeBytes - uploadReserveBytes(space.totalBytes));
+/** Uploads arriving now: the size each declared, and what it has written to the disk so far. */
+const arriving = new Map<symbol, { declared: number; written: number }>();
+
+/** What the uploads arriving now will still write (their declared size less what is on the disk already). */
+export function arrivingBytes(): number {
+  let n = 0;
+  for (const u of arriving.values()) n += Math.max(0, u.declared - u.written);
+  return n;
 }
+
+/**
+ * Re-review fix: holds the room an accepted upload will need while it arrives, so two uploads that each fit but not
+ * together are not both let in (the second is refused before it is read, and GET /videos/access says less room).
+ * `wrote(bytes)` as it writes (that part is on the disk, so no longer held); `release()` when it ends, however.
+ */
+export function holdUploadRoom(declaredBytes: number): { wrote(bytes: number): void; release(): void } {
+  const key = Symbol('upload');
+  const entry = { declared: Math.max(0, Number.isFinite(declaredBytes) ? declaredBytes : 0), written: 0 };
+  arriving.set(key, entry);
+  return {
+    wrote(bytes) {
+      entry.written = Math.max(entry.written, bytes);
+    },
+    release() {
+      arriving.delete(key);
+    },
+  };
+}
+
+/** Bytes an upload may take on this disk now (never negative): free space less the reserve and the uploads arriving. */
+export function uploadRoomBytes(space: DiskSpace): number {
+  return Math.max(0, space.freeBytes - uploadReserveBytes(space.totalBytes) - arrivingBytes());
+}
+
+/** The disk filled while a video arrived (ENOSPC): what to do, as the check before it says. */
+export const VIDEO_DISK_FULL_MESSAGE =
+  'The server ran out of disk space while this video arrived. Free some disk space on the server, or add the video as a YouTube, Vimeo or Google Drive link.';
 
 /** "312 MB", "1.4 GB", "820 KB" (as the client writes sizes). */
 export function formatByteSize(bytes: number): string {

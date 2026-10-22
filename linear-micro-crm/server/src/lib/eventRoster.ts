@@ -11,7 +11,11 @@
  *    may take themself off ("I can't make it"), whoever booked them.
  *  - Someone who has left (users.status 'left') drops off every list and count — the roster, the booked counts, the
  *    plans and the forecasts — while their row stays as it was (back at work, they are booked again). A leader's save
- *    never touches it.
+ *    never touches it. Someone ON LEAVE stays booked and counted (re-review fix: they used to vanish too, against the
+ *    documented rule), marked `onLeave` on the roster so the leader can take them off; they cannot be newly booked.
+ *  - Edit bookings sends the CHANGES it made ({ add, remove }) rather than the list it loaded, so someone who tapped
+ *    "I'm working this" while the leader had it open stays booked (re-review fix); the whole list ({ userIds }) still
+ *    works as before.
  *  - Error messages name a person only when the caller may see them: the admin any member of staff, a leader their own
  *    team and themself. A client account, an unknown id, or (for a leader) anyone else is "Unknown person (id N)" or
  *    "That person is not on the … team (id N)".
@@ -33,16 +37,18 @@ export const ROSTER_MAX_PEOPLE = 200;
 const ROSTER_SELECT = `
   SELECT r.event_id AS eventId, r.user_id AS userId, u.first_name || ' ' || u.last_name AS userName, u.avatar_color AS avatarColor,
          r.booked_by AS bookedBy, CASE WHEN b.id IS NULL THEN NULL ELSE b.first_name || ' ' || b.last_name END AS bookedByName,
-         r.booked_at AS bookedAt, r.source
+         r.booked_at AS bookedAt, r.source, u.status = 'on_leave' AS onLeave
   FROM event_roster r
-  JOIN users u ON u.id = r.user_id AND u.status = 'active'
+  JOIN users u ON u.id = r.user_id AND u.status <> 'left'
   LEFT JOIN users b ON b.id = r.booked_by`;
 
 const ROSTER_ORDER = `ORDER BY u.first_name COLLATE NOCASE, u.last_name COLLATE NOCASE, u.id`;
 
-/** Everyone booked on an event who is still active, by first name then last name. */
+/** Everyone booked on an event who has not left, by first name then last name (`onLeave` only when they are). */
 export function listRoster(db: Db, eventId: number): EventBooking[] {
-  return all<EventBooking>(db, `${ROSTER_SELECT} WHERE r.event_id = ? ${ROSTER_ORDER}`, [eventId]);
+  return all<Omit<EventBooking, 'onLeave'> & { onLeave: number }>(db, `${ROSTER_SELECT} WHERE r.event_id = ? ${ROSTER_ORDER}`, [eventId]).map(({ onLeave, ...b }) =>
+    Number(onLeave) === 1 ? { ...b, onLeave: true } : b,
+  );
 }
 
 /** One person booked on an event, as a plan needs them (their team decides whether a leader sees their own numbers). */
@@ -53,20 +59,20 @@ export interface RosterPerson {
   teamId: number | null;
 }
 
-/** The active people booked on an event, in the roster's order (for plans). */
+/** The people booked on an event who have not left, in the roster's order (for plans). */
 export function rosterPeople(db: Db, eventId: number): RosterPerson[] {
   return all<RosterPerson>(
     db,
     `SELECT r.user_id AS userId, u.first_name || ' ' || u.last_name AS userName, u.avatar_color AS avatarColor, u.team_id AS teamId
-     FROM event_roster r JOIN users u ON u.id = r.user_id AND u.status = 'active'
+     FROM event_roster r JOIN users u ON u.id = r.user_id AND u.status <> 'left'
      WHERE r.event_id = ? ${ROSTER_ORDER}`,
     [eventId],
   );
 }
 
 /**
- * One grouped query: active people booked per event, and whether `meId` is among them. Events nobody (active) is
- * booked on are absent.
+ * One grouped query: people booked per event (not those who have left), and whether `meId` is among them. Events
+ * nobody is booked on are absent.
  */
 export function bookingSummaries(db: Db, eventIds: readonly number[], meId: number): Map<number, EventBookingSummary> {
   const out = new Map<number, EventBookingSummary>();
@@ -74,7 +80,7 @@ export function bookingSummaries(db: Db, eventIds: readonly number[], meId: numb
   const rows = all<{ eventId: number; booked: number; me: number }>(
     db,
     `SELECT r.event_id AS eventId, COUNT(*) AS booked, MAX(r.user_id = ?) AS me
-     FROM event_roster r JOIN users u ON u.id = r.user_id AND u.status = 'active'
+     FROM event_roster r JOIN users u ON u.id = r.user_id AND u.status <> 'left'
      WHERE r.event_id IN (${placeholders(eventIds.length)}) GROUP BY r.event_id`,
     [meId, ...eventIds],
   );
@@ -115,7 +121,7 @@ export function saveRoster(db: Db, me: UserWithTeam, event: SalesEventWithMeta, 
   assertBookingsOpen(event);
   const wanted = [...new Set(userIds)];
   const current = new Set(
-    all<{ userId: number }>(db, `SELECT r.user_id AS userId FROM event_roster r JOIN users u ON u.id = r.user_id AND u.status = 'active' WHERE r.event_id = ?`, [event.id]).map((r) =>
+    all<{ userId: number }>(db, `SELECT r.user_id AS userId FROM event_roster r JOIN users u ON u.id = r.user_id AND u.status <> 'left' WHERE r.event_id = ?`, [event.id]).map((r) =>
       Number(r.userId),
     ),
   );
@@ -148,6 +154,17 @@ export function saveRoster(db: Db, me: UserWithTeam, event: SalesEventWithMeta, 
     });
   }
   return listRoster(db, event.id);
+}
+
+/**
+ * Edit bookings' changes (re-review fix): `add` booked by `me`, `remove` taken off, everyone else as they are now — so
+ * a self-booking made while the leader had the list open is never lost. The same rules as saveRoster.
+ */
+export function changeRoster(db: Db, me: UserWithTeam, event: SalesEventWithMeta, add: readonly number[], remove: readonly number[]): EventBooking[] {
+  if (!canManageTeam(me, event.teamId)) throw forbidden("Leaders can only book people on their own team's events");
+  const off = new Set(remove);
+  const now = all<{ userId: number }>(db, `SELECT r.user_id AS userId FROM event_roster r JOIN users u ON u.id = r.user_id AND u.status <> 'left' WHERE r.event_id = ?`, [event.id]).map((r) => Number(r.userId));
+  return saveRoster(db, me, event, [...now.filter((id) => !off.has(id)), ...add.filter((id) => !off.has(id))]);
 }
 
 /** "I'm working this": books `me` (source 'self'); booking twice changes nothing. Returns the roster. */

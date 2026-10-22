@@ -40,6 +40,7 @@ export const VIDEO_COPY = {
     uploading: 'Uploading…',
     added: 'Video added',
     cancelled: 'Upload cancelled',
+    searchWaits: 'Search opens once the upload has finished',
     noRoom: (room: string, size: string) =>
       `The server has room for ${room} more and this video is ${size}. Free some disk space on the server, or paste a YouTube, Vimeo or Google Drive link instead.`,
     stopTitle: 'Stop the upload?',

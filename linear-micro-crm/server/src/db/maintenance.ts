@@ -1,4 +1,4 @@
-import { auditMoney, payDayLabel, paydayForWeek, round2, type UserWithTeam } from '@lm/shared';
+import { auditMoney, auditWeekLabel, payDayLabel, paydayForWeek, round2, type UserWithTeam } from '@lm/shared';
 import { all, get, run, transaction, type Db } from './connection.ts';
 import { recordSystemEvent } from '../lib/audit/events.ts';
 import { bumpDataVersion } from '../lib/cache.ts';
@@ -122,14 +122,49 @@ export function nextOpenWeek(db: Db, userId: number, monday: string): string {
  * lines stay where they are (their run shows what they owe). Returns the week the lines moved to, or null.
  */
 export function carryForwardCorrections(db: Db, userId: number, monday: string, w: WeekPay | null): string | null {
+  return carryForward(db, userId, monday, w)?.target ?? null;
+}
+
+/** carryForwardCorrections with the lines it moved (their ids), for the audit row. */
+function carryForward(db: Db, userId: number, monday: string, w: WeekPay | null): { target: string; ids: number[] } | null {
   if (!w || w.rule !== 'base-or-commission') return null;
   const wk = w.week;
   if (!wk.hasAdjustments || wk.daysWorked > 0 || wk.result.salesLogged > 0 || wk.facts.confirmations.length > 0) return null;
   if (round2(wk.result.gross + wk.result.deductions) > 0) return null;
   const status = get<{ status: string }>(db, `SELECT status FROM users WHERE id = ?`, [userId])?.status;
   if (status === 'left') return null;
+  const ids = all<{ id: number }>(db, `SELECT id FROM pay_adjustments WHERE user_id = ? AND target_week_start = ? ORDER BY id`, [userId, monday]).map((r) => Number(r.id));
+  if (!ids.length) return null;
   const target = nextOpenWeek(db, userId, monday);
-  return run(db, `UPDATE pay_adjustments SET target_week_start = ? WHERE user_id = ? AND target_week_start = ?`, [target, userId, monday]).changes > 0 ? target : null;
+  run(db, `UPDATE pay_adjustments SET target_week_start = ? WHERE user_id = ? AND target_week_start = ?`, [target, userId, monday]);
+  return { target, ids };
+}
+
+/**
+ * The audit row for corrections Linear Hub moved on from a week with no work (re-review fix: decision 10 covers its
+ * own automatic steps). One row for the whole move, from the week the lines were on to where they ended up (a run of
+ * empty or paid weeks moves them several times): "Moved 1 correction (−£20) for Megan Shaw from w/c 5 Oct to w/c
+ * 19 Oct: no work that week". Written in the caller's transaction, so a preview that is rolled back leaves none.
+ */
+function recordCarryForward(db: Db, userId: number, from: string, ids: readonly number[]): void {
+  const rows = all<{ target: string; n: number; total: number }>(
+    db,
+    `SELECT target_week_start AS target, COUNT(*) AS n, COALESCE(SUM(amount), 0) AS total FROM pay_adjustments WHERE id IN (${ids.map(() => '?').join(', ')}) GROUP BY target_week_start ORDER BY target_week_start`,
+    [...ids],
+  );
+  if (!rows.length) return;
+  const name = get<{ name: string }>(db, `SELECT first_name || ' ' || last_name AS name FROM users WHERE id = ?`, [userId])?.name ?? 'Someone';
+  const signed = (n: number) => (n < 0 ? `−${auditMoney(-n)}` : auditMoney(n));
+  const n = rows.reduce((a, r) => a + Number(r.n), 0);
+  const total = round2(rows.reduce((a, r) => a + Number(r.total), 0));
+  const to = rows.map((r) => auditWeekLabel(r.target)).join(' and ');
+  recordSystemEvent(db, {
+    name: 'pay.carry_forward',
+    summary: `Moved ${n} correction${n === 1 ? '' : 's'} (${signed(total)}) for ${name} from ${auditWeekLabel(from)} to ${to}: no work that week`,
+    entity: 'pay_adjustment',
+    entityId: ids.length === 1 ? ids[0]! : null,
+    after: { userId, fromWeekStart: from, toWeekStart: rows.at(-1)!.target, adjustmentIds: [...ids], total },
+  });
 }
 
 /** Whether a calculated week gets (or keeps) a run: something to pay, or a bonus / correction line on it (1.3). */
@@ -151,7 +186,7 @@ export function runIsDue(w: WeekPay | null, deductions = 0): w is WeekPay {
  * Release 1.3: a week from PAY_RULE_FROM also stores paid_as, the subs logged / confirmed / cancelled, the adjustments
  * total and the calculation itself (breakdown_json), which a paid run keeps as paid.
  */
-export function syncPayrollRun(db: Db, user: RunUser, monday: string, today = todayISO(), opts: { flagPaid?: boolean; ctx?: PayCalcContext } = {}): RunSync {
+export function syncPayrollRun(db: Db, user: RunUser, monday: string, today = todayISO(), opts: { flagPaid?: boolean; ctx?: PayCalcContext; carried?: boolean } = {}): RunSync {
   const sunday = sundayOf(monday);
   if (!(sunday < today) || user.startDate > sunday) return 'skipped';
   const existing = get<StoredRun>(db, RUN_SELECT, [user.id, monday]);
@@ -162,10 +197,12 @@ export function syncPayrollRun(db: Db, user: RunUser, monday: string, today = to
   }
   const deductions = existing?.deductions ?? 0;
   const w = weekPayFor(db, user, monday, today, { ctx: opts.ctx, deductions });
-  const movedTo = carryForwardCorrections(db, user.id, monday, w);
-  if (movedTo) {
+  const moved = carryForward(db, user.id, monday, w);
+  if (moved) {
     // the corrections now sit on a later week: bring its run (when that week is complete) in line too
-    syncPayrollRun(db, user, movedTo, today, { ctx: opts.ctx });
+    syncPayrollRun(db, user, moved.target, today, { ctx: opts.ctx, carried: true });
+    // one audit row for the whole move, written where it started (the later week may have moved them on again)
+    if (!opts.carried) recordCarryForward(db, user.id, monday, moved.ids);
     if (!existing) return 'unchanged';
     run(db, `DELETE FROM payroll_runs WHERE id = ?`, [existing.id]);
     return 'deleted';

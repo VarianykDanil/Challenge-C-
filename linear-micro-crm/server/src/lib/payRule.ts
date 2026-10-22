@@ -236,7 +236,9 @@ export interface BreakdownOptions {
  * One person's pay week with every figure and line: the stored run's own calculation when it has one (a paid run as
  * it was paid), else a live calculation (the week in progress, a week with no run). A paid 1.2 run (made by the 1.2
  * code, so no stored calculation) shows the live calculation only while it still equals the run's figures; once the
- * gauges or the plan moved, its own stored columns (review fix). Null for an unknown person or a client account.
+ * gauges or the plan moved, its own stored columns (review fix). The same goes for an UNPAID 1.2 plan-week run, which a
+ * plan or team change does not recalculate (re-review fix: the breakdown and Mark paid then agree). Null for an
+ * unknown person or a client account.
  */
 export function weekPayBreakdown(db: Db, userId: number, weekStart: string, opts: BreakdownOptions = {}): WeekPayBreakdown | null {
   if (!isISODate(weekStart)) return null;
@@ -270,8 +272,9 @@ export function weekPayBreakdown(db: Db, userId: number, weekStart: string, opts
   } else {
     const w = computeWeek(db, user, monday, today, { ctx, deductions: stored?.deductions ?? 0 });
     if (!w) return null;
-    if (paid && stored && !(w.rule === 'plan' && matchesRun(w.result, w.daysWorked, w.sales, stored))) {
-      // paid by the 1.2 code: what was paid, from the run's own columns
+    // a run made by the 1.2 code (no stored calculation): paid, or an unpaid 1.2 plan week (re-review fix: a plan or
+    // team change does not recalculate it, and Mark paid pays the run) — its own columns once the live figures moved
+    if (stored && (paid || w.rule === 'plan') && !(w.rule === 'plan' && matchesRun(w.result, w.daysWorked, w.sales, stored))) {
       result = resultFromRun(stored, user.role === 'recruiter');
       rule = 'plan';
       adjustments = [];
@@ -329,6 +332,7 @@ export function weekPayBreakdown(db: Db, userId: number, weekStart: string, opts
     explanation = payExplanation({ ...result, daysWorked, dayRate }, { name, confirmedSince });
   }
   if (paid && stored?.adjustedAt) explanation.push('The gauges for this week were changed after it was paid; the figures here are what it was paid with.');
+  if (!paid && stored && asPaid && !snap) explanation.push('These are the figures this pay run was made with, which is what will be paid. A fresh calculation would differ (for example after a change of pay plan).');
   if (!paid && stored && result.gross < 0) {
     const owed = payMoney(-result.gross);
     explanation.push(own
@@ -455,7 +459,8 @@ function planExplanation(r: WeekPayResult, ruleFrom: string, daysWorked: number)
 interface Group {
   userId: number;
   monday: string;
-  rows: Map<number, { confirmed: number; rowIds: number[] }>;
+  /** Per campaign; `notOnStatement` when every row for it says the person is only on the statement being replaced. */
+  rows: Map<number, { confirmed: number; rowIds: number[]; notOnStatement: boolean }>;
 }
 
 /**
@@ -490,7 +495,15 @@ export function applyConfirmedSales(db: Db, rows: readonly ConfirmedSalesRow[], 
     if (!g) groups.set(key, (g = { userId, monday, rows: new Map() }));
     const prev = g.rows.get(campaignId);
     // several statement rows for one person, campaign and week add up (a per-sub statement lists each sub)
-    g.rows.set(campaignId, { confirmed: (prev?.confirmed ?? 0) + Math.round(confirmed), rowIds: [...(prev?.rowIds ?? []), ...(r.statementRowIds ?? [])] });
+    g.rows.set(campaignId, {
+      confirmed: (prev?.confirmed ?? 0) + Math.round(confirmed),
+      rowIds: [...(prev?.rowIds ?? []), ...(r.statementRowIds ?? [])],
+      notOnStatement: (prev?.notOnStatement ?? true) && r.notOnStatement === true,
+    });
+  }
+  const replaces = opts.replacesStatementId ?? null;
+  if (replaces !== null && (!Number.isInteger(replaces) || replaces <= 0 || replaces === statementId || statementId === null)) {
+    throw badRequest('replacesStatementId must be another statement’s id');
   }
   // last week's runs exist before we decide which weeks are paid (only outside the caller's transaction)
   if (!db.isTransaction) ensurePayrollMaterialised(db, today);
@@ -518,6 +531,18 @@ export function applyConfirmedSales(db: Db, rows: readonly ConfirmedSalesRow[], 
   };
 
   withSavepoint(db, 'p1_apply', () => {
+    if (replaces !== null) {
+      // a statement sent again for the same period: the corrections of the one it replaces that still wait on an
+      // unpaid week become this statement's, so each is updated in place below (never a second, contradictory line)
+      const handed = run(
+        db,
+        `UPDATE pay_adjustments SET statement_id = ?
+          WHERE statement_id = ? AND kind IN ('cancellation', 'statement')
+            AND NOT EXISTS (SELECT 1 FROM payroll_runs p WHERE p.user_id = pay_adjustments.user_id AND p.week_start = pay_adjustments.target_week_start AND p.status IN ('paid', 'late'))`,
+        [statementId, replaces],
+      ).changes;
+      if (handed) wrote = true;
+    }
     const resync = new Map<string, { userId: number; monday: string }>();
     const ordered = [...groups.values()].sort((a, b) => a.monday.localeCompare(b.monday) || a.userId - b.userId);
     for (const g of ordered) {
@@ -541,7 +566,7 @@ export function applyConfirmedSales(db: Db, rows: readonly ConfirmedSalesRow[], 
           `SELECT COALESCE(SUM(amount), 0) AS s FROM pay_adjustments WHERE user_id = ? AND source_week_start = ? AND kind IN ('cancellation', 'statement')`,
           [user.id, g.monday],
         )!.s));
-        for (const [campaignId, { confirmed }] of campaigns) {
+        for (const [campaignId, { confirmed, notOnStatement }] of campaigns) {
           const code = campaignCodes.get(campaignId) ?? String(campaignId);
           const before = week.grossWith(confirmations);
           confirm(user.id, campaignId, g.monday, confirmed);
@@ -560,9 +585,16 @@ export function applyConfirmedSales(db: Db, rows: readonly ConfirmedSalesRow[], 
             const what = confirmed < paidFor
               ? `${paidFor - confirmed} cancelled by ${code}`
               : confirmed > paidFor ? `${confirmed - paidFor} more confirmed by ${code}` : `all ${paidFor} confirmed by ${code}`;
+            // worded by the line's own total (re-review fix): an older statement re-read after a newer one can give
+            // back part of what the newer one took off, so "2 cancelled" may come with a line of +£10
+            const noteFor = (total: number) => notOnStatement
+              ? `not on ${code}'s corrected statement: back to the ${confirmed} subs logged`
+              : (confirmed < paidFor && total > 0) || (confirmed > paidFor && total < 0)
+                ? `${code} confirmed ${confirmed} of the ${paidFor} paid for, which changes the week's earlier correction`
+                : `${what}: paid for ${paidFor}, confirmed ${confirmed}`;
             const line = upsertStatementAdjustment(db, {
               userId: user.id, targetWeekStart: nextUnpaidWeek(db, user.id, g.monday, today), sourceWeekStart: g.monday, campaignId, statementId, amount: difference,
-              kind: confirmed < paidFor ? 'cancellation' : 'statement', note: `${what}: paid for ${paidFor}, confirmed ${confirmed}`, createdBy: opts.actorId ?? null,
+              noteFor, createdBy: opts.actorId ?? null,
             });
             adjustmentId = line.id;
             targetWeekStart = line.targetWeekStart;
@@ -577,7 +609,7 @@ export function applyConfirmedSales(db: Db, rows: readonly ConfirmedSalesRow[], 
             before: { gross: beforeGross, paidAs: before.paidAs }, after: { gross: round2(beforeGross + difference), paidAs: after.paidAs },
             difference, effect, adjustmentId, targetWeekStart, sentence: '',
           };
-          result.sentence = applySentence({ ...result, campaignCode: code, paidFor, correctionTotal });
+          result.sentence = applySentence({ ...result, campaignCode: code, paidFor, correctionTotal, notOnStatement });
           people.push(result);
         }
         continue;
@@ -586,7 +618,7 @@ export function applyConfirmedSales(db: Db, rows: readonly ConfirmedSalesRow[], 
       // ── an unpaid week: recalculated live, campaign by campaign ──
       let before = computeWeek(db, user, g.monday, today, { ctx });
       if (!before) continue;
-      for (const [campaignId, { confirmed }] of campaigns) {
+      for (const [campaignId, { confirmed, notOnStatement }] of campaigns) {
         const code = campaignCodes.get(campaignId) ?? String(campaignId);
         confirm(user.id, campaignId, g.monday, confirmed);
         const after = computeWeek(db, user, g.monday, today, { ctx })!;
@@ -600,7 +632,7 @@ export function applyConfirmedSales(db: Db, rows: readonly ConfirmedSalesRow[], 
           after: { gross: after.pay.gross, paidAs: after.rule === 'base-or-commission' ? after.result.paidAs : null },
           difference, effect: difference !== 0 ? 'recalculated' : 'no-change', adjustmentId: null, targetWeekStart: null, sentence: '',
         };
-        result.sentence = applySentence({ ...result, campaignCode: code, paidFor: was?.confirmed ?? logged });
+        result.sentence = applySentence({ ...result, campaignCode: code, paidFor: was?.confirmed ?? logged, notOnStatement });
         people.push(result);
         before = after;
       }
@@ -616,12 +648,14 @@ export function applyConfirmedSales(db: Db, rows: readonly ConfirmedSalesRow[], 
 /**
  * The statement's correction line for (person, week, campaign): the same statement applied again with other figures
  * changes its own line in place while the week it sits on is unpaid (removing it when it comes to £0); otherwise a new
- * line on the target week. Returns the line (id null when removed), its total and the week it sits on.
+ * line on the target week. Its kind follows the sign of its total ('cancellation' takes money off, 'statement' adds
+ * it) and its note is worded for that total. Returns the line (id null when removed), its total and the week it sits on.
  */
 function upsertStatementAdjustment(db: Db, a: {
   userId: number; targetWeekStart: string; sourceWeekStart: string; campaignId: number; statementId: number | null; amount: number;
-  kind: PayAdjustmentKind; note: string; createdBy: number | null;
+  noteFor: (total: number) => string; createdBy: number | null;
 }): { id: number | null; amount: number; targetWeekStart: string } {
+  const kindFor = (total: number): PayAdjustmentKind => (total < 0 ? 'cancellation' : 'statement');
   if (a.statementId !== null) {
     const existing = get<{ id: number; amount: number; target: string }>(
       db,
@@ -637,7 +671,7 @@ function upsertStatementAdjustment(db: Db, a: {
         run(db, `DELETE FROM pay_adjustments WHERE id = ?`, [existing.id]);
         return { id: null, amount: 0, targetWeekStart: existing.target };
       }
-      run(db, `UPDATE pay_adjustments SET amount = ?, kind = ?, note = ? WHERE id = ?`, [amount, a.kind, a.note, existing.id]);
+      run(db, `UPDATE pay_adjustments SET amount = ?, kind = ?, note = ? WHERE id = ?`, [amount, kindFor(amount), a.noteFor(amount), existing.id]);
       return { id: Number(existing.id), amount, targetWeekStart: existing.target };
     }
   }
@@ -645,7 +679,7 @@ function upsertStatementAdjustment(db: Db, a: {
     db,
     `INSERT INTO pay_adjustments (user_id, target_week_start, source_week_start, kind, amount, note, campaign_id, statement_id, invoice_id, created_by, created_at)
      VALUES (?, ?, ?, ?, ?, ?, ?, ?, NULL, ?, ?)`,
-    [a.userId, a.targetWeekStart, a.sourceWeekStart, a.kind, a.amount, a.note, a.campaignId, a.statementId, a.createdBy, nowISO()],
+    [a.userId, a.targetWeekStart, a.sourceWeekStart, kindFor(a.amount), a.amount, a.noteFor(a.amount), a.campaignId, a.statementId, a.createdBy, nowISO()],
   ).lastInsertRowid;
   return { id, amount: a.amount, targetWeekStart: a.targetWeekStart };
 }
@@ -872,7 +906,11 @@ export function addPayAdjustment(db: Db, input: AdjustmentInput, actorId: number
 /** Kinds an admin may remove by hand (statement corrections follow their statement; disputes are P2's). */
 export const REMOVABLE_ADJUSTMENTS: readonly PayAdjustmentKind[] = ['bonus', 'manual'];
 
-/** Removes a bonus or manual line from an unpaid week (404 / 409 otherwise) and recalculates that week's run. */
+/**
+ * Removes a bonus or manual line from an unpaid week (404 / 409 otherwise) and recalculates that week's run. Like
+ * adding a line, removing one may not take a finished week below £0 (re-review fix: removing a bonus that made room
+ * for a deduction used to leave the run below £0, held at Mark paid): 400, and nothing is removed.
+ */
 export function removePayAdjustment(db: Db, id: number, today = todayISO()): PayAdjustment {
   const a = getPayAdjustment(db, id);
   if (!a) throw notFound('Adjustment');
@@ -880,9 +918,17 @@ export function removePayAdjustment(db: Db, id: number, today = todayISO()): Pay
     throw conflict('This correction came from a client statement or a dispute, so it cannot be removed by hand. Add a manual adjustment to offset it.');
   }
   assertWeekUnpaid(db, a.userId, a.targetWeekStart);
+  const unpaidRuns = () => all<{ week: string; gross: number }>(db, `SELECT week_start AS week, gross FROM payroll_runs WHERE user_id = ? AND status IN ('pending', 'failed') ORDER BY week_start`, [a.userId]);
   withSavepoint(db, 'p1_remove', () => {
+    const before = a.amount > 0 ? new Map(unpaidRuns().map((r) => [r.week, Number(r.gross)])) : null;
     run(db, `DELETE FROM pay_adjustments WHERE id = ?`, [id]);
     syncWeek(db, a.userId, a.targetWeekStart, today);
+    // the week it sat on, or the week its other lines moved on to when it was the only pay that week
+    const below = before && unpaidRuns().find((r) => Number(r.gross) < 0 && Number(r.gross) < (before.get(r.week) ?? 0));
+    if (below) {
+      const who = getUser(db, a.userId)?.firstName ?? 'This person';
+      throw badRequest(`Removing this would take ${who}'s pay for ${payWeekLabel(below.week)} below £0 (${payMoney(Number(below.gross))}), so it could not be paid. Remove or reduce the lines that take money off that week first.`);
+    }
   });
   bumpDataVersion();
   return a;

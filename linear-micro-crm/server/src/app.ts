@@ -50,6 +50,7 @@ import { recruitmentPlusRouter } from './routes/recruitmentPlus.ts';
 import { statementsRouter } from './routes/statements.ts';
 import { venuesRouter } from './routes/venues.ts';
 import { videosRouter } from './routes/videos.ts';
+import { isVideoProgressReport } from './lib/videos/progress.ts';
 
 export interface AppOptions {
   /** When set (production), serve the built client from this folder with an SPA fallback. */
@@ -179,9 +180,11 @@ export function createApp(db: Db, opts: AppOptions = {}): Express {
   // POST /gauges/bulk together (429 after that); before the recorder, so a refused write is never recorded.
   api.use(perUserWriteLimit({ perMinute: opts.writeLimitPerMinute }));
   api.use(auditMiddleware(db));
-  // any write invalidates the aggregate cache before the handler runs (handlers are synchronous node:sqlite calls)
+  // any write invalidates the aggregate cache before the handler runs (handlers are synchronous node:sqlite calls);
+  // Release 1.3 (P5 merge note): not a video progress report (every 15 s per viewer) — that route clears the cache
+  // itself when a report makes a video watched
   api.use((req, _res, next) => {
-    if (req.method !== 'GET' && req.method !== 'HEAD' && req.method !== 'OPTIONS') bumpDataVersion();
+    if (req.method !== 'GET' && req.method !== 'HEAD' && req.method !== 'OPTIONS' && !isVideoProgressReport(req.method, req.path)) bumpDataVersion();
     next();
   });
   // Release 1.3 (r3-foundation): every router mount is recorded for the route table (lib/routeTable.ts listApiRoutes).

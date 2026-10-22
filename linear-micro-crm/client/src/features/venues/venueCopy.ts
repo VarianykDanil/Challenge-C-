@@ -70,7 +70,11 @@ function amongText(plan: EventPlan, booked: number): string {
 export function planTargetText(plan: EventPlan, booked: number, who: 'you' | string = 'you'): string {
   const share = plan.eventShare;
   const among = amongText(plan, booked);
-  const needs = share != null ? ` (the event needs ${formatNumber(share)} each from ${among})` : '';
+  // inside brackets already: "(the event needs 4 each from the 6 expected; 2 are booked so far)", never brackets in
+  // brackets (re-review copy fix)
+  const expected = plan.sharedAmong ?? booked;
+  const amongFlat = expected === booked ? among : `the ${formatNumber(expected)} expected; ${formatNumber(booked)} ${booked === 1 ? 'is' : 'are'} booked so far`;
+  const needs = share != null ? ` (the event needs ${formatNumber(share)} each from ${amongFlat})` : '';
   const yours = who === 'you' ? 'Your' : `${who}'s`;
   if (plan.shareAboveGoodDay && share != null) {
     const good = plan.targetSource === 'good-day' ? `${yours} good day` : 'A good day here';

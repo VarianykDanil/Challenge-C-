@@ -19,7 +19,7 @@ import type { Request } from 'express';
 import busboy from 'busboy';
 import { VIDEO_FILE_EXTENSIONS, VIDEO_LIMITS, VIDEO_MAX_BYTES, VIDEO_MIME_TYPES, type VideoMime } from '@lm/shared';
 import { HttpError, badRequest } from '../errors.ts';
-import { isJpeg, isQuickTime, sniffVideoContainer } from './files.ts';
+import { VIDEO_DISK_FULL_MESSAGE, isJpeg, isQuickTime, sniffVideoContainer } from './files.ts';
 
 export type VideoExtension = keyof typeof VIDEO_FILE_EXTENSIONS;
 
@@ -44,6 +44,8 @@ export interface ReceiveOptions {
   maxBytes?: number;
   /** Called with the fields received so far when the video part starts; throw to refuse the upload at once. */
   onVideoStart?: (fields: Record<string, string>) => void;
+  /** Called with the video's bytes received so far as they arrive (the room held for it: files.ts holdUploadRoom). */
+  onVideoBytes?: (bytes: number) => void;
 }
 
 export const notAVideo = () => new HttpError(415, 'Upload an MP4, WebM or MOV video');
@@ -172,10 +174,11 @@ export function receiveVideoUpload(req: Request, dir: string, opts: ReceiveOptio
       });
       file.on('error', (err: NodeJS.ErrnoException) => {
         stream.resume();
-        fail(err.code === 'ENOSPC' ? new HttpError(507, 'The server has no room for this video: free some disk space and try again') : err);
+        fail(err.code === 'ENOSPC' ? new HttpError(507, VIDEO_DISK_FULL_MESSAGE) : err);
       });
       stream.on('data', (chunk: Buffer) => {
         current.size += chunk.length;
+        opts.onVideoBytes?.(current.size);
         if (!checked) {
           head = Buffer.concat([head, chunk]).subarray(0, 64);
           if (head.length >= 12 || current.size >= 12) {

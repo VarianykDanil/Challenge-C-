@@ -176,7 +176,7 @@ function peopleFor(db: Db, teamIds: readonly number[], eventIds: readonly number
       sql += `
        UNION ALL
        SELECT 'b' AS kind, r.event_id AS id, COUNT(*) AS n, MAX(r.source = 'leader') AS managed
-       FROM event_roster r JOIN users u ON u.id = r.user_id AND u.status = 'active'
+       FROM event_roster r JOIN users u ON u.id = r.user_id AND u.status <> 'left'
        WHERE r.event_id IN (${placeholders(eventIds.length)})
        GROUP BY r.event_id`;
       params.push(...eventIds);

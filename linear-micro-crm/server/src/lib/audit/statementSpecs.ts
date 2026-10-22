@@ -180,8 +180,13 @@ export const AUDIT_SPECS: readonly AuditRouteSpec<any>[] = [ // eslint-disable-l
     after(db, done) {
       const id = toId(responseOf(done).id);
       const after = statementSnapshot(db, id);
-      const counts = after ? ` (${plural(Number(after.rowCount ?? 0), 'row')}, ${Number(after.matchedCount ?? 0)} matched)` : '';
-      return one({ entity: 'statement', entityId: id, summary: `Uploaded a statement: ${statementName(after).replace(/^the /, '')}${after?.status === 'failed' ? ', which could not be read' : counts}`, after });
+      const failed = after?.status === 'failed';
+      // re-review fix: the same PDF again after it could not be read replaces the failed copy (routes/statements.ts)
+      const replaced = toId(responseOf(done).replacedFailedId) !== null;
+      const instead = replaced ? `it replaces the copy received before, which could not be read${failed ? ' either' : ''}` : '';
+      const counts = after ? ` (${plural(Number(after.rowCount ?? 0), 'row')}, ${Number(after.matchedCount ?? 0)} matched${instead ? `; ${instead}` : ''})` : '';
+      const summary = `Uploaded a statement: ${statementName(after).replace(/^the /, '')}${failed ? `, which could not be read${instead ? ` (${instead})` : ''}` : counts}`;
+      return one({ entity: 'statement', entityId: id, summary, after: replaced ? { ...after, replacedFailedId: responseOf(done).replacedFailedId } : after });
     },
   },
   {
@@ -193,9 +198,12 @@ export const AUDIT_SPECS: readonly AuditRouteSpec<any>[] = [ // eslint-disable-l
       const r = responseOf(done);
       const people = Array.isArray(r.people) ? (r.people as { cancelled?: number }[]) : [];
       const cancelled = people.reduce((s, p) => s + (Number(p.cancelled) || 0), 0);
+      // re-review fix: the people a replacement dropped are in the total too
+      const dropped = Array.isArray(r.dropped) ? r.dropped.length : 0;
+      const back = dropped ? `, ${plural(dropped, 'person', 'people')} back to the subs they logged` : '';
       const effect = isRecord(r.effect) ? r.effect : {};
       const diff = Number(effect.totalDifference ?? 0);
-      const summary = `Applied ${statementName(before ?? null)}: ${plural(people.length, 'person', 'people')}, ${plural(cancelled, 'cancelled sub')}, ${diff ? `${money(diff)} on the next pay runs` : 'no change to pay'}`;
+      const summary = `Applied ${statementName(before ?? null)}: ${plural(people.length, 'person', 'people')}${back}, ${plural(cancelled, 'cancelled sub')}, ${diff ? `${money(diff)} on the next pay runs` : 'no change to pay'}`;
       return one({ entity: 'statement', entityId: id, summary, before: before ?? null, after: statementSnapshot(db, id) });
     },
   } satisfies AuditRouteSpec<Snap | null>,

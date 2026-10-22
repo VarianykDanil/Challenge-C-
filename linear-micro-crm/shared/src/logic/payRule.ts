@@ -426,8 +426,13 @@ export function payExplanation(week: WeekPayResult, opts: PayExplanationOptions 
  *  adjustment    "Paid for 18, 2 cancelled by BCN, so −£20.00 on the pay for w/c 19 Oct."
  *                "BCN confirmed all 18 subs paid for, which changes the week's earlier correction: +£20.00 on the pay for
  *                w/c 26 Oct." (the week's correction for another campaign or an earlier statement is undone)
+ *                "Paid for 30, 2 cancelled by BCN, which changes the week's earlier correction: +£10.00 on the pay for
+ *                w/c 26 Oct." (the line's total goes the other way from its subs: a later statement took off more)
  *  recalculated  "2 cancelled by BCN: the week's pay goes from £180.00 to £160.00 (not paid yet)."
  *  no change     "2 cancelled by BCN, but the base still applied: no change." / "All 16 confirmed by BCN: no change."
+ *  not on it     "Not on BCN's corrected statement: back to the 22 subs logged, so the earlier correction is withdrawn."
+ *                (someone the statement it replaces listed; also "…; the week's pay goes from … (not paid yet)." and
+ *                "…: no change.")
  */
 export function applySentence(r: {
   logged: number;
@@ -442,7 +447,19 @@ export function applySentence(r: {
   paidFor?: number;
   /** The correction's total on the later week (default `difference`); 0 when an earlier correction was withdrawn. */
   correctionTotal?: number;
+  /** On the statement being replaced but not on this one: `confirmed` is the week as logged (P3's dropped people). */
+  notOnStatement?: boolean;
 }): string {
+  if (r.notOnStatement) {
+    const back = `Not on ${r.campaignCode}'s corrected statement: back to the ${r.confirmed} sub${r.confirmed === 1 ? '' : 's'} logged`;
+    if (r.effect === 'adjustment') {
+      const where = r.targetWeekStart ? ` on the pay for ${payWeekLabel(r.targetWeekStart)}` : ' on the next pay';
+      const total = r.correctionTotal ?? r.difference;
+      return total === 0 ? `${back}, so the earlier correction is withdrawn.` : `${back}, so ${paySignedMoney(total)}${where}.`;
+    }
+    if (r.effect === 'recalculated') return `${back}; the week's pay goes from ${payMoney(r.before.gross)} to ${payMoney(r.after.gross)} (not paid yet).`;
+    return `${back}: no change.`;
+  }
   const cancelled = Math.max(0, r.logged - r.confirmed);
   const extra = Math.max(0, r.confirmed - r.logged);
   const what = cancelled > 0 ? `${cancelled} cancelled by ${r.campaignCode}` : extra > 0 ? `${r.campaignCode} confirmed ${extra} more` : `All ${r.confirmed} confirmed by ${r.campaignCode}`;
@@ -453,6 +470,9 @@ export function applySentence(r: {
     if (total === 0) return `${r.campaignCode} confirmed ${r.confirmed} of the ${paidFor} subs paid for: the earlier correction is withdrawn.`;
     if (r.confirmed === paidFor) return `${r.campaignCode} confirmed all ${paidFor} subs paid for, which changes the week's earlier correction: ${paySignedMoney(total)}${where}.`;
     const change = r.confirmed < paidFor ? `${paidFor - r.confirmed} cancelled by ${r.campaignCode}` : `${r.campaignCode} confirmed ${r.confirmed - paidFor} more`;
+    // the total goes the other way from the subs: an earlier correction for the week is partly given back or added to
+    const against = (r.confirmed < paidFor && total > 0) || (r.confirmed > paidFor && total < 0);
+    if (against) return `Paid for ${paidFor}, ${change}, which changes the week's earlier correction: ${paySignedMoney(total)}${where}.`;
     return `Paid for ${paidFor}, ${change}, so ${paySignedMoney(total)}${where}.`;
   }
   if (r.effect === 'recalculated') return `${what}: the week's pay goes from ${payMoney(r.before.gross)} to ${payMoney(r.after.gross)} (not paid yet).`;

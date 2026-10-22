@@ -63,13 +63,17 @@ event was ever held there. Everything in the summary, plus:
 
 | Route | Who | Answer |
 |---|---|---|
-| `GET /events/:id/roster` | every staff role | `EventBooking[]` `{ eventId, userId, userName, avatarColor, bookedBy, bookedByName, bookedAt, source }`, by first name |
-| `PUT /events/:id/roster` `{ userIds }` | the admin; the leader of the event's team | the roster after the change |
+| `GET /events/:id/roster` | every staff role | `EventBooking[]` `{ eventId, userId, userName, avatarColor, bookedBy, bookedByName, bookedAt, source, onLeave? }`, by first name (`onLeave: true` only for someone on leave) |
+| `PUT /events/:id/roster` `{ userIds }` or `{ add?, remove? }` | the admin; the leader of the event's team | the roster after the change |
 | `POST /events/:id/roster/me` | the admin (any event); a leader or rep of the event's team | the roster ("I'm working this") |
 | `DELETE /events/:id/roster/me` | the admin, leaders, reps | the roster ("I can't make it") |
 | `GET /events/:id/plan[?userId=]` | every staff role (response-cached) | `EventPlan[]` |
 
-- **PUT** replaces the roster with exactly `userIds` (deduplicated, at most 200; a bad body → 400): people already
+- **PUT `{ add, remove }`** (last fix round; what Edit bookings sends): the changes from the list the page loaded.
+  `add` is booked by the caller, `remove` is taken off, and everyone else stays as they are now. So someone who taps
+  **I'm working this** while the leader has Edit bookings open stays booked, and the audit row names only the changes.
+  It follows the same rules as below. Send at least one of the two; mixing them with `userIds` is a 400.
+- **PUT `{ userIds }`** replaces the roster with exactly `userIds` (deduplicated, at most 200; a bad body → 400): people already
   booked keep their row (who booked them, when, how — a self-booking stays `self`); people left out come off; new
   people are booked by the caller with `source: 'leader'`. A new person must be an **active** member of staff in a
   field role (rep, leader or admin; recruiters work in the office) — for a leader, a member of the event's team or the
@@ -81,6 +85,10 @@ event was ever held there. Everything in the summary, plus:
 - **People who have left** (`users.status = 'left'`) drop off everything: the roster, `bookings.booked`, the plans,
   the forecasts' headcount and the venue page's booked counts. Their row stays as it was (back at work, they are
   booked again), and a leader's save neither keeps nor removes it (the audit trail sees no change).
+- **People on leave** (`users.status = 'on_leave'`) stay booked and counted, as the rule above says only people who
+  have left drop off. Until the last fix round they vanished from every list and count as well. The roster marks them
+  `onLeave`, and the page shows "· on leave", so the leader can take them off. They cannot be newly booked until they
+  are back ("Rita Rep cannot be booked on an event").
 - **Bookings are open** while the event is **scheduled or live and dated today or later** (business clock); otherwise
   409 "This event has finished, so its bookings are closed" / "This event is cancelled, so its bookings are closed".
   That applies to coming off too, so the roster of a finished day stays as it was.
@@ -255,8 +263,9 @@ rest when sorting by sales a shift: a handful of shifts is too few to rank. **Ex
 
 **Who's working** (an event's page). Everyone booked, with who booked them ("booked yourself", "booked by you",
 "booked by Amelia Hart"). A leader (or the office) taps **Edit bookings**, ticks the team members working that day (or
-**Tick the whole … team**) and taps **Save bookings**. A rep taps **I'm working this** on their team's events, or **I
-can't make it** to come off. Bookings close once the event is over or cancelled. Once a leader has booked people, the
+**Tick the whole … team**) and taps **Save bookings**. Saving changes only the people ticked or unticked, so someone
+who books themself while the list is open stays booked. Someone on leave stays booked, marked "on leave". A rep taps
+**I'm working this** on their team's events, or **I can't make it** to come off. Bookings close once the event is over or cancelled. Once a leader has booked people, the
 forecast counts the people booked ("· 3 booked"); while only people's own bookings are in, it keeps the team's usual
 number as a floor ("· 3 booked, 6 expected"). Someone who leaves drops off the list.
 
@@ -287,7 +296,13 @@ tiles stay on one screen. Plans are estimates: luck evens out over many shifts, 
     if everyone booked themselves and the leader saves the list without adding anyone, it still counts as filling up.
     Say if you want an explicit "roster done" button instead.
   - Someone the office books from another team: their leader at that event sees a plan from the venue's numbers only
-    (their own numbers stay with their own leader).
+    (their own numbers stay with their own leader). **Please decide (last fix round, not changed):** that plan's aim and
+    steps can differ from what the person sees on their phone, because their own good day and ratios are left out. For
+    example, the leader sees "4 sales: 98 stops…" and the person sees 2. There are two ways out:
+    - (a) aim that plan at the event's share only. This reveals nothing, but the steps still differ.
+    - (b) work the aim and the steps out from the person's own numbers on the server and send only those (no good day,
+      ratios or basis). The leader and the person then see the same numbers, but the steps hint at the person's own
+      ratios.
   - The range is one standard deviation of luck either side (about two days in three). It is wide on purpose for small
     targets: that is the law of averages, and the page says so.
   - "Steady" compares the visit-to-visit spread with what luck alone would produce (within 1.5 ×).
@@ -299,7 +314,7 @@ tiles stay on one screen. Plans are estimates: luck evens out over many shifts, 
   never lower an estimate below the team's usual number, and on the day people who turn up and log count even if
   nobody booked them.
 - **People who leave** drop off every booking list and count straight away (their future bookings are hidden, not
-  deleted).
+  deleted). **People on leave** stay booked and counted, marked "on leave": take them off an event they will miss.
 - **An upgraded database starts with nobody booked**, so its forecasts and pages look exactly as before until leaders
   book. The demo seed books the next two weeks.
 - Venues merge by name and town however they were typed (case, spaces, punctuation), but "Trafford Centre" and "The

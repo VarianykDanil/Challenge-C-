@@ -12,6 +12,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { VIDEO_MAX_BYTES } from '@lm/shared';
 import { createApp } from '../app.ts';
+import { bumpDataVersion } from '../lib/cache.ts';
 import { configureMediaRoot } from '../lib/videos/files.ts';
 import { configureWatchCredit } from '../lib/videos/progress.ts';
 import { receiveVideoUpload } from '../lib/videos/upload.ts';
@@ -237,7 +238,7 @@ test('progress: the parts seen are merged, a replay counts once, 90 % of 598 s (
   const report = (who: TestClient, body: Json) => who.post(`/videos/${linkId}/progress`, body);
   let r = await report(rep, { watchedS: 100, positionS: 100, ranges: [[0, 100]] });
   assert.equal(r.status, 200);
-  assert.deepEqual({ ...r.json, lastAt: undefined }, { videoId: linkId, watchedS: 100, positionS: 100, completedAt: null, lastAt: undefined, marked: false });
+  assert.deepEqual({ ...r.json, lastAt: undefined }, { videoId: linkId, watchedS: 100, positionS: 100, completedAt: null, lastAt: undefined, marked: false, owedS: 0 });
   // 50–200 overlaps 0–100: together 0–200 = 200 s
   r = await report(rep, { watchedS: 150, positionS: 200, ranges: [[50, 200]] });
   assert.equal(r.json.watchedS, 200);
@@ -290,10 +291,12 @@ test('Mark as watched (links only); a length reported by the player fills a miss
   let r = await rep.post(`/videos/${repsId}/progress`, { watchedS: 0, positionS: 0, durationS: 300, ranges: [[0, 290]] });
   assert.equal(r.json.watchedS, 290);
   assert.ok(r.json.completedAt, '290 of the reported 300 s is over 90 % (270 s)');
+  assert.equal(r.json.marked, true, 're-review fix: on a length only their own player reported, it is their own word (Marked)');
   assert.equal((await admin.get(`/videos/${repsId}`)).json.durationS, null, 'a rep cannot set everyone’s length');
-  // the admin's player fills it in
+  // the admin's player fills it in: Remy's 290 of 312 s (92.9 %) is a measured watch now
   r = await admin.post(`/videos/${repsId}/progress`, { watchedS: 0, positionS: 10, durationS: 312.4, ranges: [[0, 10]] });
   assert.equal((await admin.get(`/videos/${repsId}`)).json.durationS, 312);
+  assert.equal((await rep.get(`/videos/${repsId}`)).json.my.marked, false);
   // Google Drive cannot report: "Mark as watched"
   r = await repA2.post(`/videos/${repsId}/progress`, { watchedS: 0, markWatched: true });
   assert.ok(r.json.completedAt);
@@ -606,8 +609,12 @@ test('team view (hand-counted): the leader’s team, required videos per role, o
   assert.deepEqual(pick(byName.get('Lee Leader')), { requiredTotal: 3, watchedRequired: 0, watched: 0 });
   assert.equal((await leader.get('/videos/team')).headers.get('x-cache'), 'HIT');
   await repA2.post(`/videos/${linkId}/progress`, { watchedS: 0, positionS: 20, ranges: [[8, 20]] });
+  // P5 merge note, applied: a report that does not make a video watched leaves the cached views warm (they refresh
+  // within the cache's time, or at once when a report makes a video watched)
+  assert.equal((await leader.get('/videos/team')).headers.get('x-cache'), 'HIT', 'an in-between progress report keeps the cache');
+  bumpDataVersion();
   const fresh = await leader.get('/videos/team');
-  assert.equal(fresh.headers.get('x-cache'), 'MISS', 'a progress report clears the cached view');
+  assert.equal(fresh.headers.get('x-cache'), 'MISS');
   // 8–20 added to 590–598: 12 + 8 = 20 s
   assert.equal(fresh.json.rows.find((r: Json) => r.userName === 'Rita Rep').cells.find((c: Json) => c.videoId === linkId).watchedS, 20);
 
@@ -664,10 +671,17 @@ test('audit: adds, edits, deletes and settings are recorded; progress only when 
   assert.deepEqual(settings.map((r) => r.summary), ['Changed learning video settings: leaders can add videos no → yes', 'Changed learning video settings: leaders can add videos yes → no']);
   assert.equal(settings[0]!.entity, 'settings');
   const progress = auditRows('POST /videos/:id/progress');
-  // completions: Remy (link, Drive, upload), Rita (Drive, marked), and nothing for the dozens of other reports
+  // completions: Remy (link, upload, and the Drive one on his own player's length: Marked then), Rita (Drive, marked),
+  // the admin's player giving the Drive one its length, and nothing for the dozens of other reports
   assert.deepEqual(
     progress.map((r) => r.summary).sort(),
-    ['Marked “Objections on the street” as watched', 'Watched “How to speak so that people want to listen”', 'Watched “Monday team talk”', 'Watched “Objections on the street”'].sort(),
+    [
+      'Marked “Objections on the street” as watched',
+      'Marked “Objections on the street” as watched',
+      'Set the length of video “Objections on the street” to 5:12 (from Ada Admin’s player)',
+      'Watched “How to speak so that people want to listen”',
+      'Watched “Monday team talk”',
+    ].sort(),
   );
   assert.ok(progress.every((r) => r.entity === 'video'));
   // a refused write writes nothing

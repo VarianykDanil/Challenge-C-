@@ -18,7 +18,7 @@ that does not exist.
 | Route | Who | Answer |
 | --- | --- | --- |
 | `GET /videos` | staff | `LearningVideo[]` the caller's role sees, newest first, each with `my` (their own progress or null) |
-| `GET /videos/access` | staff | `{ canAdd }`: admins always; leaders while Settings → Learning videos allows it |
+| `GET /videos/access` | staff | `{ canAdd, uploadRoomBytes? }`: `canAdd` is true for admins always, and for leaders while Settings → Learning videos allows it. `uploadRoomBytes` (only for admins and leaders who may add videos) is the bytes an upload may use now: free space, less the reserve, less what the uploads already arriving will still write. It is null when the server cannot tell |
 | `GET /videos/settings` · `PUT /videos/settings { leadersCanAdd }` | admin | `VideoSettings { leadersCanAdd, storage: { uploads, bytes, folder } }` (`storage` on GET and PUT answers only) |
 | `GET /videos/team[?userId=]` (cached) | admin (everyone), leader (own team) | `TeamVideoProgress { required, rows, videos }`; `?userId=` one person (a leader: themself or their team, else 403; a client account or unknown id 404) |
 | `POST /videos` `VideoLinkInput` | admin; leader when allowed | 201 `LearningVideo`. 400 for anything but a YouTube, Vimeo or Google Drive video link; 409 "This video is already in Learning as “…”" for the same video in any form of link |
@@ -30,7 +30,7 @@ that does not exist.
 | `GET /videos/:id/views` | admin | `VideoViewRow[]`: everyone who started it (never client accounts), watched first, with `marked` when **Mark as watched** made it watched (stored when it happened) |
 | `PATCH /videos/:id` `VideoUpdateInput` | admin; the leader who added it while leaders may add | `LearningVideo`. Title, description, topic, audience, required, `durationS` (the link itself never changes; a new length counts everyone who has already seen 90% of it as watched, and never takes "watched" back); 400 "Nothing to change" for `{}` |
 | `DELETE /videos/:id` | same | 204; an upload's file and still are deleted too; everyone's progress goes (CASCADE) |
-| `POST /videos/:id/progress` `VideoProgressInput` | staff in its audience | `VideoProgress` (their own row only), with `marked` |
+| `POST /videos/:id/progress` `VideoProgressInput` | staff in its audience | `VideoProgress` (their own row only), with `marked` and `owedS`: seconds the report showed as seen that are not counted yet (over the watch credit). 429 after 30 reports by the same person for the same video in a minute: "That is more than 30 progress reports for this video in a minute. What you watch is kept and counted from your next report." The player sends about 4 a minute |
 
 `LearningVideo` adds to the foundation's fields: `provider` ('youtube' \| 'vimeo' \| 'drive'), `thumbnailUrl`
 (YouTube's still from i.ytimg.com, or `/api/videos/:id/poster`), `canEdit`; `VideoProgress` (and so `LearningVideo.my`)
@@ -48,8 +48,11 @@ when the first bytes are not an ISO media (MP4 / MOV) or WebM container, whateve
 file is read** when the disk has no room for it: an upload may use the disk's free space less a reserve of a tenth of
 the disk, at most 500 MB (a 1 GB cloud volume keeps 100 MB for the database and its backups): "The server has room for
 420 MB more and this video is 1.3 GB. Free some disk space on the server, or add the video as a YouTube, Vimeo or
-Google Drive link." (or "The server is almost out of disk space. …" without a declared size); 507 also if the disk
-fills while it arrives. Any failure removes the partial file and answers with `Connection: close`. While at least one upload is
+Google Drive link." (or "The server is almost out of disk space. …" without a declared size). The room counts the
+uploads already arriving: each holds its declared size, less what it has written, until it ends (last fix round). So
+two uploads that each fit, but not together, are never both let in. 507 also if the disk fills while it arrives:
+"The server ran out of disk space while this video arrived. Free some disk space on the server, or add the video as a
+YouTube, Vimeo or Google Drive link." Any failure removes the partial file and answers with `Connection: close`. While at least one upload is
 arriving the HTTP server's `requestTimeout` is raised from Node's 5 minutes to 3 hours (a 2 GB file over a hotspot)
 and put back once the last one ends.
 
@@ -62,13 +65,20 @@ resume position back to 0. `markWatched` is for links only (400 for an upload: "
 once you have seen 90% of it"). A video without a length takes `durationS` from a report by someone who may edit it
 (and then everyone who has already seen 90% of it counts as watched); anyone else's reported length only limits their
 own ranges, and decides their own "watched" for a link only — **an upload without a length of its own counts as
-watched only once it has one**. A report that makes a video watched clears the response cache itself.
+watched only once it has one**. A link watched to 90% of a length only the viewer's own player reported is stored as
+**Marked** (their own word, like Mark as watched). Once the link has a length, a viewing measured at 90% of it becomes a
+watch (last fix round). A report that makes a video watched clears the response cache itself. The others no longer
+clear it either: the blanket "every write clears the cache" step in `app.ts` skips progress reports (the P5 merge
+note, applied in the last fix round).
 
 **Audit** (`lib/audit/videoSpecs.ts`): "Added video: “…” (YouTube link)" / "(upload, 312 MB)"; "Updated video “…”:
 required no → yes" (nothing when nothing changed; a description is named, never quoted); "Deleted video “…”"; "Added a
 still to video “…” (length 0:42)" / "Replaced the still of video “…”"; "Changed learning video settings: leaders can
 add videos no → yes". Progress writes a row only when it makes the video watched for that person ("Watched “…”" or
-"Marked “…” as watched"); the report every 15 s writes nothing. Snapshots never hold a file path.
+"Marked “…” as watched"). The report every 15 s writes nothing. Last fix round: a report from an editor's player that
+gives the video its length writes "Set the length of video “Team talk” to 1:04 (from Danil Varianyk’s player);
+counted 1 person as watched". Edit video and the still step add "; counted N people as watched" when a new length
+counts people. Snapshots never hold a file path.
 
 ## Logic
 
@@ -98,12 +108,19 @@ add videos no → yes". Progress writes a row only when it makes the video watch
   business clock), from a credit of up to 2 minutes that refills between reports and that each report spends. A first
   report starts with the full 2 minutes. Worked by hand: claiming all of a 10-minute upload in one report counts 120 s;
   claiming it again every 15 s adds 30 s each time, so it is watched (540 s) after 14 more reports, 3.5 minutes — no
-  faster than playing it at double speed. A viewer at normal speed reporting every 15 s loses nothing; one whose
+  faster than playing it at double speed. **Last fix round:** a viewing starts with 40 s
+  (`VIDEO_WATCH_CREDIT_START_S`: two reports at double speed plus a margin). That applies to the first report, and to
+  the first after 10 minutes without one (`VIDEO_WATCH_SESSION_GAP_S`; a credit is never banked between viewings). The
+  player reports as soon as it starts playing, so the clock runs from then. A 100 s upload claimed in one report now
+  counts 40 s (it was 100 s, watched), and the 10-minute example needs 17 reports (4.25 minutes). The answer's `owedS`
+  says what is over the credit, and the player sends again on its next tick until nothing is owed, even if nothing new
+  was seen. A viewer at normal speed reporting every 15 s loses nothing; one whose
   reports were lost for two minutes gets the rest counted on the next reports (what is over the credit stays in the
   ranges). Reports every 100 ms gain nothing extra (the credit is per second, not per report).
-- **The player** reports every 15 s while something new was seen (`VIDEO_PROGRESS_INTERVAL_S`), on pause, at the end,
-  and with `keepalive` when the page is hidden or closed; a failed report keeps its ranges for the next one, and a
-  report sent twice changes nothing. **Resume** (`videoResumeAt`): the saved position, except within 5 s of the start,
+- **The player** reports when it starts playing, then every 15 s while something new was seen or anything is still
+  owed (`VIDEO_PROGRESS_INTERVAL_S`), on pause, at the end, and with `keepalive` when the page is hidden or closed. A
+  failed report keeps its ranges for the next one, and a failed end report is repeated with the next report (so the
+  resume point still goes back to the start). A report sent twice changes nothing. **Resume** (`videoResumeAt`): the saved position, except within 5 s of the start,
   within 10 s of the end, or once watched (then from the beginning).
 - **Lengths**: an MP4 / MOV's own length is read on the server from its `moov → mvhd` box (wherever `moov` sits);
   a WebM's comes from the browser. Uploads: the first time someone who may edit it opens the video, their browser reads
@@ -144,7 +161,8 @@ covers, the topic (Interviews, Pitching, Objections, Leadership, Other), who it 
 **Required**, which adds it to the Learning checklist of everyone it is for. For a link you can give the length
 (mm:ss, e.g. 9:58): it counts as watched at 90% of it. After adding, the video's page opens. While a video uploads,
 pressing Escape or Back asks **Stop the upload?** (**Keep uploading** / **Stop the upload**), and closing or reloading
-the tab asks before leaving; **Cancel upload** stops it at once.
+the tab asks before leaving. Ctrl+K / ⌘K (the search) waits until the upload has finished ("Search opens once the
+upload has finished"). **Cancel upload** stops it at once.
 
 **The video's page**: the player, picking up where you left off ("Picked up where you left off, at 8:15." with
 **Start from the beginning**). **Your progress** fills in as you watch and says **Watched** once you have seen 90%;
@@ -187,13 +205,11 @@ videos the server holds, how big they are and the folder they are in.
   start with a 1 GB volume: Linear Hub refuses an upload that would leave less than a tenth of the disk free (507 with
   a plain message), but one 800 MB video would still nearly fill it. Before uploading videos there, grow the volume
   (e.g. 10 GB), or use YouTube (unlisted), Vimeo or Google Drive links instead. On the MacBook the reserve is 500 MB.
-- **Lead merge note (app.ts, foundation-owned):** every write bumps the response cache's data version in `app.ts`, and
-  a progress report arrives every 15 s per viewer, so 20 people watching keep the cached dashboards and team views
-  cold. The route already clears the cache itself when a report makes a video watched; to finish the fix, change the
-  blanket bump in `server/src/app.ts` to skip progress reports:
-  `if (req.method !== 'GET' && req.method !== 'HEAD' && req.method !== 'OPTIONS' && !isVideoProgressReport(req.method, req.path)) bumpDataVersion();`
-  (import `isVideoProgressReport` from `./lib/videos/progress.ts`). The team view's in-progress dots then lag by up to
-  the cache's 20 s; "watched" shows at once. In `videos-trust.test.ts`, the cache test then expects 0 and 1 bumps
-  instead of 1 and 2.
+- **Lead merge note (app.ts, foundation-owned): applied in the last fix round.** The blanket bump in `server/src/app.ts`
+  skips progress reports (`isVideoProgressReport`), so people watching no longer keep the cached dashboards and team
+  views cold. The team view's in-progress dots lag by up to the cache's 20 s, and "watched" shows at once (the route
+  clears the cache itself). `videos-trust.test.ts` expects 0 and 1 bumps.
+- **A short video:** a viewing starts with 40 s of credit, so a video up to about 44 s long can still be ticked off by
+  one report. Watching is measured by the browser; this only stops one request from claiming a longer video.
 - YouTube plays from youtube-nocookie.com (no YouTube cookies until someone presses play) and Vimeo with Do Not Track.
   Uploaded videos are served only to signed-in staff in the video's audience, never cached by the browser.
