@@ -6,8 +6,14 @@
  * returns eventId → forecast. GET /events and GET /events/:id attach `forecast` for every event id present in the Map.
  * forecastFor(db, params, today): backs GET /events/forecast (route, validation and role check wired by P1).
  *
- * There is no roster table, so attendance is the team's own habit: expectedReps = the mean number of distinct reps
- * over the team's completed events with at least one entry in the last 8 weeks (null below 5 such events). The rate
+ * Attendance is the team's own habit: expectedReps = the mean number of distinct reps over the team's completed events
+ * with at least one entry in the last 8 weeks (null below 5 such events). Release 1.3 (P8, owner of this file in 1.3):
+ * BOOKINGS FEED FORECASTS — for every caller (GET /events, the Needs-attention "behind target" item, the digest), because
+ * the bookings are read here, in the same grouped query as the habit (never from an attached `bookings` key):
+ * expectedReps = shared expectedHeadcount — the people booked once a leader or the office has booked anyone; the larger
+ * of the self-bookings and the habit while only self-bookings exist; and on a live event with bookings, at least the
+ * people who have logged it (walk-ups). People who have left are not counted. Nobody booked → the habit, as in 1.1. The
+ * chip then reads "· 4 booked" instead of "· 5 reps usually". The rate
  * is sales per rep-day over 12 weeks of completed events, from the first bucket with ≥ 5 events in the chain
  * team (same campaign + type) → company (campaign + type) → campaign alone. The maths is shared/logic/eventForecast.ts.
  * eventRosters(db, events, today): "4 / 7 logged" for completed / live events dated today − 2 … today (one grouped
@@ -18,7 +24,7 @@
  * next read; only the cheap per-event maths (including the live flag, which moves with the clock) runs per request.
  * Read-only: nothing here writes a row (never a gauge, never payroll).
  */
-import { EVENT_FORECAST_RULES, eventForecastFrom, inRosterWindow, pickRate, type EventForecast, type EventRosterCount, type EventStatus, type EventType, type RateBucket, type SalesEventWithMeta } from '@lm/shared';
+import { EVENT_FORECAST_RULES, eventForecastFrom, expectedHeadcount, inRosterWindow, pickRate, type EventForecast, type EventRosterCount, type EventStatus, type EventType, type RateBucket, type SalesEventWithMeta } from '@lm/shared';
 import { all, placeholders, type Db } from '../../db/connection.ts';
 import { CACHE_TTL_MS, currentDataVersion } from '../cache.ts';
 import { addDays, nowHHMM } from '../dates.ts';
@@ -80,11 +86,16 @@ interface ForecastTarget {
   startTime: string;
   endTime: string;
   salesSoFar: number;
+  /** Release 1.3 (P8): distinct people who have logged the event so far (walk-ups on a live day). */
+  logged: number;
 }
 
-interface AttendanceRow {
-  teamId: number;
-  reps: number;
+/** Query 1's rows: 'a' = one completed event's distinct reps (id = its team); 'b' = one event's bookings (id = the event). */
+interface PeopleRow {
+  kind: 'a' | 'b';
+  id: number;
+  n: number;
+  managed: number;
 }
 
 interface RateRow {
@@ -117,6 +128,26 @@ interface Attendance {
   total: number;
 }
 
+/** Release 1.3 (P8): active people booked on an event, and whether a leader or the office booked any of them. */
+interface Booked {
+  booked: number;
+  managed: boolean;
+}
+
+interface People {
+  attendance: Map<number, Attendance>;
+  bookings: Map<number, Booked>;
+}
+
+/** Release 1.3 (P8): who an event is expected to have — exported for the plans (lib/venueInsights.ts). */
+export interface EventHeadcount {
+  /** expectedHeadcount (may be a mean); null when nobody is booked and the team has too little history. */
+  people: number | null;
+  booked: number;
+  managed: boolean;
+  habit: number | null;
+}
+
 interface Rates {
   byCampaign: Map<string, Acc>;
   byCompany: Map<string, Acc>;
@@ -126,30 +157,56 @@ interface Rates {
 }
 
 /**
- * Query 1 — attendance: distinct reps per completed event of these teams over the last 8 weeks (today excluded),
- * folded into a per-team mean. COUNT(*) is the distinct rep count: UNIQUE(event_id, user_id, date) and an entry's date
- * is its event's date. The (team_id, date) index bounds the read to the window.
+ * Query 1 — who is expected, in ONE statement:
+ *  - attendance ('a'): distinct reps per completed event of these teams over the last 8 weeks (today excluded), folded
+ *    into a per-team mean. COUNT(*) is the distinct rep count: UNIQUE(event_id, user_id, date) and an entry's date is its
+ *    event's date. The (team_id, date) index bounds the read to the window.
+ *  - bookings ('b', release 1.3, P8): active people booked per event (event_roster's primary key), and whether any of
+ *    them was booked by a leader or the office (source 'leader'). Read here rather than from an attached `bookings`
+ *    key, so every caller of eventForecasts sees the same numbers.
  */
-function attendanceFor(db: Db, teamIds: readonly number[], today: string): Map<number, Attendance> {
-  return remember(db, today, `attendance|${idKey(teamIds)}`, () => {
-    const rows = all<AttendanceRow>(
-      db,
-      `SELECT e.team_id AS teamId, COUNT(*) AS reps
+function peopleFor(db: Db, teamIds: readonly number[], eventIds: readonly number[], today: string): People {
+  return remember(db, today, `people|${idKey(teamIds)}|${idKey(eventIds)}`, () => {
+    let sql = `SELECT 'a' AS kind, e.team_id AS id, COUNT(*) AS n, 0 AS managed
        FROM events e JOIN gauge_entries g ON g.event_id = e.id
        WHERE e.team_id IN (${placeholders(teamIds.length)}) AND e.status = 'completed' AND e.date >= ? AND e.date < ?
-       GROUP BY e.id`,
-      [...teamIds, addDays(today, -7 * EVENT_FORECAST_RULES.attendanceWeeks), today],
-    );
-    const out = new Map<number, Attendance>();
-    for (const r of rows) {
-      const acc = out.get(r.teamId) ?? { events: 0, total: 0 };
+       GROUP BY e.id`;
+    const params: (number | string)[] = [...teamIds, addDays(today, -7 * EVENT_FORECAST_RULES.attendanceWeeks), today];
+    if (eventIds.length) {
+      sql += `
+       UNION ALL
+       SELECT 'b' AS kind, r.event_id AS id, COUNT(*) AS n, MAX(r.source = 'leader') AS managed
+       FROM event_roster r JOIN users u ON u.id = r.user_id AND u.status = 'active'
+       WHERE r.event_id IN (${placeholders(eventIds.length)})
+       GROUP BY r.event_id`;
+      params.push(...eventIds);
+    }
+    const out: People = { attendance: new Map(), bookings: new Map() };
+    for (const r of all<PeopleRow>(db, sql, params)) {
+      const id = Number(r.id);
+      if (r.kind === 'b') {
+        out.bookings.set(id, { booked: Number(r.n), managed: Number(r.managed) === 1 });
+        continue;
+      }
+      const acc = out.attendance.get(id) ?? { events: 0, total: 0 };
       acc.events += 1;
-      acc.total += Number(r.reps);
-      out.set(r.teamId, acc);
+      acc.total += Number(r.n);
+      out.attendance.set(id, acc);
     }
     return out;
   });
 }
+
+/** The headcount of one target from query 1 (shared expectedHeadcount). */
+function headcountOf(t: ForecastTarget, people: People): EventHeadcount {
+  const att = people.attendance.get(t.teamId);
+  const habit = att && att.events >= EVENT_FORECAST_RULES.minBasisDays ? att.total / att.events : null;
+  const b = people.bookings.get(t.id) ?? { booked: 0, managed: false };
+  return { people: expectedHeadcount({ habit, booked: b.booked, managed: b.managed, live: t.status === 'live', logged: t.logged }), booked: b.booked, managed: b.managed, habit };
+}
+
+const peopleOf = (db: Db, targets: readonly ForecastTarget[], today: string) =>
+  peopleFor(db, [...new Set(targets.map((t) => t.teamId))], targets.map((t) => t.id).filter((id) => id > 0), today);
 
 /**
  * Query 2 — rates: sales and rep-days per completed event of these campaigns over the last 12 weeks (today excluded),
@@ -192,12 +249,12 @@ function ratesFor(db: Db, campaignIds: readonly number[], today: string): Rates 
 function buildForecasts(db: Db, targets: readonly ForecastTarget[], today: string, now: string): Map<number, EventForecast> {
   const out = new Map<number, EventForecast>();
   if (!targets.length) return out;
-  const reps = attendanceFor(db, [...new Set(targets.map((t) => t.teamId))], today);
+  const people = peopleOf(db, targets, today);
   const { byCampaign, byCompany, byTeam, teamSales } = ratesFor(db, [...new Set(targets.map((t) => t.campaignId))], today);
 
   for (const t of targets) {
-    const att = reps.get(t.teamId);
-    const expectedReps = att && att.events >= EVENT_FORECAST_RULES.minBasisDays ? att.total / att.events : null;
+    // Release 1.3 (P8): who is expected — the bookings, the habit and (live) the people who have logged
+    const expectedReps = headcountOf(t, people).people;
     const company = `${t.campaignId}|${t.type}`;
     const team = `${company}|${t.teamId}`;
     const bucket = pickRate({
@@ -221,9 +278,8 @@ function buildForecasts(db: Db, targets: readonly ForecastTarget[], today: strin
   return out;
 }
 
-/** Forecasts for the scheduled and live events in `events`; `now` ("HH:MM", business clock) drives the live flag. */
-export function eventForecasts(db: Db, events: readonly SalesEventWithMeta[], today: string, now: string = nowHHMM()): Map<number, EventForecast> {
-  if (!smartEnabled()) return new Map();
+/** The scheduled and live events of a list, as forecast targets (the same list → the same memoised query 1). */
+function targetsOf(events: readonly SalesEventWithMeta[]): ForecastTarget[] {
   const targets: ForecastTarget[] = [];
   for (const e of events) {
     if (e.status !== 'scheduled' && e.status !== 'live') continue;
@@ -237,9 +293,29 @@ export function eventForecasts(db: Db, events: readonly SalesEventWithMeta[], to
       startTime: e.startTime,
       endTime: e.endTime,
       salesSoFar: e.totals.sales,
+      logged: e.repCount,
     });
   }
-  return buildForecasts(db, targets, today, now);
+  return targets;
+}
+
+/** Forecasts for the scheduled and live events in `events`; `now` ("HH:MM", business clock) drives the live flag. */
+export function eventForecasts(db: Db, events: readonly SalesEventWithMeta[], today: string, now: string = nowHHMM()): Map<number, EventForecast> {
+  if (!smartEnabled()) return new Map();
+  return buildForecasts(db, targetsOf(events), today, now);
+}
+
+/**
+ * Release 1.3 (P8): who each scheduled or live event in `events` is expected to have — the forecast's own headcount
+ * (query 1, memoised: passing the list GET /events forecast costs no statement), for the plans' event share.
+ */
+export function eventHeadcounts(db: Db, events: readonly SalesEventWithMeta[], today: string): Map<number, EventHeadcount> {
+  const targets = targetsOf(events);
+  const out = new Map<number, EventHeadcount>();
+  if (!targets.length) return out;
+  const people = peopleOf(db, targets, today);
+  for (const t of targets) out.set(t.id, headcountOf(t, people));
+  return out;
 }
 
 /** A new (scheduled) event for this team, campaign and type; without targetSales, repsNeeded and flag are null. */
@@ -256,6 +332,7 @@ export function forecastFor(db: Db, params: ForecastParams, today: string): Even
     startTime: '00:00',
     endTime: '23:59',
     salesSoFar: 0,
+    logged: 0,
   };
   const forecast = buildForecasts(db, [target], today, '00:00').get(0) ?? null;
   if (!forecast || hasTarget) return forecast;

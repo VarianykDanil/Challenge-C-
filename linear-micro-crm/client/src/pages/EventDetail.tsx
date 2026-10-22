@@ -100,7 +100,16 @@ export function EventDetailPage() {
             <span className="flex flex-wrap items-center gap-x-3 gap-y-1">
               <span className="inline-flex items-center gap-1"><CalendarDays className="h-3.5 w-3.5" aria-hidden />{formatDate(ev.date)}</span>
               <span className="inline-flex items-center gap-1"><Clock className="h-3.5 w-3.5" aria-hidden />{formatTime(ev.startTime)} – {formatTime(ev.endTime)}</span>
-              <span className="inline-flex items-center gap-1"><MapPin className="h-3.5 w-3.5" aria-hidden />{ev.venue}, {ev.city}<DirectionsLink variant="text" venue={ev.venue} city={ev.city} className="-my-1.5 ml-0.5" /><ErrorBoundary name="venue-link" fallback={null}><VenueLink venue={ev.venue} city={ev.city} className="-my-1.5 ml-0.5" /></ErrorBoundary></span>
+              {/* The address wraps as text and its two links follow it, each on one line, wrapping as a pair when the
+                  column is narrow (1.3, P8: the "Venue numbers" link made the old one-row line squeeze the address to a
+                  word a line at 768–1024 px, where a leader's four header buttons leave the column about 190 px). */}
+              <span className="inline-flex min-w-0 flex-wrap items-center gap-x-1">
+                <span className="min-w-0"><MapPin className="mr-1 inline h-3.5 w-3.5 align-[-2px]" aria-hidden />{ev.venue}, {ev.city}</span>
+                <span className="inline-flex min-w-0 flex-wrap items-center">
+                  <DirectionsLink variant="text" venue={ev.venue} city={ev.city} className="-my-1.5 ml-0.5" />
+                  <ErrorBoundary name="venue-link" fallback={null}><VenueLink venue={ev.venue} city={ev.city} className="-my-1.5 ml-0.5" /></ErrorBoundary>
+                </span>
+              </span>
               <span className="inline-flex items-center gap-1"><Users className="h-3.5 w-3.5" aria-hidden />{formatNumber(ev.repCount)} rep{ev.repCount === 1 ? '' : 's'}</span>
             </span>
           ) : undefined
@@ -140,7 +149,7 @@ export function EventDetailPage() {
           )}
 
           {ev?.forecast && (ev.status === 'scheduled' || ev.status === 'live') && (
-            <EventForecastChip variant="detail" forecast={ev.forecast} targetSales={ev.targetSales} campaignCode={ev.campaignCode} type={ev.type} teamName={ev.teamName} className="max-w-2xl" />
+            <EventForecastChip variant="detail" forecast={ev.forecast} targetSales={ev.targetSales} campaignCode={ev.campaignCode} type={ev.type} teamName={ev.teamName} booked={ev.bookings?.booked} className="max-w-2xl" />
           )}
 
           {/* Release 1.3 slot (P8): the plan for the people booked; nothing until the package lands. */}

@@ -16,7 +16,8 @@ import { useCurrentUser } from '@/auth/AuthProvider';
 import { CheckInButton } from '@/features/checkins/CheckInButton';
 import { ErrorBoundary } from '@/features/common/ErrorBoundary';
 import { PitchLink } from '@/features/learning/PitchLink';
-// Release 1.3 slot (P8): the thin "Aim" strip under the header.
+// Release 1.3 slot (P8): the thin "Aim" strip — one line in the help line's place under the header (upright), or in the
+// header's side slot (held sideways); the help shortens to its first sentence beside it, so the tiles keep their height.
 import { EventPlanStrip } from '@/features/venues/EventPlanStrip';
 import { LogGaugesModal } from '@/features/gauges/LogGaugesModal';
 import { TallyEventPicker } from '@/features/gauges/TallyEventPicker';
@@ -33,10 +34,13 @@ import { useWakeLock } from '@/lib/useWakeLock';
  * The grid: 2 × 3 on a phone held upright (tiles ≥ 88 px, so the help line still leaves all six on one 360×640
  * screen), 3 × 2 from 640 px wide or held sideways; the rows share the height left under the header. A phone held
  * sideways (`short`: max-height 480 px) packs all six onto one screen with 80 px tiles, so no row hides behind the
- * bottom bar; so does a small phone held upright (`tiny`: 320×568).
+ * bottom bar; so does a small phone held upright (`tiny`: 320×568). The smallest phones held sideways (360 px high,
+ * e.g. 640×360) get 72 px tiles (TILE_LOW), which is what leaves both rows above the bar there.
  */
 const GRID =
-  'grid flex-1 grid-cols-2 grid-rows-[repeat(3,minmax(5.5rem,1fr))] gap-2.5 sm:grid-cols-3 sm:grid-rows-[repeat(2,minmax(6rem,1fr))] sm:gap-3 landscape:grid-cols-3 landscape:grid-rows-[repeat(2,minmax(6rem,1fr))] short:grid-rows-[repeat(2,minmax(5rem,1fr))] short:gap-2 tiny:grid-rows-[repeat(3,minmax(5rem,1fr))] tiny:gap-2';
+  'grid flex-1 grid-cols-2 grid-rows-[repeat(3,minmax(5.5rem,1fr))] gap-2.5 sm:grid-cols-3 sm:grid-rows-[repeat(2,minmax(6rem,1fr))] sm:gap-3 landscape:grid-cols-3 landscape:grid-rows-[repeat(2,minmax(6rem,1fr))] short:grid-rows-[repeat(2,minmax(5rem,1fr))] short:gap-2 tiny:grid-rows-[repeat(3,minmax(5rem,1fr))] tiny:gap-2 [@media(max-height:370px)]:grid-rows-[repeat(2,minmax(4.5rem,1fr))]';
+/** A tile's own floor on the smallest phones held sideways (see GRID). */
+const TILE_LOW = '[@media(max-height:370px)]:min-h-18';
 
 export function QuickGaugesPage() {
   usePageTitle('Quick gauges');
@@ -115,9 +119,13 @@ export function QuickGaugesPage() {
             />
           )}
         </div>
-        {/* Held sideways there is no height to spare under the header, but room across it: the help line sits here. */}
+        {/* Held sideways there is no height to spare under the header, but room across it: the help line sits here,
+            and the booked person's Aim (P8) above it, the help then cut to its first sentence (two 14 px lines). */}
         {selected && (
-          <p className="hidden w-60 shrink-0 text-[11px] leading-[14px] text-muted short:block" data-quick-help-side><TallyHelp /></p>
+          <div className="group/side hidden w-60 shrink-0 text-[11px] leading-[14px] text-muted short:block" data-quick-help-side>
+            <ErrorBoundary name="event-plan" fallback={null}><EventPlanStrip event={selected} variant="quick" /></ErrorBoundary>
+            <p className="group-has-[[data-plan-strip]]/side:max-h-[14px] group-has-[[data-plan-strip]]/side:overflow-hidden"><TallyHelp /></p>
+          </div>
         )}
         {/* Release 1.2: the campaign's pitch (L2) and one-tap check-in (U4), 40 px icons on a phone, 4 px apart. */}
         {selected && (
@@ -135,12 +143,9 @@ export function QuickGaugesPage() {
         )}
       </header>
 
-      {/* Release 1.3 slot (P8): nothing until the package lands. */}
-      {selected && <ErrorBoundary name="event-plan" fallback={null}><EventPlanStrip event={selected} variant="quick" /></ErrorBoundary>}
-
       {loading ? (
         <div className={GRID} aria-hidden>
-          {GAUGE_KEYS.map((k) => <Skeleton key={k} className="h-full min-h-22 rounded-2xl sm:min-h-24 short:min-h-20 tiny:min-h-20" />)}
+          {GAUGE_KEYS.map((k) => <Skeleton key={k} className={clsx('h-full min-h-22 rounded-2xl sm:min-h-24 short:min-h-20 tiny:min-h-20', TILE_LOW)} />)}
         </div>
       ) : selected ? (
         <QuickCounter key={`${selected.id}:${selected.date}`} event={selected} />
@@ -203,8 +208,14 @@ function QuickCounter({ event }: { event: SalesEventWithMeta }) {
         <p className="rounded-xl border border-warning/30 bg-warning-soft px-3 py-2 text-xs text-warning">This browser can&apos;t keep the tally if the page reloads — keep this page open until you finish the shift.</p>
       )}
 
-      {/* Tucked under the event header (two short lines on a phone); held sideways it moves into the header. */}
-      <p className="-mt-1.5 px-1 text-[11px] leading-[14px] text-muted sm:-mt-1 sm:text-xs sm:leading-4 short:hidden tiny:-mt-1" data-quick-help><TallyHelp /></p>
+      {/* Tucked under the event header (two short lines on a phone); held sideways it moves into the header. Release 1.3
+          (P8): a booked person's Aim takes the first of the two lines (one line, cut short with "…" if it must be), and
+          on a phone the help keeps its first sentence on the second — the same 28 px, so all six tiles stay above the
+          Finish bar (UI QA 1.2). From 640 px wide there is room for both in full. */}
+      <div className="group/help -mt-1.5 px-1 text-[11px] leading-[14px] text-muted sm:-mt-1 sm:text-xs sm:leading-4 short:hidden tiny:-mt-1" data-quick-help>
+        <ErrorBoundary name="event-plan" fallback={null}><EventPlanStrip event={event} variant="quick" className="text-xs leading-4 sm:text-sm sm:leading-5" /></ErrorBoundary>
+        <p className="group-has-[[data-plan-strip]]/help:max-sm:max-h-[14px] group-has-[[data-plan-strip]]/help:max-sm:overflow-hidden"><TallyHelp /></p>
+      </div>
 
       <div className={GRID} role="group" aria-label={`Counts for ${event.name}`}>
         {GAUGE_KEYS.map((k) => (
@@ -326,7 +337,7 @@ function Tile({ k, value, digits, full, pulse, color, onTap }: TileProps) {
   const label = GAUGE_LABELS[k];
   const flash = useRaiseFlash(pulse);
   return (
-    <div className="relative min-h-22 sm:min-h-24 short:min-h-20 tiny:min-h-20" data-quick-tile={k}>
+    <div className={clsx('relative min-h-22 sm:min-h-24 short:min-h-20 tiny:min-h-20', TILE_LOW)} data-quick-tile={k}>
       <button
         type="button"
         onClick={() => onTap(1)}

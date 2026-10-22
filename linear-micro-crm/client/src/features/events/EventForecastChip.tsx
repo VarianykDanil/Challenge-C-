@@ -38,15 +38,28 @@ export function forecastRange(f: Pick<EventForecast, 'low' | 'high'>): string {
   return `${formatNumber(Math.round(f.low))}–${formatNumber(Math.round(f.high))}`;
 }
 
-/** ["expect ≈ 14 (8–20)", "· 5 reps usually"]: the two halves a narrow cell may break between (never inside one). */
-export function forecastHeadlineParts(f: Pick<EventForecast, 'expectedSales' | 'expectedReps' | 'low' | 'high'>): [string, string] {
+/**
+ * Who the estimate is for when people are booked: "4 booked", or — when it counts more people than are booked (a roster
+ * still filling up uses the team's usual turnout as its floor; on a live day, people who logged without a booking
+ * count too) — "4 booked, 6 expected".
+ */
+function bookedText(f: Pick<EventForecast, 'expectedReps'>, booked: number): string {
+  const expected = Math.round(f.expectedReps);
+  return expected > booked ? `${formatNumber(booked)} booked, ${formatNumber(expected)} expected` : `${formatNumber(booked)} booked`;
+}
+
+/**
+ * ["expect ≈ 14 (8–20)", "· 5 reps usually"]: the two halves a narrow cell may break between (never inside one).
+ * Release 1.3 (P8): with people booked the second half reads "· 4 booked" (or "· 4 booked, 6 expected").
+ */
+export function forecastHeadlineParts(f: Pick<EventForecast, 'expectedSales' | 'expectedReps' | 'low' | 'high'>, booked = 0): [string, string] {
   const reps = Math.max(1, Math.round(f.expectedReps));
-  return [`expect ≈ ${formatNumber(Math.round(f.expectedSales))} (${forecastRange(f)})`, `· ${pluralise(reps, 'rep')} usually`];
+  return [`expect ≈ ${formatNumber(Math.round(f.expectedSales))} (${forecastRange(f)})`, booked > 0 ? `· ${bookedText(f, booked)}` : `· ${pluralise(reps, 'rep')} usually`];
 }
 
 /** "expect ≈ 14 (8–20) · 5 reps usually": the range is always on show, not only in the hover tooltip (phones). */
-export function forecastHeadline(f: Pick<EventForecast, 'expectedSales' | 'expectedReps' | 'low' | 'high'>): string {
-  return forecastHeadlineParts(f).join(' ');
+export function forecastHeadline(f: Pick<EventForecast, 'expectedSales' | 'expectedReps' | 'low' | 'high'>, booked = 0): string {
+  return forecastHeadlineParts(f, booked).join(' ');
 }
 
 /**
@@ -86,12 +99,14 @@ export interface EventForecastChipProps {
   variant?: 'chip' | 'detail';
   /** Tooltip side for the chip variant. */
   side?: 'top' | 'bottom';
+  /** Release 1.3 (P8): people booked on the event (the forecast is then for them). */
+  booked?: number;
   className?: string;
 }
 
-export function EventForecastChip({ forecast: f, targetSales, campaignCode, type, teamName, variant = 'chip', side = 'top', className }: EventForecastChipProps) {
+export function EventForecastChip({ forecast: f, targetSales, campaignCode, type, teamName, variant = 'chip', side = 'top', booked = 0, className }: EventForecastChipProps) {
   const sentence = forecastSentence(f, targetSales, campaignCode, type, teamName);
-  const [estimate, reps] = forecastHeadlineParts(f);
+  const [estimate, reps] = forecastHeadlineParts(f, booked);
   // A block that takes its cell's width and wraps inside it: in a narrow grid cell (Events rows from 768 to ~1600 px)
   // the reps half drops to a second line instead of running over the next cell (each half is an inline-block, so the
   // line breaks between them first). Never truncated: the range stays on show.
@@ -109,7 +124,7 @@ export function EventForecastChip({ forecast: f, targetSales, campaignCode, type
         <div className="flex flex-wrap items-center gap-2">
           <span className="inline-flex items-center gap-1 text-sm font-medium text-fg">
             <Sparkles className="h-3.5 w-3.5 shrink-0 text-accent" aria-hidden />
-            Estimate: about {formatNumber(Math.round(f.expectedSales))} sales · usually {pluralise(Math.max(1, Math.round(f.expectedReps)), 'rep')}
+            Estimate: about {formatNumber(Math.round(f.expectedSales))} sales · {booked > 0 ? `for the ${bookedText(f, booked)}` : `usually ${pluralise(Math.max(1, Math.round(f.expectedReps)), 'rep')}`}
           </span>
           <ForecastFlag flag={f.flag} />
         </div>

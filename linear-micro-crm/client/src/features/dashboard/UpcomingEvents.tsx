@@ -2,7 +2,7 @@ import { useMemo } from 'react';
 import { Link } from 'react-router-dom';
 import { format } from 'date-fns';
 import { CalendarDays, MapPin, PlusCircle } from 'lucide-react';
-import type { EventForecast, SalesEventWithMeta } from '@lm/shared';
+import type { EventBookingSummary, EventForecast, SalesEventWithMeta } from '@lm/shared';
 import { EmptyState } from '@/components/ui';
 import { useEvents } from '@/api/hooks';
 import { useCurrentUser } from '@/auth/AuthProvider';
@@ -34,6 +34,12 @@ export function UpcomingEvents({ events }: { events: SalesEventWithMeta[] }) {
     for (const e of list.data ?? []) if (e.forecast) map.set(e.id, e.forecast);
     return map;
   }, [list.data]);
+  // Release 1.3 (P8): /me/dashboard carries no bookings either; they come from the same /events list
+  const bookings = useMemo(() => {
+    const map = new Map<number, EventBookingSummary>();
+    for (const e of list.data ?? []) if (e.bookings) map.set(e.id, e.bookings);
+    return map;
+  }, [list.data]);
 
   if (!events.length) return <EmptyState icon={<CalendarDays className="h-6 w-6" aria-hidden />} title="Nothing scheduled" description="Upcoming events for your team will appear here." size="sm" className="border-0" />;
 
@@ -47,6 +53,7 @@ export function UpcomingEvents({ events }: { events: SalesEventWithMeta[] }) {
     <ul className="divide-y divide-border">
       {events.map((e) => {
         const forecast = forecasts.get(e.id);
+        const booked = bookings.get(e.id);
         return (
           <li key={e.id} className="py-1.5">
             <div className="flex items-start gap-1">
@@ -65,8 +72,8 @@ export function UpcomingEvents({ events }: { events: SalesEventWithMeta[] }) {
                       <span className="font-semibold text-fg">{formatDateShort(e.date)}</span> · {formatTime(e.startTime)} · {formatRelative(e.date)}
                     </span>
                     <span className="mt-0.5 flex items-start gap-1 text-xs text-muted"><MapPin className="mt-0.5 h-3 w-3 shrink-0" aria-hidden /><span className="min-w-0 truncate">{e.venue}, {e.city} · {e.teamName}</span></span>
-                    {forecast && <EventForecastChip forecast={forecast} targetSales={e.targetSales} campaignCode={e.campaignCode} type={e.type} teamName={e.teamName} side="bottom" className="mt-1" />}
-                    <ErrorBoundary name="event-plan" fallback={null}><EventPlanStrip event={e} variant="upcoming" className="mt-1" /></ErrorBoundary>
+                    {forecast && <EventForecastChip forecast={forecast} targetSales={e.targetSales} campaignCode={e.campaignCode} type={e.type} teamName={e.teamName} booked={booked?.booked} side="bottom" className="mt-1" />}
+                    <ErrorBoundary name="event-plan" fallback={null}><EventPlanStrip event={booked ? { ...e, bookings: booked } : e} variant="upcoming" className="mt-1" /></ErrorBoundary>
                   </span>
                 </span>
               </Link>

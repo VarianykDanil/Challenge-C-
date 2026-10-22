@@ -1,6 +1,6 @@
 import { Link } from 'react-router-dom';
 import { format } from 'date-fns';
-import { Clock, MapPin, Users } from 'lucide-react';
+import { CalendarCheck, Clock, MapPin, Users } from 'lucide-react';
 import { EVENT_ROSTER_LOOKBACK_DAYS, inRosterWindow as inSharedRosterWindow, type SalesEventWithMeta } from '@lm/shared';
 import { Badge, ProgressBar } from '@/components/ui';
 import { EventStatusBadge, EventTypeBadge } from '@/features/common';
@@ -39,7 +39,13 @@ export function EventRow({ event: e }: EventRowProps) {
   // who had started by that day, so it matches the event page's "Not logged yet" list and never reads 8 / 7.
   const roster = e.roster && e.roster.members > 0 ? e.roster : null;
   const missing = !!roster && roster.logged < roster.members;
-  const label = [e.name, e.campaignName, e.venue, e.forecast ? forecastAriaText(e.forecast) : null, roster ? `${roster.logged} of ${roster.members} team members logged` : null].filter(Boolean).join(', ');
+  // Release 1.3 (P8): on an event still to come, who is booked replaces the (empty) rep count
+  const booked = e.bookings && e.bookings.booked > 0 && (notStarted || e.totals.sales + e.repCount === 0) ? e.bookings : null;
+  const label = [
+    e.name, e.campaignName, e.venue, e.forecast ? forecastAriaText(e.forecast) : null,
+    roster ? `${roster.logged} of ${roster.members} team members logged` : null,
+    booked ? `${booked.booked} booked${booked.me ? ', you included' : ''}` : null,
+  ].filter(Boolean).join(', ');
   return (
     <li className="flex items-stretch rounded-xl border border-border bg-surface shadow-sm">
       <Link
@@ -67,11 +73,15 @@ export function EventRow({ event: e }: EventRowProps) {
           ) : (
             <ProgressBar value={e.totals.sales} max={Math.max(e.targetSales, 1)} tone={tone} size="sm" label={`${formatNumber(e.totals.sales)} / ${formatNumber(e.targetSales)} sales`} />
           )}
-          {e.forecast && <EventForecastChip forecast={e.forecast} targetSales={e.targetSales} campaignCode={e.campaignCode} type={e.type} teamName={e.teamName} side="bottom" />}
+          {e.forecast && <EventForecastChip forecast={e.forecast} targetSales={e.targetSales} campaignCode={e.campaignCode} type={e.type} teamName={e.teamName} booked={e.bookings?.booked} side="bottom" />}
           <ErrorBoundary name="event-plan" fallback={null}><EventPlanStrip event={e} variant="row" /></ErrorBoundary>
         </span>
         <span className="flex items-center justify-between gap-3 md:justify-end">
-          {roster ? (
+          {booked && !roster ? (
+            <span className={`flex items-center gap-1 whitespace-nowrap text-xs ${booked.me ? 'font-semibold text-primary' : 'text-muted'}`} title={booked.me ? 'People booked, you included' : 'People booked'}>
+              <CalendarCheck className="h-3.5 w-3.5" aria-hidden />{formatNumber(booked.booked)} booked
+            </span>
+          ) : roster ? (
             <span className={`flex items-center gap-1 whitespace-nowrap text-xs ${missing ? 'font-semibold text-warning' : 'text-muted'}`} title="Team members with gauges logged">
               <Users className="h-3.5 w-3.5" aria-hidden />{formatNumber(roster.logged)} / {formatNumber(roster.members)} logged
             </span>

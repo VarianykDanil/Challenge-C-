@@ -1,5 +1,6 @@
 import { useMemo, useState } from 'react';
-import { CalendarDays, Plus } from 'lucide-react';
+import { Link } from 'react-router-dom';
+import { CalendarDays, MapPinned, Plus } from 'lucide-react';
 import type { EventStatus, SalesEventWithMeta } from '@lm/shared';
 import { Badge, Button, EmptyState, PageHeader, Select } from '@/components/ui';
 import { useCampaigns, useEvents, useTeams } from '@/api/hooks';
@@ -58,7 +59,19 @@ export function EventsPage() {
       <PageHeader
         title={COPY.nav.events.title}
         description={COPY.nav.events.description}
-        actions={canCreate ? <Button onClick={() => setCreateOpen(true)} leftIcon={<Plus className="h-4 w-4" aria-hidden />}>New event</Button> : undefined}
+        actions={
+          <>
+            {/* Release 1.3 (P8): every venue's numbers and the law of averages */}
+            <Link
+              to="/venues"
+              className="focus-ring inline-flex h-10 items-center gap-2 rounded-lg border border-border bg-surface px-4 text-sm font-medium text-fg shadow-card transition hover:border-border-strong hover:bg-surface-2"
+            >
+              <MapPinned className="h-4 w-4" aria-hidden />
+              Venues
+            </Link>
+            {canCreate && <Button onClick={() => setCreateOpen(true)} leftIcon={<Plus className="h-4 w-4" aria-hidden />}>New event</Button>}
+          </>
+        }
       />
 
       {/* The range presets and three filters only fit side by side from about 1400 px (with the sidebar open); below that they stack. */}

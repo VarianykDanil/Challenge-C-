@@ -1,13 +1,15 @@
 import { Router } from 'express';
 import { z } from 'zod';
-import { EVENT_MAX_TARGET_SALES, funnelRatios, type EventForecastResponse, type SalesEventWithMeta } from '@lm/shared';
+import { EVENT_MAX_TARGET_SALES, funnelRatios, type EventForecastResponse, type SalesEventWithMeta, type UserWithTeam } from '@lm/shared';
 import { get, run, type Db } from '../db/connection.ts';
 import { Where, getEvent, listEvents, listGauges } from '../db/queries.ts';
 import { addDays, nowHHMM, todayISO } from '../lib/dates.ts';
 import { badRequest, conflict, forbidden, notFound } from '../lib/errors.ts';
+import { bookingSummaries } from '../lib/eventRoster.ts';
+import { eventPlans } from '../lib/venueInsights.ts';
 import { canManageTeam, redactEntry } from '../lib/scope.ts';
 import { smartEnabled } from '../lib/smart/enabled.ts';
-import { eventForecasts, eventRosters, forecastFor } from '../lib/smart/eventForecast.ts';
+import { eventForecasts, eventHeadcounts, eventRosters, forecastFor } from '../lib/smart/eventForecast.ts';
 import { idParam, isoDate, optionalIdQuery, optionalString, parseRange, positiveInt, targetSalesCount, timeHHMM } from '../lib/validate.ts';
 import { currentUser, requireRole } from '../middleware/auth.ts';
 
@@ -38,9 +40,52 @@ const forecastQuery = z.object({
 });
 
 /**
+ * Release 1.3 (P8): attach `bookings` ({ booked, me }) to the events somebody is booked on, in one grouped query. An
+ * event nobody is booked on carries no key at all, so 1.2 payloads stay byte-identical. Bookings are a workflow rule,
+ * not an estimate: they stay with LM_SMART=0. Every staff role may see how many are booked (event pages already name
+ * who logged), so nothing is scoped beyond `me`.
+ */
+function withBookings<T extends SalesEventWithMeta>(db: Db, events: T[], me: UserWithTeam): T[] {
+  if (!events.length) return events;
+  const summaries = bookingSummaries(db, events.map((e) => e.id), me.id);
+  if (!summaries.size) return events;
+  return events.map((e) => {
+    const bookings = summaries.get(e.id);
+    return bookings ? { ...e, bookings } : e;
+  });
+}
+
+/**
+ * Release 1.3 (P8): the caller's own aim (`bookings.aim`, { targetSales, steps }) on the events they are booked on that
+ * are still open — the same numbers as GET /events/:id/plan, so the Events list, the dashboard and Quick gauges need no
+ * request per row. One eventPlans call for all of them (at most two queries, memoised; the headcount reuses the
+ * forecast's query for this very list). An estimate: none with LM_SMART=0, and none without anything to plan from.
+ */
+function withAims<T extends SalesEventWithMeta>(db: Db, events: T[], today: string, me: UserWithTeam): T[] {
+  if (!events.length || !smartEnabled()) return events;
+  const mine = events.filter((e) => e.bookings?.me && (e.status === 'scheduled' || e.status === 'live') && e.date >= today);
+  if (!mine.length) return events;
+  const person = { userId: me.id, userName: `${me.firstName} ${me.lastName}`, avatarColor: me.avatarColor, teamId: me.teamId };
+  const plans = eventPlans(db, mine.map((event) => ({ event, people: [person] })), me, today, eventHeadcounts(db, events, today));
+  return events.map((e) => {
+    const plan = plans.get(e.id)?.[0];
+    return plan && plan.steps.length && e.bookings ? { ...e, bookings: { ...e.bookings, aim: { targetSales: plan.targetSales, steps: plan.steps } } } : e;
+  });
+}
+
+/**
+ * Bookings (P8), the smart release's forecasts and roster counts, then the caller's own aims. The forecasts read the
+ * bookings themselves (lib/smart/eventForecast.ts), so every caller of eventForecasts agrees with these rows.
+ */
+function withMeta<T extends SalesEventWithMeta>(db: Db, events: T[], today: string, me: UserWithTeam): T[] {
+  return withAims(db, withForecasts(db, withBookings(db, events, me), today), today, me);
+}
+
+/**
  * Smart release 1.1: attach `forecast` and `roster` (p6) to the events that have one. Nothing is attached — not even
  * the key — when the kill switch is off or the builder has nothing for an event, so existing payloads stay
- * byte-identical.
+ * byte-identical. Release 1.3 (P8): an event with bookings is forecast for the people expected to work it
+ * (shared expectedHeadcount, read in lib/smart/eventForecast.ts).
  */
 function withForecasts<T extends SalesEventWithMeta>(db: Db, events: T[], today: string): T[] {
   if (!events.length || !smartEnabled()) return events;
@@ -86,7 +131,7 @@ export function eventsRouter(db: Db): Router {
       where.add('e.status = ?', status);
     }
     // the date window is pushed into the gauge aggregate too, so the list never scans the whole gauge table
-    res.json(withForecasts(db, listEvents(db, `${where}`, where.params, undefined, { from, to }), today));
+    res.json(withMeta(db, listEvents(db, `${where}`, where.params, undefined, { from, to }), today, me));
   });
 
   // Smart release 1.1 (p6 fills forecastFor): admin / leader only; declared before /:id so the literal path wins.
@@ -104,7 +149,7 @@ export function eventsRouter(db: Db): Router {
     const me = currentUser(req);
     const found = getEvent(db, idParam(req));
     if (!found) throw notFound('Event');
-    const [event] = withForecasts(db, [found], todayISO());
+    const [event] = withMeta(db, [found], todayISO(), me);
     // read-only for every role; check-in times and notes of other people are stripped unless admin / that team's leader
     const entries = listGauges(db, 'WHERE g.event_id = ?', [event!.id], 'g.sales DESC, u.last_name ASC').map((e) => redactEntry(me, e));
     res.json({ ...event!, entries, ratios: funnelRatios(event!.totals) });
