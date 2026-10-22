@@ -1,8 +1,9 @@
 // Release 1.3 — P2 invoices hooks — OWNED BY P2 (laid down by r3-foundation). Endpoints: server/src/routes/invoices.ts.
+// Every write invalidates the invoices, the finance views (payroll rows carry run.invoice) and the attention feed.
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import type {
-  CompanySettings, CompanySettingsInput, Invoice, InvoiceDisputeInput, InvoiceDisputeRow, InvoiceProfile, InvoiceProfileInput,
-  InvoiceResolveInput, InvoiceStatus, InvoiceSummary, SelfBillingAgreement,
+  CompanySettings, CompanySettingsInput, Invoice, InvoiceDisputeInput, InvoiceDisputeRow, InvoiceListRow, InvoiceProfile, InvoiceProfileInput,
+  InvoiceResolveInput, InvoiceStatus, PayrollRunWithUser, SelfBillingAgreement,
 } from '@lm/shared';
 import { api, qs } from './client';
 
@@ -20,10 +21,11 @@ export const invoiceKeys = {
 const invalidateInvoices = (qc: ReturnType<typeof useQueryClient>) => {
   void qc.invalidateQueries({ queryKey: invoiceKeys.all });
   void qc.invalidateQueries({ queryKey: ['finance'] });
+  void qc.invalidateQueries({ queryKey: ['dashboard'] });
 };
 
 export function useAgreement({ enabled = true }: { enabled?: boolean } = {}) {
-  return useQuery({ queryKey: invoiceKeys.agreement, queryFn: () => api<SelfBillingAgreement>('/invoices/agreement'), enabled });
+  return useQuery({ queryKey: invoiceKeys.agreement, queryFn: () => api<SelfBillingAgreement>('/invoices/agreement'), enabled, staleTime: 5 * 60_000 });
 }
 
 export function useAcceptAgreement() {
@@ -56,12 +58,12 @@ export function useSaveCompanySettings() {
 export function useInvoices(p: { userId?: number | null; weekStart?: string | null; status?: InvoiceStatus | null } = {}, { enabled = true }: { enabled?: boolean } = {}) {
   return useQuery({
     queryKey: invoiceKeys.list(p),
-    queryFn: () => api<InvoiceSummary[]>(`/invoices${qs({ userId: p.userId ?? undefined, weekStart: p.weekStart ?? undefined, status: p.status ?? undefined })}`),
+    queryFn: () => api<InvoiceListRow[]>(`/invoices${qs({ userId: p.userId ?? undefined, weekStart: p.weekStart ?? undefined, status: p.status ?? undefined })}`),
     enabled,
   });
 }
 
-/** GET /invoices/by-run/:runId — the invoice behind a payslip. */
+/** GET /invoices/by-run/:runId — the invoice behind a payslip. Only ask for runs that carry `run.invoice` (else 404). */
 export function useInvoiceForRun(runId: number | null | undefined, { enabled = true }: { enabled?: boolean } = {}) {
   return useQuery({ queryKey: invoiceKeys.byRun(runId ?? 0), queryFn: () => api<Invoice>(`/invoices/by-run/${runId}`), enabled: enabled && runId != null });
 }
@@ -72,14 +74,14 @@ export function useInvoice(id: number | null | undefined, { enabled = true }: { 
 
 export function useAcceptInvoice() {
   const qc = useQueryClient();
-  return useMutation({ mutationFn: (id: number) => api<Invoice>(`/invoices/${id}/accept`, { method: 'POST' }), onSuccess: () => invalidateInvoices(qc) });
+  return useMutation({ mutationFn: (id: number) => api<Invoice>(`/invoices/${id}/accept`, { method: 'POST' }), onSettled: () => invalidateInvoices(qc) });
 }
 
 export function useDisputeInvoice() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: ({ id, ...input }: InvoiceDisputeInput & { id: number }) => api<Invoice>(`/invoices/${id}/dispute`, { method: 'POST', json: input }),
-    onSuccess: () => invalidateInvoices(qc),
+    onSettled: () => invalidateInvoices(qc),
   });
 }
 
@@ -91,6 +93,16 @@ export function useResolveInvoice() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: ({ id, ...input }: InvoiceResolveInput & { id: number }) => api<Invoice>(`/invoices/${id}/resolve`, { method: 'POST', json: input }),
-    onSuccess: () => invalidateInvoices(qc),
+    onSettled: () => invalidateInvoices(qc),
+  });
+}
+
+/** P2: Mark paid without an accepted invoice — POST /finance/payroll/:id/pay with the admin's reason (audited). */
+export function useMarkPaidWithReason() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ runId, overrideReason }: { runId: number; overrideReason: string }) =>
+      api<PayrollRunWithUser>(`/finance/payroll/${runId}/pay`, { method: 'POST', json: { overrideReason } }),
+    onSettled: () => invalidateInvoices(qc),
   });
 }

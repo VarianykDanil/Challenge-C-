@@ -29,6 +29,7 @@
  * address_line2, address_town, postcode, utr, vat_number; meta `ext:invoices:company` (CompanySettings JSON),
  * `ext:invoices:seq:<YYYY>` (the number sequence).
  */
+import type { PayrollStatus } from '../types.ts';
 import type { PayLineKind } from './pay.ts';
 
 /** The agreement text's version; bump when the wording changes (everyone accepts again). */
@@ -59,6 +60,11 @@ export interface InvoiceParty {
   utr?: string | null;
   /** null → the invoice says "Not VAT registered". */
   vatNumber?: string | null;
+  /**
+   * P2: the supplier's home address and UTR are not shown to this viewer (a team leader): only the person and the
+   * office see them. The name and VAT registration stay.
+   */
+  withheld?: boolean;
 }
 
 export interface InvoiceLine {
@@ -86,6 +92,43 @@ export interface InvoiceSummary {
   /** ISO: 12:00 the day before payday; after it an un-disputed invoice counts as accepted. */
   deemedAcceptedAt: string;
   total: number;
+}
+
+/** P2: GET /invoices — a summary with the person and the pay week it is for. */
+export interface InvoiceListRow extends InvoiceSummary {
+  payrollRunId: number;
+  userId: number;
+  userName: string;
+  weekStart: string;
+  weekEnd: string;
+  /** Payday. */
+  dueDate: string;
+  runStatus: PayrollStatus;
+}
+
+/** P2: an earlier version of a reissued invoice (newest first in Invoice.previousVersions). */
+export interface InvoiceVersionNote {
+  version: number;
+  issuedAt: string;
+  total: number;
+  /** Its status when it was replaced (e.g. 'disputed'). */
+  status: InvoiceStatus;
+  replacedAt: string;
+  /** "Fixed and reissued by the office", "The figures changed". */
+  reason: string;
+  disputeReason?: string | null;
+}
+
+/** P2: what the signed-in viewer may do with an invoice (the server's rules, so the buttons match them). */
+export interface InvoiceActions {
+  /** The supplier: Accept invoice. */
+  accept: boolean;
+  /** The supplier: Something's wrong (before the deadline, while unpaid). */
+  dispute: boolean;
+  /** Admin: Fix and reissue / Keep as it is (a disputed invoice). */
+  resolve: boolean;
+  /** Admin: Mark paid anyway, with a reason (unpaid and not accepted). */
+  markPaidWithReason: boolean;
 }
 
 export interface InvoiceDisputeLine {
@@ -123,10 +166,28 @@ export interface Invoice extends InvoiceSummary {
   /** "Self-billed invoice issued by Linear MCR Limited on behalf of the supplier under a self-billing agreement". */
   selfBillingNote: string;
   signatory: { name: string; signatureUrl: string | null };
-  /** "Accepted electronically by Jordan Lee on Thu 22 Oct 2026, 14:05"; null while not accepted. */
-  acceptance: { by: string; at: string; deemed: boolean } | null;
+  /**
+   * "Accepted electronically by Jordan Lee on Thu 22 Oct 2026, 14:05"; null while not accepted. P2: `withoutAgreement`
+   * marks a deemed acceptance of someone who had not accepted the self-billing agreement by then.
+   */
+  acceptance: { by: string; at: string; deemed: boolean; withoutAgreement?: boolean } | null;
   dispute: InvoiceDispute | null;
   resolution: InvoiceResolution | null;
+  /** P2: the run's payroll status and paid date (Mark paid gating, "Paid on …"). */
+  runStatus?: PayrollStatus;
+  paidDate?: string | null;
+  /** P2: the run was marked paid before the invoice was accepted, with the admin's reason (audited). */
+  paidOverride?: { reason: string; by: number | null; byName?: string | null; at: string } | null;
+  /** P2: earlier versions, newest first (absent before the first reissue). */
+  previousVersions?: InvoiceVersionNote[];
+  /** P2: what the viewer may do. */
+  actions?: InvoiceActions;
+  /** P2: the supplier only — whether they accepted the current self-billing agreement (needed to accept). */
+  agreementAccepted?: boolean;
+  /** P2, admin only: the run's gross as it stands now (what Fix and reissue would issue). */
+  runTotal?: number;
+  /** P2, admin only: the run's figures moved since this version was issued. */
+  figuresChanged?: boolean;
 }
 
 export interface InvoiceDisputeInput {
@@ -138,6 +199,11 @@ export interface InvoiceResolveInput {
   action: 'reissue' | 'keep';
   /** Shown to the person. */
   note: string;
+  /**
+   * P2, 'reissue' only: a correction added to the disputed week before it is reissued (a pay_adjustments row of kind
+   * 'dispute' for the invoice; £, negative to take money off). The run is recalculated with P1's rule.
+   */
+  adjustment?: { amount: number; note?: string } | null;
 }
 
 /** Finance → Company → Disputes. */
@@ -149,6 +215,18 @@ export interface InvoiceDisputeRow {
   dispute: InvoiceDispute;
   /** Our figure for the disputed lines and the run. */
   ours: { total: number; salesLogged?: number; salesConfirmed?: number };
+  /** P2: the run behind it (to open it from the Disputes card) and its payday. */
+  payrollRunId?: number;
+  dueDate?: string;
+  teamName?: string | null;
+  /** P2: the disputed lines as printed on the invoice, with the person's note on each. */
+  disputedLines?: { line: number; description: string; amount: number; paid: boolean; note?: string }[];
+  /** P2: true once the run's figures differ from the disputed invoice (the office changed something). */
+  figuresChanged?: boolean;
+  /** P2: the run's gross as it stands now (what Fix and reissue would issue). */
+  runTotal?: number;
+  /** P2: the clients' statements that confirmed this person's sales for the week (Finance → Statements → the statement). */
+  statements?: { id: number; campaignCode: string | null }[];
 }
 
 /** The person's details printed as the supplier (users columns). */
@@ -161,9 +239,13 @@ export interface InvoiceProfile {
   postcode: string | null;
   utr: string | null;
   vatNumber: string | null;
+  /** P2: whether this person's pay runs get a self-billing invoice (reps and leaders: the field people). */
+  invoiced?: boolean;
+  /** P2: the self-billing agreement they accepted (the current version), if any. */
+  agreement?: { version: string; acceptedAt: string | null };
 }
 
-export type InvoiceProfileInput = Partial<Omit<InvoiceProfile, 'userId' | 'name'>>;
+export type InvoiceProfileInput = Partial<Omit<InvoiceProfile, 'userId' | 'name' | 'invoiced' | 'agreement'>>;
 
 /** Settings → Company (meta `ext:invoices:company`). */
 export interface CompanySettings {

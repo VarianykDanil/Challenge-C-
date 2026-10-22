@@ -6,9 +6,14 @@
 // the pure helpers; FlaggedRunsList (the confirm dialogs' body); and LazyBulkPayBar. The sticky bar itself
 // (BulkPayBar.tsx) is admin-only, so it is loaded on demand the first time runs are selected (lead decision on the
 // bundle): a rep opening My pay never downloads it.
+// Release 1.3 (P2 invoices, which owns this file in 1.3): runs whose self-billing invoice is not accepted yet (issued and
+// before its deadline, or disputed) are skipped without asking the server, and so are any the server refuses for the
+// same reason (409 with an invoice code); the summary says how many and why: "20 marked paid · 3 skipped (invoice not
+// accepted) · 0 failed". Paying one of them needs a reason, from the invoice itself.
 import { Suspense, lazy, useCallback, useRef, useState, type ComponentProps } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 import type { PayrollRunWithUser } from '@lm/shared';
+import { isInvoicePayable } from '@lm/shared';
 import { Skeleton, useToast } from '@/components/ui';
 import { api, ApiError } from '@/api/client';
 import { errorMessage } from '@/features/common';
@@ -39,11 +44,29 @@ export interface BulkPayOutcome {
   /** Already paid elsewhere (409). */
   skipped: PayrollRunWithUser[];
   failed: { run: PayrollRunWithUser; message: string }[];
+  /** Release 1.3 (P2): the invoice is not accepted yet (never sent, or refused by the server for that reason). */
+  held?: PayrollRunWithUser[];
 }
 
-/** "22 marked paid · 1 skipped (already paid) · 0 failed" */
-export function bulkPaySummary(o: { paid: number; skipped: number; failed: number }): string {
-  return `${formatNumber(o.paid)} marked paid · ${formatNumber(o.skipped)} skipped (already paid) · ${formatNumber(o.failed)} failed`;
+/** Release 1.3 (P2): a run whose self-billing invoice is not accepted yet; Mark paid for it needs a reason. */
+export const invoiceNotAccepted = (r: Pick<PayrollRunWithUser, 'invoice'>): boolean => !!r.invoice && !isInvoicePayable(r.invoice.status);
+
+/**
+ * Release 1.3 (P2): the selected runs a bulk Mark paid will actually send (held invoices are skipped). The confirm
+ * step counts and lists these, so it never asks to pay runs that will not be paid.
+ */
+export function payableRuns<T extends Pick<PayrollRunWithUser, 'invoice'>>(runs: readonly T[]): T[] {
+  return runs.filter((r) => !invoiceNotAccepted(r));
+}
+
+const INVOICE_REFUSAL_CODES = ['invoice_not_accepted', 'invoice_disputed', 'invoice_reissued'];
+const isInvoiceRefusal = (e: unknown): boolean =>
+  e instanceof ApiError && e.status === 409 && INVOICE_REFUSAL_CODES.includes(String((e.details as { code?: unknown } | undefined)?.code ?? ''));
+
+/** "22 marked paid · 1 skipped (already paid) · 0 failed"; with held runs: "· 3 skipped (invoice not accepted)". */
+export function bulkPaySummary(o: { paid: number; skipped: number; failed: number; held?: number }): string {
+  const held = o.held ? ` · ${formatNumber(o.held)} skipped (invoice not accepted)` : '';
+  return `${formatNumber(o.paid)} marked paid${held} · ${formatNumber(o.skipped)} skipped (already paid) · ${formatNumber(o.failed)} failed`;
 }
 
 export interface BulkPayProgress {
@@ -62,9 +85,15 @@ export function useBulkMarkPaid() {
   const [progress, setProgress] = useState<BulkPayProgress | null>(null);
   const running = useRef(false);
 
-  const markPaid = useCallback(async (runs: PayrollRunWithUser[], paidDate?: string): Promise<BulkPayOutcome> => {
-    const outcome: BulkPayOutcome = { paid: [], skipped: [], failed: [] };
-    if (running.current || !runs.length) return outcome;
+  const markPaid = useCallback(async (selected: PayrollRunWithUser[], paidDate?: string): Promise<BulkPayOutcome> => {
+    const outcome: BulkPayOutcome = { paid: [], skipped: [], failed: [], held: selected.filter(invoiceNotAccepted) };
+    // Runs whose invoice is not accepted are not sent at all (the server would refuse them without a reason).
+    const runs = payableRuns(selected);
+    if (running.current || !selected.length) return outcome;
+    if (!runs.length) {
+      toast.toast({ tone: 'warning', title: bulkPaySummary({ paid: 0, skipped: 0, failed: 0, held: outcome.held!.length }), description: 'None of the selected invoices is accepted yet. Open a run to mark it paid with a reason.', duration: 8000 });
+      return outcome;
+    }
     running.current = true;
     const total = runs.length;
     setProgress({ done: 0, total });
@@ -85,7 +114,8 @@ export function useBulkMarkPaid() {
             const res = await api<PayrollRunWithUser>(`/finance/payroll/${r.id}/pay`, { method: 'POST', json: paidDate ? { paidDate } : {} });
             outcome.paid.push(res ?? r);
           } catch (e) {
-            if (e instanceof ApiError && e.status === 409) outcome.skipped.push(r);
+            if (isInvoiceRefusal(e)) outcome.held!.push(r);
+            else if (e instanceof ApiError && e.status === 409) outcome.skipped.push(r);
             else {
               const message = errorMessage(e);
               outcome.failed.push({ run: r, message });
@@ -99,13 +129,16 @@ export function useBulkMarkPaid() {
       toast.dismiss(progressToast);
       // One invalidation for the whole batch (not one per run).
       await Promise.all([qc.invalidateQueries({ queryKey: ['finance'] }), qc.invalidateQueries({ queryKey: ['dashboard'] })]);
-      const title = bulkPaySummary({ paid: outcome.paid.length, skipped: outcome.skipped.length, failed: outcome.failed.length });
+      const held = outcome.held?.length ?? 0;
+      const title = bulkPaySummary({ paid: outcome.paid.length, skipped: outcome.skipped.length, failed: outcome.failed.length, held });
       const paidTotal = outcome.paid.reduce((a, r) => a + r.gross, 0);
+      const heldNote = held ? ` ${plural(held, 'invoice')} not accepted yet: open the run to mark it paid with a reason.` : '';
       if (outcome.failed.length) {
         const first = outcome.failed[0]!;
-        toast.toast({ tone: 'warning', title, description: `${first.run.userName}: ${first.message}${outcome.failed.length > 1 ? ` (and ${plural(outcome.failed.length - 1, 'other')})` : ''}. The runs that did not go through stay selected.`, duration: 10000 });
+        toast.toast({ tone: 'warning', title, description: `${first.run.userName}: ${first.message}${outcome.failed.length > 1 ? ` (and ${plural(outcome.failed.length - 1, 'other')})` : ''}. The runs that did not go through stay selected.${heldNote}`, duration: 10000 });
       } else {
-        toast.toast({ tone: 'success', title, description: outcome.paid.length ? `${formatGBP(paidTotal, { cents: true })} recorded as paid${paidDate ? ` on ${formatDate(paidDate)}` : ''}` : undefined, duration: 6000 });
+        const paidNote = outcome.paid.length ? `${formatGBP(paidTotal, { cents: true })} recorded as paid${paidDate ? ` on ${formatDate(paidDate)}` : ''}.` : '';
+        toast.toast({ tone: held ? 'warning' : 'success', title, description: `${paidNote}${heldNote}`.trim() || undefined, duration: held ? 9000 : 6000 });
       }
       setProgress(null);
       running.current = false;

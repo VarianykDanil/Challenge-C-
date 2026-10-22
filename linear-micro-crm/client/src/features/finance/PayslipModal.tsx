@@ -1,17 +1,28 @@
 // Payslip breakdown for a single payroll run, with a "Print payslip" action that lays it out on A4.
-import { CheckCircle2, Info, Printer, TriangleAlert } from 'lucide-react';
+// Release 1.3 (P2 invoices, which owns this file in 1.3): a run with a self-billing invoice (reps and leaders) opens as
+// the invoice — the document replaces the pay table and plan box, with Accept / Something's wrong (or the office's
+// actions) above it, "Print invoice" and, once P4's PDFs are ready, "Download PDF". Runs without an invoice (office
+// roles, weeks paid before 1.3) keep the payslip exactly as before.
+import { useRef, useState, type RefObject } from 'react';
+import { CheckCircle2, Download, Info, Printer, TriangleAlert } from 'lucide-react';
 import clsx from 'clsx';
 import type { PayrollFlag, PayrollRunWithUser } from '@lm/shared';
 import { BRAND, POSITION_LABELS } from '@lm/shared';
-import { Badge, Button, Modal, Skeleton } from '@/components/ui';
+import { Badge, Button, Modal, Skeleton, useToast } from '@/components/ui';
 import { usePayslip } from '@/api/hooks';
-import { ErrorBoundary, ErrorState, OnTimeBadge, PayrollStatusBadge } from '@/features/common';
+import { useInvoiceForRun } from '@/api/invoices';
+import { reportAuditEvent } from '@/api/auditEvents';
+import { useCurrentUser } from '@/auth/AuthProvider';
+import { ErrorBoundary, ErrorState, OnTimeBadge, PayrollStatusBadge, errorMessage } from '@/features/common';
 import { EntityHistory } from '@/features/audit/EntityHistory';
 // Release 1.3 slots: the invoice's Accept / Dispute bar (P2), the 1.3 pay breakdown (P1), "opened" for the trail (P9).
 import { RecordOpened } from '@/features/audit/RecordOpened';
 import { InvoiceActionsBar } from '@/features/invoices/InvoiceActionsBar';
+import { InvoiceDocument } from '@/features/invoices/InvoiceDocument';
+import { InvoiceStatusBadge } from '@/features/invoices/InvoiceStatusBadge';
 import { PayBreakdown } from '@/features/pay/PayBreakdown';
 import { GaugeEntriesTable } from '@/features/gauges';
+import { PDF_EXPORTS_READY } from '@/lib/pdf';
 import { formatDate, formatDateTime, formatGBP, formatNumber, formatRangeLabel } from '@/lib/format';
 import { PAYROLL_STATUS_LABELS } from '@/lib/labels';
 
@@ -67,20 +78,52 @@ export const payUnit = (run: Pick<PayrollRunWithUser, 'position'>): 'sale' | 'hi
 export const payUnits = (run: Pick<PayrollRunWithUser, 'position'>, n: number): string => `${formatNumber(n)} ${payUnit(run)}${n === 1 ? '' : 's'}`;
 
 export function PayslipModal({ run, onClose }: { run: PayrollRunWithUser | null; onClose: () => void }) {
+  const hasInvoice = !!run?.invoice;
+  const invoice = useInvoiceForRun(run?.id, { enabled: hasInvoice });
+  const inv = hasInvoice ? invoice.data : undefined;
+  const toast = useToast();
+  const [pdfBusy, setPdfBusy] = useState(false);
+  // Focus starts at the top of the body (the status row), not on the gauges table further down: the invoice loads in
+  // above it, and focusing the table first left the dialog opened half-way down.
+  const topRef = useRef<HTMLDivElement>(null);
+  const print = () => {
+    if (inv) reportAuditEvent({ kind: 'export', format: 'print', what: `invoice ${inv.number}`, entity: 'invoice', entityId: inv.id });
+    window.print();
+  };
+  const downloadPdf = async () => {
+    if (!inv) return;
+    setPdfBusy(true);
+    try {
+      const { downloadInvoicePdf } = await import('@/features/invoices/invoicePdf');
+      await downloadInvoicePdf(inv);
+    } catch (e) {
+      toast.error('Could not make the PDF', errorMessage(e));
+    } finally {
+      setPdfBusy(false);
+    }
+  };
   return (
     <Modal
       open={!!run}
       onClose={onClose}
-      title={run ? `Payslip · ${run.reference}` : 'Payslip'}
+      title={run ? (run.invoice ? `Invoice · ${run.invoice.number}` : `Payslip · ${run.reference}`) : 'Payslip'}
       description={run ? `${run.userName} · ${POSITION_LABELS[run.position]} · week ${formatRangeLabel(run.weekStart, run.weekEnd)}` : undefined}
       size="xl"
+      initialFocusRef={topRef}
       footer={run ? (
-        <Button variant="outline" onClick={() => window.print()} leftIcon={<Printer aria-hidden />}>
-          Print payslip
-        </Button>
+        <>
+          {hasInvoice && PDF_EXPORTS_READY && (
+            <Button variant="outline" onClick={() => void downloadPdf()} loading={pdfBusy} disabled={!inv} leftIcon={<Download aria-hidden />}>
+              Download PDF
+            </Button>
+          )}
+          <Button variant="outline" onClick={print} leftIcon={<Printer aria-hidden />}>
+            {hasInvoice ? 'Print invoice' : 'Print payslip'}
+          </Button>
+        </>
       ) : undefined}
     >
-      {run && <PayslipBody run={run} />}
+      {run && <PayslipBody run={run} topRef={topRef} />}
     </Modal>
   );
 }
@@ -89,11 +132,14 @@ export function PayslipModal({ run, onClose }: { run: PayrollRunWithUser | null;
  * Print rules, scoped to the time the payslip is open (the <style> unmounts with the modal). Only the
  * element marked `data-print-root` is printed; every ancestor (the fixed, scrolling dialog chrome) is
  * flattened so the payslip flows top-down over as many A4 pages as it needs, and siblings on the way
- * down (backdrop, dialog header/footer, the app behind it) take no space.
+ * down (backdrop, dialog header/footer, the app behind it) take no space. The page itself is white in
+ * both themes (dark mode with "Background graphics" on printed a near-black page).
  */
 const PRINT_CSS = `
 @media print {
   @page { size: A4; margin: 14mm; }
+  /* more specific than the flattening rule below (which makes every ancestor transparent), so the page is white */
+  html:has([data-print-root]), html:has([data-print-root]) body { background: #fff !important; color-scheme: light !important; }
   body > * { visibility: hidden !important; }
   [data-print-root], [data-print-root] * { visibility: visible !important; }
   *:has([data-print-root]) {
@@ -113,9 +159,14 @@ const PRINT_CSS = `
 }
 `;
 
-function PayslipBody({ run }: { run: PayrollRunWithUser }) {
+function PayslipBody({ run, topRef }: { run: PayrollRunWithUser; topRef?: RefObject<HTMLDivElement | null> }) {
+  const me = useCurrentUser();
   const q = usePayslip(run.id);
   const p = q.data;
+  // The payslip's copy is the fresher one (e.g. just marked paid from the invoice's "Mark paid anyway").
+  const current: PayrollRunWithUser = p ?? run;
+  const hasInvoice = !!(current.invoice ?? run.invoice);
+  const iq = useInvoiceForRun(run.id, { enabled: hasInvoice });
   const unit = payUnit(run);
   const isRecruiter = unit === 'hire';
   const adjustedAt = runAdjustedAt(run) ?? (p ? runAdjustedAt(p) : null);
@@ -131,11 +182,12 @@ function PayslipBody({ run }: { run: PayrollRunWithUser }) {
     // A plan without commission (recruiters) has no commission line to show — the hire count sits in the plan box instead.
   ].filter((l) => !(l.label === 'Commission' && isRecruiter && run.commission === 0 && (!p || p.plan.commissionPerSale === 0)));
   return (
-    <div className="space-y-5" data-print-root>
+    // overflow-anchor none: the invoice and the actions bar load in above the gauges; the view must stay at the top
+    <div className="space-y-5 [overflow-anchor:none]" data-print-root>
       <style>{PRINT_CSS}</style>
 
-      {/* Letterhead — print only. On screen the dialog title carries the same facts. */}
-      <header className="hidden print:block" data-print-keep>
+      {/* Letterhead — print only. On screen the dialog title carries the same facts. An invoice is its own letterhead. */}
+      <header className={clsx('hidden', !hasInvoice && 'print:block')} data-print-keep>
         <div className="flex items-start justify-between gap-6 border-b border-border pb-3">
           <div>
             <div className="text-lg font-bold text-fg">{BRAND.legalName}</div>
@@ -156,19 +208,22 @@ function PayslipBody({ run }: { run: PayrollRunWithUser }) {
         </dl>
       </header>
 
-      <div className="flex flex-wrap items-center gap-2 text-sm print:hidden">
-        <PayrollStatusBadge status={run.status} />
-        <OnTimeBadge value={run.onTime} labels={{ yes: 'Paid on time', no: 'Paid late', none: 'Not yet paid' }} />
+      <div ref={topRef} tabIndex={-1} className="flex flex-wrap items-center gap-2 text-sm outline-none print:hidden">
+        <PayrollStatusBadge status={current.status} />
+        <ErrorBoundary name="invoice-status-modal" fallback={null}><InvoiceStatusBadge run={current} /></ErrorBoundary>
+        <OnTimeBadge value={current.onTime} labels={{ yes: 'Paid on time', no: 'Paid late', none: 'Not yet paid' }} />
         {adjustedAt && <Badge tone="warning" title={`Recalculated ${formatDateTime(adjustedAt)} from gauges logged or corrected after the run was paid`}>Adjusted after payment</Badge>}
-        <span className="text-muted">Due {formatDate(run.dueDate)}{run.paidDate ? ` · paid ${formatDate(run.paidDate)}` : ''}</span>
+        <span className="text-muted">Due {formatDate(current.dueDate)}{current.paidDate ? ` · paid ${formatDate(current.paidDate)}` : ''}</span>
         {run.teamName && <Badge tone="neutral">{run.teamName}</Badge>}
       </div>
-      {/* Release 1.3 slots (P2, P9): nothing until the packages land. */}
+      {/* Release 1.3 (P2): Accept / Something's wrong, or the office's actions; P9 records the opening. */}
       <ErrorBoundary name="invoice-actions" fallback={null}>
-        <InvoiceActionsBar run={run} className="print:hidden" />
+        <InvoiceActionsBar run={current.invoice ? current : run} className="print:hidden" />
       </ErrorBoundary>
       <ErrorBoundary name="payslip-opened" fallback={null}>
-        <RecordOpened entity="payroll_run" entityId={run.id} what="payslip" />
+        {hasInvoice
+          ? iq.data && <RecordOpened entity="invoice" entityId={iq.data.id} what={`invoice ${iq.data.number}`} />
+          : <RecordOpened entity="payroll_run" entityId={run.id} what="payslip" />}
       </ErrorBoundary>
       {adjustedAt && (
         <p className="rounded-lg border border-warning/40 bg-warning/10 p-3 text-xs text-warning print:hidden" role="note">
@@ -182,6 +237,15 @@ function PayslipBody({ run }: { run: PayrollRunWithUser }) {
           {checks.length > 0 && <p className="mt-2 text-xs text-muted">Advisory only — you can still mark this run paid.</p>}
         </section>
       )}
+      {hasInvoice ? (
+        iq.isLoading ? (
+          <div className="space-y-3 rounded-xl border border-border p-5"><Skeleton className="h-6 w-48" /><Skeleton /><Skeleton /><Skeleton className="w-2/3" /></div>
+        ) : iq.isError ? (
+          <ErrorState error={iq.error} onRetry={() => void iq.refetch()} title="Could not load the invoice" />
+        ) : iq.data ? (
+          <InvoiceDocument invoice={iq.data} mine={iq.data.userId === me.id} />
+        ) : null
+      ) : (
       <div className="grid grid-cols-1 gap-5 md:grid-cols-5 print:grid-cols-5" data-print-keep>
         <table className="w-full min-w-0 text-sm md:col-span-3 print:col-span-3">
           <caption className="sr-only">Pay breakdown</caption>
@@ -216,11 +280,15 @@ function PayslipBody({ run }: { run: PayrollRunWithUser }) {
           )}
         </div>
       </div>
-      {/* Release 1.3 slot (P1): the week under the base-or-commission rule; nothing until the package lands. */}
-      <ErrorBoundary name="pay-breakdown" fallback={null}>
-        <PayBreakdown run={run} />
-      </ErrorBoundary>
-      <div className="min-w-0">
+      )}
+      {/* Release 1.3 slot (P1): the week under the base-or-commission rule; nothing until the package lands. An invoice
+          prints as the invoice alone, so the breakdown and the gauges stay on screen (print:hidden) for invoiced runs. */}
+      <div className={clsx('min-w-0 empty:hidden', hasInvoice && 'print:hidden')}>
+        <ErrorBoundary name="pay-breakdown" fallback={null}>
+          <PayBreakdown run={run} />
+        </ErrorBoundary>
+      </div>
+      <div className={clsx('min-w-0', hasInvoice && 'print:hidden')}>
         <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted">The week's gauges</div>
         <GaugeEntriesTable rows={p?.entries ?? []} loading={q.isLoading} showPerson={false} emptyMessage={isRecruiter ? 'Recruiters do not log gauges' : 'No gauge entries this week'} />
       </div>

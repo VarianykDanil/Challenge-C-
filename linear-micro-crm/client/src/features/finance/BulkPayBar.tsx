@@ -4,20 +4,22 @@
 // optional paid date (defaults to today; between the latest selected week end and today — the server checks again).
 // Loaded on demand through LazyBulkPayBar (bulkPay.tsx, with useBulkMarkPaid and the helpers); never import it directly
 // from a page, or it moves back into that page's chunk.
+// Release 1.3 (P2 invoices, which owns this file in 1.3): selected runs whose self-billing invoice is not accepted yet
+// are counted out of the button's number and total, and the bar says they will be skipped.
 import { useId } from 'react';
-import { TriangleAlert, X } from 'lucide-react';
+import { FileClock, TriangleAlert, X } from 'lucide-react';
 import clsx from 'clsx';
 import type { PayrollRunWithUser } from '@lm/shared';
 import { Button, Input, ProgressBar } from '@/components/ui';
 import { formatGBP, formatNumber } from '@/lib/format';
-import { latestWeekEnd, paidDateProblem, type BulkPayProgress } from './bulkPay';
+import { invoiceNotAccepted, latestWeekEnd, paidDateProblem, payableRuns, type BulkPayProgress } from './bulkPay';
 
 const plural = (n: number, one: string, many = `${one}s`) => `${formatNumber(n)} ${n === 1 ? one : many}`;
 
 export interface BulkPayBarProps {
   /** The selected runs (all unpaid). */
   runs: PayrollRunWithUser[];
-  /** How many of them carry a warning-level check. */
+  /** How many of the runs that will be paid (held invoices left out) carry a warning-level check. */
   flagged: number;
   paidDate: string;
   onPaidDateChange: (date: string) => void;
@@ -33,13 +35,15 @@ export interface BulkPayBarProps {
 export function BulkPayBar({ runs, flagged, paidDate, onPaidDateChange, today, progress, onPay, onClear, className }: BulkPayBarProps) {
   const uid = useId();
   if (!runs.length && !progress) return null;
-  const total = runs.reduce((a, r) => a + r.gross, 0);
-  const minDate = latestWeekEnd(runs);
+  const held = runs.filter(invoiceNotAccepted);
+  const payable = held.length ? payableRuns(runs) : runs;
+  const total = payable.reduce((a, r) => a + r.gross, 0);
+  const minDate = latestWeekEnd(payable.length ? payable : runs);
   const problem = paidDateProblem(paidDate, minDate, today);
   const busy = progress !== null;
   // One format for the total everywhere (pence, as in the table, the confirm dialog and the summary toast).
   const totalText = formatGBP(total, { cents: true });
-  const label = `Mark ${formatNumber(runs.length)} selected paid · ${totalText}`;
+  const label = `Mark ${formatNumber(payable.length)} selected paid · ${totalText}`;
   return (
     <div
       role="region"
@@ -59,10 +63,16 @@ export function BulkPayBar({ runs, flagged, paidDate, onPaidDateChange, today, p
       ) : (
         <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
           {/* The button already carries the count and total, so phones show only the note about checks here. */}
-          <div className={clsx('min-w-0 flex-1 basis-full text-sm sm:basis-auto', !flagged && 'hidden sm:block')}>
+          <div className={clsx('min-w-0 flex-1 basis-full text-sm sm:basis-auto', !flagged && !held.length && 'hidden sm:block')}>
             <p className="hidden font-medium text-fg sm:block">
-              {plural(runs.length, 'run')} selected · <span className="tabular-nums">{totalText}</span>
+              {plural(runs.length, 'run')} selected{held.length > 0 ? ` · ${formatNumber(payable.length)} ready to pay` : ''} · <span className="tabular-nums">{totalText}</span>
             </p>
+            {held.length > 0 && (
+              <p className="flex items-center gap-1.5 text-xs text-warning sm:mt-0.5" data-bulk-held="">
+                <FileClock className="h-3.5 w-3.5 shrink-0" aria-hidden />
+                <span>{plural(held.length, 'invoice')} not accepted yet<span className="hidden sm:inline">: {held.length === 1 ? 'it is' : 'they are'} skipped (open a run to pay it with a reason)</span><span className="sm:hidden">: skipped</span></span>
+              </p>
+            )}
             {flagged > 0 && (
               <p className="flex items-center gap-1.5 text-xs text-warning sm:mt-0.5">
                 <TriangleAlert className="h-3.5 w-3.5 shrink-0" aria-hidden />
@@ -85,7 +95,7 @@ export function BulkPayBar({ runs, flagged, paidDate, onPaidDateChange, today, p
             />
           </div>
           <Button variant="ghost" onClick={onClear} leftIcon={<X className="h-4 w-4" aria-hidden />} className="h-10 shrink-0" aria-label="Clear the selection">Clear</Button>
-          <Button onClick={onPay} disabled={!!problem || !runs.length} className="h-10 w-full sm:w-auto">{label}</Button>
+          <Button onClick={onPay} disabled={!!problem || !payable.length} className="h-10 w-full sm:w-auto">{label}</Button>
           {problem && <p id={`${uid}-err`} className="basis-full text-xs text-danger" role="alert">{problem}</p>}
         </div>
       )}

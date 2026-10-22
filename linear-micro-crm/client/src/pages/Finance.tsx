@@ -25,6 +25,8 @@ import { formatDate, formatDateShort, formatDecimal, formatGBP, formatNumber, fo
 import { usePageTitle } from '@/lib/usePageTitle';
 import { useActionParam } from '@/lib/useActionParam';
 import { COPY } from '@/content/copy';
+// Release 1.3 (P2): bulk Mark paid skips runs whose invoice is not accepted; the confirm step counts only the rest.
+import { payableRuns } from '@/features/finance/bulkPay';
 
 type Tab = 'me' | 'team' | 'company';
 const EXPENSE_PAGE = 25;
@@ -352,7 +354,9 @@ function Company({ onOpen, scrollToRuns = false, onScrolled }: { onOpen: (r: Pay
   const selectedRuns = useMemo(() => toPay.filter((r) => selected.has(r.id) && canSelect(r)), [toPay, selected, canSelect]);
   const flaggedRuns = useMemo(() => toPay.filter((r) => warningFlags(r).length > 0), [toPay]);
   const failedCount = toPay.filter((r) => r.status === 'failed').length;
-  const flaggedSelected = selectedRuns.filter((r) => warningFlags(r).length > 0);
+  // Release 1.3 (P2): runs whose invoice is not accepted are skipped, so the confirm step counts and lists only the rest
+  const payableSelected = payableRuns(selectedRuns);
+  const flaggedSelected = payableSelected.filter((r) => warningFlags(r).length > 0);
   // Drop ids that left the list (paid elsewhere, refetched) or became unselectable (failed tick cleared).
   useEffect(() => {
     setSelected((prev) => {
@@ -579,7 +583,7 @@ function Company({ onOpen, scrollToRuns = false, onScrolled }: { onOpen: (r: Pay
         onClose={() => setConfirmBulk(false)}
         title={flaggedSelected.length === 1 ? '1 selected run needs a look' : `${formatNumber(flaggedSelected.length)} selected runs need a look`}
         description="These checks are advisory — you can still pay every selected run. Here is why each one stood out:"
-        confirmLabel={`Mark ${formatNumber(selectedRuns.length)} paid`}
+        confirmLabel={`Mark ${formatNumber(payableSelected.length)} paid`}
         onConfirm={() => void payNow()}
       >
         <FlaggedRunsList runs={flaggedSelected} />
