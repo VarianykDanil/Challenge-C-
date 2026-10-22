@@ -317,7 +317,11 @@ test('statement upload contract: a raw PDF body over 1 MB reaches P3\'s route th
       headers: { 'content-type': 'application/pdf', cookie },
       body: new Uint8Array(1_500_000),
     });
-  assert.equal((await upload(admin.cookie)).status, 501, 'the stub answers (no 413 from express.json, no 400)');
+  // the stub answered 501; P3's route reads the whole body and answers 422 for bytes that are not a PDF. Either way the
+  // 1.5 MB body got past express.json (no 413) to the route.
+  const res = await upload(admin.cookie);
+  const body = res.status === 501 ? null : ((await res.json()) as { error?: string });
+  assert.ok(res.status === 501 || (res.status === 422 && /not a PDF/.test(body?.error ?? '')), `POST /statements/upload → ${res.status} ${JSON.stringify(body)}`);
   assert.equal((await upload(rep.cookie)).status, 403);
 });
 

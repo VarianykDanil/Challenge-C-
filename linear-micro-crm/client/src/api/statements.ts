@@ -1,8 +1,8 @@
 // Release 1.3 — P3 statements hooks — OWNED BY P3 (laid down by r3-foundation). Endpoints: server/src/routes/statements.ts.
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import type {
-  CheckNowResult, ClientRef, MailSettings, MailSettingsInput, MailTestResult, StatementColumnMapping, StatementDetail, StatementRow,
-  StatementSender, StatementStatus, StatementSummary, StatementTemplate,
+  CheckNowResult, ClientRef, MailSettings, MailSettingsInput, MailTestResult, StatementColumnMapping, StatementDetail, StatementPatchInput,
+  StatementRow, StatementSender, StatementStatus, StatementSummary, StatementTemplate,
 } from '@lm/shared';
 import { api, qs } from './client';
 
@@ -40,6 +40,21 @@ export const statementFileUrl = (id: number) => `/api/statements/${id}/file`;
 export function useApplyStatement() {
   const qc = useQueryClient();
   return useMutation({ mutationFn: (id: number) => api<StatementDetail>(`/statements/${id}/apply`, { method: 'POST' }), onSuccess: () => invalidateStatements(qc) });
+}
+
+/** P3: PATCH /statements/:id — the campaign or period the PDF did not say. */
+export function usePatchStatement() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, ...input }: StatementPatchInput & { id: number }) => api<StatementDetail>(`/statements/${id}`, { method: 'PATCH', json: input }),
+    onSuccess: () => invalidateStatements(qc),
+  });
+}
+
+/** P3: DELETE /statements/:id — discard a statement that is not applied. */
+export function useDeleteStatement() {
+  const qc = useQueryClient();
+  return useMutation({ mutationFn: (id: number) => api<void>(`/statements/${id}`, { method: 'DELETE' }), onSuccess: () => invalidateStatements(qc) });
 }
 
 export function useMatchStatementRow() {
