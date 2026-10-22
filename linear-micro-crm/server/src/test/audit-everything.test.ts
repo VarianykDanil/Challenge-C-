@@ -239,6 +239,19 @@ test('POST /audit/events: only the two kinds and well-formed fields; long text i
   assert.ok(!('extra' in after));
 });
 
+test('POST /audit/events: bidi overrides and other invisible characters are removed, so a row never shows reversed', async () => {
+  const r = await recruiter.post('/audit/events', { kind: 'export', format: 'csv', rows: 3, what: 'a\u0000b\nc‮d​e⁦f⁩﻿', filename: 'invoice‮fdp.exe' });
+  assert.equal(r.status, 204);
+  const row = newest(srv.db);
+  const after = JSON.parse(row.afterJson!);
+  assert.equal(after.what, 'a b cdef', 'controls become spaces; invisible characters go');
+  assert.equal(after.filename, 'invoicefdp.exe', 'the real name, not one that displays as "invoiceexe.pdf"');
+  assert.doesNotMatch(row.summary, /\p{Cf}|\p{Cc}/u, row.summary);
+  assert.match(row.summary, / as CSV: 3 rows$/, 'the part the server adds reads the right way round');
+  // made only of invisible characters: nothing left to record
+  assert.equal((await recruiter.post('/audit/events', { kind: 'export', what: '‮​' })).status, 400);
+});
+
 test('POST /audit/events opened: a candidate profile — recruitment roles only, a real record, once per 5 minutes', async () => {
   const opened = { kind: 'opened', what: 'candidate profile', entity: 'candidate', entityId: candidateId };
   const n0 = count(srv.db);

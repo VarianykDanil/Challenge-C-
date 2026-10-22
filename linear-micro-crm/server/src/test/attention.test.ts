@@ -10,6 +10,7 @@ import { paydayForWeek, remainingFraction, type UserWithTeam } from '@lm/shared'
 import { run, type Db } from '../db/connection.ts';
 import { getUser } from '../db/queries.ts';
 import { addDays, mondayOf, setBusinessClock, todayISO } from '../lib/dates.ts';
+import { ATTENTION_PROVIDERS } from '../lib/attention/index.ts';
 import { attentionNow, buildAttentionFeed } from '../routes/attention.ts';
 import { addEvent, addGauge, funnelFrom, startTestServer, withSmart, type Json } from './helpers.ts';
 
@@ -187,6 +188,13 @@ test('every role: at most 12 statements to build the feed; LM_SMART=0 → empty 
       const me: UserWithTeam = { ...getUser(srv.db, id)!, twoFactorEnabled: false };
       const { result, statements } = countStatements(srv.db, () => buildAttentionFeed(srv.db, me, now));
       assert.ok(statements <= 12, `${me.role}: ${statements} statements`);
+      // Release 1.3: each package's provider (P2 invoices, P3 statements, P6 client posts) takes at most one statement,
+      // so the 1.1 budget holds with all of them merged (the admin used 13 when two of them took two).
+      for (const p of ATTENTION_PROVIDERS) {
+        const one = countStatements(srv.db, () => p.items(srv.db, me, now));
+        assert.ok(one.statements <= 1, `${me.role}: the ${p.name} provider took ${one.statements} statements`);
+        if (me.role === 'admin' && p.name !== 'statements') assert.ok(one.result.length > 0, `admin: the demo has ${p.name} items, so the statement counted is the real one`);
+      }
       assert.ok(result.items.length <= 20);
       assert.equal(result.disabled, undefined);
       const again = buildAttentionFeed(srv.db, me, now);

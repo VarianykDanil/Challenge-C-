@@ -216,9 +216,11 @@ test('client guard: the portal paths a client may call, and nothing else', () =>
   }
 });
 
-test('audit registry: package specs first, every 1.2 spec kept, POST /audit/events skipped while it is a stub', () => {
+test('audit registry: package specs first, every 1.2 spec kept, POST /audit/events skipped (P9 records its own row)', () => {
   const all = allAuditSpecs();
   for (const spec of AUDIT_ROUTES) assert.ok(all.includes(spec), `${spec.method} ${spec.pattern}`);
+  // P9 filled the stub: a reported export or opening is written by the route with its own kind and wording, so the
+  // middleware must not add a second, generic "POST /audit/events" row.
   assert.equal(matchAuditSpec('POST', '/audit/events')?.spec.skip, true);
   assert.equal(matchAuditSpec('POST', '/finance/payroll/12/pay')?.spec.pattern, '/finance/payroll/:id/pay');
   assert.deepEqual(matchAuditSpec('POST', '/finance/payroll/12/pay')?.params, { id: '12' });
@@ -285,22 +287,25 @@ test('1.3 routes: anonymous → 401 on every new path', async () => {
   assert.equal((await anon.get('/client/portal')).status, 401);
 });
 
-test('1.3 routes: mounted for a signed-in admin (never the JSON 404 of an unknown path, never a 5xx except 501 stubs)', async () => {
+test('1.3 routes: mounted for a signed-in admin (never the JSON 404 of an unknown path, never a 5xx: every stub is filled)', async () => {
   for (const [method, path] of R3_ROUTES()) {
     const r = await admin.req(method, path, method === 'GET' ? undefined : {});
-    assert.ok(r.status < 500 || r.status === 501, `${method} ${path} → ${r.status}`);
+    // the foundation's stubs answered 501; with P1–P9 merged none is left, so a 501 now means a package's route is missing
+    assert.ok(r.status < 500, `${method} ${path} → ${r.status}`);
     if (r.status === 404) assert.notEqual(r.json?.error, 'Not found', `${method} ${path} is not mounted`);
   }
 });
 
-test('role checks of the 1.3 stubs, and /client never swallows /client-posts or /client-accounts', async () => {
+test('role checks of the 1.3 routes, and /client never swallows /client-posts or /client-accounts', async () => {
   assert.equal((await admin.get('/client-posts')).status, 200);
   assert.deepEqual((await admin.get('/client-posts/unread')).json, { count: 0 });
   assert.equal((await rep.get('/client-posts')).status, 403);
-  assert.equal((await rep.patch('/client-accounts/1', {})).status, 403);
-  // P6 fills the stub: user 1 is a staff member, so it is not a client account (404), never a 403 or a 5xx.
+  assert.equal((await rep.patch('/client-accounts/1', {})).status, 403, 'admin only');
+  // P6's route (the foundation's stub answered 501): the admin's call reaches it, and user 1 is a staff member, so it is
+  // not a client account — P6's own 404, never the app's "Not found" for an unknown path, a 403 or a 5xx.
   const notClient = await admin.patch('/client-accounts/1', {});
-  assert.ok(notClient.status === 501 || (notClient.status === 404 && notClient.json?.error === 'Client account not found'), `PATCH /client-accounts/1 → ${notClient.status}`);
+  assert.equal(notClient.status, 404, `PATCH /client-accounts/1 → ${notClient.status} ${JSON.stringify(notClient.json)}`);
+  assert.equal(notClient.json?.error, 'Client account not found');
   assert.equal((await rep.get('/statements')).status, 403);
   assert.equal((await rep.get('/pay/settings')).status, 403);
   assert.equal((await rep.get('/invoices/disputes')).status, 403);
@@ -319,12 +324,15 @@ test('statement upload contract: a raw PDF body over 1 MB reaches P3\'s route th
       headers: { 'content-type': 'application/pdf', cookie },
       body: new Uint8Array(1_500_000),
     });
-  // the stub answered 501; P3's route reads the whole body and answers 422 for bytes that are not a PDF. Either way the
-  // 1.5 MB body got past express.json (no 413) to the route.
+  // The foundation's stub answered 501; P3's route reads the whole body and answers 422 for bytes that are not a PDF.
+  // That 422 is the proof: the 1.5 MB body got past express.json (no 413) and every middleware to the route itself.
   const res = await upload(admin.cookie);
-  const body = res.status === 501 ? null : ((await res.json()) as { error?: string });
-  assert.ok(res.status === 501 || (res.status === 422 && /not a PDF/.test(body?.error ?? '')), `POST /statements/upload → ${res.status} ${JSON.stringify(body)}`);
-  assert.equal((await upload(rep.cookie)).status, 403);
+  const body = (await res.json()) as { error?: string };
+  assert.equal(res.status, 422, `POST /statements/upload → ${res.status} ${JSON.stringify(body)}`);
+  assert.match(body.error ?? '', /not a PDF/);
+  assert.equal((await upload(rep.cookie)).status, 403, 'admin only');
+  assert.equal((await upload(client.cookie)).status, 403, 'never a client');
+  assert.equal((await upload('')).status, 401);
 });
 
 test('the routers mounted before a 1.0 router leave its paths alone', async () => {
@@ -444,6 +452,17 @@ test('announcements: a client-authored one carries fromClient; the office ones a
   assert.ok(!('fromClient' in fromOffice), 'no key on office announcements');
 });
 
+test('read receipts: a client-authored announcement is read by all of its audience, never more ("Read by 6 of 6")', async () => {
+  const id = Number((srv.db.prepare(`SELECT id FROM announcements WHERE title = 'From the client'`).get() as { id: number }).id);
+  const staff = srv.db.prepare(`SELECT email, employee_id AS employeeId FROM users WHERE status = 'active' AND role <> 'client'`).all() as { email: string; employeeId: string }[];
+  for (const who of staff) assert.equal((await (await srv.login(who)).post(`/announcements/${id}/read`)).status, 204, who.email);
+  const stats = (await admin.get(`/announcements/reads?ids=${id}`)).json[0];
+  // The author is a client account, which is never in the audience, so nobody is taken off for being the author.
+  assert.equal(stats.audience, staff.length, 'every active staff member');
+  assert.equal(stats.readCount, staff.length);
+  assert.ok(stats.readCount <= stats.audience);
+});
+
 test('payroll and candidate payloads gain no keys while the 1.3 columns are empty', async () => {
   srv.db.prepare(`INSERT INTO payroll_runs (user_id, week_start, week_end, days_worked, sales, base_pay, commission, gross, due_date, status, reference)
                   VALUES (?, '2026-01-05', '2026-01-11', 1, 1, 60, 45, 105, '2026-01-16', 'pending', 'PAY-R3-TEST')`).run(fx().users.rep);
@@ -483,7 +502,11 @@ test('demo seed: the client account signs in, is listed apart from the four staf
     const reads = await owner.get('/announcements/reads');
     const staffActive = Number((demo.db.prepare(`SELECT COUNT(*) AS n FROM users WHERE status = 'active' AND role <> 'client'`).get() as { n: number }).n);
     assert.ok(reads.json.length > 0);
-    for (const r of reads.json) assert.ok(r.audience === staffActive || r.audience === staffActive - 1, `read receipts count staff only: ${r.audience} of ${staffActive}`);
+    // Everyone active on the staff, less the author when the author is one of them (a client author takes no one off).
+    const staffAuthor = (id: number) => Number((demo.db.prepare(`SELECT COUNT(*) AS n FROM announcements a JOIN users u ON u.id = a.author_id
+                                                                 WHERE a.id = ? AND u.status = 'active' AND u.role <> 'client'`).get(id) as { n: number }).n);
+    for (const r of reads.json) assert.equal(r.audience, staffActive - staffAuthor(r.announcementId), `read receipts count staff only: announcement ${r.announcementId}`);
+    assert.ok(reads.json.some((r: { announcementId: number }) => staffAuthor(r.announcementId) === 0), 'the demo has a client-authored announcement');
     // Hannah's own payload: her campaign, no office fields.
     const me = await hannah.get('/auth/me');
     assert.equal(me.json.user.clientCampaignId, Number((demo.db.prepare(`SELECT id FROM campaigns WHERE code = 'BCN'`).get() as { id: number }).id));

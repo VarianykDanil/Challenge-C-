@@ -343,6 +343,12 @@ export async function startTestServer(opts: StartOptions = {}): Promise<TestServ
   resetCodeFailures();
 
   const server = http.createServer(createApp(db));
+  // Release 1.3: idle keep-alive connections stay open until close() (which ends them all). With Node's default (the
+  // server drops a socket after 6 s idle: keepAliveTimeout 5 s + keepAliveTimeoutBuffer 1 s, on its own timer) a test
+  // step that blocks the event loop for longer — a synchronous demo seed, slower while the other test files run in
+  // parallel — let the server's close and the next request on that pooled socket meet: "fetch failed" (ECONNRESET /
+  // other side closed), depending on test order and machine load. See harness.test.ts.
+  server.keepAliveTimeout = 0;
   await new Promise<void>((resolve, reject) => {
     server.once('error', reject);
     server.listen(0, '127.0.0.1', () => resolve());

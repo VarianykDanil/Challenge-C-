@@ -151,7 +151,20 @@ export function AuditPage() {
         title={COPY.nav.audit.title}
         description={DESCRIPTION}
         icon={<History aria-hidden />}
-        actions={PDF_EXPORTS_READY ? <ErrorBoundary name="audit-pdf" fallback={null}><AuditPdfButton entries={data?.rows ?? []} filters={filterLines} /></ErrorBoundary> : undefined}
+        actions={
+          PDF_EXPORTS_READY ? (
+            <ErrorBoundary name="audit-pdf" fallback={null}>
+              {/* every matching entry (P4 reads them page by page), not only the 50 on screen; the total only once this
+                  view's own answer is in, never the previous filters' placeholder */}
+              <AuditPdfButton
+                entries={data?.rows ?? []}
+                filters={filterLines}
+                total={data && !log.isPlaceholderData ? total : undefined}
+                query={{ userId, entity, entityId, from, to, q, kind }}
+              />
+            </ErrorBoundary>
+          ) : undefined
+        }
       />
       <ErrorBoundary name="audit-opened" fallback={null}><RecordOpened entity={null} entityId={null} what="audit trail" /></ErrorBoundary>
 

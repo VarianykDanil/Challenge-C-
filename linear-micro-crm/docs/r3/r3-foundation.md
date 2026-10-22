@@ -272,7 +272,9 @@ Files on disk (git-ignored in `.gitignore`): `server/data/media/` (P5 videos), `
   `withProviderItems(core, extra)` (dedupe by key, `sortAttentionItems`, cap `ATTENTION_MAX_ITEMS`; unchanged when no
   extra items; a throwing provider is logged and skipped). Provider files, one per owner: `invoices.ts` (P2),
   `statements.ts` (P3), `clientPosts.ts` (P6). Keys start with the kind (`invoices:dispute:12`); items only for what
-  the caller may see; one or two grouped queries. With `LM_SMART=0` the whole feed (and so the providers) is off.
+  the caller may see; one grouped statement per caller (integration: with all three merged, two statements in one
+  provider took the admin's feed to 13, over the 1.1 budget of 12; `attention.test.ts` now holds each provider to one).
+  With `LM_SMART=0` the whole feed (and so the providers) is off.
 - `server/src/lib/audit/` — `registry.ts` (foundation; P9 owns it from now): `PACKAGE_AUDIT_SPECS`, `allAuditSpecs()`,
   `matchAuditSpec(method, path)`; one spec file per package exporting `AUDIT_SPECS: readonly AuditRouteSpec<any>[]` in
   the shape of `lib/auditSpecs.ts`: `paySpecs.ts` (P1), `invoiceSpecs.ts` (P2), `statementSpecs.ts` (P3),

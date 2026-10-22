@@ -1,8 +1,9 @@
 /**
  * Release 1.3 — P9 audit-everything: failed sign-ins and security checks are recorded (kind `sign_in`), filed under the
  * account they were tried on, worded plainly, and never with what was typed (the PIN, the employee ID, the code, the
- * challenge token). Validation answers write nothing. A flood of failures from one address stops being recorded after
- * FAILED_ROWS_PER_SOURCE rows in 15 minutes, with one row that says so.
+ * challenge token). Validation answers write nothing. A flood of unknown emails from one address stops being recorded
+ * after FAILED_ROWS_PER_SOURCE rows in 15 minutes, with one row that says so; a try on a real account is bounded by that
+ * account's own budget only, so the flood never hides it.
  */
 import { after, before, test } from 'node:test';
 import assert from 'node:assert/strict';
@@ -13,7 +14,9 @@ import { createApp } from '../app.ts';
 import { all, get, openDb, run, type Db } from '../db/connection.ts';
 import { createSchema } from '../db/schema.ts';
 import { FAILED_ROWS_ALL, FAILED_ROWS_PER_ACCOUNT, FAILED_ROWS_PER_SOURCE } from '../lib/audit.ts';
+import { IDLE_SIGN_OUT_ACTION } from '../lib/audit/sessions.ts';
 import { SIGN_IN_MESSAGES } from '../lib/audit/signIns.ts';
+import { purgeExpiredSessions } from '../middleware/auth.ts';
 import { hashPin, savePinHash } from '../lib/pin.ts';
 import { totp } from '../lib/totp.ts';
 import { INVALID_LOGIN, PIN_MESSAGES, resetLoginFailures } from '../routes/auth.ts';
@@ -94,10 +97,18 @@ test('a wrong employee ID, a deactivated account and an unknown email: one sign-
   assert.ok(!r.afterJson!.toLowerCase().includes('lm-0010') && !r.summary.toLowerCase().includes('lm-0010'));
   assert.equal(count(srv.db), n + 4);
 
+  // an "email" with a right-to-left override (it would display as danil.v@linear-mcr.co.uk): never stored or shown
+  const disguised = `‮${[...'danil.v@linear-mcr.co.uk'].reverse().join('')}`;
+  assert.equal((await srv.anon().post('/auth/login', { email: disguised, employeeId: 'x' })).status, 401);
+  r = newest(srv.db);
+  assert.equal(r.summary, 'Failed sign-in with an unknown email');
+  assert.deepEqual(JSON.parse(r.afterJson!), { reason: 'unknown_email', typedEmail: null });
+  assert.equal(count(srv.db), n + 5);
+
   // a missing field is a validation answer: nobody tried a credential
   assert.equal((await srv.anon().post('/auth/login', { email: fx().accounts.rep.email })).status, 400);
   assert.equal((await srv.anon().post('/auth/login', {})).status, 400);
-  assert.equal(count(srv.db), n + 4);
+  assert.equal(count(srv.db), n + 5);
 });
 
 test('a wrong PIN says how many tries are left; the try that locks the PIN, and tries during the lock, are recorded', async () => {
@@ -215,7 +226,7 @@ test(`a flood of failed sign-ins from one address stops being recorded after ${F
     assert.equal(added.length, FAILED_ROWS_PER_SOURCE + 1);
     assert.ok(added.slice(0, FAILED_ROWS_PER_SOURCE).every((r) => r.summary.startsWith('Failed sign-in with an unknown email')));
     // the cap is a count in a 15-minute window, not "in a row"
-    assert.match(added.at(-1)!.summary, new RegExp(`^Stopped recording failed sign-ins from .+ after ${FAILED_ROWS_PER_SOURCE} in 15 minutes; recording starts again within 15 minutes$`));
+    assert.match(added.at(-1)!.summary, new RegExp(`^Stopped recording failed sign-ins with unknown emails from .+ after ${FAILED_ROWS_PER_SOURCE} in 15 minutes; recording starts again within 15 minutes$`));
     assert.equal(added.at(-1)!.kind, 'sign_in');
     // successful sign-ins are never held back
     await flood.login('admin');
@@ -241,7 +252,13 @@ async function proxiedServer() {
     await new Promise<void>((resolve) => server.close(() => resolve()));
     db.close();
   };
-  return { db, fixture, login, close };
+  /** An admin session's GET (the fixture's owner, no PIN), for reading what was recorded through the API. */
+  const adminGet = async (path: string) => {
+    const signIn = await fetch(`${base}/auth/login`, { method: 'POST', headers: { 'content-type': 'application/json', 'x-forwarded-for': '10.250.0.1' }, body: JSON.stringify(FIXTURE_ACCOUNTS.admin) });
+    const cookie = /lm_session=[^;]*/.exec(signIn.headers.get('set-cookie') ?? '')?.[0] ?? '';
+    return (await fetch(`${base}${path}`, { headers: { cookie } })).json();
+  };
+  return { db, fixture, login, adminGet, close };
 }
 
 const address = (i: number) => `10.${(i >> 16) & 255}.${(i >> 8) & 255}.${i & 255}`;
@@ -292,3 +309,104 @@ test(`a flood from many addresses cannot hide a try on a real account: unknown e
     await p.close();
   }
 });
+
+test('one address: made-up emails up to its cap, then a try on a real account from that address is still recorded', async () => {
+  const p = await proxiedServer();
+  try {
+    const from = '10.66.66.66';
+    const n = count(p.db);
+    for (let i = 0; i < FAILED_ROWS_PER_SOURCE; i++) assert.equal(await p.login(from, { email: `junk${i}@example.test`, employeeId: 'LM-0000' }), 401);
+    let added = rows(p.db, 'WHERE id > ?', [n]);
+    assert.equal(added.length, FAILED_ROWS_PER_SOURCE + 1);
+    assert.equal(added.at(-1)!.summary, `Stopped recording failed sign-ins with unknown emails from ${from} after ${FAILED_ROWS_PER_SOURCE} in 15 minutes; recording starts again within 15 minutes`);
+    // the address's room for unknown emails is used up…
+    const m = count(p.db);
+    assert.equal(await p.login(from, { email: 'junk.more@example.test', employeeId: 'LM-0000' }), 401);
+    assert.equal(count(p.db), m, 'one more unknown email: not recorded');
+    // …but a try on the leader's account from the same address is recorded, filed under the leader
+    assert.equal(await p.login(from, { email: FIXTURE_ACCOUNTS.leader.email, employeeId: 'LM-0000' }), 401);
+    added = rows(p.db, 'WHERE id > ?', [m]);
+    assert.equal(added.length, 1);
+    assert.deepEqual([added[0]!.summary, added[0]!.userId], ['Failed sign-in: wrong employee ID', p.fixture.users.leader]);
+    const activity = await p.adminGet(`/audit/person/${p.fixture.users.leader}`);
+    assert.equal(activity.failedSignIns, 1, 'on the leader\'s Activity');
+  } finally {
+    await p.close();
+  }
+});
+
+test('an account\'s pause note is on that person\'s Activity, as Linear Hub\'s, and is not them being active', async () => {
+  const p = await proxiedServer();
+  try {
+    for (let i = 0; i < FAILED_ROWS_PER_ACCOUNT + 2; i++) {
+      const status = await p.login(address(9000 + i), { email: FIXTURE_ACCOUNTS.recruiter.email, employeeId: `X-${i}` });
+      assert.ok(status === 401 || status === 429, String(status));
+    }
+    const activity = await p.adminGet(`/audit/person/${p.fixture.users.recruiter}`);
+    const pause = activity.rows.find((r: { summary: string }) => r.summary.startsWith('Stopped recording'));
+    assert.ok(pause, 'the pause note is listed');
+    assert.equal(pause.summary, `Stopped recording failed sign-ins on Rae Recruiter's account after ${FAILED_ROWS_PER_ACCOUNT} in 15 minutes; recording starts again within 15 minutes`);
+    assert.equal(pause.userName, null, 'no actor: the Audit page names it Linear Hub');
+    assert.equal(activity.failedSignIns, FAILED_ROWS_PER_ACCOUNT);
+    assert.equal(activity.lastActiveAt, null, 'tries on the account, and the note, are not the recruiter being active');
+    assert.equal(activity.total, FAILED_ROWS_PER_ACCOUNT + 1);
+  } finally {
+    await p.close();
+  }
+});
+
+test('a sign-out by the idle timeout is recorded once, under the person, when they come back or at start-up', async () => {
+  const s = await startTestServer();
+  try {
+    const db = s.db;
+    const tokenOf = (c: TestClient) => c.cookie.replace('lm_session=', '');
+    const ago = (h: number) => new Date(Date.now() - h * 3_600_000).toISOString();
+    const idleRows = () => rows(db, `WHERE action = ?`, [IDLE_SIGN_OUT_ACTION]);
+    const SUMMARY = /^Signed out after 12 hours without activity \(last active \d{2}:\d{2} [A-Z][a-z]{2} \d{1,2} [A-Z][a-z]{2}\)$/;
+
+    // 1. the leader comes back 13 hours later (the default timeout is 12): one sign-out row, then nothing more
+    const leader = await s.login('leader');
+    run(db, `UPDATE sessions SET last_seen_at = ? WHERE token = ?`, [ago(13), tokenOf(leader)]);
+    assert.equal((await leader.get('/auth/me')).status, 401);
+    assert.equal((await leader.get('/auth/me')).status, 401);
+    let idle = idleRows();
+    assert.equal(idle.length, 1);
+    assert.deepEqual([idle[0]!.userId, idle[0]!.kind, idle[0]!.entity], [fx2(s).users.leader, 'sign_in', null]);
+    assert.match(idle[0]!.summary, SUMMARY);
+    // 11 hours is still inside the timeout: nothing
+    const rep = await s.login('rep');
+    run(db, `UPDATE sessions SET last_seen_at = ? WHERE token = ?`, [ago(11), tokenOf(rep)]);
+    assert.equal((await rep.get('/auth/me')).status, 200);
+    assert.equal(idleRows().length, 1);
+
+    // 2. start-up: an idle session of a current account is a sign-out; a 14-day expiry and a deactivated account are not
+    const recruiter = await s.login('recruiter');
+    run(db, `UPDATE sessions SET last_seen_at = ? WHERE token = ?`, [ago(20), tokenOf(recruiter)]);
+    const repB = await s.login('repB');
+    run(db, `UPDATE sessions SET last_seen_at = ?, expires_at = ? WHERE token = ?`, [ago(20), ago(1), tokenOf(repB)]);
+    const repA2 = await s.login('repA2');
+    run(db, `UPDATE sessions SET last_seen_at = ? WHERE token = ?`, [ago(20), tokenOf(repA2)]);
+    run(db, `UPDATE users SET status = 'left' WHERE id = ?`, [fx2(s).users.repA2]);
+    purgeExpiredSessions(db);
+    idle = idleRows();
+    assert.equal(idle.length, 2);
+    assert.equal(idle[1]!.userId, fx2(s).users.recruiter);
+    assert.match(idle[1]!.summary, SUMMARY);
+    assert.equal(get<{ n: number }>(db, `SELECT COUNT(*) AS n FROM sessions`)!.n, 1, 'only the rep\'s live session is left');
+
+    // 3. it is a sign-out on the person's Activity, not them being active
+    const admin = await s.login('admin');
+    const activity = (await admin.get(`/audit/person/${fx2(s).users.recruiter}`)).json;
+    assert.ok(activity.rows.some((r: { action: string }) => r.action === IDLE_SIGN_OUT_ACTION));
+    const signIn = rows(db, `WHERE user_id = ? AND action = 'POST /auth/login'`, [fx2(s).users.recruiter]).length;
+    assert.equal(signIn, 1);
+    assert.ok(activity.lastActiveAt < get<{ at: string }>(db, `SELECT at FROM audit_log WHERE action = ? AND user_id = ?`, [IDLE_SIGN_OUT_ACTION, fx2(s).users.recruiter])!.at);
+    // …and a Sign-ins row: the kind filter finds it
+    const signIns = (await admin.get(`/audit?kind=sign_in&userId=${fx2(s).users.recruiter}`)).json;
+    assert.ok(signIns.rows.some((r: { action: string }) => r.action === IDLE_SIGN_OUT_ACTION));
+  } finally {
+    await s.close();
+  }
+});
+
+const fx2 = (s: TestServer) => s.fixture!;

@@ -93,7 +93,7 @@ export function CampaignPagePage() {
           <EventsThisMonth events={page.eventsThisMonth} ownTeam={me.role === 'rep'} />
         </div>
         <div className="min-w-0 space-y-6">
-          <ContactCard page={page} />
+          <ContactCard page={page} viaTeamLeader={me.role === 'rep' && me.teamId != null} />
           {page.full && <RatesCard page={page} />}
           {page.clientAccounts && (
             <ErrorBoundary name="client-accounts" fallback={null}>
@@ -151,15 +151,20 @@ function BriefCard({ page }: { page: CampaignPage }) {
   );
 }
 
-function ContactCard({ page }: { page: CampaignPage }) {
+function ContactCard({ page, viaTeamLeader }: { page: CampaignPage; viaTeamLeader: boolean }) {
   const c = page.campaign;
   const has = c.contactName || c.contactEmail || c.contactPhone;
   return (
     <Card data-testid="campaign-contact">
       <CardHeader icon={<UserRound />} title="Client contact" />
       {!page.full ? (
-        // Reps and recruiters: the server sends no contact details (they are the client's own).
-        <p className="text-sm text-muted">Questions for {c.name} go through your team leader or the Linear MCR office. They speak to the client for you.</p>
+        // Reps and recruiters: the server sends no contact details (they are the client's own). A rep with a team asks
+        // their leader first; office staff (the recruiter has no team) and reps without one ask an administrator.
+        <p className="text-sm text-muted">
+          {viaTeamLeader
+            ? `Questions for ${c.name} go through your team leader or the Linear MCR office. They speak to the client for you.`
+            : `Questions for ${c.name} go to the owner or another administrator. They speak to the client for you.`}
+        </p>
       ) : !has ? (
         <p className="text-sm text-muted">No contact recorded.</p>
       ) : (

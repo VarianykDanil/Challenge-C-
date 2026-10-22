@@ -1,8 +1,9 @@
 import { randomBytes } from 'node:crypto';
 import type { NextFunction, Request, RequestHandler, Response } from 'express';
 import { isSessionIdle, type PinSetupRequiredError, type Role, type TwoFactorSetupRequiredError, type UserWithTeam } from '@lm/shared';
-import { get, run, type Db } from '../db/connection.ts';
+import { all, get, run, type Db } from '../db/connection.ts';
 import { USER_SELECT } from '../db/queries.ts';
+import { recordIdleSignOut } from '../lib/audit/sessions.ts';
 import { forbidden, unauthorized } from '../lib/errors.ts';
 import { clientSafeUser, isDemoClientAccount } from '../lib/client.ts';
 import { accountFlags, readSecuritySettings } from '../lib/pin.ts';
@@ -43,11 +44,23 @@ export function destroyOtherSessions(db: Db, userId: number, keepToken: string |
     : destroyUserSessions(db, userId);
 }
 
-/** Sessions past their 14-day expiry, and (1.2) sessions idle for longer than the admin's session idle timeout. */
+/**
+ * Sessions past their 14-day expiry, and (1.2) sessions idle for longer than the admin's session idle timeout.
+ * Release 1.3 (P9): each idle one of a current account is recorded as that person's sign-out (one grouped read first).
+ */
 export function purgeExpiredSessions(db: Db): void {
   const now = Date.now();
-  const idleCutoff = new Date(now - readSecuritySettings(db).sessionIdleHours * 3_600_000).toISOString();
-  run(db, `DELETE FROM sessions WHERE expires_at < ? OR COALESCE(last_seen_at, created_at) < ?`, [new Date(now).toISOString(), idleCutoff]);
+  const idleHours = readSecuritySettings(db).sessionIdleHours;
+  const nowIso = new Date(now).toISOString();
+  const idleCutoff = new Date(now - idleHours * 3_600_000).toISOString();
+  const idle = all<{ userId: number; seenAt: string }>(
+    db,
+    `SELECT s.user_id AS userId, COALESCE(s.last_seen_at, s.created_at) AS seenAt FROM sessions s JOIN users u ON u.id = s.user_id
+     WHERE s.expires_at >= ? AND COALESCE(s.last_seen_at, s.created_at) < ? AND u.status <> 'left'`,
+    [nowIso, idleCutoff],
+  );
+  run(db, `DELETE FROM sessions WHERE expires_at < ? OR COALESCE(last_seen_at, created_at) < ?`, [nowIso, idleCutoff]);
+  for (const s of idle) recordIdleSignOut(db, { userId: s.userId, lastSeenAt: s.seenAt, idleHours, ip: null });
 }
 
 /** `Secure` whenever the request arrived over HTTPS (behind the trusted proxy) or `COOKIE_SECURE=1` forces it. */
@@ -92,8 +105,12 @@ export function authenticate(db: Db): RequestHandler {
     const now = Date.now();
     const settings = readSecuritySettings(db);
     const seenMs = Date.parse(row.seenAt);
-    if (row.expiresAt < new Date(now).toISOString() || row.status === 'left' || !Number.isFinite(seenMs) || isSessionIdle(seenMs, now, settings.sessionIdleHours)) {
+    const expired = row.expiresAt < new Date(now).toISOString();
+    const idle = Number.isFinite(seenMs) && isSessionIdle(seenMs, now, settings.sessionIdleHours);
+    if (expired || row.status === 'left' || !Number.isFinite(seenMs) || idle) {
       destroySession(db, token);
+      // Release 1.3 (P9, every sign-out is recorded): the idle timeout signed this person out
+      if (idle && !expired && row.status !== 'left') recordIdleSignOut(db, { userId: row.id, lastSeenAt: row.seenAt, idleHours: settings.sessionIdleHours, ip: req.ip ?? null });
       return next(); // requireAuth answers 401
     }
     if (now - seenMs >= LAST_SEEN_RESOLUTION_MS) run(db, `UPDATE sessions SET last_seen_at = ? WHERE token = ?`, [new Date(now).toISOString(), token]);

@@ -60,9 +60,10 @@ when he approves or unpublishes is the office's own and is always `null` in `GET
   Now asks to change commission", **Review** → `/campaigns/<id>?post=<id>`.
 - Admin and leader: `client:post:<id>` (info) for every other post they have not read, from the last 30 days —
   "Update from Breast Cancer Now", **Read it**. A leader sees a pending change as info ("Waiting for the office").
-- Every other role: nothing. Two grouped queries: the admin's pending changes, **all of them** (a change to approve is
-  never pushed out by newer posts; the feed keeps warnings ahead of info items), then at most 8 unread posts, newest
-  first. Reading a client's announcement in Announcements does not clear its item; opening the campaign page does.
+- Every other role: nothing. One statement per caller, so the feed's 1.1 budget (12 statements) holds with P2's and
+  P3's providers merged: for an admin a `UNION ALL` of the pending changes, **all of them** up to the feed's 20 (a
+  change to approve is never pushed out by newer posts; the feed keeps warnings ahead of info items), and at most 8
+  unread posts, newest first, each part with its own `ORDER BY` and `LIMIT`; for a leader the unread posts alone. Reading a client's announcement in Announcements does not clear its item; opening the campaign page does.
 
 ### Audit (`lib/audit/clientSpecs.ts`)
 
@@ -111,7 +112,9 @@ the 1.2 specs (same wording) so the snapshot holds the brief too. Snapshots neve
   `campaign_rates.client_post_id`. The owner has read the older posts, the leaders the announcement, so the demo opens
   with a commission change to approve and one new update. The two published posts' Announcements rows get read
   receipts from a share of the active staff that grows with age, like the audit seed's (`announcement_reads`; e.g.
-  "Read by 27 of 28" for the nine-day-old walk, "17 of 28" for the three-day-old update), never "Read by 0".
+  "Read by 27 of 29" for the nine-day-old walk, "19 of 29" for the three-day-old update), never "Read by 0". The
+  audience of a client's announcement is every active staff member: a client account is never in it, so nobody is
+  taken off for being the author.
 
 ## User guide
 
@@ -129,7 +132,8 @@ organisation posted: Published, Waiting for Linear, Approved from Mon 2 Nov, Dec
 **Campaigns** in the sidebar. **Campaigns** → a campaign → **Open page** shows the client's brief and contact, this
 month's sales and events, the rate history and **Client posts** (a change waiting for you reads "Waiting for
 approval"): **Approve** a commission change (confirm the date it starts — unpaid weeks from that date are recalculated;
-if the date reaches back into a week already paid, the dialog says so: those weeks keep the old rate), **Decline** it
+if the change has a new rate to the fundraiser and the date reaches back into a week already paid, the dialog says
+so: those weeks keep the old rate; a payout-only change changes nobody's pay, so it gets no such warning), **Decline** it
 with a reason the client sees, **Unpublish** an update or announcement (also from the dashboard: the crossed-out eye
 next to "From BCN"). The optional **Note for the office** on Approve and Unpublish stays in the office (the campaign page
 and the audit trail); only a decline's reason reaches the client. **Edit brief** changes the description, the brief for
@@ -142,8 +146,9 @@ the demo client).
 
 **For reps and recruiters.** Tap the "From BCN" badge on a client's announcement (dashboard) to open the campaign's
 page: the brief for the field team, the client's announcements and this month's events (reps: your team's), never any
-money and not the client contact's email or phone (questions for the client go through your team leader or the
-office).
+money and not the client contact's email or phone. The contact card says who to ask instead: a rep with a team
+"Questions for Breast Cancer Now go through your team leader or the Linear MCR office"; a recruiter (office staff, no
+team) or a rep without a team "Questions for Breast Cancer Now go to the owner or another administrator".
 
 ## Owner notes
 
@@ -158,16 +163,17 @@ office).
   If that date is in the past, unpaid weeks from it are recalculated, but **weeks already paid keep the old rate and
   nothing corrects them automatically**: if someone should get the difference, add it yourself with **Add an
   adjustment** (Finance → Company → Bonuses and corrections). The Approve dialog warns you when the date reaches a paid
-  week.
+  week and the change has a new rate to the fundraiser (a payout-only change needs no pay correction, so no warning).
 - Unpublishing removes the announcement for everyone and cannot be undone from the app (the text stays in the client
   post and the audit trail); ask the client to post again if it was a mistake.
 - Decide: should leaders also be able to approve or decline commission changes? Today only administrators can.
 - Decide: posts older than 30 days no longer count as new for the sidebar badge and Needs attention. Change
   `CLIENT_POST_UNREAD_DAYS` in `shared/src/logic/clientPortal.ts` if you want longer. (A change waiting for your
   decision stays in Needs attention until you decide it, however old.)
-- Decide: the client contact's name, email and phone are now shown only to admins and leaders. Reps and recruiters see
-  "Questions for Breast Cancer Now go through your team leader or the Linear MCR office". Say if you want the field
-  team to have the contact's details.
+- Decide: the client contact's name, email and phone are now shown only to admins and leaders. Reps with a team see
+  "Questions for Breast Cancer Now go through your team leader or the Linear MCR office"; recruiters and reps without a
+  team see "… go to the owner or another administrator". Say if you want the field team to have the contact's
+  details.
 - Decide: in narrow cards (phones, and the dashboard's third column) the badge reads "From BCN"; the full "From
   Breast Cancer Now" shows where the card has room, and screen readers and the hover text always get the full name.
   Showing the full name everywhere needs the announcement title row (the foundation's `Announcements.tsx`) to wrap.
@@ -175,11 +181,12 @@ office).
 ## Notes for the lead
 
 - Foundation files touched (two small edits, both tolerant of merge order): `server/src/routes/auth.ts`
-  `POST /auth/pin/remove` refuses a client account (`clientPinRequired`); `server/src/test/r3-contracts.test.ts` line
-  301 accepts the stub's 501 or P6's 404 "Client account not found" for `PATCH /client-accounts/1` (user 1 is staff).
-  No other package branch edits those lines (P3 edits r3-contracts lines 317-324, a separate hunk).
+  `POST /auth/pin/remove` refuses a client account (`clientPinRequired`); `server/src/test/r3-contracts.test.ts`
+  asserts P6's 404 "Client account not found" for an admin's `PATCH /client-accounts/1` (user 1 is staff) and 403 for a
+  rep (integration I1 dropped the stub's 501 once every package had landed).
 - Merge P1 before P6: the client seed links P1's demo `campaign_rates` rows (`client_post_id`) and Approve calls P1's
   `addCampaignRate`.
-- `GET /announcements/reads` (U3/P9's `routes/audit.ts`) counts the audience as active staff minus one when the author
-  is active; for a client-authored announcement the author is not staff, so the audience reads one short ("of 28" on
-  the demo, where 29 staff are active).
+- Fixed in integration (I1): `GET /announcements/reads` (U3/P9's `routes/audit.ts`) took the author off the audience
+  even when the author was a client account (never counted in it), so a client's announcement read one short ("Read by
+  29 of 28" once everyone had read it). It now takes the author off only when the author is active staff, and counts
+  only staff readers; tests in `r3-contracts.test.ts`.

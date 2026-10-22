@@ -61,8 +61,13 @@ export interface SignInState {
 
 const ACCOUNT_SELECT = `SELECT u.id, u.first_name || ' ' || u.last_name AS name, u.status FROM users u`;
 
-/** The Login page's email test (client/src/pages/Login.tsx EMAIL_RE): text, one "@", text with a dot. */
-export const EMAIL_SHAPE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+/**
+ * The Login page's email test (client/src/pages/Login.tsx EMAIL_RE): text, one "@", text with a dot — and, stricter
+ * than the page, no control or invisible format character (\p{C}: bidi overrides, zero-width characters), so an
+ * anonymous caller cannot store an "unknown email" that displays as somebody else's address. Anything else is kept
+ * as no email at all.
+ */
+export const EMAIL_SHAPE = /^[^\s@\p{C}]+@[^\s@\p{C}]+\.[^\s@\p{C}]+$/u;
 
 /** What a failed attempt's row keeps: why it failed, and a few facts (never what was typed but an email). */
 type FailureFacts = { reason: AuditSignInReason } & Record<string, unknown>;

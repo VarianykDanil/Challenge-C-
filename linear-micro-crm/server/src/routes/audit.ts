@@ -16,7 +16,8 @@
  *  GET /audit/people                → AuditPerson[] (admin): everyone the trail can name, client accounts included
  *                                    (id, name, role, status: no employee IDs or client access codes)
  *  GET /audit/person/:userId?kind=&limit=&offset=  → AuditPersonActivity (admin): what that person did, newest first,
- *                                    and the failed attempts on their account; their last sign-in, last activity (not
+ *                                    the failed attempts on their account and Linear Hub's note when it paused
+ *                                    recording them; their last sign-in, last activity (not
  *                                    counting tries on the sign-in page, which may be somebody else's) and failed
  *                                    sign-ins in the last 30 days
  *  GET /audit/:entity/:entityId?kind=  the record's history, optionally of some kinds only (as GET /audit)
@@ -47,6 +48,7 @@ import { getGauge, getUser } from '../db/queries.ts';
 import { addDays, toBusinessISO } from '../lib/dates.ts';
 import { badRequest, forbidden, notFound } from '../lib/errors.ts';
 import { gaugeSummary } from '../lib/auditSpecs.ts';
+import { IDLE_SIGN_OUT_ACTION } from '../lib/audit/sessions.ts';
 import { canSeeEntryDetails } from '../lib/scope.ts';
 import { idParam, isoDate, offsetQuery, optionalIdQuery, optionalString } from '../lib/validate.ts';
 import { currentUser, requireRole } from '../middleware/auth.ts';
@@ -56,8 +58,11 @@ export const AUDIT_PAGE_DEFAULT = 50;
 export const AUDIT_PAGE_MAX = 200;
 /** GET /audit/:entity/:entityId answers the newest 100 rows. */
 export const ENTITY_HISTORY_MAX = 100;
-/** The sign-in and sign-out rows (left out with `signIns=0`, so the page lists changes only). */
-export const SIGN_IN_ACTIONS = ['POST /auth/login', 'POST /auth/login/2fa', 'POST /auth/logout'] as const;
+/**
+ * The sign-in and sign-out rows (left out with `signIns=0`, so the page lists changes only). Release 1.3: with the
+ * sign-out by the idle timeout (lib/audit/signIns.ts IDLE_SIGN_OUT_ACTION), which is not the person being active.
+ */
+export const SIGN_IN_ACTIONS = ['POST /auth/login', 'POST /auth/login/2fa', 'POST /auth/logout', IDLE_SIGN_OUT_ACTION] as const;
 /** GET /announcements/reads without `ids`: the 50 newest (pinned first, as the dashboard lists them). */
 const READS_DEFAULT_LIMIT = 50;
 
@@ -293,8 +298,10 @@ export function auditRouter(db: Db): Router {
     const limitRaw = optionalIdQuery(req.query.limit, 'limit');
     const limit = Math.min(limitRaw ?? AUDIT_PAGE_DEFAULT, AUDIT_PAGE_MAX);
     const offset = offsetQuery(req.query.offset);
-    const clauses = ['a.user_id = ?'];
-    const params: (string | number)[] = [userId];
+    // what they did, plus Linear Hub's note that it paused recording failed sign-ins on their account (no actor, filed
+    // under the account: lib/audit.ts takeFailureBudget), so the card shows why tries on the account stopped appearing
+    const clauses = [`(a.user_id = ? OR (a.user_id IS NULL AND a.entity = 'user' AND a.entity_id = ? AND a.kind = 'sign_in'))`];
+    const params: (string | number)[] = [userId, userId];
     pushKinds(clauses, params, kinds);
     const where = `WHERE ${clauses.join(' AND ')}`;
     const total = Number(get<{ n: number }>(db, `SELECT COUNT(*) AS n FROM audit_log a ${where}`, params)!.n);
@@ -304,7 +311,7 @@ export function auditRouter(db: Db): Router {
     const stats = get<{ lastSignInAt: string | null; lastActiveAt: string | null; failed: number | null }>(
       db,
       `SELECT MAX(CASE WHEN a.action IN ('POST /auth/login', 'POST /auth/login/2fa') AND a.kind = 'sign_in' AND a.after_json IS NULL THEN a.at END) AS lastSignInAt,
-              MAX(CASE WHEN ${ATTEMPT_ON_ACCOUNT} THEN NULL ELSE a.at END) AS lastActiveAt,
+              MAX(CASE WHEN ${ATTEMPT_ON_ACCOUNT} OR a.action = '${IDLE_SIGN_OUT_ACTION}' THEN NULL ELSE a.at END) AS lastActiveAt,
               SUM(CASE WHEN ${FAILED_ATTEMPT} AND a.at >= ? THEN 1 ELSE 0 END) AS failed
        FROM audit_log a WHERE a.user_id = ?`,
       [since, userId],
@@ -357,7 +364,8 @@ export function announcementReadsRouter(db: Db): Router {
   const router = Router();
 
   /**
-   * "Read by 18 of 34": the audience is everyone active except the author; a read counts when its reader is in that
+   * "Read by 18 of 34": the audience is every active staff member except the author (a client portal account is never
+   * in it, so a client-authored announcement — release 1.3 — loses no one); a read counts when its reader is in that
    * audience. Admins get every announcement, everyone else only the ones they wrote. Names are always included, as the
    * only people who receive a row are the author and admins. Two queries whatever the number of announcements.
    */
@@ -378,7 +386,7 @@ export function announcementReadsRouter(db: Db): Router {
     const limit = ids ? '' : ` LIMIT ${READS_DEFAULT_LIMIT}`;
     const announcements = all<{ id: number; authorId: number; authorActive: number }>(
       db,
-      `SELECT a.id, a.author_id AS authorId, (au.status = 'active') AS authorActive
+      `SELECT a.id, a.author_id AS authorId, (au.status = 'active' AND au.role <> 'client') AS authorActive
        FROM announcements a LEFT JOIN users au ON au.id = a.author_id ${where}
        ORDER BY a.pinned DESC, a.created_at DESC, a.id DESC${limit}`,
       params,
@@ -394,7 +402,7 @@ export function announcementReadsRouter(db: Db): Router {
       db,
       `SELECT r.announcement_id AS announcementId, r.user_id AS userId, u.first_name || ' ' || u.last_name AS name, r.read_at AS readAt
        FROM announcement_reads r JOIN users u ON u.id = r.user_id JOIN announcements a ON a.id = r.announcement_id
-       WHERE r.announcement_id IN (${placeholders(annIds.length)}) AND u.status = 'active' AND r.user_id <> a.author_id
+       WHERE r.announcement_id IN (${placeholders(annIds.length)}) AND u.status = 'active' AND u.role <> 'client' AND r.user_id <> a.author_id
        ORDER BY r.read_at DESC, u.last_name, u.first_name`,
       annIds,
     );

@@ -24,8 +24,8 @@
  *    ("Linear Hub") or a client-portal action.
  *  - Failed attempts: a 4xx answer to a route whose spec has a `failed` hook (sign-in, two-step sign-in, PIN change and
  *    removal, two-step settings) writes what the hook returns — "Failed sign-in: wrong PIN (4 tries left)" — within a
- *    budget per 15 minutes (FAILED_ROWS_*): 30 rows per address (sign-in page tries), 30 per account, and 600 in all
- *    for emails nobody has — so a flood of made-up emails from many addresses can never hide a try on a real account.
+ *    budget per 15 minutes (FAILED_ROWS_*): 30 rows per real account, and for emails nobody has 30 per address and 600
+ *    in all — so a flood of made-up emails, from one address or many, can never hide a try on a real account.
  *    Other failed requests still write nothing.
  *  - Exports and opened records reported by a page (POST /audit/events) and automatic steps go through
  *    lib/audit/events.ts, which calls recordAudit.
@@ -196,12 +196,12 @@ interface AuditState extends AuditRequestContext {
 /**
  * Release 1.3 (P9): failed sign-ins, wrong PINs and wrong two-step codes are recorded (the registry's `failed` hook),
  * within a budget per 15-minute window, so a script hammering the sign-in page cannot fill the disk:
- *  - FAILED_ROWS_PER_SOURCE rows per address, for tries from the sign-in page (nobody signed in yet; a signed-in
- *    person's own wrong PIN or code is bounded by their account's budget instead);
- *  - FAILED_ROWS_PER_ACCOUNT rows per account a try is filed under (a real account: its own budget, so a flood of
- *    made-up emails can never use up the room for a try on Matt's account);
- *  - FAILED_ROWS_ALL rows in all for emails nobody has (no account to file them under).
- * The row that reaches a cap says recording has paused, for whom, and that it starts again within 15 minutes.
+ *  - FAILED_ROWS_PER_ACCOUNT rows per account a try is filed under (a real account: its own budget and only that, so a
+ *    flood of made-up emails — even from the same address — can never use up the room for a try on Matt's account);
+ *  - for emails nobody has (no account to file them under): FAILED_ROWS_PER_SOURCE rows per address of the sign-in
+ *    page, and FAILED_ROWS_ALL rows in all.
+ * The row that reaches a cap says recording has paused, for whom, and that it starts again within 15 minutes; an
+ * account's pause row names the account (entity 'user'), so it shows on that person's Activity, as Linear Hub's note.
  * Worst case per window: FAILED_ROWS_ALL + FAILED_ROWS_PER_ACCOUNT × accounts tried.
  */
 export const FAILED_ROWS_PER_SOURCE = 30;
@@ -303,30 +303,33 @@ interface PauseRow {
  * Takes one row from the failure budget: `source` is the address of a sign-in page try (null for a signed-in
  * person's own check), `accountId` the account the try is filed under (null for an email nobody has). Returns null
  * when the room is used up; otherwise the row to write after the failure when this one was the last allowed (null
- * pause when it was not).
+ * pause when it was not). A try on a real account counts against that account's budget only (not the address's), so
+ * made-up emails from the same address never use up its room.
  */
 function takeFailureBudget(db: Db, budget: FailureBudget, source: string | null, accountId: number | null): { pause: PauseRow | null } | null {
   const now = Date.now();
-  const accountKey = accountId === null ? null : String(accountId);
-  const fromSource = source === null ? 0 : budget.perSource.count(source, now);
-  const fromAccount = accountKey === null ? 0 : budget.perAccount.count(accountKey, now);
-  const fromAll = accountKey === null ? budget.all.count('*', now) : 0;
-  if (source !== null && fromSource >= FAILED_ROWS_PER_SOURCE) return null;
-  if (accountKey !== null ? fromAccount >= FAILED_ROWS_PER_ACCOUNT : fromAll >= FAILED_ROWS_ALL) return null;
-  if (source !== null) budget.perSource.record(source, now);
-  if (accountKey !== null) budget.perAccount.record(accountKey, now);
-  else budget.all.record('*', now);
   const minutes = FAILED_ROWS_WINDOW_MS / 60_000;
   const again = `; recording starts again within ${minutes} minutes`;
-  if (source !== null && fromSource + 1 === FAILED_ROWS_PER_SOURCE) {
-    return { pause: { accountId: null, summary: `Stopped recording failed sign-ins from ${source} after ${FAILED_ROWS_PER_SOURCE} in ${minutes} minutes${again}` } };
-  }
-  if (accountKey !== null && fromAccount + 1 === FAILED_ROWS_PER_ACCOUNT) {
+  if (accountId !== null) {
+    const key = String(accountId);
+    const fromAccount = budget.perAccount.count(key, now);
+    if (fromAccount >= FAILED_ROWS_PER_ACCOUNT) return null;
+    budget.perAccount.record(key, now);
+    if (fromAccount + 1 < FAILED_ROWS_PER_ACCOUNT) return { pause: null };
     const name = get<{ name: string }>(db, `SELECT first_name || ' ' || last_name AS name FROM users WHERE id = ?`, [accountId])?.name;
     const whose = name ? `${name}'s account` : 'one account';
     return { pause: { accountId, summary: `Stopped recording failed sign-ins on ${whose} after ${FAILED_ROWS_PER_ACCOUNT} in ${minutes} minutes${again}` } };
   }
-  if (accountKey === null && fromAll + 1 === FAILED_ROWS_ALL) {
+  const fromSource = source === null ? 0 : budget.perSource.count(source, now);
+  const fromAll = budget.all.count('*', now);
+  if (source !== null && fromSource >= FAILED_ROWS_PER_SOURCE) return null;
+  if (fromAll >= FAILED_ROWS_ALL) return null;
+  if (source !== null) budget.perSource.record(source, now);
+  budget.all.record('*', now);
+  if (source !== null && fromSource + 1 === FAILED_ROWS_PER_SOURCE) {
+    return { pause: { accountId: null, summary: `Stopped recording failed sign-ins with unknown emails from ${source} after ${FAILED_ROWS_PER_SOURCE} in ${minutes} minutes${again}` } };
+  }
+  if (fromAll + 1 === FAILED_ROWS_ALL) {
     return { pause: { accountId: null, summary: `Stopped recording failed sign-ins with unknown emails after ${FAILED_ROWS_ALL} in ${minutes} minutes from many addresses${again}` } };
   }
   return { pause: null };

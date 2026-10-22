@@ -10,10 +10,11 @@
  *    deadline — how many of the next payday's invoices are still waiting to be accepted.
  *
  * Read-only (the feed is cached; the invoices job writes the statuses): an issued invoice past its deadline counts as
- * deemed accepted here too. At most two grouped queries per caller.
+ * deemed accepted here too. One grouped statement per caller (the feed's 1.1 budget of 12 holds with every provider
+ * merged): the person's own invoices, or for an admin the disputes and the waiting count together.
  */
 import { effectiveInvoiceStatus, isInvoicedRole, type AttentionItem } from '@lm/shared';
-import { all, get } from '../../db/connection.ts';
+import { all } from '../../db/connection.ts';
 import { addDays, formatShort, formatWeek, toBusinessISO } from '../dates.ts';
 import type { AttentionProvider } from './types.ts';
 
@@ -47,6 +48,9 @@ interface DisputeRow {
   reason: string;
   userName: string;
 }
+
+/** One row per disputed invoice (or a single row of nulls when none), each carrying the waiting count. */
+type AdminRow = { [K in keyof DisputeRow]: DisputeRow[K] | null } & { waitingN: number; waitingDeemAt: string | null; waitingPayday: string | null };
 
 export const provider: AttentionProvider = {
   name: 'invoices',
@@ -98,13 +102,22 @@ export const provider: AttentionProvider = {
     }
 
     if (me.role === 'admin') {
-      const disputes = all<DisputeRow>(
+      // One statement: the next deadline's invoices still waiting (a one-row count, kept by the LEFT JOIN when nothing is
+      // disputed) beside each disputed invoice.
+      const rows = all<AdminRow>(
         db,
-        `SELECT i.id, i.number, i.version, i.total, p.week_start AS weekStart, i.disputed_at AS disputedAt, i.dispute_reason AS reason,
-                u.first_name || ' ' || u.last_name AS userName
-         FROM invoices i JOIN payroll_runs p ON p.id = i.payroll_run_id JOIN users u ON u.id = i.user_id
-         WHERE i.status = 'disputed' ORDER BY i.disputed_at`,
+        `SELECT w.n AS waitingN, w.deemAt AS waitingDeemAt, w.payday AS waitingPayday, d.*
+         FROM (SELECT COUNT(*) AS n, MIN(i.deem_at) AS deemAt, MIN(p.due_date) AS payday FROM invoices i JOIN payroll_runs p ON p.id = i.payroll_run_id
+               WHERE i.status = 'issued' AND p.status IN ('pending', 'failed') AND i.deem_at > ?
+                 AND i.deem_at <= ?) w
+         LEFT JOIN (SELECT i.id, i.number, i.version, i.total, p.week_start AS weekStart, i.disputed_at AS disputedAt, i.dispute_reason AS reason,
+                           u.first_name || ' ' || u.last_name AS userName
+                    FROM invoices i JOIN payroll_runs p ON p.id = i.payroll_run_id JOIN users u ON u.id = i.user_id
+                    WHERE i.status = 'disputed') d ON 1
+         ORDER BY d.disputedAt`,
+        [local, `${addDays(local.slice(0, 10), 1)}T23:59:59`],
       );
+      const disputes = rows.filter((r): r is AdminRow & DisputeRow => r.id !== null);
       for (const d of disputes) {
         items.push({
           key: `invoices:dispute:${d.id}:v${d.version}`,
@@ -118,13 +131,7 @@ export const provider: AttentionProvider = {
         });
       }
       // the next deadline's invoices still waiting, on the day before and the day of that deadline
-      const waiting = get<{ n: number; deemAt: string | null; payday: string | null }>(
-        db,
-        `SELECT COUNT(*) AS n, MIN(i.deem_at) AS deemAt, MIN(p.due_date) AS payday FROM invoices i JOIN payroll_runs p ON p.id = i.payroll_run_id
-         WHERE i.status = 'issued' AND p.status IN ('pending', 'failed') AND i.deem_at > ?
-           AND i.deem_at <= ?`,
-        [local, `${addDays(local.slice(0, 10), 1)}T23:59:59`],
-      );
+      const waiting = rows[0] ? { n: rows[0].waitingN, deemAt: rows[0].waitingDeemAt, payday: rows[0].waitingPayday } : undefined;
       if (waiting && waiting.n > 0 && waiting.deemAt) {
         items.push({
           key: `invoices:waiting:${waiting.deemAt.slice(0, 10)}`,

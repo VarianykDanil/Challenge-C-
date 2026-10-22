@@ -159,8 +159,10 @@ function DecisionModal({ decision: { post, action }, paidThrough, onClose }: { d
   const [submitted, setSubmitted] = useState(false);
   const noteError = submitted && action === 'decline' && !note.trim() ? 'Say why, in a sentence. The client sees it.' : undefined;
   const dateError = submitted && action === 'approve' && !effectiveFrom ? 'Pick the date the new rate starts.' : undefined;
-  // P1 recalculates unpaid weeks only: a date on or before the last paid week leaves those weeks at the old rate.
-  const reachesPaid = action === 'approve' && !!paidThrough && !!effectiveFrom && effectiveFrom <= paidThrough;
+  // P1 recalculates unpaid weeks only: a date on or before the last paid week leaves those weeks at the old rate. Only a
+  // new rate to the fundraiser changes anyone's pay; a payout-only change (what the client pays Linear) needs no
+  // pay correction, so it gets no warning.
+  const reachesPaid = action === 'approve' && post.rateRep != null && !!paidThrough && !!effectiveFrom && effectiveFrom <= paidThrough;
 
   async function submit() {
     setSubmitted(true);

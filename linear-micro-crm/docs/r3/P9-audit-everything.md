@@ -19,10 +19,10 @@ What a page reports itself: an export it built, or a sensitive record it opened 
 | Field | Rule |
 | --- | --- |
 | `kind` | `export` or `opened`; anything else → 400 |
-| `what` | required text; control characters and runs of spaces become one space; cut at 80 characters (`"gauges-by-team"`, `"candidate profile"`, `"invoice LM-SB-2026-000123"`, `"audit trail"`) |
+| `what` | required text; control characters and runs of spaces become one space; invisible format characters (bidi overrides such as U+202E, zero-width characters, the BOM: Unicode `Cf`) are removed, so a row never displays reversed or disguised; cut at 80 characters (`"gauges-by-team"`, `"candidate profile"`, `"invoice LM-SB-2026-000123"`, `"audit trail"`) |
 | `format` | exports: `csv`, `pdf`, `xero`, `sage`, `print` (optional; anything else → 400) |
 | `rows` | exports: a whole number 0–1,000,000 (optional; anything else → 400) |
-| `filename` | exports: the file's name, cut at 120 characters; a path keeps its last part only (optional) |
+| `filename` | exports: the file's name, cleaned like `what` (so `invoice\u202Efdp.exe` is stored as `invoicefdp.exe`, never displayed as "invoiceexe.pdf"), cut at 120 characters; a path keeps its last part only (optional) |
 | `entity`, `entityId` | an `AuditEntity` and a positive id. **Opened**: the record; leave both out (or `null`) for the audit trail itself. **Export**: an export of ONE record — P7's candidate profile and interview sheet PDFs (`candidate`), P2's invoice PDF and print (`invoice`); leave both out (or `null`, or `export`) for an export of a table |
 
 Unknown keys are dropped, not refused (a newer page reporting an extra detail still gets its event recorded).
@@ -78,9 +78,10 @@ filter any more.) Leader, recruiter, rep → 403.
 
 Team → person → Activity: `{ person: AuditPerson, rows, total, lastSignInAt, lastActiveAt, failedSignIns }` — the rows
 **made by** that person (their own changes, sign-ins, exports and openings, plus the failed attempts on their account,
-which are filed under it), newest first, paged like `GET /audit` (limit 1–200, default 50). `lastSignInAt` is their
+which are filed under it, and Linear Hub's note when it paused recording those attempts — no actor, entity `user` and
+the account's id), newest first, paged like `GET /audit` (limit 1–200, default 50). `lastSignInAt` is their
 latest successful sign-in, `lastActiveAt` their latest row **not counting failed tries on the sign-in page** (those are
-filed under the account but may be somebody else's: shared `isAuditAttemptOnAccount`), `failedSignIns` the failed
+filed under the account but may be somebody else's: shared `isAuditAttemptOnAccount`) nor a sign-out by the idle timeout, `failedSignIns` the failed
 sign-ins, wrong PINs and wrong two-step codes on their account in the last 30 days. Unknown person → 404, bad id or kind → 400; leader,
 recruiter, rep (their own included) → 403. Registered before `/audit/:entity/:entityId`, which would otherwise read
 "person" as an entity. Two indexed queries plus the count.
@@ -97,7 +98,7 @@ recruiter, rep (their own included) → 403. Registered before `/audit/:entity/:
 
 | Route | Answer | Summary |
 | --- | --- | --- |
-| `POST /auth/login` | 401 | "Failed sign-in: wrong employee ID" · "Failed sign-in: the account is deactivated" · "Failed sign-in with an unknown email: jo@example.com" (no person; the email typed is kept only when it is an email — the Login page's test — so "Failed sign-in with an unknown email" and `typedEmail: null` for an employee ID typed into the email box) · "Failed sign-in: wrong PIN (4 tries left before a lock)" |
+| `POST /auth/login` | 401 | "Failed sign-in: wrong employee ID" · "Failed sign-in: the account is deactivated" · "Failed sign-in with an unknown email: jo@example.com" (no person; the email typed is kept only when it is an email — the Login page's test, and no control or invisible character, so an address disguised with a right-to-left override is never stored — so "Failed sign-in with an unknown email" and `typedEmail: null` for an employee ID typed into the email box) · "Failed sign-in: wrong PIN (4 tries left before a lock)" |
 | `POST /auth/login` | 423 | "PIN locked after 10 wrong PINs in a row, until 14:35" (this try started the lock) · "Sign-in refused: the PIN is locked until 14:35" |
 | `POST /auth/login`, `/auth/login/2fa` | 429 | "Sign-in refused: too many attempts, try again in 12 minutes" |
 | `POST /auth/login/2fa` | 401 / 410 | "Failed sign-in: wrong two-step code" · "Sign-in stopped: too many wrong two-step codes" · "Sign-in stopped: the two-step code was not entered within 5 minutes" (an unknown challenge writes nothing) |
@@ -109,16 +110,21 @@ recruiter, rep (their own included) → 403. Registered before `/audit/:entity/:
   `challenge_expired`, `wrong_current_pin`), which the trail says in words (`AUDIT_SIGN_IN_REASON_LABELS`).
   Validation answers (a missing field, a PIN that breaks the rules) and step one of a sign-in (the PIN or two-step
   challenge) write nothing. **The failure budget**, per 15 minutes (`FAILED_ROWS_*` in `lib/audit.ts`):
-  - 30 rows per address, for tries from the sign-in page (a signed-in person's own wrong PIN or code counts against
-    their account instead);
-  - 30 rows per account a try is filed under — every real account has room of its own, so a flood of made-up emails
-    from many addresses can never use up the room for a try on Matt's account;
-  - 600 rows in all for emails nobody has.
+  - 30 rows per account a try is filed under — and only that: every real account has room of its own, so a flood of
+    made-up emails, from many addresses or from the same one, can never use up the room for a try on Matt's account
+    (a signed-in person's own wrong PIN or code counts against their account too);
+  - for emails nobody has: 30 rows per address of the sign-in page, and 600 rows in all.
 
-  The row that reaches a cap is followed by one that says so (no person): "Stopped recording failed sign-ins from
-  203.0.113.7 after 30 in 15 minutes; recording starts again within 15 minutes" · "… on Jordan Lee's account after 30
-  in 15 minutes; …" (filed under that account) · "… with unknown emails after 600 in 15 minutes from many addresses;
-  …". Worst case per 15 minutes: 600 + 30 × the accounts tried. Successful sign-ins are never held back.
+  The row that reaches a cap is followed by one that says so (no person): "Stopped recording failed sign-ins with
+  unknown emails from 203.0.113.7 after 30 in 15 minutes; recording starts again within 15 minutes" · "… on Jordan
+  Lee's account after 30 in 15 minutes; …" (entity `user` and that account's id, so it shows on Jordan's Activity as
+  Linear Hub's note) · "… with unknown emails after 600 in 15 minutes from many addresses; …". Worst case per 15
+  minutes: 600 + 30 × the accounts tried. Successful sign-ins are never held back.
+- **Sign-outs by the idle timeout** (kind `sign_in`, action `SESSION idle`, filed under the person, real clock):
+  "Signed out after 12 hours without activity (last active 18:02 Wed 21 Oct)" — written once, when the person comes
+  back to the idle session (`middleware/auth.ts authenticate`), or at start-up for a session that went idle while the
+  server was off (`purgeExpiredSessions`). A session that reaches its 14-day end, and one of a deactivated account
+  (the deactivation is the admin's recorded change), write nothing. `lib/audit/signIns.ts recordIdleSignOut`.
 - **New 1.2 specs** (found by the coverage test): `POST /auth/pin/remove` → "Removed their PIN" (was a bare route
   name); `PUT /learning/milestones/:userId/:key` → "Updated a progression milestone for Jordan Lee: “Trained 3
   personalities” 2 → 3" (a save of the same value writes nothing).
@@ -234,8 +240,9 @@ the failure budget and the per-person report limit allow. Retention is unchanged
 Tap a chip at the top to see one kind; **Everything** shows them all. **Changes** is the view 1.2 had. The **Person**
 filter lists client accounts too ("Hannah Price (Client)"). Tap any row to see the details: the fields that changed
 (for a sign-in, an export or an opening: what happened, e.g. "Reason: Wrong PIN", "Format: PDF"), the action and, for
-administrators, the address it came from. **Download PDF** (P4) prints the view with its filters
-written out ("Showing: Sign-ins", "Person: Jordan Lee", "Dates: 1 – 21 Oct 2026").
+administrators, the address it came from. **Download PDF** (P4) prints every entry that matches the filters (newest
+first, up to 2,000 — not only the 50 on screen), with the filters written out ("Showing: Sign-ins", "Person: Jordan
+Lee", "Dates: 1 – 21 Oct 2026").
 
 ### Team → person → Activity (administrators)
 
@@ -251,20 +258,21 @@ more; **Open in the audit trail** shows the full list with every filter.
   Activity shows attempts on their account even when it was not them typing (worded "Attempt on … account", never as
   their action). An email nobody has is recorded with the email typed — only when it is an email, never an employee
   ID, PIN or code — so you can see which addresses someone tried.
-- **How much is recorded in a flood (a trade-off).** Per 15 minutes: 30 failures per address, 30 per account and 600
-  for emails nobody has, each followed by one row saying recording paused. A flood of made-up emails from many
-  addresses can no longer hide a try on your account (each account has its own room), but a determined attacker who
-  sends more than 30 tries at one account in 15 minutes is recorded for the first 30 plus the pause row, not for every
-  try; the sign-in limiter and the PIN lock still block the tries themselves. Worst case on disk: 600 + 30 × accounts
-  tried rows per 15 minutes.
-- **What is still not recorded**: page views, reading a list, a session that ends by itself after the idle timeout (it
-  is simply gone; the next request asks to sign in), a refused request other than a sign-in or security check (a rep
-  trying to open the office pages gets 403 and nothing is written), and a request refused by the client guard.
-- **For the lead: the idle sign-out** happens in the foundation's `middleware/auth.ts` (`authenticate`, the branch
-  that calls `destroySession` when `isSessionIdle`, and `purgeExpiredSessions` at start-up). Recording it needs one
-  line there before `destroySession`: a `recordAudit` row with `userId: row.id`, `action: 'SESSION idle'`, `kind:
-  'sign_in'` and the summary "Signed out after 12 hours without activity" (the admin's `sessionIdleHours`). P9 did not
-  edit that file.
+- **How much is recorded in a flood (a trade-off).** Per 15 minutes: 30 failures per account, and for emails nobody
+  has 30 per address and 600 in all, each followed by one row saying recording paused. A flood of made-up emails —
+  from many addresses or from the same one — can no longer hide a try on your account (each account has its own room,
+  and a try on a real account never uses an address's room), but a determined attacker who sends more than 30 tries
+  at one account in 15 minutes is recorded for the first 30 plus the pause row (on that person's Activity), not for
+  every try; the sign-in limiter and the PIN lock still block the tries themselves. Worst case on disk: 600 + 30 ×
+  accounts tried rows per 15 minutes.
+- **Sign-outs by the idle timeout are recorded** ("Signed out after 12 hours without activity (last active 18:02 Wed
+  21 Oct)"), when the person comes back or when the server starts. They do not count as the person being active.
+- **What is still not recorded**: page views, reading a list, a session that reaches its 14-day end (the next request
+  asks to sign in), a refused request other than a sign-in or security check (a rep trying to open the office pages
+  gets 403 and nothing is written), and a request refused by the client guard.
+- **Text that could display misleadingly is cleaned**: a page's report or an email typed at sign-in that carries
+  invisible right-to-left or zero-width characters is stored without them (or, for an email, not stored), so the trail
+  never shows a name or file reversed. Rows written before this release are shown as they were stored.
 - **For the lead: P3's docs sentence** for a statement download now reads "Exported the BCN statement for 12–18 Oct
   2026 as PDF" (with "the"), and the row is filed under the statement; P3's code needs no change.
 - **Opened records come from the page.** The phone or laptop reports them, and the server checks the person may open
@@ -274,3 +282,10 @@ more; **Open in the audit trail** shows the full list with every filter.
   once: sign-ins, the payroll exports and changes. Nothing is deleted; the two-year retention is unchanged.
 - The Audit page's line under the title is the page's own ("Everything done in Linear Hub: …"); `COPY.nav.audit`
   still says "Who changed what and when" (foundation copy) and the lead may want to change it there.
+- **For the lead (integration I1):** the Audit page now passes `total` and `query` to P4's **Download PDF**, so the PDF
+  holds every matching entry (checked: 91 of 91, not the 50 on screen). The PDF's **Who** column is P4's
+  (`client/src/features/pdf/auditPdf.ts`, `userName` or "Linear Hub"), so it still prints a failed try on Jordan's
+  account as "Jordan Lee"; the page's wording is `auditActorName` in `client/src/features/audit/kinds.tsx` — left to
+  the P4 fix (its list has "audit … Who"), so the two branches do not edit the same line.
+- **Sign-outs by the idle timeout** are written from the foundation's `middleware/auth.ts` (two calls to
+  `lib/audit/sessions.ts recordIdleSignOut`: `authenticate` and `purgeExpiredSessions`), the hook P9 asked for.

@@ -38,10 +38,17 @@ import { exportedRecord, openedLabel, openedRecord, recordClientEvent } from '..
 import { forbidden, notFound } from '../lib/errors.ts';
 import { currentUser } from '../middleware/auth.ts';
 
-// eslint-disable-next-line no-control-regex
-const CONTROL = /[\u0000-\u001f\u007f]/g;
+/** Control characters (C0, DEL, C1): each becomes a space. */
+const CONTROL = /\p{Cc}/gu;
+/**
+ * Invisible format characters — bidi overrides and isolates (U+202A–202E, U+2066–2069), zero-width ones, U+061C, the
+ * BOM: removed, so a summary on the Audit page reads as stored, never reversed or disguised ("invoice\u202Efdp.exe"
+ * showing as "invoiceexe.pdf").
+ */
+const INVISIBLE = /\p{Cf}/gu;
 /** One line of text: control characters and runs of spaces become one space; longer than `max` is cut, not refused. */
-const text = (max: number) => z.string().transform((s) => s.replace(CONTROL, ' ').replace(/\s+/g, ' ').trim().slice(0, max).trimEnd()).pipe(z.string().min(1, 'Required'));
+const text = (max: number) =>
+  z.string().transform((s) => s.replace(INVISIBLE, '').replace(CONTROL, ' ').replace(/\s+/g, ' ').trim().slice(0, max).trimEnd()).pipe(z.string().min(1, 'Required'));
 /** A file name as the page saved it; a path keeps its last part only. */
 const fileName = (max: number) => z.string().transform((s) => s.split(/[\\/]/).pop() ?? '').pipe(text(max));
 

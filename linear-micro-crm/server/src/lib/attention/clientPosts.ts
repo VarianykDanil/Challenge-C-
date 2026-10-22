@@ -6,9 +6,10 @@
  *  - admin and leader: every other client post they have not read yet, from the last CLIENT_POST_UNREAD_DAYS days
  *    (info, `client:post:<id>`): an update or an announcement ("Update from Breast Cancer Now"), or, for a leader, a
  *    commission change ("waiting for the office"). Reading it on the campaign page clears it.
- * Two grouped queries: the admin's changes to approve (every one of them, never pushed out by newer posts: a change
- * waits for Matt until he decides it), then at most CLIENT_ATTENTION_MAX unread posts, newest first (for an admin the
- * pending changes are not counted twice). Each item links to the post on its campaign page.
+ * One statement per caller (the feed's 1.1 budget of 12 holds with every provider merged): for an admin, a UNION ALL of
+ * the changes to approve (every one of them up to the feed's cap, never pushed out by newer posts: a change waits for
+ * Matt until he decides it) and at most CLIENT_ATTENTION_MAX unread posts, newest first (the pending changes are not
+ * counted twice); for a leader, the unread posts alone. Each item links to the post on its campaign page.
  * Contract: ./types.ts.
  */
 import { ATTENTION_MAX_ITEMS, clientCommissionSummary, type AttentionItem } from '@lm/shared';
@@ -47,21 +48,24 @@ export const provider: AttentionProvider = {
     if (me.role !== 'admin' && me.role !== 'leader') return [];
     const admin = me.role === 'admin';
     const since = unreadSince(now.nowISO);
-    // The admin's decisions first, all of them (the feed's own cap keeps warnings ahead of info items).
-    const pending = admin
-      ? all<Row>(db, `SELECT ${COLUMNS} ${FROM} WHERE p.status = 'pending' ORDER BY p.created_at DESC, p.id DESC LIMIT ${ATTENTION_MAX_ITEMS}`)
-      : [];
-    // Then the newest unread posts (an admin's pending changes are already listed above).
-    const unread = all<Row>(
-      db,
-      `SELECT ${COLUMNS} ${FROM}
+    // The newest unread posts (an admin's pending changes come from the first part instead).
+    const unread = `SELECT 1 AS part, ${COLUMNS} ${FROM}
        LEFT JOIN client_post_reads r ON r.post_id = p.id AND r.user_id = ?
        WHERE r.post_id IS NULL AND p.created_at >= ? AND p.status <> 'unpublished'${admin ? ` AND p.status <> 'pending'` : ''}
        ORDER BY p.created_at DESC, p.id DESC
-       LIMIT ${CLIENT_ATTENTION_MAX}`,
-      [me.id, since],
-    );
-    const rows = [...pending, ...unread];
+       LIMIT ${CLIENT_ATTENTION_MAX}`;
+    // For an admin, the decisions first, all of them (the feed's own cap keeps warnings ahead of info items): each part
+    // keeps its own ORDER BY and LIMIT inside a subselect, in one statement.
+    const rows = admin
+      ? all<Row>(
+          db,
+          `SELECT * FROM (SELECT 0 AS part, ${COLUMNS} ${FROM} WHERE p.status = 'pending' ORDER BY p.created_at DESC, p.id DESC LIMIT ${ATTENTION_MAX_ITEMS})
+           UNION ALL
+           SELECT * FROM (${unread})
+           ORDER BY part, createdAt DESC, id DESC`,
+          [me.id, since],
+        )
+      : all<Row>(db, unread, [me.id, since]);
     return rows.map((p): AttentionItem => {
       const href = `/campaigns/${p.campaignId}?post=${p.id}`;
       const change = clientCommissionSummary(p);
