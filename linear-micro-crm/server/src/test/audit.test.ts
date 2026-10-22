@@ -74,17 +74,23 @@ test('registry: literal and :param patterns, method-specific, read receipts skip
   assert.equal(matchAuditRoute('POST', '/nothing/here'), null);
 });
 
-test('sign-ins are recorded with the person who signed in; failed sign-ins and reads write nothing', async () => {
+test('sign-ins are recorded with the person who signed in; reads write nothing (1.3: a failed sign-in writes one sign-in row)', async () => {
   const signIns = auditRows(srv.db, `WHERE summary = 'Signed in'`);
   assert.ok(signIns.length >= 5, 'one per login in before()');
   assert.ok(signIns.every((r) => r.userId !== null && r.entity === 'user' && r.entityId === r.userId && r.action === 'POST /auth/login'));
   const n = auditCount(srv.db);
   const bad = await srv.anon().post('/auth/login', { email: fx().accounts.rep.email, employeeId: 'WRONG-1' });
   assert.equal(bad.status, 401);
+  // Release 1.3 (P9): the failed attempt is recorded, filed under the account the email belongs to, never with what was typed
+  assert.equal(auditCount(srv.db), n + 1, 'one row for the failed sign-in');
+  const failed = newest(srv.db);
+  assert.equal(failed.summary, 'Failed sign-in: wrong employee ID');
+  assert.equal(failed.userId, fx().users.rep);
+  assert.ok(!(failed.afterJson ?? '').includes('WRONG-1'), 'the employee ID typed is not stored');
   await rep.get('/me/dashboard');
   await admin.get('/finance/payroll');
   await admin.get('/audit');
-  assert.equal(auditCount(srv.db), n, 'no row for a failed sign-in or any GET');
+  assert.equal(auditCount(srv.db), n + 1, 'no row for any GET');
 });
 
 test('gauges: create, edit and delete are recorded with snapshots, a diff and a readable summary', async () => {

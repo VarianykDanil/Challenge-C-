@@ -4,7 +4,9 @@
  * wording helpers the server's readable summaries use ("Marked paid: Jordan Lee w/c 5 Oct, £945"). Deterministic and
  * en-GB: the same snapshots always give the same text. No I/O.
  */
-import type { AuditEntity, AuditFieldChange } from '../types/audit.ts';
+import type { Role } from '../types.ts';
+import type { AuditEntity, AuditEventKind, AuditExportFormat, AuditFieldChange, AuditSignInReason } from '../types/audit.ts';
+import { AUDIT_EVENT_KINDS } from '../types/audit.ts';
 
 /** Every entity the trail knows, in the order the /audit filter lists them. */
 export const AUDIT_ENTITIES: readonly AuditEntity[] = [
@@ -50,6 +52,122 @@ export const AUDIT_ENTITY_LABELS: Record<AuditEntity, string> = {
 
 export function isAuditEntity(value: unknown): value is AuditEntity {
   return typeof value === 'string' && ((AUDIT_ENTITIES as readonly string[]).includes(value) || (AUDIT_ENTITIES_R3 as readonly string[]).includes(value));
+}
+
+// ───────────────────────────── Release 1.3 (P9 audit-everything): kinds of action ─────────────────────────────
+
+/** The Audit page's Record filter: the 1.2 entities, then the 1.3 ones (AUDIT_ENTITIES itself is unchanged). */
+export const AUDIT_FILTER_ENTITIES: readonly AuditEntity[] = [...AUDIT_ENTITIES, ...AUDIT_ENTITIES_R3];
+
+/** The kind filter's words (Audit page, Team → person → Activity). */
+export const AUDIT_EVENT_KIND_LABELS: Record<AuditEventKind, string> = {
+  change: 'Changes',
+  sign_in: 'Sign-ins',
+  export: 'Exports',
+  opened: 'Opened records',
+  automatic: 'Automatic',
+  client: 'Client portal',
+};
+
+/** One row's kind in words, singular ("Sign-in", "Export"). */
+export const AUDIT_EVENT_KIND_LABELS_ONE: Record<AuditEventKind, string> = {
+  change: 'Change',
+  sign_in: 'Sign-in',
+  export: 'Export',
+  opened: 'Opened',
+  automatic: 'Automatic',
+  client: 'Client portal',
+};
+
+export const AUDIT_EXPORT_FORMAT_LABELS: Record<AuditExportFormat, string> = {
+  csv: 'CSV',
+  pdf: 'PDF',
+  xero: 'Xero CSV',
+  sage: 'Sage CSV',
+  print: 'print',
+};
+
+export function isAuditEventKind(value: unknown): value is AuditEventKind {
+  return typeof value === 'string' && (AUDIT_EVENT_KINDS as readonly string[]).includes(value);
+}
+
+/** The actions of signing in and out (their failed attempts use the same actions, kind `sign_in`). */
+export const AUDIT_SIGN_IN_ACTIONS: readonly string[] = ['POST /auth/login', 'POST /auth/login/2fa', 'POST /auth/logout'];
+
+/**
+ * The sign-in page's actions. A failed attempt there (a wrong employee ID, PIN or two-step code) is filed under the
+ * account it was tried on, but whoever typed it may not be that person: it is an attempt ON the account, not something
+ * the person did (their "Last active" leaves it out; the trail words it "Attempt on Jordan Lee's account"). A failed
+ * check while signed in (a wrong current PIN or code in Settings) is the person's own.
+ */
+export const AUDIT_SIGN_IN_PAGE_ACTIONS: readonly string[] = ['POST /auth/login', 'POST /auth/login/2fa'];
+
+/** A failed sign-in, wrong PIN or wrong two-step code (its row's snapshot has a `reason`). */
+export function isAuditFailedAttempt(entry: { kind?: AuditEventKind | null; after?: unknown }): boolean {
+  const after = isRecord(entry.after) ? entry.after : null;
+  return entry.kind === 'sign_in' && typeof after?.reason === 'string';
+}
+
+/** A failed attempt made on the sign-in page: on the account it is filed under, maybe by somebody else. */
+export function isAuditAttemptOnAccount(entry: { kind?: AuditEventKind | null; action: string; after?: unknown }): boolean {
+  return isAuditFailedAttempt(entry) && AUDIT_SIGN_IN_PAGE_ACTIONS.includes(entry.action);
+}
+
+/** Actions for rows that are not a route's write: `SYSTEM <name>` (automatic), `EVENT export` / `EVENT opened` (reported by a page). */
+export const AUDIT_SYSTEM_PREFIX = 'SYSTEM ';
+export const AUDIT_EVENT_EXPORT_ACTION = 'EVENT export';
+export const AUDIT_EVENT_OPENED_ACTION = 'EVENT opened';
+/** The Xero / Sage payroll CSV (routes/payExport.ts records it itself, as a GET). */
+export const AUDIT_PAY_EXPORT_ACTION = 'GET /finance/payroll/export';
+
+/**
+ * The kind of an audit row, from its action and the role of whoever acted, when the row does not say (a failed PIN
+ * change says `sign_in` itself). In order: `SYSTEM …` → automatic; `EVENT export` and the payroll export → export;
+ * `EVENT opened` → opened; signing in or out (and its failed attempts) → sign_in; anything a client account did, or
+ * a write to the client portal (`/client`, `/client/…`) → client; everything else → change.
+ * server/src/db/extensions/audit.ts classifies rows written before 1.3 with the same rules in SQL.
+ */
+export function auditKindOf(action: string, actorRole?: Role | null): AuditEventKind {
+  if (action.startsWith(AUDIT_SYSTEM_PREFIX)) return 'automatic';
+  if (action.startsWith(AUDIT_EVENT_EXPORT_ACTION) || action === AUDIT_PAY_EXPORT_ACTION) return 'export';
+  if (action.startsWith(AUDIT_EVENT_OPENED_ACTION)) return 'opened';
+  if (AUDIT_SIGN_IN_ACTIONS.includes(action)) return 'sign_in';
+  if (actorRole === 'client' || /^[A-Z]+ \/client(\/|$)/i.test(action)) return 'client';
+  return 'change';
+}
+
+/**
+ * `?kind=sign_in,export` → ['sign_in', 'export'] (in the order given, without repeats); undefined when absent or
+ * empty; null when any part is not a kind (the route answers 400).
+ */
+export function parseAuditKinds(raw: string | undefined): AuditEventKind[] | undefined | null {
+  if (raw === undefined) return undefined;
+  const parts = raw.split(',').map((s) => s.trim()).filter(Boolean);
+  if (!parts.length) return undefined;
+  if (!parts.every(isAuditEventKind)) return null;
+  return [...new Set(parts as AuditEventKind[])];
+}
+
+/**
+ * What a page reported as exported, in words: "gauges-by-team" → "Gauges by team"; a file name loses its extension
+ * and a trailing date ("linear-leaderboard-2026-10-21.csv" → "Linear leaderboard"). Empty → "a table".
+ */
+export function auditWhatLabel(what: string): string {
+  const base = what.trim().replace(/\.(csv|pdf|txt|xlsx?)$/i, '').replace(/[-_ ]?\d{4}-\d{2}-\d{2}(?:[-_ ]?(?:to|-)?[-_ ]?\d{4}-\d{2}-\d{2})?$/i, '');
+  const words = base.replace(/[_-]+/g, ' ').replace(/\s+/g, ' ').trim();
+  if (!words) return 'a table';
+  return words[0]!.toUpperCase() + words.slice(1);
+}
+
+const ROWS = new Intl.NumberFormat('en-GB');
+
+/** "Exported Gauges by team as CSV: 124 rows" · "Exported Leaderboard as PDF" (no row count sent) · "Printed Payslip". */
+export function auditExportSummary(input: { what: string; format?: AuditExportFormat; rows?: number }): string {
+  const label = auditWhatLabel(input.what);
+  const rows = typeof input.rows === 'number' && Number.isFinite(input.rows) ? `: ${ROWS.format(input.rows)} ${input.rows === 1 ? 'row' : 'rows'}` : '';
+  if (input.format === 'print') return `Printed ${label}${rows}`;
+  const as = input.format ? ` as ${AUDIT_EXPORT_FORMAT_LABELS[input.format]}` : '';
+  return `Exported ${label}${as}${rows}`;
 }
 
 /** Keys (any depth, case-insensitive) replaced by "[redacted]" before a snapshot is stored. U3 owns the list. */
@@ -141,6 +259,21 @@ export function auditDiff(before: unknown, after: unknown): AuditFieldChange[] {
 
 // ───────────────────────────── wording ─────────────────────────────
 
+/** Release 1.3 (P9): a failed attempt's `reason` in words ("Reason: Wrong PIN" when its row is opened). */
+export const AUDIT_SIGN_IN_REASON_LABELS: Record<AuditSignInReason, string> = {
+  wrong_employee_id: 'Wrong employee ID',
+  deactivated: 'The account is deactivated',
+  unknown_email: 'No account has this email',
+  wrong_pin: 'Wrong PIN',
+  pin_locked_now: 'This try locked the PIN',
+  pin_locked: 'The PIN is locked',
+  too_many_attempts: 'Too many attempts',
+  wrong_code: 'Wrong two-step code',
+  too_many_codes: 'Too many wrong two-step codes',
+  challenge_expired: 'The two-step code was not entered within 5 minutes',
+  wrong_current_pin: 'Wrong current PIN',
+};
+
 /** Labels for snapshot fields (diff tables and summaries); anything else is humanised from camelCase. */
 export const AUDIT_FIELD_LABELS: Record<string, string> = {
   // gauge entry
@@ -167,6 +300,9 @@ export const AUDIT_FIELD_LABELS: Record<string, string> = {
   facts: 'Fact check', requirePin: 'Require a PIN for everyone', requireAdminTwoFactor: 'Require two-step for administrators',
   sessionIdleHours: 'Sign out after idle (hours)', lessonKey: 'Lesson', learnedAt: 'Learned', quizScore: 'Self-check score',
   teachbackAt: 'Teach-back written', signedOffByName: 'Signed off by', signedOffAt: 'Signed off',
+  // Release 1.3 (P9): exports and opened records reported by a page, failed sign-ins
+  what: 'What', format: 'Format', rows: 'Rows', filename: 'File', record: 'Record', reason: 'Reason',
+  attemptsLeft: 'Tries left', lockedUntil: 'Locked until', typedEmail: 'Email typed',
 };
 
 /** Fields whose numbers are money (shown as £). */
@@ -245,6 +381,32 @@ export function auditValueText(field: string, value: unknown): string {
 }
 
 const isLongText = (v: unknown) => typeof v === 'string' && v.length > TEXT_MAX;
+
+/** One detail of a row that records an event rather than a change: "Reason" · "Wrong PIN". */
+export interface AuditFact {
+  field: string;
+  label: string;
+  text: string;
+}
+
+/**
+ * Release 1.3 (P9): the details of a sign-in or failed attempt, an export or an opened record, as facts ("Reason:
+ * Wrong PIN", "Tries left: 6", "Format: PDF") rather than as a before → after change. A failed attempt's reason and an
+ * export's format are said in words; everything else as auditValueText says it; empty values are left out.
+ */
+export function auditFacts(snapshot: unknown): AuditFact[] {
+  if (!isRecord(snapshot)) return [];
+  const out: AuditFact[] = [];
+  for (const [field, value] of Object.entries(snapshot)) {
+    if (norm(value) === null) continue;
+    let text: string;
+    if (field === 'reason' && typeof value === 'string' && value in AUDIT_SIGN_IN_REASON_LABELS) text = AUDIT_SIGN_IN_REASON_LABELS[value as AuditSignInReason];
+    else if (field === 'format' && typeof value === 'string' && value in AUDIT_EXPORT_FORMAT_LABELS) text = auditHumanise(AUDIT_EXPORT_FORMAT_LABELS[value as AuditExportFormat]);
+    else text = auditValueText(field, value);
+    out.push({ field, label: auditFieldLabel(field), text });
+  }
+  return out;
+}
 
 /**
  * The changes as one phrase: "sales 3 → 4, stops 60 → 65 and 2 more". Long text fields are named, not quoted

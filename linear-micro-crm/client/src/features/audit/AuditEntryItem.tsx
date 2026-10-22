@@ -1,11 +1,30 @@
-// Release 1.2 — OWNED BY U3 audit-trail. One audit row: who, when, the summary, and (expanded) the field-level diff.
-// Used by the /audit page and the EntityHistory slot.
+// Release 1.2 — OWNED BY U3 audit-trail (OWNED BY P9 audit-everything from 1.3). One audit row: who, when, the summary,
+// and (expanded) the field-level diff. Used by the /audit page, the EntityHistory slot and Team → person → Activity.
+// Release 1.3: a badge names the kind of action (Sign-in, Export, Opened, Automatic, Client portal; a change needs
+// none), a failed attempt (sign-in, PIN, two-step code) is marked in red, and a row without a person is "Linear Hub"
+// (an automatic step) or "Unknown person" (a sign-in tried with an email nobody has). A failed try on the sign-in page
+// reads "Attempt on Jordan Lee's account" with a shield, not as something Jordan did. Once opened, a sign-in or failed
+// attempt, an export or an opened record shows its details as facts ("Reason: Wrong PIN", "Format: PDF"), not as a
+// before → after change.
 import { useId, useState } from 'react';
-import { ArrowRight, ChevronDown } from 'lucide-react';
+import { ArrowRight, Bot, ChevronDown, ShieldAlert } from 'lucide-react';
 import clsx from 'clsx';
-import { AUDIT_ENTITY_LABELS, auditFieldLabel, auditValueText, type AuditEntity, type AuditEntryDetail, type AuditFieldChange } from '@lm/shared';
+import {
+  AUDIT_ENTITY_LABELS,
+  AUDIT_EVENT_KIND_LABELS_ONE,
+  ROLE_LABELS,
+  auditFacts,
+  auditFieldLabel,
+  auditValueText,
+  type AuditEntity,
+  type AuditEntryDetail,
+  type AuditEventKind,
+  type AuditFact,
+  type AuditFieldChange,
+} from '@lm/shared';
 import { Avatar, Badge } from '@/components/ui';
 import { formatDateTime, formatNumber, formatTime } from '@/lib/format';
+import { KIND_ICONS, KIND_TONES, auditActorName, isAttemptOnAccount, isFailedAttempt } from './kinds';
 import { isAuditLongText, longTextHeadline } from './longText';
 
 const LONG_TEXT = 60;
@@ -89,6 +108,24 @@ export function AuditDiffTable({ diff, entity, className }: { diff: AuditFieldCh
   );
 }
 
+/** The kinds whose rows record an event, not a change of a record: their snapshot is a set of facts. */
+const FACT_KINDS: ReadonlySet<AuditEventKind> = new Set(['sign_in', 'export', 'opened']);
+
+/** A row's details as facts: "Reason" · "Wrong PIN" (a label column from `sm`, stacked on a phone like the diff). */
+export function AuditFactList({ facts, className }: { facts: AuditFact[]; className?: string }) {
+  if (!facts.length) return null;
+  return (
+    <dl className={clsx('divide-y divide-border overflow-hidden rounded-lg border border-border bg-surface', className)}>
+      {facts.map((f) => (
+        <div key={f.field} className="grid grid-cols-1 gap-1 px-3 py-2 text-sm sm:grid-cols-[minmax(8rem,12rem)_1fr] sm:gap-3">
+          <dt className="text-xs font-medium text-muted sm:pt-0.5">{f.label}</dt>
+          <dd className="min-w-0 break-words font-medium text-fg">{f.text}</dd>
+        </div>
+      ))}
+    </dl>
+  );
+}
+
 export interface AuditEntryItemProps {
   entry: AuditEntryDetail;
   /** Show the entity badge (the /audit page; the entity history knows its entity already). */
@@ -96,14 +133,29 @@ export interface AuditEntryItemProps {
   /** Time only (rows grouped under a day heading) instead of date and time. */
   timeOnly?: boolean;
   compact?: boolean;
+  /** Release 1.3: leave the person out (Team → person → Activity is one person's timeline already). */
+  hideWho?: boolean;
 }
 
-export function AuditEntryItem({ entry, showEntity = true, timeOnly, compact }: AuditEntryItemProps) {
+/** The round picture beside a row: the person's initials, a robot for Linear Hub's own steps, a shield for an unknown person's attempt. */
+function Who({ entry, name, compact }: { entry: AuditEntryDetail; name: string; compact?: boolean }) {
+  const box = clsx('mt-0.5 inline-flex shrink-0 items-center justify-center rounded-full [&_svg]:h-4 [&_svg]:w-4', compact ? 'h-6 w-6 [&_svg]:h-3.5 [&_svg]:w-3.5' : 'h-8 w-8');
+  // a try with an unknown email, or on someone's account from the sign-in page: a shield, never the account's own face
+  if (isFailedAttempt(entry) && (!entry.userName || isAttemptOnAccount(entry))) return <span className={clsx(box, 'bg-danger-soft text-danger')} aria-hidden><ShieldAlert /></span>;
+  if (!entry.userName) return <span className={clsx(box, 'bg-surface-2 text-muted ring-1 ring-inset ring-border')} aria-hidden><Bot /></span>;
+  return <Avatar name={name} size={compact ? 'xs' : 'sm'} className="mt-0.5" />;
+}
+
+export function AuditEntryItem({ entry, showEntity = true, timeOnly, compact, hideWho }: AuditEntryItemProps) {
   const [open, setOpen] = useState(false);
   const panelId = useId();
-  const who = entry.userName ?? 'Linear Hub';
+  const who = auditActorName(entry);
   const when = timeOnly ? formatTime(entry.at) : formatDateTime(entry.at);
   const changes = entry.diff.length;
+  const kind = entry.kind ?? 'change';
+  const failed = isFailedAttempt(entry);
+  const role = entry.userRole === 'client' ? ROLE_LABELS.client : null;
+  const facts = FACT_KINDS.has(kind) && entry.before == null ? auditFacts(entry.after) : null;
   return (
     <li className="min-w-0">
       <button
@@ -113,23 +165,41 @@ export function AuditEntryItem({ entry, showEntity = true, timeOnly, compact }: 
         aria-controls={panelId}
         className={clsx('focus-ring-inset flex w-full min-w-0 items-start gap-3 text-left transition-colors hover:bg-surface-2', compact ? 'min-h-11 px-3 py-2.5' : 'min-h-14 px-4 py-3')}
       >
-        <Avatar name={who} size={compact ? 'xs' : 'sm'} className="mt-0.5" />
+        {!hideWho && <Who entry={entry} name={who} compact={compact} />}
         <span className="min-w-0 flex-1">
-          <span className="block break-words text-sm text-fg">{entry.summary}</span>
+          <span className={clsx('block break-words text-sm', failed ? 'text-danger' : 'text-fg')}>{entry.summary}</span>
           <span className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-muted">
-            <span className="font-medium text-fg/80">{who}</span>
-            <span aria-hidden>·</span>
+            {!hideWho ? (
+              <>
+                <span className="font-medium text-fg/80">{who}{role ? <span className="font-normal text-muted"> ({role})</span> : null}</span>
+                <span aria-hidden>·</span>
+              </>
+            ) : (
+              // one person's timeline: a sign-in page try is on their account, maybe not by them
+              isAttemptOnAccount(entry) && (
+                <>
+                  <span className="font-medium text-fg/80">Attempt on this account</span>
+                  <span aria-hidden>·</span>
+                </>
+              )
+            )}
             <time dateTime={entry.at} title={formatDateTime(entry.at)} className="tabular">{when}</time>
-            {showEntity && entry.entity && <Badge size="sm" tone="neutral">{AUDIT_ENTITY_LABELS[entry.entity]}</Badge>}
-            {changes > 0 && <span>{changes === 1 ? '1 field' : `${changes} fields`}</span>}
+            {kind !== 'change' && (
+              <Badge size="sm" tone={failed ? 'danger' : KIND_TONES[kind]}>
+                {KIND_ICONS[kind]}
+                {failed ? 'Failed attempt' : AUDIT_EVENT_KIND_LABELS_ONE[kind]}
+              </Badge>
+            )}
+            {showEntity && entry.entity && entry.entity !== 'export' && <Badge size="sm" tone="neutral">{AUDIT_ENTITY_LABELS[entry.entity]}</Badge>}
+            {changes > 0 && !facts && <span>{changes === 1 ? '1 field' : `${changes} fields`}</span>}
           </span>
         </span>
         <ChevronDown className={clsx('mt-1 h-4 w-4 shrink-0 text-muted transition-transform', open && 'rotate-180')} aria-hidden />
       </button>
       {open && (
         <div id={panelId} className={clsx('border-t border-border bg-surface-2/50', compact ? 'px-3 py-3' : 'px-4 py-3 sm:pl-[3.75rem]')}>
-          <AuditDiffTable diff={entry.diff} entity={entry.entity} />
-          <p className="mt-2 flex flex-wrap gap-x-3 gap-y-1 text-[11px] text-muted">
+          {facts ? <AuditFactList facts={facts} /> : <AuditDiffTable diff={entry.diff} entity={entry.entity} />}
+          <p className={clsx('flex flex-wrap gap-x-3 gap-y-1 text-[11px] text-muted', (!facts || facts.length > 0) && 'mt-2')}>
             <span className="font-mono">{entry.action}</span>
             {entry.entity && entry.entityId != null && <span>{AUDIT_ENTITY_LABELS[entry.entity]} #{entry.entityId}</span>}
             {entry.ip && <span>IP {entry.ip}</span>}

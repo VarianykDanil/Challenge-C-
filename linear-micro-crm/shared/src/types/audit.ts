@@ -9,6 +9,7 @@
  * Recorded by lib/audit.ts (every successful write; snapshots for the routes in lib/auditSpecs.ts). Docs: docs/LOGIC.md §15.5.
  * Snapshots never contain PINs, two-step secrets, recovery codes, session tokens or passwords (keys are redacted).
  */
+import type { Role, UserStatus } from '../types.ts';
 
 export type AuditEntity =
   | 'payroll_run'
@@ -50,6 +51,13 @@ export interface AuditEntry {
   summary: string;
   /** Admin only (null for everyone else). */
   ip: string | null;
+  /**
+   * Release 1.3 (P9): what kind of action the row records (a change, a sign-in or failed attempt, an export, an opened
+   * record, an automatic step, a client-portal action). Always sent from 1.3; optional for older callers.
+   */
+  kind?: AuditEventKind;
+  /** Release 1.3 (P9): the role of the person who acted (null for "Linear Hub" and unknown people). */
+  userRole?: Role | null;
 }
 
 export interface AuditFieldChange {
@@ -80,7 +88,7 @@ export interface AnnouncementReadStats {
   readers?: { userId: number; name: string; readAt: string }[];
 }
 
-// ───────────────────────────── Release 1.3 (P9 audit-everything; laid down by r3-foundation) ─────────────────────────────
+// ───────────────────────────── Release 1.3 (P9 audit-everything) ─────────────────────────────
 //
 // Lead decision: audit "every action" = every change, every sign-in/out and failed attempt, every export or download
 // (CSV, PDF, pay export, invoice), every opening of a sensitive record (an invoice, a candidate profile, the audit
@@ -89,10 +97,12 @@ export interface AnnouncementReadStats {
 //
 // Endpoints (owned by P9):
 //  - POST /audit/events  ClientAuditEventInput → 204 (routes/auditEvents.ts, mounted at /audit/events before the audit
-//    router; any signed-in staff member; rate limited; validated kinds only). The stub answers 204 and records nothing,
-//    so callers (P4's exports, P9's RecordOpened slot) can report from day one.
-//  - GET /audit gains `kind=` (AuditEventKind) and `view=everything|changes`; GET /audit/person/:userId (Team → person →
-//    Activity) — P9's own router.
+//    router; any signed-in staff member; at most AUDIT_EVENTS_PER_MINUTE a minute per person, 429 after that;
+//    validated kinds and fields only, else 400; an opened record the caller may not open → 403, an unknown one → 404).
+//  - GET /audit gains `kind=` (one AuditEventKind or a comma list) and `view=everything|changes`; every row carries
+//    `kind` and `userRole`.
+//  - GET /audit/people → AuditPerson[] (everyone the trail can name, client accounts included: the Person filter).
+//  - GET /audit/person/:userId?kind=&limit=&offset= → AuditPersonActivity (Team → person → Activity).
 // Server helpers (server/src/lib/audit/events.ts, owned by P9): recordSystemEvent (actor "Linear Hub"),
 // recordClientEvent, and the spec registry server/src/lib/audit/registry.ts.
 
@@ -100,9 +110,22 @@ export interface AnnouncementReadStats {
 export type AuditEventKind = 'change' | 'sign_in' | 'export' | 'opened' | 'automatic' | 'client';
 export const AUDIT_EVENT_KINDS: readonly AuditEventKind[] = ['change', 'sign_in', 'export', 'opened', 'automatic', 'client'];
 
+/** GET /audit `view`: everything (the default) or the changes only (kind `change`). */
+export type AuditView = 'everything' | 'changes';
+
 /** The two kinds a page may report itself (POST /audit/events). */
 export type ClientAuditEventKind = 'export' | 'opened';
 export type AuditExportFormat = 'csv' | 'pdf' | 'xero' | 'sage' | 'print';
+export const AUDIT_EXPORT_FORMATS: readonly AuditExportFormat[] = ['csv', 'pdf', 'xero', 'sage', 'print'];
+
+/** POST /audit/events limits: `what` up to 80 characters, `filename` up to 120, `rows` 0 to 1,000,000. */
+export const AUDIT_EVENT_WHAT_MAX = 80;
+export const AUDIT_EVENT_FILENAME_MAX = 120;
+export const AUDIT_EVENT_ROWS_MAX = 1_000_000;
+/** POST /audit/events: at most this many reports per person per minute (429 after that). */
+export const AUDIT_EVENTS_PER_MINUTE = 60;
+/** The same person opening the same record again within this many minutes adds no row. */
+export const AUDIT_OPENED_REPEAT_MINUTES = 5;
 
 /** POST /audit/events — reported by the client: an export it built, or a sensitive record it opened. */
 export interface ClientAuditEventInput {
@@ -114,7 +137,42 @@ export interface ClientAuditEventInput {
   /** Exports: how many rows went into the file. */
   rows?: number;
   filename?: string;
-  /** Opened records: which one. */
+  /**
+   * Opened records: which one. Exports (release 1.3 review): an export of ONE record (a candidate profile PDF, an
+   * invoice PDF or print) names it too, so the row is filed under that record and follows its access rule.
+   */
   entity?: AuditEntity;
   entityId?: number;
+}
+
+/**
+ * Release 1.3 (P9): why a failed sign-in or security check was recorded — the `reason` in its row's snapshot (server
+ * lib/audit/signIns.ts writes only these; shared AUDIT_SIGN_IN_REASON_LABELS says them in words).
+ */
+export const AUDIT_SIGN_IN_REASONS = [
+  'wrong_employee_id', 'deactivated', 'unknown_email', 'wrong_pin', 'pin_locked_now', 'pin_locked', 'too_many_attempts',
+  'wrong_code', 'too_many_codes', 'challenge_expired', 'wrong_current_pin',
+] as const;
+export type AuditSignInReason = (typeof AUDIT_SIGN_IN_REASONS)[number];
+
+/**
+ * GET /audit/people — one person the trail can name (staff and client accounts, any status): what the Person filter
+ * shows, nothing more (no employee IDs or client access codes).
+ */
+export interface AuditPerson {
+  id: number;
+  name: string;
+  role: Role;
+  status: UserStatus;
+}
+
+/** GET /audit/person/:userId — one person's timeline (what they did, newest first) and a short sign-in summary. */
+export interface AuditPersonActivity extends AuditPage {
+  person: AuditPerson;
+  /** Their latest successful sign-in (UTC ISO), or null. */
+  lastSignInAt: string | null;
+  /** Their latest row of any kind (UTC ISO), or null — not counting failed tries on the sign-in page (maybe somebody else's). */
+  lastActiveAt: string | null;
+  /** Failed sign-ins, wrong PINs and wrong two-step codes on their account in the last 30 days. */
+  failedSignIns: number;
 }

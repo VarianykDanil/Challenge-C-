@@ -19,6 +19,7 @@ import {
   AUDIT_DIFF_SKIPPED,
   EXPENSE_CATEGORY_LABELS,
   POSITION_LABELS,
+  PROGRESSION_MILESTONES,
   ROLE_LABELS,
   SESSION_IDLE_HOURS_DEFAULT,
   STAGE_LABELS,
@@ -29,8 +30,10 @@ import {
   auditMoney,
   auditValueText,
   auditWeekLabel,
+  isProgressionMilestoneKey,
   lessonTitle,
   type AuditEntity,
+  type AuditEventKind,
   type AuditFieldChange,
   type CandidateStage,
   type ExpenseCategory,
@@ -41,6 +44,8 @@ import {
 import { all, get, placeholders, type Db } from '../db/connection.ts';
 import { mondayOf } from './dates.ts';
 import { readSecuritySettings } from './pin.ts';
+// Release 1.3 (P9): what a failed sign-in, PIN check or two-step check writes (the `failed` hooks below).
+import { codeCheckFailed, pinCheckFailed, signInBefore, signInFailed, twoFactorSignInBefore, twoFactorSignInFailed, type SignInState, type TwoFactorSignInState } from './audit/signIns.ts';
 
 type Snap = Record<string, unknown>;
 
@@ -69,6 +74,8 @@ export interface AuditDraft {
   after?: unknown;
   /** Overrides the actor (a sign-in: the person who has just signed in). */
   userId?: number | null;
+  /** Release 1.3 (P9): the row's kind (default: shared auditKindOf of the action and the actor's role). */
+  kind?: AuditEventKind;
 }
 
 export interface AuditRouteSpec<S = unknown> {
@@ -81,6 +88,11 @@ export interface AuditRouteSpec<S = unknown> {
   before?(db: Db, call: AuditCall): S;
   /** After a 2xx answer: the rows to write ([] writes nothing). */
   after(db: Db, done: AuditDone, state: S | undefined): AuditDraft[];
+  /**
+   * Release 1.3 (P9): after a 4xx answer, the rows a failed attempt writes (a wrong PIN, a wrong two-step code; kind
+   * `sign_in` unless a draft says otherwise). Absent: a failed request writes nothing, as in 1.2.
+   */
+  failed?(db: Db, done: AuditDone, state: S | undefined): AuditDraft[];
 }
 
 // ───────────────────────────── small helpers ─────────────────────────────
@@ -614,16 +626,51 @@ export function lessonLabel(key: unknown): string {
 
 // ───────────────────────────── the registry ─────────────────────────────
 
-const signIn = (pattern: string, summary: string): AuditRouteSpec<null> => ({
+const signedIn = (summary: string) => (_db: Db, done: AuditDone): AuditDraft[] => {
+  // step one of a two-step sign-in answers a challenge, not a session: nobody is signed in yet
+  const user = responseOf(done).user;
+  const id = isRecord(user) ? toId(user.id) : null;
+  return id ? [{ entity: 'user', entityId: id, summary, userId: id }] : [];
+};
+
+/** Release 1.3 (P9): sign-in, with its failed attempts (lib/audit/signIns.ts). */
+const signIn: AuditRouteSpec<SignInState> = { method: 'POST', pattern: '/auth/login', before: signInBefore, after: signedIn('Signed in'), failed: signInFailed };
+const signInTwoFactor: AuditRouteSpec<TwoFactorSignInState> = {
   method: 'POST',
-  pattern,
-  after(_db, done) {
-    // step one of a two-step sign-in answers a challenge, not a session: nobody is signed in yet
-    const user = responseOf(done).user;
-    const id = isRecord(user) ? toId(user.id) : null;
-    return id ? [{ entity: 'user', entityId: id, summary, userId: id }] : [];
-  },
-});
+  pattern: '/auth/login/2fa',
+  before: twoFactorSignInBefore,
+  after: signedIn('Signed in with two-step verification'),
+  failed: twoFactorSignInFailed,
+};
+
+/** A spec with a `failed` hook added (release 1.3: wrong codes and PINs are recorded). */
+function withFailed<S>(spec: AuditRouteSpec<S>, failed: (db: Db, done: AuditDone) => AuditDraft[]): AuditRouteSpec<S> {
+  return { ...spec, failed };
+}
+
+/** The pin snapshot the PIN routes compare (`pinSet` only; never the hash). */
+function pinRoute(pattern: string, summary: (before: Snap | null, after: Snap | null) => string | null, doing: 'changing' | 'removing'): AuditRouteSpec<Snap | null> {
+  return {
+    method: 'POST',
+    pattern,
+    before: (db, call) => (call.me ? userSnapshot(db, call.me.id) : null),
+    after(db, done, before) {
+      if (!done.me) return [];
+      const after = userSnapshot(db, done.me.id);
+      const text = summary(before ?? null, after);
+      return text ? [{ entity: 'user', entityId: done.me.id, summary: text, before: before ?? null, after }] : [];
+    },
+    failed: pinCheckFailed(doing),
+  };
+}
+
+/** Release 1.3 (P9): a progression milestone as the trail keeps it (PUT /learning/milestones/:userId/:key). */
+function milestoneSnapshot(db: Db, userId: number | null, key: string): Snap | null {
+  if (!userId || !isProgressionMilestoneKey(key)) return null;
+  const person = userName(db, userId);
+  const row = soft(() => get<{ value: number }>(db, `SELECT value FROM learning_milestones WHERE user_id = ? AND milestone_key = ?`, [userId, key]), undefined);
+  return { userName: person, milestone: PROGRESSION_MILESTONES[key].label, value: row ? Number(row.value) : null };
+}
 
 export const AUDIT_ROUTES: readonly AuditRouteSpec<any>[] = [ // eslint-disable-line @typescript-eslint/no-explicit-any
   // ── read receipts have their own table (announcement_reads) ──
@@ -664,24 +711,16 @@ export const AUDIT_ROUTES: readonly AuditRouteSpec<any>[] = [ // eslint-disable-
   }),
 
   // ── signing in and the caller's own security ──
-  signIn('/auth/login', 'Signed in'),
-  signIn('/auth/login/2fa', 'Signed in with two-step verification'),
+  signIn,
+  signInTwoFactor,
   selfRoute('POST', '/auth/logout', 'Signed out'),
   selfRoute('POST', '/auth/2fa/setup', 'Started setting up two-step verification'),
-  selfRoute('POST', '/auth/2fa/enable', 'Turned on two-step verification', true),
-  selfRoute('POST', '/auth/2fa/disable', 'Turned off two-step verification', true),
-  selfRoute('POST', '/auth/2fa/recovery-codes', 'Made new recovery codes'),
-  {
-    method: 'POST',
-    pattern: '/auth/pin',
-    before: (db, call) => (call.me ? userSnapshot(db, call.me.id) : null),
-    after(db, done, before: Snap | null) {
-      if (!done.me) return [];
-      const after = userSnapshot(db, done.me.id);
-      const summary = before && 'pinSet' in before ? (before.pinSet ? 'Changed their PIN' : 'Set a PIN') : 'Set or changed their PIN';
-      return [{ entity: 'user', entityId: done.me.id, summary, before, after }];
-    },
-  } satisfies AuditRouteSpec<Snap | null>,
+  withFailed(selfRoute('POST', '/auth/2fa/enable', 'Turned on two-step verification', true), codeCheckFailed('turning on two-step verification')),
+  withFailed(selfRoute('POST', '/auth/2fa/disable', 'Turned off two-step verification', true), codeCheckFailed('turning off two-step verification')),
+  withFailed(selfRoute('POST', '/auth/2fa/recovery-codes', 'Made new recovery codes'), codeCheckFailed('making new recovery codes')),
+  // Release 1.3 (P9): literal /auth/pin/remove before /auth/pin (first match wins; the patterns differ anyway)
+  pinRoute('/auth/pin/remove', () => 'Removed their PIN', 'removing'),
+  pinRoute('/auth/pin', (before) => (before && 'pinSet' in before ? (before.pinSet ? 'Changed their PIN' : 'Set a PIN') : 'Set or changed their PIN'), 'changing'),
   {
     method: 'PUT',
     pattern: '/auth/security-settings',
@@ -823,6 +862,21 @@ export const AUDIT_ROUTES: readonly AuditRouteSpec<any>[] = [ // eslint-disable-
       const what = after?.signedOffAt ? 'Signed off a teach-back' : 'Took back a teach-back sign-off';
       const summary = `${what}: ${userName(db, userId) ?? 'someone'}, ${lessonLabel(done.params.lessonKey)}`;
       return [{ entity: 'learning', entityId: userId, summary, before, after }];
+    },
+  } satisfies AuditRouteSpec<Snap | null>,
+
+  {
+    // Release 1.3 (P9): the criteria the office ticks on a person's progression (recorded generically in 1.2)
+    method: 'PUT',
+    pattern: '/learning/milestones/:userId/:key',
+    before: (db, call) => milestoneSnapshot(db, paramId(call, 'userId'), String(call.params.key ?? '')),
+    after(db, done, before: Snap | null) {
+      const userId = paramId(done, 'userId');
+      const after = milestoneSnapshot(db, userId, String(done.params.key ?? ''));
+      if (!after || (before && !auditDiff(before, after).length)) return []; // saved with the same value
+      const was = before?.value ?? null;
+      const change = was === null ? `set to ${auditValueText('value', after.value)}` : `${auditValueText('value', was)} → ${auditValueText('value', after.value)}`;
+      return [{ entity: 'learning', entityId: userId, summary: `Updated a progression milestone for ${str(after.userName, 'someone')}: “${str(after.milestone)}” ${change}`, before, after }];
     },
   } satisfies AuditRouteSpec<Snap | null>,
 

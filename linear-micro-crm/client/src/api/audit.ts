@@ -1,7 +1,9 @@
-// Release 1.2 — U3 audit-trail hooks — OWNED BY U3. Endpoints: server/src/routes/audit.ts.
+// Release 1.2 — U3 audit-trail hooks — OWNED BY U3 (OWNED BY P9 audit-everything from 1.3). Endpoints:
+// server/src/routes/audit.ts. Release 1.3 (P9): `kind` on GET /audit, the Person filter's list (GET /audit/people) and
+// Team → person → Activity (GET /audit/person/:userId).
 import { useCallback } from 'react';
 import { keepPreviousData, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import type { AnnouncementReadStats, AuditEntity, AuditEntryDetail, AuditPage } from '@lm/shared';
+import type { AnnouncementReadStats, AuditEntity, AuditEntryDetail, AuditEventKind, AuditPage, AuditPerson, AuditPersonActivity } from '@lm/shared';
 import { api, qs } from './client';
 
 export interface AuditParams {
@@ -14,14 +16,24 @@ export interface AuditParams {
   q?: string;
   /** false leaves sign-ins and sign-outs out (changes only). */
   signIns?: boolean;
+  /** Release 1.3 (P9): only rows of this kind ('' or absent: everything). */
+  kind?: AuditEventKind | '';
   limit?: number;
   offset?: number;
+}
+
+/** Release 1.3 (P9): Team → person → Activity. */
+export interface PersonActivityParams {
+  kind?: AuditEventKind | '';
+  limit?: number;
 }
 
 export const auditKeys = {
   all: ['audit'] as const,
   list: (p: AuditParams) => ['audit', 'list', p] as const,
   entity: (entity: AuditEntity, id: number) => ['audit', 'entity', entity, id] as const,
+  people: ['audit', 'people'] as const,
+  person: (userId: number, p: PersonActivityParams) => ['audit', 'person', userId, p] as const,
   announcementReads: ['announcements', 'reads'] as const,
 };
 
@@ -31,7 +43,7 @@ export function useAuditLog(params: AuditParams, { enabled = true }: { enabled?:
     queryKey: auditKeys.list(params),
     queryFn: () =>
       api<AuditPage>(
-        `/audit${qs({ userId: params.userId ?? undefined, entity: params.entity || undefined, entityId: params.entityId ?? undefined, from: params.from, to: params.to, q: params.q, signIns: params.signIns === false ? 0 : undefined, limit: params.limit, offset: params.offset })}`,
+        `/audit${qs({ userId: params.userId ?? undefined, entity: params.entity || undefined, entityId: params.entityId ?? undefined, from: params.from, to: params.to, q: params.q, signIns: params.signIns === false ? 0 : undefined, kind: params.kind || undefined, limit: params.limit, offset: params.offset })}`,
       ),
     enabled,
     placeholderData: keepPreviousData,
@@ -39,11 +51,35 @@ export function useAuditLog(params: AuditParams, { enabled = true }: { enabled?:
   });
 }
 
-/** GET /audit/:entity/:entityId — the history behind the EntityHistory slot. */
+/** Release 1.3 (P9): GET /audit/people — staff and client accounts, any status, for the Person filter (admin). */
+export function useAuditPeople({ enabled = true }: { enabled?: boolean } = {}) {
+  return useQuery({ queryKey: auditKeys.people, queryFn: () => api<AuditPerson[]>('/audit/people'), enabled, staleTime: 60_000 });
+}
+
+/**
+ * Release 1.3 (P9): GET /audit/person/:userId — what one person did, newest first, with their sign-in summary (admin).
+ * The previous answer stays on screen while a filter or "Show more" loads — for the SAME person only: moving to
+ * another person's page (UserDetail stays mounted) shows the loading state, never the last person's rows and stats.
+ */
+export function usePersonActivity(userId: number | null | undefined, params: PersonActivityParams, { enabled = true }: { enabled?: boolean } = {}) {
+  const key = userId ?? 0;
+  return useQuery({
+    queryKey: auditKeys.person(key, params),
+    queryFn: () => api<AuditPersonActivity>(`/audit/person/${userId}${qs({ kind: params.kind || undefined, limit: params.limit })}`),
+    enabled: enabled && userId != null,
+    placeholderData: (previous, previousQuery) => (previousQuery?.queryKey[2] === key ? previous : undefined),
+    staleTime: 10_000,
+  });
+}
+
+/** Release 1.3 (P9): what a record's History panel lists — its changes and automatic steps, not who opened or exported it. */
+export const HISTORY_KINDS: readonly AuditEventKind[] = ['change', 'automatic', 'client'];
+
+/** GET /audit/:entity/:entityId — the history behind the EntityHistory slot (release 1.3: changes and automatic steps). */
 export function useEntityHistory(entity: AuditEntity, entityId: number | null | undefined, { enabled = true }: { enabled?: boolean } = {}) {
   return useQuery({
     queryKey: auditKeys.entity(entity, entityId ?? 0),
-    queryFn: () => api<AuditEntryDetail[]>(`/audit/${entity}/${entityId}`),
+    queryFn: () => api<AuditEntryDetail[]>(`/audit/${entity}/${entityId}${qs({ kind: HISTORY_KINDS.join(',') })}`),
     enabled: enabled && entityId != null,
     // fetched afresh each time a payslip or entry is opened: a change made a moment ago must show
     staleTime: 0,

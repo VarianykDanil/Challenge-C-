@@ -8,10 +8,40 @@
  *  GET  /announcements/reads[?ids=1,2]  → AnnouncementReadStats[] (admin: every announcement; others: the ones they wrote)
  * The recording itself is lib/audit.ts (middleware + recordAudit). Types: shared/src/types/audit.ts.
  * Mounted in app.ts: auditRouter at /audit; announcementReadsRouter at /announcements BEFORE the announcements router.
+ *
+ * Release 1.3 — OWNED BY P9 audit-everything from here on:
+ *  GET /audit … &kind=sign_in,export&view=everything|changes   every row carries `kind` and `userRole`; `kind` is one
+ *                                    AuditEventKind or a comma list, `view=changes` is `kind=change` (400 for anything
+ *                                    else, or for both at once); `entity` takes the 1.3 entities too
+ *  GET /audit/people                → AuditPerson[] (admin): everyone the trail can name, client accounts included
+ *                                    (id, name, role, status: no employee IDs or client access codes)
+ *  GET /audit/person/:userId?kind=&limit=&offset=  → AuditPersonActivity (admin): what that person did, newest first,
+ *                                    and the failed attempts on their account; their last sign-in, last activity (not
+ *                                    counting tries on the sign-in page, which may be somebody else's) and failed
+ *                                    sign-ins in the last 30 days
+ *  GET /audit/:entity/:entityId?kind=  the record's history, optionally of some kinds only (as GET /audit)
+ *  (both registered before /:entity/:entityId, which would otherwise read "person" as an entity)
  */
 import { Router } from 'express';
 import { z } from 'zod';
-import { auditDiff, isAuditEntity, type AnnouncementReadStats, type AuditEntity, type AuditEntryDetail, type AuditPage, type UserWithTeam } from '@lm/shared';
+import {
+  AUDIT_SIGN_IN_PAGE_ACTIONS,
+  auditDiff,
+  auditKindOf,
+  isAuditEntity,
+  isAuditEventKind,
+  parseAuditKinds,
+  type AnnouncementReadStats,
+  type AuditEntity,
+  type AuditEntryDetail,
+  type AuditEventKind,
+  type AuditPage,
+  type AuditPerson,
+  type AuditPersonActivity,
+  type Role,
+  type UserStatus,
+  type UserWithTeam,
+} from '@lm/shared';
 import { all, get, placeholders, run, type Db } from '../db/connection.ts';
 import { getGauge, getUser } from '../db/queries.ts';
 import { addDays, toBusinessISO } from '../lib/dates.ts';
@@ -43,12 +73,25 @@ interface AuditRow {
   beforeJson: string | null;
   afterJson: string | null;
   ip: string | null;
+  kind: string | null;
+  userRole: Role | null;
 }
 
 const AUDIT_SELECT = `
   SELECT a.id, a.at, a.user_id AS userId, u.first_name || ' ' || u.last_name AS userName, a.action, a.entity,
-         a.entity_id AS entityId, a.summary, a.before_json AS beforeJson, a.after_json AS afterJson, a.ip
+         a.entity_id AS entityId, a.summary, a.before_json AS beforeJson, a.after_json AS afterJson, a.ip, a.kind,
+         u.role AS userRole
   FROM audit_log a LEFT JOIN users u ON u.id = a.user_id`;
+
+/** Release 1.3: a failed sign-in, wrong PIN or wrong two-step code (lib/audit/signIns.ts writes a `reason`). */
+const FAILED_ATTEMPT = `a.kind = 'sign_in' AND json_extract(a.after_json, '$.reason') IS NOT NULL`;
+/**
+ * …made on the sign-in page (shared isAuditAttemptOnAccount): filed under the account it was tried on, maybe typed by
+ * somebody else, so it is not that person being active. (The actions are constants, safe to inline.)
+ */
+const ATTEMPT_ON_ACCOUNT = `${FAILED_ATTEMPT} AND a.action IN (${AUDIT_SIGN_IN_PAGE_ACTIONS.map((x) => `'${x}'`).join(', ')})`;
+/** Release 1.3: Team → person → Activity counts failed attempts over this many days. */
+export const PERSON_FAILED_DAYS = 30;
 
 /**
  * The `q` search folds apostrophes and quotes on both sides, so what a phone keyboard types finds what the summaries
@@ -85,8 +128,33 @@ function toDetail(row: AuditRow, showIp: boolean): AuditEntryDetail {
     before,
     after,
     diff: auditDiff(before, after),
+    // a row written before audit_log.kind was classified reads as the same rules would class it
+    kind: isAuditEventKind(row.kind) ? row.kind : auditKindOf(row.action, row.userRole),
+    userRole: row.userRole ?? null,
   };
 }
+
+/** `kind` and `view` of GET /audit and GET /audit/person/:userId → the kinds to keep (undefined: every kind). */
+function kindsQuery(kindRaw: unknown, viewRaw: unknown): AuditEventKind[] | undefined {
+  const view = optionalString(viewRaw);
+  if (view !== undefined && view !== 'everything' && view !== 'changes') throw badRequest('view must be everything or changes');
+  const kinds = parseAuditKinds(optionalString(kindRaw));
+  if (kinds === null) throw badRequest('Invalid kind');
+  if (view === 'changes') {
+    if (kinds) throw badRequest('Use either kind or view=changes, not both');
+    return ['change'];
+  }
+  return kinds;
+}
+
+function pushKinds(clauses: string[], params: (string | number)[], kinds: AuditEventKind[] | undefined): void {
+  if (!kinds) return;
+  clauses.push(`a.kind IN (${placeholders(kinds.length)})`);
+  params.push(...kinds);
+}
+
+/** What the Person filter and the Activity card name a person by: no employee IDs or client access codes. */
+const PERSON_SELECT = `SELECT u.id, u.first_name || ' ' || u.last_name AS name, u.role, u.status FROM users u`;
 
 /** The UTC instant of midnight in London on `date` (audit times are UTC; the filters are London calendar days). */
 export function londonMidnightUtc(date: string): string {
@@ -167,6 +235,7 @@ export function auditRouter(db: Db): Router {
     const q = foldAuditSearch(optionalString(req.query.q)?.slice(0, 100) ?? '').trim();
     const signIns = optionalString(req.query.signIns);
     if (signIns !== undefined && signIns !== '0' && signIns !== '1') throw badRequest('signIns must be 0 or 1');
+    const kinds = kindsQuery(req.query.kind, req.query.view);
     const limitRaw = optionalIdQuery(req.query.limit, 'limit');
     const limit = Math.min(limitRaw ?? AUDIT_PAGE_DEFAULT, AUDIT_PAGE_MAX);
     const offset = offsetQuery(req.query.offset);
@@ -201,10 +270,53 @@ export function auditRouter(db: Db): Router {
       clauses.push(`a.action NOT IN (${placeholders(SIGN_IN_ACTIONS.length)})`);
       params.push(...SIGN_IN_ACTIONS);
     }
+    pushKinds(clauses, params, kinds);
     const where = clauses.length ? `WHERE ${clauses.join(' AND ')}` : '';
     const total = get<{ n: number }>(db, `SELECT COUNT(*) AS n FROM audit_log a ${where}`, params)!.n;
     const rows = all<AuditRow>(db, `${AUDIT_SELECT} ${where} ORDER BY a.at DESC, a.id DESC LIMIT ? OFFSET ?`, [...params, limit, offset]);
     const body: AuditPage = { rows: rows.map((r) => toDetail(r, true)), total: Number(total) };
+    res.json(body);
+  });
+
+  // Release 1.3 (P9): the Person filter's list — staff and client accounts, any status (GET /users leaves clients out).
+  router.get('/people', requireRole('admin'), (_req, res) => {
+    const body: AuditPerson[] = all<AuditPerson>(db, `${PERSON_SELECT} ORDER BY u.first_name COLLATE NOCASE, u.last_name COLLATE NOCASE, u.id`);
+    res.json(body);
+  });
+
+  // Release 1.3 (P9): Team → person → Activity. Before /:entity/:entityId (two segments as well).
+  router.get('/person/:userId', requireRole('admin'), (req, res) => {
+    const userId = idParam(req, 'userId');
+    const person = get<{ id: number; name: string; role: Role; status: UserStatus }>(db, `${PERSON_SELECT} WHERE u.id = ?`, [userId]);
+    if (!person) throw notFound('User');
+    const kinds = kindsQuery(req.query.kind, req.query.view);
+    const limitRaw = optionalIdQuery(req.query.limit, 'limit');
+    const limit = Math.min(limitRaw ?? AUDIT_PAGE_DEFAULT, AUDIT_PAGE_MAX);
+    const offset = offsetQuery(req.query.offset);
+    const clauses = ['a.user_id = ?'];
+    const params: (string | number)[] = [userId];
+    pushKinds(clauses, params, kinds);
+    const where = `WHERE ${clauses.join(' AND ')}`;
+    const total = Number(get<{ n: number }>(db, `SELECT COUNT(*) AS n FROM audit_log a ${where}`, params)!.n);
+    const rows = all<AuditRow>(db, `${AUDIT_SELECT} ${where} ORDER BY a.at DESC, a.id DESC LIMIT ? OFFSET ?`, [...params, limit, offset]);
+    // one more indexed query (user_id, at) for the summary line
+    const since = new Date(Date.now() - PERSON_FAILED_DAYS * 86_400_000).toISOString();
+    const stats = get<{ lastSignInAt: string | null; lastActiveAt: string | null; failed: number | null }>(
+      db,
+      `SELECT MAX(CASE WHEN a.action IN ('POST /auth/login', 'POST /auth/login/2fa') AND a.kind = 'sign_in' AND a.after_json IS NULL THEN a.at END) AS lastSignInAt,
+              MAX(CASE WHEN ${ATTEMPT_ON_ACCOUNT} THEN NULL ELSE a.at END) AS lastActiveAt,
+              SUM(CASE WHEN ${FAILED_ATTEMPT} AND a.at >= ? THEN 1 ELSE 0 END) AS failed
+       FROM audit_log a WHERE a.user_id = ?`,
+      [since, userId],
+    );
+    const body: AuditPersonActivity = {
+      person,
+      rows: rows.map((r) => toDetail(r, true)),
+      total,
+      lastSignInAt: stats?.lastSignInAt ?? null,
+      lastActiveAt: stats?.lastActiveAt ?? null,
+      failedSignIns: Number(stats?.failed ?? 0),
+    };
     res.json(body);
   });
 
@@ -217,11 +329,13 @@ export function auditRouter(db: Db): Router {
       if (entity !== 'gauge_entry') throw forbidden('Only administrators can see this history');
       if (!canReadGaugeHistory(db, me, entityId)) throw forbidden("Leaders can only see the history of their own team's gauge entries");
     }
-    const rows = all<AuditRow>(db, `${AUDIT_SELECT} WHERE a.entity = ? AND a.entity_id = ? ORDER BY a.at DESC, a.id DESC LIMIT ?`, [
-      entity,
-      entityId,
-      ENTITY_HISTORY_MAX,
-    ]);
+    // Release 1.3 (P9): `kind=` narrows a record's history (the History panels ask for changes and automatic steps only,
+    // so "Opened the payslip" never reads as a change of it)
+    const kinds = kindsQuery(req.query.kind, req.query.view);
+    const clauses = ['a.entity = ?', 'a.entity_id = ?'];
+    const params: (string | number)[] = [entity, entityId];
+    pushKinds(clauses, params, kinds);
+    const rows = all<AuditRow>(db, `${AUDIT_SELECT} WHERE ${clauses.join(' AND ')} ORDER BY a.at DESC, a.id DESC LIMIT ?`, [...params, ENTITY_HISTORY_MAX]);
     const details = rows.map((r) => toDetail(r, me.role === 'admin'));
     const body: AuditEntryDetail[] = entity === 'gauge_entry' ? redactGaugeHistory(db, me, details) : details;
     res.json(body);

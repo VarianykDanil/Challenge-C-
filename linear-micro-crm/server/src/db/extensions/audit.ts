@@ -10,9 +10,18 @@
  *    The demo seed marks a plausible share of the active people as having read each seeded announcement, so the
  *    dashboard's "Read by 18 of 34" has something to show; an existing database starts empty.
  *
- * Nothing here touches a core table: `upgrade` has no data steps, `seed` writes announcement_reads only.
+ * Release 1.3 — OWNED BY P9 audit-everything from here on:
+ *  - audit_log.kind: what kind of action the row records — 'change' | 'sign_in' | 'export' | 'opened' | 'automatic' |
+ *    'client' (shared AuditEventKind) — written with every row by lib/audit.ts recordAudit, indexed with `at` for the
+ *    Audit page's kind filter. `upgrade` adds the column to a 1.2 database and classifies its rows once, by the same
+ *    rules as shared auditKindOf (KIND_CASE below; a test holds the two equal): the payroll export → export, sign-ins
+ *    and sign-outs → sign_in, a client account's rows → client, everything else → change. It runs on every start
+ *    but only touches rows whose kind is still NULL (none, once classified), so a second start changes nothing.
+ *
+ * Nothing here touches a core table: `upgrade` writes audit_log only, `seed` writes announcement_reads only.
  */
 import type { DbExtension, SeedContext } from './types.ts';
+import { addColumnIfMissing } from './types.ts';
 import type { Db } from '../connection.ts';
 
 const SQL = `
@@ -26,7 +35,8 @@ CREATE TABLE IF NOT EXISTS audit_log (
   summary TEXT NOT NULL,
   before_json TEXT,
   after_json TEXT,
-  ip TEXT
+  ip TEXT,
+  kind TEXT
 );
 CREATE INDEX IF NOT EXISTS idx_audit_at ON audit_log(at);
 CREATE INDEX IF NOT EXISTS idx_audit_user_at ON audit_log(user_id, at);
@@ -73,9 +83,33 @@ function seedReads(db: Db, ctx: SeedContext): void {
   }
 }
 
+/**
+ * shared auditKindOf in SQL, for rows written before audit_log.kind existed (same order of rules; the test
+ * audit-everything.test.ts checks both give the same kind for every action the app writes).
+ */
+export const KIND_CASE = `CASE
+  WHEN action LIKE 'SYSTEM %' THEN 'automatic'
+  WHEN action LIKE 'EVENT export%' OR action = 'GET /finance/payroll/export' THEN 'export'
+  WHEN action LIKE 'EVENT opened%' THEN 'opened'
+  WHEN action IN ('POST /auth/login', 'POST /auth/login/2fa', 'POST /auth/logout') THEN 'sign_in'
+  WHEN user_id IN (SELECT id FROM users WHERE role = 'client') OR action LIKE '% /client' OR action LIKE '% /client/%' THEN 'client'
+  ELSE 'change'
+END`;
+
+/** Adds audit_log.kind (+ its index) and classifies the rows that have none yet; reports only real changes. */
+function upgrade(db: Db): string[] {
+  const changed: string[] = [];
+  const added = addColumnIfMissing(db, 'audit_log', 'kind', 'TEXT');
+  if (added) changed.push(added);
+  db.exec(`CREATE INDEX IF NOT EXISTS idx_audit_kind_at ON audit_log(kind, at)`);
+  const classified = Number(db.prepare(`UPDATE audit_log SET kind = ${KIND_CASE} WHERE kind IS NULL`).run().changes);
+  if (classified > 0) changed.push('audit_log.kind (rows classified)');
+  return changed;
+}
+
 export const extension: DbExtension = {
   name: 'audit',
   sql: SQL,
-  upgrade: () => [],
+  upgrade,
   seed: seedReads,
 };
