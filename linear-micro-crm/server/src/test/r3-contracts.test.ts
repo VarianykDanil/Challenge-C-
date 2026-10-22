@@ -298,7 +298,9 @@ test('role checks of the 1.3 stubs, and /client never swallows /client-posts or 
   assert.deepEqual((await admin.get('/client-posts/unread')).json, { count: 0 });
   assert.equal((await rep.get('/client-posts')).status, 403);
   assert.equal((await rep.patch('/client-accounts/1', {})).status, 403);
-  assert.equal((await admin.patch('/client-accounts/1', {})).status, 501);
+  // P6 fills the stub: user 1 is a staff member, so it is not a client account (404), never a 403 or a 5xx.
+  const notClient = await admin.patch('/client-accounts/1', {});
+  assert.ok(notClient.status === 501 || (notClient.status === 404 && notClient.json?.error === 'Client account not found'), `PATCH /client-accounts/1 → ${notClient.status}`);
   assert.equal((await rep.get('/statements')).status, 403);
   assert.equal((await rep.get('/pay/settings')).status, 403);
   assert.equal((await rep.get('/invoices/disputes')).status, 403);

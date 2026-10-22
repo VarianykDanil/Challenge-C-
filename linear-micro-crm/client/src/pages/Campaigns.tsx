@@ -1,8 +1,12 @@
+// Release 1.3 (P6 client-portal): each campaign opens its page (/campaigns/:id: the brief, the client's posts, the
+// client accounts), and a card says how many client posts the signed-in admin or leader has not read yet.
 import { useMemo, useState } from 'react';
-import { Megaphone, Pencil, Plus } from 'lucide-react';
+import { Link } from 'react-router-dom';
+import { ArrowRight, Megaphone, Pencil, Plus } from 'lucide-react';
 import type { Campaign } from '@lm/shared';
 import { Badge, Button, Card, EmptyState, PageHeader, Skeleton, Tabs } from '@/components/ui';
 import { useCampaigns, useGaugeSummary } from '@/api/hooks';
+import { useClientPosts } from '@/api/clientPortal';
 import { useCurrentUser } from '@/auth/AuthProvider';
 import { ErrorState, ExportButton } from '@/features/common';
 import { CampaignFormModal } from '@/features/campaigns';
@@ -26,6 +30,12 @@ export function CampaignsPage() {
   const month = useMemo(() => presetRange('this_month'), []);
   const sales = useGaugeSummary({ groupBy: 'campaign', from: month.from, to: month.to });
   const salesByCampaign = useMemo(() => new Map((sales.data ?? []).map((r) => [r.key, r])), [sales.data]);
+  const clientPosts = useClientPosts();
+  const unreadByCampaign = useMemo(() => {
+    const m = new Map<number, number>();
+    for (const p of clientPosts.data ?? []) if (p.unread) m.set(p.campaignId, (m.get(p.campaignId) ?? 0) + 1);
+    return m;
+  }, [clientPosts.data]);
 
   const list = (q.data ?? []).filter((c) => (filter === 'all' ? true : filter === 'active' ? c.active : !c.active));
 
@@ -71,6 +81,7 @@ export function CampaignsPage() {
           {list.map((c) => {
             const row = salesByCampaign.get(String(c.id));
             const margin = c.payoutPerSale > 0 ? (c.payoutPerSale - c.repCommissionPerSale) / c.payoutPerSale : 0;
+            const unread = unreadByCampaign.get(c.id) ?? 0;
             return (
               <li key={c.id}>
                 <Card padded={false} className={`overflow-hidden ${c.active ? '' : 'opacity-75'}`}>
@@ -86,6 +97,7 @@ export function CampaignsPage() {
                           <Badge tone="info">{SECTOR_LABELS[c.sector]}</Badge>
                           <Badge tone="neutral">{CAMPAIGN_TYPE_LABELS[c.type]}</Badge>
                           <Badge tone={c.active ? 'success' : 'neutral'} dot>{c.active ? 'Active' : 'Inactive'}</Badge>
+                          {unread > 0 && <Badge tone="accent" data-testid="campaign-unread">{unread} new from the client</Badge>}
                         </div>
                       </div>
                       {isAdmin && <Button variant="ghost" size="icon" aria-label={`Edit ${c.name}`} onClick={() => setEditing(c)}><Pencil className="h-4 w-4" aria-hidden /></Button>}
@@ -100,7 +112,17 @@ export function CampaignsPage() {
                       <span className="text-muted">Sales this month</span>
                       <span className="font-semibold tabular-nums text-fg">{sales.isLoading ? '…' : formatNumber(row?.sales ?? 0)}{row && row.days > 0 && <span className="ml-1 text-xs font-normal text-muted">· {formatPct(row.ratios.overallConversion, 1)} conv.</span>}</span>
                     </div>
-                    <p className="mt-3 text-xs text-muted">Since {formatDate(c.startDate)}</p>
+                    <div className="mt-3 flex items-center justify-between gap-2">
+                      <p className="text-xs text-muted">Since {formatDate(c.startDate)}</p>
+                      <Link
+                        to={`/campaigns/${c.id}`}
+                        className="focus-ring inline-flex min-h-10 items-center gap-1 rounded-lg px-2 text-sm font-medium text-primary hover:bg-primary-soft"
+                        aria-label={`Open the ${c.name} campaign page`}
+                        data-testid="campaign-open-page"
+                      >
+                        Open page <ArrowRight className="h-4 w-4" aria-hidden />
+                      </Link>
+                    </div>
                   </div>
                 </Card>
               </li>

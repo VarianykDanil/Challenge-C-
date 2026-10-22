@@ -1,5 +1,6 @@
 // Owned by the Product Designer (layout); the two-step verification step by the Frontend Developer; the PIN step by
-// U1 sign-in-pin (release 1.2).
+// U1 sign-in-pin (release 1.2); the client sign-in (an access code instead of an employee ID) and the demo client button
+// by P6 client-portal (release 1.3).
 // Contract: exports LoginPage(); uses useAuth() and pickDemoAccounts().
 import { useEffect, useRef, useState, type FormEvent } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
@@ -21,6 +22,8 @@ import { Avatar, Badge, Button, Divider, Field, Input, Skeleton } from '@/compon
 
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const NETWORK_ERROR = 'We couldn’t reach the server. Check your connection and try again.';
+/** Release 1.3 (P6): a client portal account signs in with an access code ("CL-0002") where staff use an employee ID. */
+const isAccessCode = (code: string) => /^CL-/i.test(code.trim());
 /** Show "N tries left" once this few wrong PINs remain before the lock. */
 const WARN_TRIES_LEFT = 3;
 
@@ -87,7 +90,10 @@ export function LoginPage() {
   useEffect(() => { if (stage === 'credentials') emailRef.current?.focus(); }, [stage]);
 
   const emailError = touched.email && !EMAIL_RE.test(email.trim()) ? 'Enter a valid work email.' : undefined;
-  const idError = touched.employeeId && employeeId.trim().length < 3 ? 'Enter your employee ID, e.g. LM-0042.' : undefined;
+  const client = isAccessCode(employeeId);
+  const idError = touched.employeeId && employeeId.trim().length < 3 ? (client ? 'Enter your access code, e.g. CL-0002.' : 'Enter your employee ID, e.g. LM-0042.') : undefined;
+  const noMatch = (code: string) =>
+    isAccessCode(code) ? 'We couldn’t match that email and access code. Check both and try again.' : 'We couldn’t match that email and employee ID. Check both and try again.';
 
   /** Swap the form for the code step (no session yet) and keep the credentials for "Back". */
   function openCodeStep(challengeToken: string) {
@@ -142,7 +148,7 @@ export function LoginPage() {
         return;
       }
       if (e instanceof ApiError) {
-        setError(e.status === 401 ? 'We couldn’t match that email and employee ID. Check both and try again.' : e.message);
+        setError(e.status === 401 ? noMatch(normalised.employeeId) : e.message);
       } else {
         setError(NETWORK_ERROR);
       }
@@ -216,7 +222,7 @@ export function LoginPage() {
       } else if (err instanceof ApiError && err.status === 401) {
         // The email and employee ID stopped matching meanwhile (e.g. the account was deactivated): start again.
         backToCredentials();
-        setError('We couldn’t match that email and employee ID. Check both and try again.');
+        setError(noMatch(employeeId));
       } else {
         setPinError(err instanceof ApiError ? err.message : NETWORK_ERROR);
       }
@@ -271,6 +277,8 @@ export function LoginPage() {
   const year = new Date().getFullYear();
   // The API may legitimately return no demo accounts; then the whole section disappears (no skeleton, no note).
   const demoAccounts = demo.data?.accounts ?? [];
+  // Release 1.3 (P6): the seeded demo client portal account(s), listed apart from the four staff accounts.
+  const demoClients = demo.data?.clientAccounts ?? [];
   const showDemo = demo.isLoading || demo.isError || demoAccounts.length > 0;
 
   return (
@@ -430,7 +438,13 @@ export function LoginPage() {
                       disabled={busy}
                     />
                   </Field>
-                  <Field label={COPY.login.employeeIdLabel} htmlFor="login-employee-id" error={idError} hint={idError ? undefined : 'Format LM-0000. Ask your team leader if you don’t have one yet.'} required>
+                  <Field
+                    label={COPY.login.employeeIdLabel}
+                    htmlFor="login-employee-id"
+                    error={idError}
+                    hint={idError ? undefined : client ? 'Your client access code, from your invite email.' : 'Format LM-0000. Ask your team leader if you don’t have one yet. Clients: use your access code, CL-0000.'}
+                    required
+                  >
                     <Input
                       id="login-employee-id"
                       name="employeeId"
@@ -464,6 +478,7 @@ export function LoginPage() {
                     <Divider label={COPY.login.demoTitle} spacing="lg" />
                     <DemoAccounts
                       accounts={demoAccounts}
+                      clientAccounts={demoClients}
                       loading={demo.isLoading}
                       failed={demo.isError}
                       busyId={typeof submitting === 'string' && submitting !== 'form' ? submitting : null}
@@ -652,6 +667,8 @@ function PinStep({ email, pin, error, hint, locked, busy, inputRef, onPinChange,
 
 interface DemoAccountsProps {
   accounts?: { label: string; role: string; email: string; employeeId: string }[];
+  /** Release 1.3 (P6): the demo client portal account(s), under their own heading. */
+  clientAccounts?: { label: string; role: string; email: string; employeeId: string }[];
   loading: boolean;
   failed: boolean;
   busyId: string | null;
@@ -664,9 +681,10 @@ const ROLE_TONE: Record<string, 'primary' | 'accent' | 'info' | 'success' | 'neu
   leader: 'accent',
   recruiter: 'info',
   rep: 'success',
+  client: 'neutral',
 };
 
-function DemoAccounts({ accounts, loading, failed, busyId, disabled, onPick }: DemoAccountsProps) {
+function DemoAccounts({ accounts, clientAccounts, loading, failed, busyId, disabled, onPick }: DemoAccountsProps) {
   if (loading) {
     return (
       <div className="grid gap-2" aria-busy>
@@ -682,9 +700,9 @@ function DemoAccounts({ accounts, loading, failed, busyId, disabled, onPick }: D
   if (failed || !accounts?.length) {
     return <p className="text-center text-xs text-muted">Demo accounts aren’t available right now — sign in with your own details above.</p>;
   }
-  return (
-    <ul className="grid grid-cols-1 gap-2">
-      {accounts.map((acc) => {
+  const list = (items: NonNullable<DemoAccountsProps['accounts']>, testId?: string) => (
+    <ul className="grid grid-cols-1 gap-2" data-testid={testId}>
+      {items.map((acc) => {
         const isBusy = busyId === acc.employeeId;
         return (
           <li key={acc.employeeId} className="min-w-0">
@@ -719,5 +737,15 @@ function DemoAccounts({ accounts, loading, failed, busyId, disabled, onPick }: D
         );
       })}
     </ul>
+  );
+  if (!clientAccounts?.length) return list(accounts);
+  return (
+    <div className="space-y-4">
+      {list(accounts)}
+      <div>
+        <p className="eyebrow mb-2 text-muted">Client portal</p>
+        {list(clientAccounts, 'demo-client-accounts')}
+      </div>
+    </div>
   );
 }

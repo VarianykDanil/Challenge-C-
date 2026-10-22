@@ -1,8 +1,9 @@
 import { Router } from 'express';
 import { z } from 'zod';
-import type { Campaign } from '@lm/shared';
+import type { Campaign, CampaignBrief } from '@lm/shared';
 import { all, run, type Db } from '../db/connection.ts';
 import { CAMPAIGN_SELECT, Where, getCampaign, mapCampaign } from '../db/queries.ts';
+import { campaignBrief } from '../lib/clientPortal.ts';
 import { conflict, notFound } from '../lib/errors.ts';
 import { hexColor, idParam, isoDate, moneyAmount, moneyRate } from '../lib/validate.ts';
 import { currentUser, requireRole } from '../middleware/auth.ts';
@@ -23,6 +24,38 @@ const campaignBody = z.object({
   description: z.string().nullable().optional().default(null),
 });
 
+/**
+ * Release 1.3 (P6 client-portal): the campaign page's brief (campaigns columns of the client extension). Each field is
+ * optional on POST and PATCH; '' or null clears it, a field left out keeps its value. The 1.0 fields above are unchanged.
+ */
+const briefText = (max: number) => z.string().trim().max(max).nullable().optional().transform((v) => (v === undefined ? undefined : v || null));
+const briefBody = z.object({
+  longDescription: briefText(5000),
+  brief: briefText(5000),
+  contactName: briefText(120),
+  contactEmail: z.union([z.literal(''), z.string().trim().toLowerCase().email('Enter a valid email').max(200)]).nullable().optional()
+    .transform((v) => (v === undefined ? undefined : v || null)),
+  contactPhone: briefText(40),
+});
+
+const BRIEF_COLUMNS: Record<keyof CampaignBrief, string> = {
+  longDescription: 'long_description',
+  brief: 'brief',
+  contactName: 'contact_name',
+  contactEmail: 'contact_email',
+  contactPhone: 'contact_phone',
+};
+
+/** Writes the brief fields that were sent (one UPDATE; nothing when none were). */
+function saveBrief(db: Db, id: number, input: z.infer<typeof briefBody>): void {
+  const keys = (Object.keys(BRIEF_COLUMNS) as (keyof CampaignBrief)[]).filter((k) => input[k] !== undefined);
+  if (!keys.length) return;
+  run(db, `UPDATE campaigns SET ${keys.map((k) => `${BRIEF_COLUMNS[k]} = ?`).join(', ')} WHERE id = ?`, [...keys.map((k) => input[k] ?? null), id]);
+}
+
+/** The campaign with its brief (the 1.0 fields first, as before; the brief fields after them). */
+const withBrief = (db: Db, c: Campaign): Campaign & CampaignBrief => ({ ...c, ...campaignBrief(db, c.id)! });
+
 export function campaignsRouter(db: Db): Router {
   const router = Router();
 
@@ -37,6 +70,7 @@ export function campaignsRouter(db: Db): Router {
 
   router.post('/', requireRole('admin'), (req, res) => {
     const body = campaignBody.parse(req.body);
+    const brief = briefBody.parse(req.body ?? {});
     if (all(db, `SELECT 1 FROM campaigns WHERE lower(code) = lower(?)`, [body.code]).length) throw conflict(`Campaign code ${body.code} already exists`);
     const r = run(
       db,
@@ -44,10 +78,11 @@ export function campaignsRouter(db: Db): Router {
        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [body.name, body.code, body.sector, body.type, body.payoutPerSale, body.repCommissionPerSale, body.color, body.active, body.startDate, body.description],
     );
+    saveBrief(db, r.lastInsertRowid, brief);
     const created = getCampaign(db, r.lastInsertRowid)!;
     // Release 1.3 (P1): the campaign's rate history starts with its first rates (lib/payRule.ts; nothing until P1 lands).
     recordCampaignRateChange(db, created.id, null, created, currentUser(req).id);
-    res.status(201).json(created);
+    res.status(201).json(withBrief(db, created));
   });
 
   router.patch('/:id', requireRole('admin'), (req, res) => {
@@ -55,6 +90,7 @@ export function campaignsRouter(db: Db): Router {
     const existing = getCampaign(db, id);
     if (!existing) throw notFound('Campaign');
     const patch = campaignBody.partial().parse(req.body);
+    const brief = briefBody.parse(req.body ?? {});
     if (patch.code && patch.code.toLowerCase() !== existing.code.toLowerCase()) {
       if (all(db, `SELECT 1 FROM campaigns WHERE lower(code) = lower(?) AND id <> ?`, [patch.code, id]).length) throw conflict(`Campaign code ${patch.code} already exists`);
     }
@@ -64,10 +100,11 @@ export function campaignsRouter(db: Db): Router {
       `UPDATE campaigns SET name = ?, code = ?, sector = ?, type = ?, payout_per_sale = ?, rep_commission_per_sale = ?, color = ?, active = ?, start_date = ?, description = ? WHERE id = ?`,
       [next.name, next.code, next.sector, next.type, next.payoutPerSale, next.repCommissionPerSale, next.color, next.active, next.startDate, next.description, id],
     );
+    saveBrief(db, id, brief);
     const updated = getCampaign(db, id)!;
     // Release 1.3 (P1): a change of rep commission or payout per sale adds a row to the rate history.
     recordCampaignRateChange(db, id, existing, updated, currentUser(req).id);
-    res.json(updated);
+    res.json(withBrief(db, updated));
   });
 
   return router;

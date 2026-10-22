@@ -69,11 +69,21 @@ export interface ClientPost {
   decidedBy: number | null;
   decidedByName?: string | null;
   decidedAt: string | null;
-  /** Declined: the reason the client sees. */
+  /**
+   * Declined: the reason the client sees. Approved / unpublished: the office's note for the record, in the office's
+   * copy only (the client's copy always has null there unless declined).
+   */
   decisionNote: string | null;
   /** The Announcements row it published (update / announcement). */
   announcementId: number | null;
   createdAt: string;
+  /**
+   * P6: a commission change's date as the client asked for it. `effectiveFrom` is that date until Matt approves the
+   * change, then the date he confirmed (the new rate applies from it); `requestedFrom` keeps the client's own date.
+   */
+  requestedFrom?: string | null;
+  /** P6, office payloads only (GET /client-posts, the campaign page): the signed-in admin or leader has not read it yet. */
+  unread?: boolean;
 }
 
 export interface ClientPostInput {
@@ -86,8 +96,9 @@ export interface ClientPostInput {
 }
 
 export interface ClientPostDecisionInput {
-  /** Approve (commission): the date the new rate applies from, as Matt confirms it. */
+  /** Approve (commission): the date the new rate applies from, as Matt confirms it (default: the client's date). */
   effectiveFrom?: string;
+  /** Decline: the reason the client sees (required). Unpublish: an optional note for the record. */
   note?: string;
 }
 
@@ -117,6 +128,16 @@ export interface ClientInviteInput {
   firstName: string;
   lastName: string;
   email: string;
+  /** P6: the sign-in page's address as the admin's browser sees it ("https://hub.example/login"), for the instructions. */
+  signInUrl?: string;
+}
+
+/** PATCH /client-accounts/:id — deactivate ('left') or reactivate ('active'), or correct the name or email. */
+export interface ClientAccountUpdateInput {
+  status?: ClientAccountStatus;
+  firstName?: string;
+  lastName?: string;
+  email?: string;
 }
 
 export interface ClientInviteResult {
@@ -144,11 +165,34 @@ export interface CampaignBrief {
   contactPhone: string | null;
 }
 
-/** GET /campaigns/:id/page. Money (rates, payout, revenue) only for admins and leaders. */
+/** POST /campaigns and PATCH /campaigns/:id also take these (each optional; '' or null clears it). */
+export type CampaignBriefInput = Partial<CampaignBrief>;
+
+/**
+ * The campaign on its page. Admins and leaders get every field; reps and recruiters get the brief without money, so
+ * `payoutPerSale` and `repCommissionPerSale` are absent for them.
+ */
+export type CampaignPageCampaign = Omit<Campaign, 'payoutPerSale' | 'repCommissionPerSale'> &
+  Partial<Pick<Campaign, 'payoutPerSale' | 'repCommissionPerSale'>> &
+  CampaignBrief;
+
+/**
+ * GET /campaigns/:id/page. Money (rates, payout, commission changes) and the client's contact only for admins and
+ * leaders (`full: true`); reps and recruiters see the brief, the published updates and announcements, this month's
+ * events (reps: their own team's) and the sales counts (contactName / contactEmail / contactPhone are null for them).
+ * Client accounts only for admins.
+ */
 export interface CampaignPage {
-  campaign: Campaign & CampaignBrief;
+  campaign: CampaignPageCampaign;
+  /** P6: true for admins and leaders (the money and every post's status are included). */
+  full?: boolean;
   rates?: CampaignRate[];
   clientAccounts?: ClientAccount[];
+  /**
+   * P6, admins only: the last day (YYYY-MM-DD) of the latest pay week with a paid run, or null. A commission change
+   * approved from a date on or before it leaves those paid weeks at the old rate (the Approve dialog says so).
+   */
+  paidThrough?: string | null;
   posts: ClientPost[];
   announcements: Announcement[];
   eventsThisMonth: SalesEventWithMeta[];

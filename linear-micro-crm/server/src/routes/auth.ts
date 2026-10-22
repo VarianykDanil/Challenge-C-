@@ -11,7 +11,7 @@ import { HttpError, badRequest, conflict, notFound, unauthorized } from '../lib/
 import { FailureLimiter } from '../lib/limiter.ts';
 import { clientCampaignIdOf, clientSafeUser, demoClientMarkers, isClientUser, isDemoClientAccount, matchesDemoClient } from '../lib/client.ts';
 import {
-  accountFlags, clearPin, clearPinFailures, countPinAttempt, hashPin, isPinLocked, pinAttemptsLeft, pinHashNeedsUpgrade,
+  accountFlags, clearPin, clearPinFailures, clientPinRequired, countPinAttempt, hashPin, isPinLocked, pinAttemptsLeft, pinHashNeedsUpgrade,
   pinLockedMessage, pinRow, pinStatusFor, readSecuritySettings, resetPinAndSignOut, savePinHash, upgradePinHash, verifyPin,
   writeSecuritySettings, type PinRow,
 } from '../lib/pin.ts';
@@ -363,6 +363,8 @@ export function authRouter(db: Db): Router {
     const me = currentUser(req);
     const { currentPin } = removePinBody.parse(req.body);
     if (readSecuritySettings(db).requirePin) throw conflict('A PIN is required for everyone, so it cannot be removed. You can change it instead.');
+    // Release 1.3 (P6): a client account must keep its PIN (pinStatusFor reports required: true for it).
+    if (clientPinRequired(db, me.id)) throw conflict('A PIN is required for client accounts, so it cannot be removed. You can change it instead.');
     const row = pinRow(db, me.id);
     if (!row?.hash) throw conflict('You have no PIN to remove');
     await checkCurrentPin(me.id, row, currentPin);

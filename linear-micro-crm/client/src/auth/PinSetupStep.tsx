@@ -1,6 +1,8 @@
 // Release 1.2 — OWNED BY U1 sign-in-pin. The two full-screen steps the PIN gate (./PinSetupGate.tsx) shows instead of the
 // app: "Create your PIN" (the admin requires a PIN and you have none) and "Set up two-step verification" (an
 // administrator, when the admin rule requires it). Lazy-loaded, so the main chunk does not carry them.
+// Release 1.3 (P6 client-portal): a client account always creates a PIN at its first sign-in; its step speaks of the
+// "access code" (its sign-in code) rather than the "employee ID" (features/client/clientPinCopy.ts).
 import { useId, useState, type FormEvent, type ReactNode } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useQueryClient } from '@tanstack/react-query';
@@ -14,6 +16,7 @@ import { Button, useToast } from '@/components/ui';
 import { apiMessage } from '@/features/common/QueryStates';
 import { PinField, PinInput } from '@/features/settings/PinInput';
 import { PIN_COPY } from '@/features/settings/pinCopy';
+import { CLIENT_PIN_COPY, clientPinProblemMessage } from '@/features/client/clientPinCopy';
 import { TwoFactorSetupModal } from '@/features/settings/TwoFactorSetupModal';
 import { COPY } from '@/content/copy';
 import { fullName } from '@/lib/format';
@@ -90,9 +93,11 @@ export function CreatePinStep() {
   const [againLeft, setAgainLeft] = useState(false);
   const [serverError, setServerError] = useState<string | null>(null);
   const t = PIN_COPY.setup;
+  // Release 1.3 (P6): a client account's words — its access code, and why it needs a PIN.
+  const client = user.role === 'client';
 
   const problem = pinProblem(pin, { employeeId: user.employeeId });
-  const pinError = (submitted || pinLeft) && problem ? PIN_PROBLEM_MESSAGES[problem] : null;
+  const pinError = (submitted || pinLeft) && problem ? (client ? clientPinProblemMessage(problem) : PIN_PROBLEM_MESSAGES[problem]) : null;
   const againError = (submitted || againLeft) && !problem && again !== pin ? PIN_COPY.mismatch : null;
 
   async function onSubmit(e: FormEvent) {
@@ -112,7 +117,7 @@ export function CreatePinStep() {
 
   return (
     <StepFrame testId="pin-setup-step">
-      <StepHeading icon={<KeyRound />} eyebrow={t.eyebrow} title={t.heading} body={t.body} />
+      <StepHeading icon={<KeyRound />} eyebrow={t.eyebrow} title={t.heading} body={client ? CLIENT_PIN_COPY.setupBody : t.body} />
       {serverError && (
         <div role="alert" className="mt-5 flex items-start gap-3 rounded-xl border border-danger/30 bg-danger-soft px-4 py-3 text-sm text-danger animate-scale-in">
           <CircleAlert className="mt-0.5 h-4 w-4 shrink-0" aria-hidden />
@@ -121,7 +126,7 @@ export function CreatePinStep() {
       )}
       <form onSubmit={(e) => void onSubmit(e)} noValidate className="mt-6 space-y-5">
         <input type="text" name="username" autoComplete="username" value={user.email} readOnly tabIndex={-1} aria-hidden className="sr-only" />
-        <PinField htmlFor={`${uid}-pin`} label={t.pinLabel} hint={PIN_COPY.rulesHint} error={pinError}>
+        <PinField htmlFor={`${uid}-pin`} label={t.pinLabel} hint={client ? CLIENT_PIN_COPY.rulesHint : PIN_COPY.rulesHint} error={pinError}>
           <PinInput
             id={`${uid}-pin`}
             autoFocus

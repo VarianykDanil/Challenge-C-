@@ -23,6 +23,7 @@ import {
 } from '@lm/shared';
 import { all, get, run, transaction, type Db } from '../db/connection.ts';
 import { currentDataVersion } from './cache.ts';
+import { isDemoClientAccount } from './client.ts';
 import { deriveAppKey } from './crypto.ts';
 import { BUSINESS_TZ, diffDays, toBusinessISO } from './dates.ts';
 
@@ -96,6 +97,17 @@ export function pinRow(db: Db, userId: number): PinRow | undefined {
   );
 }
 
+/** Release 1.3 (P6): true for a client account other than the seeded demo client (one small read). */
+export function clientPinRequired(db: Db, userId: number): boolean {
+  const user = get<{ id: number; role: Role; email: string; employeeId: string }>(
+    db,
+    `SELECT id, role, email, employee_id AS employeeId FROM users WHERE id = ?`,
+    [userId],
+  );
+  if (!user || user.role !== 'client') return false;
+  return pinRequiredForRole({ role: user.role, demoClient: isDemoClientAccount(db, user) });
+}
+
 /** Locked now: the person has a PIN and its lock ends in the future (real clock). */
 export const isPinLocked = (row: PinRow | undefined, now = Date.now()): boolean =>
   Boolean(row?.hash && row.lockedUntil) && Date.parse(row!.lockedUntil!) > now;
@@ -138,7 +150,10 @@ export function pinStatusFor(db: Db, userId: number, now = Date.now()): PinStatu
   const row = pinRow(db, userId);
   if (!row) return null;
   const locked = isPinLocked(row, now);
-  const status: PinStatus = { hasPin: Boolean(row.hash), setAt: row.hash ? row.setAt : null, required: readSecuritySettings(db).requirePin, locked };
+  // Release 1.3 (P6): `required` is also true for a client account (never for the demo client), so Settings and the
+  // portal's Security page offer Change PIN but not Remove.
+  const required = readSecuritySettings(db).requirePin || clientPinRequired(db, userId);
+  const status: PinStatus = { hasPin: Boolean(row.hash), setAt: row.hash ? row.setAt : null, required, locked };
   if (locked) status.lockedUntil = row.lockedUntil!;
   return status;
 }
@@ -260,7 +275,17 @@ export interface AccountFlagsSubject {
 export function accountFlags(settings: SecuritySettings, who: AccountFlagsSubject): AccountFlags {
   return {
     hasPin: who.hasPin,
-    pinSetupRequired: settings.requirePin && !who.hasPin,
+    // Release 1.3 (P6 client-portal): a client account always needs a PIN (its first sign-in creates it), except the
+    // seeded demo client, so the demo sign-in button works; the admin's "Require a PIN for everyone" covers it too.
+    pinSetupRequired: !who.hasPin && (settings.requirePin || (who.role === 'client' && !who.demoClient)),
     twoFactorSetupRequired: settings.requireAdminTwoFactor && who.role === 'admin' && !who.twoFactorEnabled,
   };
+}
+
+/**
+ * Release 1.3 (P6 client-portal): a PIN is required for this account whatever the admin's settings — client accounts,
+ * except the seeded demo client (lib/client.ts isDemoClientAccount). The same rule as accountFlags, for pinStatusFor.
+ */
+export function pinRequiredForRole(who: Pick<AccountFlagsSubject, 'role' | 'demoClient'>): boolean {
+  return who.role === 'client' && !who.demoClient;
 }
