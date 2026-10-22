@@ -1,11 +1,12 @@
 import { useId, useState } from 'react';
 import type { CandidateSource, Position } from '@lm/shared';
-import { POSITION_LABELS, SOURCE_LABELS } from '@lm/shared';
+import { POSITION_LABELS, SOURCE_LABELS, dateOfBirthProblem } from '@lm/shared';
 import { Button, Field, Input, Modal, Select, Textarea, useToast } from '@/components/ui';
 import { ApiError } from '@/api/client';
 import { useCreateCandidate, useUsers } from '@/api/hooks';
 import { useCurrentUser } from '@/auth/AuthProvider';
 import { errorMessage } from '@/features/common';
+import { todayISO } from '@/lib/dates';
 import { fullName } from '@/lib/format';
 import { ENTRY_POSITIONS, optionsFrom } from '@/lib/labels';
 
@@ -23,7 +24,7 @@ function AddCandidateForm({ onClose, onCreated }: { onClose: () => void; onCreat
   const uid = useId();
   const create = useCreateCandidate();
   const owners = useUsers({});
-  const [f, setF] = useState({ firstName: '', lastName: '', email: '', phone: '', city: 'Manchester', source: 'indeed' as CandidateSource, positionApplied: 'field_rep' as Position, ownerId: String(me.id), referredById: '', notes: '' });
+  const [f, setF] = useState({ firstName: '', lastName: '', email: '', phone: '', city: 'Manchester', source: 'indeed' as CandidateSource, positionApplied: 'field_rep' as Position, ownerId: String(me.id), referredById: '', notes: '', dateOfBirth: '' });
   const [errors, setErrors] = useState<Record<string, string>>({});
   const set = (k: keyof typeof f) => (v: string) => setF((s) => ({ ...s, [k]: v }));
 
@@ -32,6 +33,9 @@ function AddCandidateForm({ onClose, onCreated }: { onClose: () => void; onCreat
     if (!f.firstName.trim()) e.firstName = 'Required';
     if (!f.lastName.trim()) e.lastName = 'Required';
     if (!/^\S+@\S+\.\S+$/.test(f.email)) e.email = 'Enter a valid email';
+    // Release 1.3 (P7): optional; the same rule as the server.
+    const dobProblem = f.dateOfBirth ? dateOfBirthProblem(f.dateOfBirth, todayISO()) : null;
+    if (dobProblem) e.dateOfBirth = dobProblem;
     setErrors(e);
     if (Object.keys(e).length) return;
     try {
@@ -46,6 +50,7 @@ function AddCandidateForm({ onClose, onCreated }: { onClose: () => void; onCreat
         ownerId: f.ownerId ? Number(f.ownerId) : null,
         referredById: f.source === 'referral' && f.referredById ? Number(f.referredById) : null,
         notes: f.notes.trim() || null,
+        ...(f.dateOfBirth ? { dateOfBirth: f.dateOfBirth } : {}),
       });
       toast.success('Candidate added', fullName(c));
       onCreated?.(c.id);
@@ -71,6 +76,9 @@ function AddCandidateForm({ onClose, onCreated }: { onClose: () => void; onCreat
         <Field label="Email" required htmlFor={`${uid}-email`} error={errors.email}><Input id={`${uid}-email`} type="email" value={f.email} onChange={(e) => set('email')(e.target.value)} invalid={!!errors.email} /></Field>
         <Field label="Phone" htmlFor={`${uid}-phone`}><Input id={`${uid}-phone`} type="tel" value={f.phone} onChange={(e) => set('phone')(e.target.value)} /></Field>
         <Field label="City" htmlFor={`${uid}-city`}><Input id={`${uid}-city`} value={f.city} onChange={(e) => set('city')(e.target.value)} /></Field>
+        <Field label="Date of birth" optional htmlFor={`${uid}-dob`} error={errors.dateOfBirth} hint="Only the recruitment team sees it. Under 18s are flagged on the profile.">
+          <Input id={`${uid}-dob`} type="date" value={f.dateOfBirth} max={todayISO()} onChange={(e) => set('dateOfBirth')(e.target.value)} invalid={!!errors.dateOfBirth} />
+        </Field>
         <Field label="Position applied for" htmlFor={`${uid}-pos`}><Select id={`${uid}-pos`} value={f.positionApplied} onChange={(e) => set('positionApplied')(e.target.value)} options={optionsFrom(POSITION_LABELS, ENTRY_POSITIONS)} /></Field>
         <Field label="Source" htmlFor={`${uid}-source`}><Select id={`${uid}-source`} value={f.source} onChange={(e) => set('source')(e.target.value)} options={optionsFrom(SOURCE_LABELS)} /></Field>
         {f.source === 'referral' && (

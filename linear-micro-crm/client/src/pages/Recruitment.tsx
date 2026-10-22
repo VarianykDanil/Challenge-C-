@@ -1,6 +1,6 @@
 import { useMemo, useState } from 'react';
-import { useNavigate } from 'react-router-dom';
-import { AlertCircle, Columns3, List, Search, UserPlus } from 'lucide-react';
+import { Link, useNavigate } from 'react-router-dom';
+import { AlertCircle, CalendarClock, Columns3, List, Search, UserPlus } from 'lucide-react';
 import type { CandidateSource, CandidateWithMeta } from '@lm/shared';
 import { PIPELINE_STAGES, SOURCE_LABELS, STAGE_LABELS, compareLongestIdle, stageIndex } from '@lm/shared';
 import { COPY } from '@/content/copy';
@@ -10,6 +10,7 @@ import { useCandidates, useRecruitmentSummary, useUsers } from '@/api/hooks';
 import { useCurrentUser } from '@/auth/AuthProvider';
 import { ChartSkeleton, ErrorState, ExportButton, KpiSkeletons, RangePicker, SourceBadge, StageBadge, StarRating, StopRowEvents, ViewToggle, useRangeState } from '@/features/common';
 import { AddCandidateModal, CandidateCard, IdleBadge, MoveStageControl, candidateCsvColumns, isOverdue } from '@/features/recruitment';
+import { buttonLinkClass } from '@/features/recruitment/linkStyles';
 import { csvFilename, sortRows } from '@/lib/csv';
 import { formatDate, formatDateShort, formatDecimal, formatNumber, formatPct, fullName } from '@/lib/format';
 import { optionsFrom } from '@/lib/labels';
@@ -135,7 +136,13 @@ export function RecruitmentPage() {
       <PageHeader
         title={COPY.nav.recruitment.title}
         description={COPY.nav.recruitment.description}
-        actions={canWrite ? <Button onClick={() => setAddOpen(true)} leftIcon={<UserPlus className="h-4 w-4" aria-hidden />}>Add candidate</Button> : undefined}
+        actions={
+          <>
+            {/* Release 1.3 (P7): every interview by day, with its interviewer. */}
+            <Link to="/recruitment/schedule" className={buttonLinkClass('outline')} data-testid="recruitment-schedule-link"><CalendarClock aria-hidden /> Schedule</Link>
+            {canWrite && <Button onClick={() => setAddOpen(true)} leftIcon={<UserPlus className="h-4 w-4" aria-hidden />}>Add candidate</Button>}
+          </>
+        }
       />
 
       <div className="mb-4"><RangePicker value={range} onChange={setRange} presets={['last_4_weeks', 'last_12_weeks', 'quarter', 'this_month', 'last_month']} /></div>

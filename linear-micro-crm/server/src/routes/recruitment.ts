@@ -1,10 +1,11 @@
 import { Router } from 'express';
 import { z } from 'zod';
-import { PIPELINE_STAGES, POSITIONS, TERMINAL_STAGES, defaultNextActionAt, isOverdue, stageIndex, type CandidateSource, type CandidateStage, type Position, type RecruitmentSummary, type UserWithTeam } from '@lm/shared';
+import { PIPELINE_STAGES, POSITIONS, TERMINAL_STAGES, dateOfBirthProblem, defaultNextActionAt, isOverdue, stageIndex, type CandidateSource, type CandidateStage, type Position, type RecruitmentSummary, type UserWithTeam } from '@lm/shared';
 import { all, get, run, transaction, type Db } from '../db/connection.ts';
 import { Where, getCandidate, getInterview, getUser, listCandidates, listInterviews, listStageChanges } from '../db/queries.ts';
 import { addDays, businessNow, eachMonday, isISODate, mondayOf, nowISO, todayISO } from '../lib/dates.ts';
 import { badRequest, conflict, notFound } from '../lib/errors.ts';
+import { logInterviewBooked, logInterviewChanges } from '../lib/recruitmentPlus/store.ts';
 import { idParam, isoTimestamp, optionalIdQuery, optionalString, parseRange } from '../lib/validate.ts';
 import { currentUser, requireRole } from '../middleware/auth.ts';
 import { defaultPayPlanId, nextEmployeeId, pickAvatarColor } from './users.ts';
@@ -41,7 +42,21 @@ const candidateBody = z.object({
   notes: z.string().trim().max(5000).nullable().optional(),
   nextAction: z.string().trim().max(200).nullable().optional(),
   nextActionAt: nextActionDeadline.nullable().optional(),
+  /** Release 1.3 (P7): YYYY-MM-DD, or null / '' to clear; checked with the shared dateOfBirthProblem on today. */
+  dateOfBirth: z
+    .string()
+    .trim()
+    .nullable()
+    .optional()
+    .transform((v) => (v === '' ? null : v)),
 });
+
+/** Release 1.3 (P7): a date of birth in a body must be a real date, not in the future, 14 to 100 years ago. */
+function assertDateOfBirth(value: string | null | undefined): void {
+  if (typeof value !== 'string') return;
+  const problem = dateOfBirthProblem(value, todayISO());
+  if (problem) throw badRequest(problem);
+}
 
 const interviewBody = z.object({
   candidateId: z.number().int().positive(),
@@ -139,6 +154,7 @@ export function recruitmentRouter(db: Db): Router {
   router.post('/candidates', (req, res) => {
     const me = currentUser(req);
     const body = candidateBody.parse(req.body);
+    assertDateOfBirth(body.dateOfBirth);
     const ownerId = body.ownerId === undefined ? me.id : body.ownerId;
     if (ownerId !== null && !getUser(db, ownerId)) throw badRequest('Unknown ownerId');
     if (body.referredById && !getUser(db, body.referredById)) throw badRequest('Unknown referredById');
@@ -149,11 +165,12 @@ export function recruitmentRouter(db: Db): Router {
     const id = transaction(db, () => {
       const r = run(
         db,
-        `INSERT INTO candidates (first_name, last_name, email, phone, city, source, stage, position_applied, applied_at, stage_updated_at, owner_id, referred_by_id, rating, notes, next_action, next_action_at, hired_user_id)
-         VALUES (?, ?, ?, ?, ?, ?, 'applied', ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL)`,
+        `INSERT INTO candidates (first_name, last_name, email, phone, city, source, stage, position_applied, applied_at, stage_updated_at, owner_id, referred_by_id, rating, notes, next_action, next_action_at, hired_user_id, date_of_birth)
+         VALUES (?, ?, ?, ?, ?, ?, 'applied', ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, ?)`,
         [
           body.firstName, body.lastName, body.email, body.phone ?? null, body.city ?? null, body.source ?? 'other', body.positionApplied ?? 'trainee',
           now, now, ownerId, body.referredById ?? null, body.rating ?? null, body.notes ?? null, body.nextAction ?? 'Phone screen', nextActionAt,
+          body.dateOfBirth ?? null,
         ],
       );
       run(db, `INSERT INTO stage_changes (candidate_id, from_stage, to_stage, changed_at, changed_by_id, note) VALUES (?, NULL, 'applied', ?, ?, NULL)`, [r.lastInsertRowid, now, me.id]);
@@ -168,14 +185,15 @@ export function recruitmentRouter(db: Db): Router {
     if (!existing) throw notFound('Candidate');
     if (req.body && typeof req.body === 'object' && 'stage' in req.body) throw badRequest('Use POST /recruitment/candidates/:id/stage to change the stage');
     const patch = candidateBody.partial().parse(req.body);
+    assertDateOfBirth(patch.dateOfBirth);
     if (patch.ownerId && !getUser(db, patch.ownerId)) throw badRequest('Unknown ownerId');
     if (patch.referredById && !getUser(db, patch.referredById)) throw badRequest('Unknown referredById');
     if (patch.email !== undefined && patch.email.toLowerCase() !== existing.email.toLowerCase() && !TERMINAL_STAGES.includes(existing.stage)) assertEmailNotOpen(patch.email, id);
     const next = { ...existing, ...patch };
     run(
       db,
-      `UPDATE candidates SET first_name = ?, last_name = ?, email = ?, phone = ?, city = ?, source = ?, position_applied = ?, owner_id = ?, referred_by_id = ?, rating = ?, notes = ?, next_action = ?, next_action_at = ? WHERE id = ?`,
-      [next.firstName, next.lastName, next.email, next.phone ?? null, next.city ?? null, next.source, next.positionApplied, next.ownerId ?? null, next.referredById ?? null, next.rating ?? null, next.notes ?? null, next.nextAction ?? null, next.nextActionAt ?? null, id],
+      `UPDATE candidates SET first_name = ?, last_name = ?, email = ?, phone = ?, city = ?, source = ?, position_applied = ?, owner_id = ?, referred_by_id = ?, rating = ?, notes = ?, next_action = ?, next_action_at = ?, date_of_birth = ? WHERE id = ?`,
+      [next.firstName, next.lastName, next.email, next.phone ?? null, next.city ?? null, next.source, next.positionApplied, next.ownerId ?? null, next.referredById ?? null, next.rating ?? null, next.notes ?? null, next.nextAction ?? null, next.nextActionAt ?? null, next.dateOfBirth ?? null, id],
     );
     res.json(getCandidate(db, id));
   });
@@ -264,10 +282,16 @@ export function recruitmentRouter(db: Db): Router {
     const body = interviewBody.parse(req.body);
     if (!getCandidate(db, body.candidateId)) throw notFound('Candidate');
     if (body.interviewerId !== null && !getUser(db, body.interviewerId)) throw badRequest('Unknown interviewerId');
-    const r = run(db, `INSERT INTO interviews (candidate_id, type, scheduled_at, interviewer_id, outcome, notes) VALUES (?, ?, ?, ?, ?, ?)`, [
-      body.candidateId, body.type, new Date(body.scheduledAt).toISOString(), body.interviewerId, body.outcome, body.notes,
-    ]);
-    res.status(201).json(getInterview(db, r.lastInsertRowid));
+    const me = currentUser(req);
+    // Release 1.3 (P7): who booked it, for when (interview_changes 'booked'), in the same transaction.
+    const id = transaction(db, () => {
+      const r = run(db, `INSERT INTO interviews (candidate_id, type, scheduled_at, interviewer_id, outcome, notes) VALUES (?, ?, ?, ?, ?, ?)`, [
+        body.candidateId, body.type, new Date(body.scheduledAt).toISOString(), body.interviewerId, body.outcome, body.notes,
+      ]);
+      logInterviewBooked(db, getInterview(db, r.lastInsertRowid)!, me.id, nowISO());
+      return r.lastInsertRowid;
+    });
+    res.status(201).json(getInterview(db, id));
   });
 
   router.patch('/interviews/:id', (req, res) => {
@@ -275,12 +299,19 @@ export function recruitmentRouter(db: Db): Router {
     const existing = getInterview(db, id);
     if (!existing) throw notFound('Interview');
     const patch = interviewBody.partial().parse(req.body);
-    if (patch.candidateId !== undefined && !getCandidate(db, patch.candidateId)) throw notFound('Candidate');
+    // Release 1.3 (P7): an interview's history (bookings, interviewers, its sheet) belongs to its candidate, so it never
+    // moves to another one.
+    if (patch.candidateId !== undefined && patch.candidateId !== existing.candidateId) throw badRequest('An interview stays with its candidate. Book a new interview for the other candidate');
     if (patch.interviewerId && !getUser(db, patch.interviewerId)) throw badRequest('Unknown interviewerId');
     const next = { ...existing, ...patch };
-    run(db, `UPDATE interviews SET candidate_id = ?, type = ?, scheduled_at = ?, interviewer_id = ?, outcome = ?, notes = ? WHERE id = ?`, [
-      next.candidateId, next.type, new Date(next.scheduledAt).toISOString(), next.interviewerId ?? null, next.outcome, next.notes ?? null, id,
-    ]);
+    const me = currentUser(req);
+    // Release 1.3 (P7): reassignments, reschedules, changes of type and outcomes go to interview_changes (who, when).
+    transaction(db, () => {
+      run(db, `UPDATE interviews SET candidate_id = ?, type = ?, scheduled_at = ?, interviewer_id = ?, outcome = ?, notes = ? WHERE id = ?`, [
+        next.candidateId, next.type, new Date(next.scheduledAt).toISOString(), next.interviewerId ?? null, next.outcome, next.notes ?? null, id,
+      ]);
+      logInterviewChanges(db, existing, getInterview(db, id)!, me.id, nowISO());
+    });
     res.json(getInterview(db, id));
   });
 

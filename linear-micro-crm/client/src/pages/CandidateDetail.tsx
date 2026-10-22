@@ -1,15 +1,23 @@
 import { useEffect, useId, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
-import { ArrowLeft, CalendarPlus, Mail, MapPin, Phone, UserRound } from 'lucide-react';
-import type { Interview } from '@lm/shared';
+import { ArrowLeft, CalendarClock, CalendarPlus, ClipboardList, FileDown, Mail, MapPin, Phone, UserRound } from 'lucide-react';
+import type { Interview, InterviewSheetSummary } from '@lm/shared';
 import { POSITION_LABELS, STAGE_LABELS, needsOutcome } from '@lm/shared';
 import { Avatar, Badge, Button, Card, CardHeader, EmptyState, Field, Input, PageHeader, Select, Skeleton, Textarea, useToast } from '@/components/ui';
 import { ApiError } from '@/api/client';
 import { useCandidate, useUpdateCandidate, useUpdateInterview, useUsers, type CandidateDetail } from '@/api/hooks';
+import { useCandidateSheets, useCandidateTimeline } from '@/api/recruitmentPlus';
 import { useCurrentUser } from '@/auth/AuthProvider';
 import { ErrorState, SourceBadge, StageBadge, StarRating, errorMessage } from '@/features/common';
 import { IdleBadge, MoveStageControl, ScheduleInterviewModal, StageStepper } from '@/features/recruitment';
 import { OutcomeToRecordRow } from '@/features/recruitment/RecordOutcome';
+// Release 1.3 (P7): date of birth, the full timeline, the interview sheets, reschedule / reassign, the profile PDF.
+import { CandidateSheetsCard } from '@/features/recruitment/CandidateSheets';
+import { CandidateTimelineCard } from '@/features/recruitment/CandidateTimeline';
+import { DateOfBirthRow, UnderAgeNotice } from '@/features/recruitment/DateOfBirth';
+import { RescheduleInterviewModal } from '@/features/recruitment/RescheduleInterviewModal';
+import { buttonLinkClass } from '@/features/recruitment/linkStyles';
+import { PDF_EXPORTS_READY, downloadCandidatePdf } from '@/features/recruitment/pdf';
 import { ErrorBoundary } from '@/features/common/ErrorBoundary';
 // Release 1.3 slot (P9): "opened a candidate profile" for the audit trail.
 import { RecordOpened } from '@/features/audit/RecordOpened';
@@ -27,6 +35,11 @@ export function CandidateDetailPage() {
   const c = q.data;
   usePageTitle(c ? fullName(c) : 'Candidate');
   const [scheduleOpen, setScheduleOpen] = useState(false);
+  const [moving, setMoving] = useState<Interview | null>(null);
+  const toast = useToast();
+  const sheets = useCandidateSheets(c?.id);
+  const timeline = useCandidateTimeline(c?.id, { enabled: PDF_EXPORTS_READY });
+  const sheetOf = new Map((sheets.data ?? []).map((s) => [s.interviewId, s.summary]));
   const canWrite = me.role === 'admin' || me.role === 'recruiter' || me.role === 'leader';
   // The shared outcome rule (needsOutcome: pending, 2 h+ after the start, within the last 56 days — the same rule as the
   // Needs attention feed): asked for first, with the outcome select inline.
@@ -44,6 +57,16 @@ export function CandidateDetailPage() {
         actions={c && canWrite ? (
           <>
             <Button variant="outline" onClick={() => setScheduleOpen(true)} leftIcon={<CalendarPlus className="h-4 w-4" aria-hidden />}>Schedule interview</Button>
+            {PDF_EXPORTS_READY && (
+              <Button
+                variant="outline"
+                leftIcon={<FileDown className="h-4 w-4" aria-hidden />}
+                disabled={!timeline.data || !sheets.data}
+                onClick={() => downloadCandidatePdf(c, timeline.data ?? [], sheets.data ?? []).catch((e) => toast.error('Could not make the PDF', errorMessage(e)))}
+              >
+                PDF
+              </Button>
+            )}
             <div className="w-44"><MoveStageControl candidate={c} /></div>
           </>
         ) : undefined}
@@ -56,6 +79,8 @@ export function CandidateDetailPage() {
       ) : (
         <div className="space-y-6">
           <Card><CardHeader title="Pipeline" description={`Currently at ${STAGE_LABELS[c.stage]} since ${formatDate(c.stageUpdatedAt)}`} actions={<IdleBadge candidate={c} />} /><StageStepper stage={c.stage} /></Card>
+
+          <UnderAgeNotice name={c.firstName} dateOfBirth={c.dateOfBirth} />
 
           {/* First thing on a phone, above the profile: a past interview that still says pending. */}
           {canWrite && toRecord.length > 0 && (
@@ -82,6 +107,7 @@ export function CandidateDetailPage() {
                   <div className="flex items-center justify-between gap-2"><dt className="text-muted">Rating</dt><dd><RatingEditor candidate={c} canWrite={canWrite} /></dd></div>
                   <div className="flex items-center justify-between gap-2"><dt className="text-muted">Owner</dt><dd className="flex items-center gap-2">{c.ownerName ? <><Avatar name={c.ownerName} size="xs" />{c.ownerName}</> : <span className="text-muted">Unassigned</span>}</dd></div>
                   <div className="flex items-center justify-between gap-2"><dt className="text-muted">Position</dt><dd>{POSITION_LABELS[c.positionApplied]}</dd></div>
+                  <DateOfBirthRow key={`${c.id}-${c.dateOfBirth ?? ''}`} candidate={c} canWrite={canWrite} />
                   {c.hiredUserId && <div className="flex items-center justify-between gap-2 border-t border-border pt-3"><dt className="text-muted">Hired as</dt><dd><Link to={`/team/${c.hiredUserId}`} className="inline-flex items-center gap-1 text-primary hover:underline"><UserRound className="h-4 w-4" aria-hidden />View profile</Link></dd></div>}
                 </dl>
               </Card>
@@ -89,38 +115,27 @@ export function CandidateDetailPage() {
             </div>
 
             <div className="min-w-0 space-y-6 lg:col-span-2">
-              <Card>
-                <CardHeader title="Interviews" description={`${c.interviews.length} scheduled`} actions={canWrite ? <Button size="sm" variant="outline" onClick={() => setScheduleOpen(true)}>Schedule</Button> : undefined} />
+              <Card data-testid="candidate-interviews">
+                <CardHeader title="Interviews" description={`${c.interviews.length} scheduled`} actions={canWrite ? <Button size="sm" variant="outline" className="max-sm:h-10" onClick={() => setScheduleOpen(true)}>Schedule</Button> : undefined} />
                 {c.interviews.length === 0 ? (
                   <EmptyState title="No interviews yet" description="Schedule a phone screen or first interview to move things along." size="sm" className="border-0" />
                 ) : (
                   <ul className="divide-y divide-border">
-                    {[...c.interviews].sort((a, b) => a.scheduledAt.localeCompare(b.scheduledAt)).map((iv) => <InterviewRow key={iv.id} interview={iv} canWrite={canWrite} />)}
+                    {[...c.interviews].sort((a, b) => a.scheduledAt.localeCompare(b.scheduledAt)).map((iv) => (
+                      <InterviewRow key={iv.id} interview={iv} canWrite={canWrite} sheet={sheetOf.get(iv.id) ?? null} onMove={() => setMoving(iv)} />
+                    ))}
                   </ul>
                 )}
               </Card>
-              <Card>
-                <CardHeader title="Timeline" description="Every stage change, newest first" />
-                <ol className="relative ml-2 border-l border-border">
-                  {[...c.history].sort((a, b) => b.changedAt.localeCompare(a.changedAt)).map((h) => (
-                    <li key={h.id} className="relative mb-4 ml-4 last:mb-0">
-                      <span className="absolute -left-[22px] top-1 h-3 w-3 rounded-full border-2 border-surface bg-primary" aria-hidden />
-                      <div className="flex flex-wrap items-center gap-2 text-sm">
-                        {h.fromStage && <><Badge tone="neutral">{STAGE_LABELS[h.fromStage]}</Badge><span className="text-muted">→</span></>}
-                        <StageBadge stage={h.toStage} />
-                        <span className="text-xs text-muted">{formatDateTime(h.changedAt)}{h.changedByName ? ` · ${h.changedByName}` : ''}</span>
-                      </div>
-                      {h.note && <p className="mt-1 text-sm text-muted">{h.note}</p>}
-                    </li>
-                  ))}
-                </ol>
-              </Card>
+              <CandidateSheetsCard candidateId={c.id} />
+              <CandidateTimelineCard candidateId={c.id} />
             </div>
           </div>
         </div>
       )}
 
       {c && canWrite && <ScheduleInterviewModal open={scheduleOpen} onClose={() => setScheduleOpen(false)} candidateId={c.id} defaultType={c.stage === 'applied' || c.stage === 'screening' ? 'phone' : c.stage === 'interview' ? 'observation' : 'first'} />}
+      {c && canWrite && <RescheduleInterviewModal open={!!moving} interview={moving} candidateName={fullName(c)} onClose={() => setMoving(null)} />}
     </>
   );
 }
@@ -131,25 +146,30 @@ function RatingEditor({ candidate, canWrite }: { candidate: CandidateDetail; can
   return <StarRating value={candidate.rating} onChange={canWrite ? (v) => update.mutate({ id: candidate.id, rating: v }, { onError: (e) => toast.error('Could not save rating', errorMessage(e)) }) : undefined} />;
 }
 
-function InterviewRow({ interview: iv, canWrite }: { interview: Interview; canWrite: boolean }) {
+function InterviewRow({ interview: iv, canWrite, sheet, onMove }: { interview: Interview; canWrite: boolean; sheet: InterviewSheetSummary | null; onMove: () => void }) {
   const toast = useToast();
   const update = useUpdateInterview();
   const upcoming = new Date(iv.scheduledAt).getTime() > Date.now();
   return (
-    <li className="flex flex-wrap items-center justify-between gap-3 py-3">
-      <div>
+    <li className="flex flex-col gap-2 py-3">
+      <div className="min-w-0">
         <div className="flex items-center gap-2 text-sm font-medium text-fg">{INTERVIEW_TYPE_LABELS[iv.type]}{upcoming && iv.outcome === 'pending' && <Badge tone="info">Upcoming</Badge>}{needsOutcome(iv) && <Badge tone="warning">Outcome due</Badge>}</div>
-        <div className="text-xs text-muted">{formatDateTime(iv.scheduledAt)} · {formatRelative(iv.scheduledAt)}{iv.interviewerName ? ` · with ${iv.interviewerName}` : ''}</div>
+        <div className="text-xs text-muted">{formatDateTime(iv.scheduledAt)} · {formatRelative(iv.scheduledAt)}{iv.interviewerName ? ` · with ${iv.interviewerName}` : ' · no interviewer yet'}</div>
+        <div className="text-xs text-muted">{sheet ? `Sheet: ${sheet.answered} of ${sheet.questions} answered${sheet.averageScore !== null ? `, average ${sheet.averageScore} / 5` : ''}` : 'No sheet written yet'}</div>
         {iv.notes && <p className="mt-1 text-xs text-muted">{iv.notes}</p>}
       </div>
-      {canWrite ? (
-        <label className="flex items-center gap-2 text-xs text-muted">
-          <span className="sr-only">Outcome</span>
-          <Select value={iv.outcome} onChange={(e) => update.mutate({ id: iv.id, outcome: e.target.value as Interview['outcome'] }, { onSuccess: () => toast.success('Outcome saved'), onError: (err) => toast.error('Could not save outcome', errorMessage(err)) })} options={optionsFrom(INTERVIEW_OUTCOME_LABELS)} size="sm" className="w-32" disabled={update.isPending} />
-        </label>
-      ) : (
-        <Badge tone={INTERVIEW_OUTCOME_TONES[iv.outcome]}>{INTERVIEW_OUTCOME_LABELS[iv.outcome]}</Badge>
-      )}
+      <div className="flex flex-wrap items-center gap-2">
+        {canWrite ? (
+          <label className="flex items-center gap-2 text-xs text-muted">
+            <span className="sr-only">Outcome</span>
+            <Select value={iv.outcome} onChange={(e) => update.mutate({ id: iv.id, outcome: e.target.value as Interview['outcome'] }, { onSuccess: () => toast.success('Outcome saved'), onError: (err) => toast.error('Could not save outcome', errorMessage(err)) })} options={optionsFrom(INTERVIEW_OUTCOME_LABELS)} className="w-32 sm:h-8" disabled={update.isPending} />
+          </label>
+        ) : (
+          <Badge tone={INTERVIEW_OUTCOME_TONES[iv.outcome]}>{INTERVIEW_OUTCOME_LABELS[iv.outcome]}</Badge>
+        )}
+        {canWrite && <Button variant="outline" size="sm" className="max-sm:h-10" onClick={onMove} leftIcon={<CalendarClock aria-hidden />}>Reschedule</Button>}
+        <Link to={`/recruitment/interviews/${iv.id}`} className={buttonLinkClass('soft', 'sm:h-8 sm:px-3')}><ClipboardList aria-hidden /> Sheet</Link>
+      </div>
     </li>
   );
 }
