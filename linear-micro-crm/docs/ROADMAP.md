@@ -1,6 +1,6 @@
 # Roadmap
 
-Version 1.2.0 adds the Learning page (the COD pack and campaign pitches), one-tap check-in, leader bulk entry, a sign-in PIN, the audit trail, ⌘K search and the Xero / Sage payroll export to the 1.1 smart release (pace notes, pay estimates, check-in lists, the Needs-attention feed, event forecasts, signal-proof logging, recruitment deadlines, nightly backups and the weekly review) and to 1.0's gauges, pay, progression, recruitment and finance behind one sign-in for four roles. This is what comes next, in the order we would do it. Items move between columns on evidence from the pilot (see [`PITCH.md`](PITCH.md)), not on opinion. What each release changed is in [`CHANGELOG.md`](../CHANGELOG.md).
+Version 1.3.0 makes pay checkable (base or commission, whichever is higher; cancellations from the clients' statements read from Gmail; weekly self-billing invoices to accept or query) and adds client accounts, learning videos, PDF downloads, recruitment schedules and interview sheets, venue insights with rosters, and an audit of every action. Before that, version 1.2.0 added the Learning page (the COD pack and campaign pitches), one-tap check-in, leader bulk entry, a sign-in PIN, the audit trail, ⌘K search and the Xero / Sage payroll export to the 1.1 smart release (pace notes, pay estimates, check-in lists, the Needs-attention feed, event forecasts, signal-proof logging, recruitment deadlines, nightly backups and the weekly review) and to 1.0's gauges, pay, progression, recruitment and finance behind one sign-in for four roles. This is what comes next, in the order we would do it. Items move between columns on evidence from the pilot (see [`PITCH.md`](PITCH.md)), not on opinion. What each release changed is in [`CHANGELOG.md`](../CHANGELOG.md).
 
 **How something makes the list.** It must remove a question somebody at Linear asks every week, or remove a piece of paper, or protect the data. If it does none of those, it waits.
 
@@ -8,10 +8,12 @@ Version 1.2.0 adds the Learning page (the COD pack and campaign pitches), one-ta
 
 ---
 
-## Now — the first weeks of 1.2
+## Now — the first weeks of 1.3
 
 | Item | Why | Notes |
 |---|---|---|
+| **Check the statement reader against real statements** | 1.3 reads the clients' PDF statements by recognising the table; it was built on sample statements. | Matt forwards one real (redacted) statement from each client; tune the template per campaign in Finance → Statements. |
+| **Pilot the invoices with one team** | Self-billing only works if people accept on time and disputes are handled the same week. | Measure accepted before the deadline, disputes per week and days to resolve. |
 | **Pilot the Learning page with one team** | Lessons, teach-backs and pitches only help if leaders sign them off. | Measure teach-backs sent and signed per week; the office writes the CHN and Volt Energy pitches in the pitch studio (only BCN ships). |
 | **Announcement edit, unpin and expiry** | Read receipts landed in 1.2; announcements still cannot be changed after posting. | Uses the audit trail for the history. |
 | **Marking a transfer as failed from the app** | A bounced payment shows up in **Runs to pay** and the review, but flagging it as failed in the first place is still not a button. | One action on the run, with a reason; keeps the on-time maths unchanged. Recorded in the audit trail. |
@@ -42,7 +44,6 @@ Version 1.2.0 adds the Learning page (the COD pack and campaign pitches), one-ta
 | **Single sign-on** (Microsoft 365 or Google Workspace) | Replaces email + employee ID (or PIN) once the company has managed accounts for everyone. | Keep employee ID as the display identifier; two-step stays for anyone outside SSO. |
 | **Off-site backup copies** | 1.1 takes nightly backups on the same laptop; a second copy elsewhere protects against losing the laptop. | Encrypted copy to cloud storage on a schedule; the guarded restore already exists. |
 | **Accounting push** (Xero or Sage) and a bank-ready payment file | 1.2 exports a week's pay runs as a CSV to import; next is expenses too, sending them straight to the ledger, and paying Friday's runs from one file. | Builds on the 1.2 export and audit trail. |
-| **Roster / assignment table** | Who works which event. Forecasts and "not logged yet" are inferred today; a roster makes them exact. | Unlocks a hiring-needs forecast and exact attendance. |
 | **Calendar export** | Reps want their events in their phone's calendar. | `.ics` downloads, then a personal subscription link. |
 | **Offer letter, onboarding checklist and expense receipts** | Less paper after a hire and after a day out. | Receipts by phone camera; leader expense claims with approval. |
 | **Recruitment source attribution** | Which job boards actually produce hires. | Cost per hire, sources ranked with honest small-number handling, a hire forecast. |

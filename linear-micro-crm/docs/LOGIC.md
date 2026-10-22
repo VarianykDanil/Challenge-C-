@@ -2162,3 +2162,1134 @@ CHECK IN ('button','quick','offline','leader'), created_at, UNIQUE(user_id, even
 - **Layout fix.** On Gauges the tabs and the date-range presets share a row only when both fit; otherwise the presets
   wrap onto their own line, and the picker itself may shrink (its pills scroll inside it). At 1024 px the admin's
   Gauges page no longer scrolls sideways.
+
+## 16. Release 1.3
+
+Pay you can check (base or commission, cancellations from the clients' statements, self-billing invoices), client accounts, learning videos, PDF downloads, more recruitment detail, venue insights and an audit of every action. As in 1.2, a foundation laid down the contracts first (database extensions, shared types, stub routes, client slots), then nine packages filled them. Paid runs never change; corrections go to the next unpaid week.
+
+### 16.0 The client role and the database extensions
+
+#### Database extensions (`server/src/db/extensions/`)
+
+`index.ts` (foundation) runs, in this fixed order: learning, pitches, pin, audit, checkins (1.2), then **pay (P1),
+invoices (P2), statements (P3), videos (P5), client (P6), recruitment (P7), venues (P8)**. P4 adds none; P9 owns the
+1.2 `audit.ts`. The rules of `types.ts` stand (CREATE TABLE IF NOT EXISTS, `addColumnIfMissing`, data steps guarded with
+meta flags and skipped on an empty database, INSERT OR IGNORE, report only real changes, rows both databases need in
+both `upgrade` and `seed`, `ctx.rng(salt)`, never gauge rows or payroll runs from an extension). 1.3 adds:
+
+- The foundation laid down each 1.3 extension's tables and columns; they are STABLE. Owners add columns with
+  `addColumnIfMissing` in `upgrade` (so a database created at the foundation commit upgrades too) and new tables.
+- An extension's `seed` may UPDATE only the columns its own extension added to core tables, on core rows (tested per
+  extension in r3-contracts). The one core-row insert allowed: P6 may insert `announcements` authored by a client
+  account (`ctx.clients`).
+- Core demo rows are written by the core seed (`db/seed.ts`): the demo client account (foundation, inserted after every
+  staff member without the core random stream, counted in `stats.users`, passed to extensions as `ctx.clients:
+  SeedClientRef[]` — never in `ctx.users` — and recorded in meta `seed_demo_clients` with `writeDemoClientMarkers`) and
+  the 1.3 pay plans, runs, bonuses and cancellations (P1).
+
+| Extension (owner) | Tables | Columns on core tables | Meta |
+| --- | --- | --- | --- |
+| `pay.ts` (P1) | `campaign_rates (id, campaign_id → campaigns CASCADE, rep_rate, payout_rate, effective_from, source 'seed'\|'admin'\|'client', approved_by, client_post_id, created_at)`; `pay_adjustments (id, user_id → users CASCADE, target_week_start, source_week_start, kind 'cancellation'\|'statement'\|'bonus'\|'dispute'\|'manual', amount, note, campaign_id, statement_id, invoice_id, created_by, created_at)`; `sale_confirmations (user_id, campaign_id, week_start, confirmed, statement_id, confirmed_at; PK user+campaign+week)` | `payroll_runs.paid_as, sales_logged, sales_confirmed, sales_cancelled, adjustments_total` (NULL = 1.2 rules) | `ext:pay:rule_from`, `ext:pay:day_rate` |
+| `invoices.ts` (P2) | `self_billing_agreements (user_id, version, accepted_at, ip; PK user+version)`; `invoices (id, payroll_run_id UNIQUE → payroll_runs CASCADE, user_id, number UNIQUE, version, issued_at, status 'issued'\|'accepted'\|'deemed_accepted'\|'disputed'\|'resolved', total, lines_json, supplier_json, customer_json, accepted_at, accepted_ip, disputed_at, dispute_reason, dispute_lines, resolved_at, resolved_by, resolution_note)` | `users.address_line1, address_line2, address_town, postcode, utr, vat_number` | `ext:invoices:company` (JSON), `ext:invoices:seq:<YYYY>` |
+| `statements.ts` (P3) | `campaign_statement_senders (campaign_id, address NOCASE; PK)`; `statement_templates (campaign_id PK, mapping JSON, updated_at, updated_by)`; `statements (id, campaign_id, source 'email'\|'upload', message_id UNIQUE, received_at, file_path, file_name, file_sha256, period_start, period_end, status 'parsed'\|'needs_review'\|'applied'\|'failed', error, applied_at, applied_by)`; `statement_rows (id, statement_id → CASCADE, raw JSON, fundraiser_ref, name, period_start, period_end, sale_date, confirmed, cancelled, amount, user_id, match 'auto'\|'manual'\|'none')`; `user_client_refs (user_id, campaign_id, ref NOCASE; PK user+campaign; UNIQUE campaign+ref)` | — | `ext:statements:mail` (address, app password ENCRYPTED with lib/crypto.ts, last check, last error, last UID) |
+| `videos.ts` (P5) | `learning_videos (id, title, description, topic, kind 'upload'\|'link', url, file_path, mime, size, duration_s, required, audience 'everyone'\|'leaders'\|'reps', example, created_by, created_at)`; `video_views (video_id → CASCADE, user_id → CASCADE, watched_s, position_s, completed_at, last_at; PK video+user)` | — | `ext:videos:leaders_can_add` |
+| `client.ts` (P6) | `client_posts (id, campaign_id, author_id, kind 'update'\|'announcement'\|'commission', title, body, rate_rep, rate_payout, effective_from, status 'published'\|'pending'\|'approved'\|'declined'\|'unpublished', decided_by, decided_at, decision_note, announcement_id → announcements SET NULL, created_at)` | `users.client_campaign_id` (+ index); `campaigns.long_description, brief, contact_name, contact_email, contact_phone` | — |
+| `recruitment.ts` (P7) | `interview_questions (id, interview_type, position, text, sort, active, created_at, updated_at)`; `interview_answers (id, interview_id → interviews CASCADE, question_id → SET NULL, question_text, sort, answer, score, updated_at, updated_by)`; `interview_changes (id, interview_id → CASCADE, field, from_value, to_value, changed_by, changed_at)` | `candidates.date_of_birth` | — |
+| `venues.ts` (P8) | `event_roster (event_id → events CASCADE, user_id → users CASCADE, booked_by, booked_at, source 'leader'\|'self'; PK event+user)` | — | — |
+
+Files on disk (git-ignored in `.gitignore`): `server/data/media/` (P5 videos), `server/data/statements/` (P3 PDFs),
+`server/data/uploads/` (P2's signature image). Tests write files only to a temp dir, never there.
+
+#### Shared types (`shared/src/types/*.ts`, re-exported from `@lm/shared`)
+
+- `pay.ts` (P1): `PAY_DAY_RATE_DEFAULT` 63.5, `PaidAs`, `PayRuleSettings { dayRate; ruleFrom }`, `PayRuleSettingsInput`,
+  `CampaignRateSource`, `CampaignRate { id, campaignId, repRate, payoutRate, effectiveFrom, source, approvedBy,
+  approvedByName?, clientPostId?, createdAt }`, `CampaignRateInput`, `PayLineKind`, `PayLine`, `PayAdjustmentKind`,
+  `PayAdjustment { id, userId, targetWeekStart, sourceWeekStart, kind, amount, note, campaignId?, statementId?,
+  invoiceId?, createdBy, createdAt }`, `WeekCampaignPay { campaignId, code, name?, logged, confirmed, cancelled,
+  statementConfirmed, rate, amount }`, `WeekPayBreakdown extends PayrollBreakdown { userId, weekStart, weekEnd, rule,
+  daysWorked, dayRate, baseAmount, commissionAmount, paidAs, lines, salesLogged, salesConfirmed, salesCancelled,
+  perCampaign, adjustments, explanation, runId, status }`, `ConfirmedSalesRow`, `ApplyConfirmedSalesOptions`,
+  `ApplyPersonResult`, `ApplyResult`, `BonusInput`, `ManualAdjustmentInput`.
+- `invoices.ts` (P2): `SELF_BILLING_AGREEMENT_VERSION` '2026-10', `INVOICE_NUMBER_PREFIX` 'LM-SB', `InvoiceStatus`,
+  `SelfBillingAgreement`, `InvoiceParty`, `InvoiceLine`, `InvoiceSummary { id, number, status, version, issuedAt,
+  acceptedAt, disputedAt, deemedAcceptedAt, total }`, `InvoiceDisputeLine`, `InvoiceDispute`, `InvoiceResolution`,
+  `Invoice`, `InvoiceDisputeInput`, `InvoiceResolveInput`, `InvoiceDisputeRow`, `InvoiceProfile`, `InvoiceProfileInput`,
+  `CompanySettings`, `CompanySettingsInput`.
+- `statements.ts` (P3): `StatementSource`, `StatementStatus`, `StatementRowMatch`, `StatementSummary { …, rowCount,
+  matchedCount, … }`, `StatementRow`, `StatementDetail { …, rows, effect: ApplyResult | null, template }`,
+  `StatementRowMatchInput`, `StatementColumnMapping`, `StatementTemplate`, `MailSettings`, `MailSettingsInput`,
+  `MailTestResult`, `CheckNowResult`, `StatementSender`, `ClientRef`.
+- `videos.ts` (P5): `VideoKind`, `VideoTopic`, `VIDEO_TOPICS`, `VideoAudience`, `VIDEO_MAX_BYTES` (2 GB),
+  `VIDEO_MIME_TYPES`, `VIDEO_COMPLETE_SHARE` 0.9, `VIDEO_PROGRESS_INTERVAL_S` 15, `VideoProgress`, `LearningVideo`,
+  `VideoLinkInput`, `VideoUpdateInput`, `VideoProgressInput`, `VideoViewRow`, `TeamVideoProgress`, `VideoSettings`.
+- `client.ts` (P6): `CLIENT_ACCESS_CODE_PREFIX` 'CL-', `ClientPortalOnlyError`, `ClientPostKind`, `ClientPostStatus`,
+  `ClientPost`, `ClientPostInput`, `ClientPostDecisionInput`, `ClientPortal`, `ClientAccountStatus`, `ClientAccount`,
+  `ClientInviteInput`, `ClientInviteResult`, `AnnouncementSource`, `CampaignBrief`, `CampaignPage`.
+- `recruitmentPlus.ts` (P7): `InterviewType` (= Interview['type']), `CANDIDATE_ADULT_AGE` 18, `InterviewQuestion`,
+  `InterviewQuestionInput`, `InterviewAnswer`, `InterviewAnswerInput`, `InterviewSheet`, `InterviewChangeField`,
+  `InterviewChange`, `CandidateTimelineKind`, `CandidateTimelineItem`, `InterviewScheduleItem`.
+- `venues.ts` (P8): `RosterSource`, `EventBooking`, `EventBookingSummary { booked, me }`, `EventRosterInput`,
+  `EventPlanStep`, `EventPlan`, `VenueSummary { key, venue, city, eventCount, shifts, sales, salesPerShift, lastVisit,
+  campaigns }`, `VenuePoint`, `VenueProfile`.
+- `audit.ts` (P9; the 1.2 file): `AuditEntity` gains `campaign_rate`, `pay_adjustment`, `invoice`, `agreement`,
+  `statement`, `video`, `client_post`, `client_account`, `interview_question`, `event_roster`, `export`;
+  `AuditEventKind` ('change' | 'sign_in' | 'export' | 'opened' | 'automatic' | 'client'), `AUDIT_EVENT_KINDS`,
+  `ClientAuditEventKind`, `AuditExportFormat`, `ClientAuditEventInput { kind, format?, what, rows?, filename?, entity?,
+  entityId? }`. Shared logic `AUDIT_ENTITIES_R3` lists the new entities (the 1.2 `AUDIT_ENTITIES` filter list is
+  unchanged; `isAuditEntity` accepts both; labels in `AUDIT_ENTITY_LABELS`).
+- Core `types.ts` (foundation): optional `UserWithTeam.clientCampaignId`, `SalesEventWithMeta.bookings?:
+  EventBookingSummary` (P8; not the p6 `roster` count), `PayrollRun.paidAs? / salesLogged? / salesConfirmed? /
+  salesCancelled? / adjustmentsTotal?` (P1), `PayrollRunWithUser.invoice?: InvoiceSummary` (P2), `Candidate.dateOfBirth?`
+  (P7), `Announcement.fromClient?: AnnouncementSource` (P6); `AttentionKind` gains `'invoices'` (P2), `'statements'`
+  (P3), `'client'` (P6) — the bell labels them "Invoices", "Statements", "Client updates".
+
+#### Shared logic modules (`shared/src/logic/`, registered in `logic/index.ts` by the foundation)
+
+| Module | Owner | Exports now |
+| --- | --- | --- |
+| `payRule.ts` | P1 | STABLE `paidAsFor(base, commission)` (tie → commission); `WeekPaySale`, `WeekPayInput`, `WeekPayResult`; stubs `calculateWeekPay`, `payExplanation` |
+| `invoices.ts` | P2 | STABLE `formatInvoiceNumber(year, seq)` → "LM-SB-2026-000123", `deemedAcceptedAt(payday)` → "YYYY-MM-DDT12:00:00" the day before |
+| `statements.ts` | P3 | `STATEMENT_HEADER_KEYWORDS`, `normalisePersonName`, stub `detectStatementColumns` |
+| `exportFormat.ts` | P4 | `PDF_PORTRAIT_MAX_COLUMNS` 6, `PdfOrientation`, `pdfOrientationFor(columnCount)` |
+| `videos.ts` | P5 | `VIDEO_TOPIC_LABELS`, `isVideoComplete(watchedS, durationS)`, stub `videoEmbedUrl` |
+| `clientPortal.ts` | P6 | `CLIENT_POST_KIND_LABELS`, `CLIENT_POST_STATUS_LABELS`, STABLE `formatClientAccessCode(n)` |
+| `recruitmentPlus.ts` | P7 | `ageOn(dateOfBirth, today)`, `isUnderAge(dateOfBirth, today)` |
+| `venues.ts` | P8 | STABLE `venueSlug`, `venueKey(venue, city)` → "golden-square--manchester", `isVenueKey` |
+
+`shared/src/logic/r3-contracts.test.ts` (foundation) tests the STABLE ones.
+
+#### Server helpers other packages call
+
+- `server/src/lib/payRule.ts` (P1, STABLE signatures): `payRuleSettings(db)`, `weekPayBreakdown(db, userId,
+  weekStart): WeekPayBreakdown | null`, `applyConfirmedSales(db, rows: ConfirmedSalesRow[], { statementId, actorId,
+  dryRun? }): ApplyResult` (P3 calls; idempotent per statement; paid weeks → `pay_adjustments` on the next unpaid run),
+  `campaignRateOn(db, campaignId, date)`, `listCampaignRates(db, campaignId)`, `addCampaignRate(db, input, actorId)`
+  (P6's approval; stub throws 501), `recordCampaignRateChange(db, campaignId, before, after, actorId)`.
+- `server/src/lib/invoices.ts` (P2, STABLE): `assertInvoicePayable`, `withInvoiceSummaries`, `startInvoiceJobs`.
+- `server/src/lib/statements/job.ts` (P3): `startStatementJob(db): () => void`; never started by tests.
+- `server/src/lib/attention/` — `types.ts` + `index.ts` (foundation, STABLE): `AttentionProvider { name, items(db, me,
+  now): AttentionItem[] }`, `ATTENTION_PROVIDERS` [invoices, statements, client-posts], `providerAttentionItems`,
+  `withProviderItems(core, extra)` (dedupe by key, `sortAttentionItems`, cap `ATTENTION_MAX_ITEMS`; unchanged when no
+  extra items; a throwing provider is logged and skipped). Provider files, one per owner: `invoices.ts` (P2),
+  `statements.ts` (P3), `clientPosts.ts` (P6). Keys start with the kind (`invoices:dispute:12`); items only for what
+  the caller may see; one grouped statement per caller (integration: with all three merged, two statements in one
+  provider took the admin's feed to 13, over the 1.1 budget of 12; `attention.test.ts` now holds each provider to one).
+  With `LM_SMART=0` the whole feed (and so the providers) is off.
+- `server/src/lib/audit/` — `registry.ts` (foundation; P9 owns it from now): `PACKAGE_AUDIT_SPECS`, `allAuditSpecs()`,
+  `matchAuditSpec(method, path)`; one spec file per package exporting `AUDIT_SPECS: readonly AuditRouteSpec<any>[]` in
+  the shape of `lib/auditSpecs.ts`: `paySpecs.ts` (P1), `invoiceSpecs.ts` (P2), `statementSpecs.ts` (P3),
+  `videoSpecs.ts` (P5), `clientSpecs.ts` (P6), `recruitmentSpecs.ts` (P7), `venueSpecs.ts` (P8), `auditEventSpecs.ts`
+  (P9; `POST /audit/events` skip: true for now). Package specs are matched before the 1.2 ones (first match wins), so a
+  package may refine a 1.2 route's entry from its own file. `lib/auditSpecs.ts` keeps its own `matchAuditRoute` (1.2
+  specs only). `events.ts` (P9): `recordSystemEvent(db, { name, summary, entity?, entityId?, after? })` — works now:
+  one row, user NULL ("Linear Hub"), action `SYSTEM <name>`; P3 records "statements.fetch" / "statements.apply"
+  with it, P2 "invoices.issue" / "invoices.deem"; stub `recordClientEvent(db, me, input, ip)`.
+- `server/src/lib/videoEmbeds.ts` (P5): `VIDEO_EMBED_ORIGINS`, `VIDEO_THUMBNAIL_ORIGINS` (the CSP).
+
+#### Client
+
+- API hooks, one file per package (`client/src/api/`): `pay.ts` (P1: `payKeys`, `usePaySettings`,
+  `useUpdatePaySettings`, `useCampaignRates`, `useAddCampaignRate`, `usePayBreakdown(userId, weekStart)`,
+  `usePayAdjustments`, `useAddBonus`, `useAddAdjustment`, `useRemoveAdjustment`), `invoices.ts` (P2: `invoiceKeys`,
+  `useAgreement`, `useAcceptAgreement`, `useInvoiceProfile(userId?)`, `useSaveInvoiceProfile`, `useCompanySettings`,
+  `useSaveCompanySettings`, `useInvoices`, `useInvoiceForRun(runId)`, `useInvoice`, `useAcceptInvoice`,
+  `useDisputeInvoice`, `useInvoiceDisputes`, `useResolveInvoice`), `statements.ts` (P3: `statementKeys`,
+  `useStatements`, `useStatement`, `statementFileUrl`, `useApplyStatement`, `useMatchStatementRow`,
+  `useCheckStatementsNow`, `useMailSettings`, `useSaveMailSettings`, `useTestMail`, `useStatementSenders`,
+  `useSaveStatementSenders`, `useStatementTemplate`, `useSaveStatementTemplate`, `useClientRefs`, `useSaveClientRefs`,
+  `useUploadStatement({ file, fileName, campaignId? })` (raw PDF body), type `StatementUploadInput`), `videos.ts` (P5: `videoKeys`, `useVideos`, `useVideo`, `videoStreamUrl`, `useAddVideoLink`,
+  `useUpdateVideo`, `useDeleteVideo`, `useReportVideoProgress`, `useVideoViews`, `useTeamVideoProgress`,
+  `useVideoSettings`, `useSaveVideoSettings`), `clientPortal.ts` (P6: `clientPortalKeys`, `useClientPortal`,
+  `useCreateClientPost`, `useClientPosts`, `useUnreadClientPosts`, `useMarkClientPostRead`, `useDecideClientPost`,
+  `useCampaignPage`, `useClientAccounts`, `useInviteClient`, `useUpdateClientAccount`, `useResetClientPin`),
+  `recruitmentPlus.ts` (P7: `recruitmentPlusKeys`, `useInterviewSchedule`, `useCandidateTimeline`,
+  `useInterviewQuestions`, `useSaveInterviewQuestion`, `useInterviewSheet`, `useSaveInterviewAnswers`), `venues.ts`
+  (P8: `venueKeys`, `useVenues(sort)`, `useVenue(key)`, `useEventPlan(eventId, userId?)`, `useEventRoster`,
+  `useSaveEventRoster`, `useBookMyself`), `auditEvents.ts` (P9, STABLE: `reportAuditEvent(event)` — fire and forget,
+  never throws). `api/hooks.ts`: only `useDemoAccounts` now types `clientAccounts?`; no package edits it.
+- PDF (`client/src/lib/pdf/`, P4, API STABLE): `exportTablePdf(TablePdfOptions)` (title, subtitle, filters, columns =
+  the CSV `CsvColumn`s, rows, totals, filename, orientation 'auto'), `pdfDocument(PdfDocumentOptions) → PdfDoc` (header,
+  addressBlocks, heading, paragraph, keyValues, lineTable, table, totals, signatureBlock, footer with page x of y,
+  save, blob), types `PdfAddress`, `PdfLineColumn`, `PdfLineRow`, `PdfSignature`, `PdfUnavailableError`, and
+  `PDF_EXPORTS_READY` (false until P4 lands; pages add a PDF button in a PageHeader's actions only when true, so no
+  empty actions row appears before). Stubs throw `PdfUnavailableError`. jsPDF loads in its own lazy chunk.
+- `ExportButton` (P4): new optional props `pdf?`, `pdfTitle?`, `pdfFilters?`, `pdfTotals?`, `auditWhat?`; every call
+  site keeps working unchanged (P4 derives the PDF title from the file name) and P4 turns the button into "Export ▾
+  CSV / PDF" everywhere, reporting each export with `reportAuditEvent`.
+- Pages (lazy, `App.tsx`; titles in `COPY.nav.*`): `/finance/statements` `Statements.tsx` (P3, `STATEMENT_ROLES` =
+  admin), `/venues` `Venues.tsx` and `/venues/:key` `VenueDetail.tsx` (P8, `VENUE_ROLES` = staff),
+  `/recruitment/schedule` `InterviewSchedule.tsx` and `/recruitment/interviews/:id` `InterviewSheet.tsx` (P7,
+  RECRUITMENT_ROLES), `/learning/videos/:id` `LearningVideo.tsx` (P5), `/campaigns/:id` `CampaignPage.tsx` (P6,
+  `CAMPAIGN_PAGE_ROLES` = staff; the server trims money), `/client` `ClientPortal.tsx` and `/client/security`
+  `ClientSecurity.tsx` (P6) inside `ClientLayout` → `PinSetupGate` → lazy `features/client/ClientShell.tsx` (P6).
+  A client account is sent to `/client` from every staff path; staff visiting `/client` go to `/`.
+- Navigation (`components/layout/nav.ts`, icons in `Sidebar.tsx`): **Venues** (staff, Workspace, MapPinned) after
+  Events; **Statements** (admin, Manage, FileSpreadsheet) after Finance (Finance is now `end: true`, so it is not lit on
+  /finance/statements); `CLIENT_NAV_ITEMS` = **Updates** (/client) and **Security** (/client/security) for the client
+  shell. `NavItem.end?` is new. Copy keys (`content/copy.ts`, packages do not edit it): `venues`, `statements`,
+  `interviewSchedule`, `interviewSheet`, `learningVideo`, `campaignPage`, `clientPortal`, `clientSecurity`.
+- Role lists (`auth/RequireRole.tsx`): `STAFF_ROLES_ALL`, `VENUE_ROLES`, `STATEMENT_ROLES`, `CAMPAIGN_PAGE_ROLES`,
+  `CLIENT_ROLES`. The Team form's Role select lists `STAFF_ROLES` only.
+- Slots (render nothing now; each mounted in an `ErrorBoundary` with `fallback={null}`; a slot that renders a card
+  renders the whole card or nothing):
+
+| Slot (props) | Owner | Mounted in |
+| --- | --- | --- |
+| `features/pay/PayBreakdown.tsx` `{ run, className? }` | P1 | `PayslipModal` body, after the pay table and plan box, before the week's gauges |
+| `features/pay/PaySettingsSection.tsx` `{ className? }` | P1 | Settings, left column, after Backups (admin) |
+| `features/invoices/InvoiceActionsBar.tsx` `{ run, className? }` | P2 | `PayslipModal` body, after the status badges |
+| `features/invoices/InvoiceStatusBadge.tsx` `{ run }` | P2 | `PayrollRunsTable` Status cell, after the payroll status badge (inline) |
+| `features/invoices/DisputesCard.tsx` `{ className? }` | P2 | Finance → Company, first item |
+| `features/invoices/InvoiceSettingsSection.tsx` `{ className? }` | P2 | Settings, left column, after Security (every staff role; render nothing for roles not invoiced) |
+| `features/invoices/CompanySettingsSection.tsx` `{ className? }` | P2 | Settings, after Settings → Pay (admin) |
+| `features/invoices/InvoiceProfileSection.tsx` `{ user, className? }` | P2 | Team → person, left column, after the Pay plan card (admin) |
+| `features/invoices/AgreementPrompt.tsx` `{ user }` | P2 | `AppShell` sticky banner row, after the check-in outbox (every page; load the modal lazily) |
+| `features/statements/IntegrationsSection.tsx` `{ className? }` | P3 | Settings, after Company (admin) |
+| `features/statements/ClientRefsSection.tsx` `{ user, className? }` | P3 | Team → person, left column, after the invoice details (admin) |
+| `features/videos/VideosSection.tsx` `{ className? }` | P5 | Learning hub, right after the pitches section |
+| `features/videos/VideoProgressSection.tsx` `{ view: 'me' \| 'person' \| 'team', userId?, className? }` | P5 | Learning → Progress: after the own checklist (me), after a person's (person), after the team checklist (team) |
+| `features/videos/VideoSettingsSection.tsx` `{ className? }` | P5 | Settings, after Integrations (admin) |
+| `features/client/AnnouncementSourceBadge.tsx` `{ announcement }` | P6 | Each dashboard announcement's title row, after the title (inline) |
+| `features/client/CampaignsNavBadge.tsx` `{ compact }` | P6 | Sidebar, inside the Campaigns link after the label (main chunk: keep it tiny) |
+| `features/venues/EventPlanStrip.tsx` `{ event, variant: 'row' \| 'upcoming' \| 'quick', className? }` | P8 | `EventRow` under the forecast chip (row); `UpcomingEvents` under each event's details (upcoming); `QuickGauges` right under the header (quick, the thin "Aim" strip) |
+| `features/venues/EventPlanCard.tsx` `{ event, canManage, className? }` | P8 | EventDetail, after the forecast |
+| `features/venues/EventRosterCard.tsx` `{ event, canManage, className? }` | P8 | EventDetail, after the check-in roll call ("Who's working") |
+| `features/venues/VenueLink.tsx` `{ venue, city, className? }` | P8 | EventDetail header, after the directions link (inline) |
+| `features/recruitment/QuestionBankSection.tsx` `{ className? }` | P7 | Settings, after Settings → Invoices (admin, recruiter) |
+| `features/audit/RecordOpened.tsx` `{ entity, entityId, what }` | P9 | CandidateDetail (candidate), PayslipModal (payroll_run; P2 may switch it to invoice), Audit page (null: the trail itself) |
+| `features/audit/PersonActivity.tsx` `{ user, className? }` | P9 | Team → person, right column, under the performance panel (admin) |
+| `features/pdf/AuditPdfButton.tsx` `{ entries, filters, className? }` | P4 | Audit page header actions, only while `PDF_EXPORTS_READY` (P9 passes the real filter lines) |
+| `features/pdf/ProgressPdfButton.tsx` `{ userId?, className? }` | P4 | Learning → Progress header actions (me, person), only while `PDF_EXPORTS_READY` |
+
+#### Who edits which existing file in 1.3
+
+No two packages edit the same file. Foundation-owned (ask the lead): `server/src/app.ts`, `index.ts`,
+`middleware/clientGuard.ts`, `middleware/auth.ts`, `lib/routeTable.ts`, `lib/attention/index.ts` + `types.ts`,
+`lib/client.ts` (P6 may ADD functions), `db/extensions/index.ts` + `types.ts`, `db/schema.ts`, `routes/users.ts`,
+`routes/auth.ts` (the demo-accounts list and `withFlags`; P9 may add failed-sign-in recording only),
+`routes/search.ts`, `routes/learning.ts`, `routes/attention.ts`, `test/helpers.ts`,
+`test/r2-contracts.test.ts`, `test/r3-contracts.test.ts`; `shared/src/index.ts`, `logic/index.ts`, `types.ts`,
+`constants.ts`, `logic/r3-contracts.test.ts`; client `App.tsx`, `auth/RequireRole.tsx`, `components/layout/*`,
+`content/copy.ts`, `api/hooks.ts`, `api/client.ts`, `pages/Settings.tsx`, `pages/UserDetail.tsx`, `pages/Learning.tsx`,
+`pages/LearningProgress.tsx`, `pages/Dashboard.tsx`, `features/dashboard/Announcements.tsx`,
+`features/team/UserFormModal.tsx`; `.gitignore`; the version numbers (lead).
+
+| Package | Its own new files (above) plus these existing ones |
+| --- | --- |
+| P1 | `server/src/lib/pay.ts`, `db/maintenance.ts`, `routes/finance.ts` (keep the P2 hook calls), `routes/dashboard.ts` and `lib/smart/payForecast.ts` / `payrollFlags.ts` / `digest.ts` where pay figures show, `db/queries.ts` (the payroll section only), `db/seed.ts` and `db/seed-data.ts` (pay plans, payroll runs, bonuses, cancellations; keep the demo client block with its `writeDemoClientMarkers` call, `CLIENT_ACCOUNTS`, and the `onlyExtensions` option), `smoke.ts` (the pay checks the new rule changes), the existing tests of pay maths (`money`, `personal`, `office-tools`…); shared `logic/finance.ts`, `logic/payForecast.ts`, `logic/payrollFlags.ts`; client `pages/Finance.tsx` (keep the DisputesCard slot), `features/finance/PayrollRunsTable.tsx` (keep the InvoiceStatusBadge slot), `features/finance/csv.ts`, `features/smart/WeekPayStrip.tsx` / `weekPayCopy.ts`, `features/dashboard/PersonalKpis.tsx` |
+| P2 | `client/src/features/finance/PayslipModal.tsx` (keep the PayBreakdown and RecordOpened slots), `features/finance/BulkPayBar.tsx`, `features/finance/bulkPay.tsx` |
+| P3 | `server/package.json` (its own dependency lines only: imapflow, mailparser, pdfjs-dist, @types/mailparser; jspdf at P4's version for demo PDFs) + `package-lock.json` — shared with P5, see below |
+| P4 | `client/src/features/common/ExportButton.tsx`, `client/src/lib/csv.ts`, `client/package.json` + `package-lock.json` (jspdf, jspdf-autotable); its node test in `server/src/test/` |
+| P5 | `server/package.json` (its own dependency lines only: busboy, @types/busboy) + `package-lock.json` — shared with P3, see below |
+| P6 | `server/src/routes/announcements.ts`, `routes/campaigns.ts` (the campaign's brief fields; keep P1's `recordCampaignRateChange` calls), `lib/pin.ts` (the body of `accountFlags` for the client PIN rule — its signature and both callers are the foundation's — and any other client PIN behaviour), `test/announcements-older.test.ts` if its shapes change; client `pages/Campaigns.tsx`, `features/campaigns/*`, `pages/Login.tsx` (the client demo button, client sign-in), `auth/PinSetupStep.tsx` if the client's PIN step needs other words |
+| P7 | `server/src/routes/recruitment.ts` (date of birth on candidates, interview_changes on PATCH /recruitment/interviews/:id); client `pages/Recruitment.tsx` (**Schedule**), `pages/CandidateDetail.tsx` (keep the RecordOpened slot), `features/recruitment/*` |
+| P8 | `server/src/routes/events.ts` (`bookings` on events), `lib/smart/eventForecast.ts` (bookings feed forecasts), shared `logic/eventForecast.ts` if the maths changes; client `pages/Events.tsx` (**Venues**), `pages/EventDetail.tsx`, `pages/QuickGauges.tsx`, `features/events/*`, `features/dashboard/UpcomingEvents.tsx` (keep the slots) |
+| P9 | `server/src/lib/audit.ts`, `lib/auditSpecs.ts`, `lib/audit/registry.ts`, `lib/audit/events.ts`, `routes/audit.ts`, `routes/auth.ts` (only to record failed sign-ins if the middleware cannot), `middleware/writeLimit.ts` (rate-limit POST /audit/events), `db/extensions/audit.ts` (e.g. a kind column), the `audit*` tests; shared `types/audit.ts`, `logic/audit.ts`; client `pages/Audit.tsx` (keep the AuditPdfButton and RecordOpened slots), `features/audit/*`, `api/audit.ts` |
+
+Dependencies (only these; checked on 21 Oct 2026 — the highest release at least two weeks old; pin exactly with
+`npm install <pkg>@<version> -w <workspace>`): P3 `imapflow@2.2.6`, `mailparser@3.9.36` (+ `@types/mailparser@3.9.0`
+dev), `pdfjs-dist@6.4.299`; P4 `jspdf@4.2.1`, `jspdf-autotable@5.0.8` (client; P3 uses the same `jspdf@4.2.1` on the
+server); P5 `busboy@1.6.0` (+ `@types/busboy@1.5.4` dev). Three packages touch `package-lock.json`, and two (P3, P5)
+`server/package.json`: each package adds only its own lines with `npm install <pkg>@<version> --save-exact -w server`
+(or `-w client`) and changes nothing else in those files; the lead merges P3 first, then P5, takes both sets of
+dependency lines in `server/package.json` (alphabetical, as npm writes them) and regenerates `package-lock.json` with
+`npm install` before the final `npm ci` check.
+
+Out of scope for every 1.3 package (unchanged): `client/src/features/office/PayExportButton.tsx` and
+`server/src/routes/payExport.ts` (the Xero / Sage payroll CSV). It is an import file for payroll software, so it gets no
+PDF (P4), and it is already recorded on the server (`GET /finance/payroll/export` writes an audit row with the format,
+week, run count and total), which P9 may classify as an export from its own audit code without editing either file.
+
+Bundle: the foundation's routes, nav items and slots add 6.0 kB to the main chunk (466.17 → 472.19 kB, gzip 144.5 →
+146.1 kB); every 1.3 page is its own lazy chunk.
+
+### 16.1 Pay: base or commission, whichever is higher; cancellations (P1)
+
+**The rule** (`shared/src/logic/payRule.ts` → `calculateWeekPay`, `paidAsFor`) works per pay week, Monday to Sunday:
+
+- **Base** = day rate × days worked. The day rate is £63.50 for everyone, set in Settings → Pay. A day worked is a day with gauges that week. A recruiter is office based: Monday to Friday, clamped to their start date and, for the week in progress, to today.
+- **Commission** = the week's paid subs × each campaign's rep rate **in effect on the day of the sale**. The rate comes from `campaign_rates`, the newest row with `effective_from` on or before the day, falling back to the campaign's own rate.
+- If commission < base, the base is paid and the commission is not. If commission ≥ base, the commission is paid and the base is not. **A tie pays the commission.**
+- Then the extras are added and taken off:
+  - gross = the paid one + Matt's bonuses + adjustment lines − deductions;
+  - there is no automatic bonus and no leader override in a 1.3 week;
+  - a negative total is shown as a negative figure.
+- **Paid subs** for a campaign are the subs logged in gauges until the client's statement for that week arrives (P3's `sale_confirmations`); then they are the confirmed number.
+  - Cancellations come off the **latest days first**, at those days' rates.
+  - Subs confirmed beyond those logged are paid at the latest day's rate.
+- The breakdown shows "not yet confirmed by BCN" while a campaign that sends statements has not sent that week's. A campaign "sends statements" when it has statement senders, or has sent any confirmation before.
+- **Weeks before the rule date** (`PAY_RULE_FROM`, in Settings → Pay) keep the 1.2 pay-plan maths: base + commission + bonus + overrides.
+- A pay plan with no day rate and no commission (the owner's salaried plan) is not paid weekly from the rule date. Bonuses and adjustments to it are refused.
+
+**Worked example** (the owner's case):
+
+1. Jordan works Monday to Thursday (4 days) and logs 18 BCN subs. BCN pays the rep £10 a sub.
+2. Base = 4 × £63.50 = £254.00. Commission = 18 × £10 = £180.00, below the base, so Jordan is paid **£254.00** and the breakdown marks the commission "Not paid".
+3. BCN's statement then confirms 16 of the 18 (2 cancelled). Commission = 16 × £10 = £160.00, still below the base. Pay stays £254.00 and the statement changes nothing. The sentence reads: "2 cancelled by BCN, but the base still applied: no change."
+4. In a week where Jordan logged 18 subs at £15, commission was £270.00, so the £270.00 commission was paid. If 2 are then cancelled, the commission is 16 × £15 = £240.00, below the base, so the week should have paid £254.00. The difference is **−£16.00**, not −£30.00.
+
+**Statements** (`applyConfirmedSales`) work per person, week and campaign:
+
+- **An unpaid week** (pending or failed) is recalculated live, before and after each campaign's confirmation, and its run follows.
+- **A paid week never changes.** Its correction is **corrected − paid** (`server/src/lib/paidWeek.ts`):
+  - "corrected" recalculates the week from the run's **own stored inputs**: the day rate, the rates per day, the logged subs, the bonuses, the corrections and the deductions it was paid with, with every confirmation the week now has. Gauges edited after payday (an admin may; the run is flagged), a rate dated in the past or a new day rate never move it;
+  - "paid" is what the run paid plus the statement corrections already made for that week, **for any campaign**: base-or-commission is decided on the whole week, so a second campaign's statement sees the first's correction;
+  - every figure is anchored on what was paid, so a statement that confirms exactly the subs paid for changes nothing.
+- The difference goes on the person's **next unpaid week** as a correction line:
+  - kind `cancellation` when fewer subs were confirmed, `statement` when more;
+  - the note reads e.g. "2 cancelled by BCN: paid for 18, confirmed 16";
+  - the target is the earliest pending run after that week, else the current week, whose run includes the line when the week closes;
+  - a failed transfer is money already owed, so it is not reused as a target.
+- Applying the same statement again changes nothing. With different figures, the line is updated in place while its target week is unpaid, and deleted at £0.
+- Several rows for one person, campaign and week add up.
+- `dryRun` runs the same steps inside a savepoint and rolls them back.
+
+**Second example** (the route test fixture):
+
+- Rule date Mon 7 Sep. Campaign FXC pays £10 a sub, rising to £15 from Thu 24 Sep.
+- Week 2 was paid as commission: 3 days (base £190.50) and 18 subs logged (12 at £10, then 6 on Thursday at £15), so £210.00.
+- FXC's statement first confirmed 16. The 2 cancelled come off Thursday at £15, so the commission is 12 × £10 + 4 × £15 = £180.00, below the base. The week should have paid £190.50, so **−£19.50** goes on week 3 (not −£30.00). The note reads "2 cancelled by FXC: paid for 18, confirmed 16".
+- A corrected statement then confirmed 17. The commission is £195.00, which beats the base, so the same line is updated in place to **−£15.00**.
+- Week 3, which is unpaid, was recalculated with its own 3 cancellations. It now shows commission 27 × £15 = £405.00 and "Correction for w/c 21 Sep −£15.00", for a total of £390.00.
+
+**Third example: paid weeks keep what they were paid with** (`server/src/test/pay-rule-paid-weeks.test.ts`, FXC £10 a sub):
+
+- Remy's week of 14 Sep was paid the base, £254.00, for 18 subs (£180.00 of commission). The office then raised Thursday from 4 to 14 subs. FXC confirms the 18: **no change** ("All 18 confirmed by FXC: no change."). Recalculating from today's gauges would have taken £26.00 off him.
+- His week of 21 Sep was paid the commission, 30 × £10 = £300.00. A rate of £12 dated from that week is added later. FXC confirms 28: 28 × £10 = £280.00, so **−£20.00** ("Paid for 30, 2 cancelled by FXC, so −£20.00 on the pay for w/c 12 Oct."), not the −£24.00 a mix of the two rates gave.
+- The day rate goes up to £70 after Rita's week of 14 Sep was paid the base at £63.50 (£254.00, 18 subs). FXC confirms 30: 30 × £10 = £300.00 beats the £254.00 she was paid, so **+£46.00**.
+- Lee's week of 21 Sep was paid the commission: FXC 10 × £10 + FXB 12 × £20 = £340.00 (base £317.50). FXC confirms 5: £290.00, below the base, so −£22.50. FXB then confirms 6: £170.00, still the base, which the first correction already pays, so **no change**.
+
+**Stored calculations.**
+
+- Each run stores the calculation it was made with (`breakdown_json`, never returned by the API) and what it was calculated from (`inputs`: the subs per day and campaign at their rates, the confirmations and the deductions; a 1.2 plan week: the plan's figures, the sales and team sales it paid on). A paid week's breakdown shows exactly what was paid, and a statement corrects it from those inputs. A run stored before the inputs were kept (P1's first build) is corrected from its own per-campaign figures.
+- A paid run made by the 1.2 code has no stored calculation. Its breakdown is the live calculation while that still equals the run's figures, else the run's own columns (base, commission, plan bonus, overrides, deductions, total). A statement for it starts from the run's days, sales and team sales with the person's plan.
+- A paid week whose gauges were changed after payment says so: "The gauges for this week were changed after it was paid; the figures here are what it was paid with."
+- The corrections made later are listed with it: "After this week was paid, BCN confirmed 13 of 14 subs." and the "Corrected after payment" note. A campaign that was awaited when the week was paid reads "not confirmed by BCN when paid".
+- Unpaid runs are recalculated whenever their facts change: gauges, statements, rates, bonuses, adjustments or settings.
+
+**Bonuses and adjustments** (`pay_adjustments`):
+
+- Matt's bonus (kind `bonus`, more than £0) and manual lines (kind `manual`, plus or minus) go on an **unpaid** week, at most four weeks ahead, with a note the person sees. That week's run is recalculated straight away.
+- Only bonuses and manual lines can be removed by hand. Statement corrections follow their statement, and disputes belong to P2.
+- A week with no work whose only lines are corrections that would make it negative moves those corrections on to the person's **next open week**: the first later week with no run yet or a pending one. A paid, late or failed run never takes them, so a line can never land where nobody pays or takes it off (and it stays removable). A leaver's week is the exception: it is not moved.
+- A manual line that would take a finished week below £0 is refused (400). A statement correction bigger than the week it lands on still can: that run shows the total below £0 and the sentence "Bo's corrections come to more than this week's pay, so the total is below £0 (−£36.50) and nothing can be paid for it as it is …", and **Mark paid** refuses it (409) until part of the correction is carried to a later week with **Add an adjustment**.
+
+**Settings → Pay** (`updatePaySettings`):
+
+- A new day rate recalculates every unpaid run from the rule date.
+- A new rule date, which must be a Monday and not after this week, moves the weeks between the old and new date to the other rule and recalculates their unpaid runs.
+- Paid runs never change.
+- On upgrade from 1.2, the rule date is set to the Monday of the upgrade week, so earlier unpaid weeks keep the plan maths. Each campaign without a rate history gets its current rates as a starting row from its start date.
+
+**Campaign rates:**
+
+- A new rate, from **Add a rate**, from changing the rep commission in the Campaigns form, or from a client change Matt approved (P6), recalculates the unpaid weeks from its date in which that campaign was worked.
+- A future rate takes over on its date: the 15-minute sweep (`rollForwardEventStatuses`) and the daily materialisation make it the campaign's own (so the revenue snapshot on that day's gauges uses it), and record it in the audit trail as an automatic step.
+- The campaign's own figures follow the rate in effect today.
+
+**The week so far** (`shared/src/logic/payForecast.ts`, rule branch):
+
+- `baseLikely` = day rate × the likely days this week.
+- `commissionSoFar` = the subs logged so far at their rates. `ratePerSub` = the average rate of the team's events still to come, else the week's own rate so far, else the person's trailing rate.
+- `subsToBeatBase` = ⌈(base − commission so far) ÷ rate⌉.
+- Likelihood: the chance of selling at least that many in the remaining event days at the person's own daily rate (Poisson): likely ≥ 60%, possible ≥ 25%, else a stretch.
+- The stops figure uses the person's own stop-to-sub ratios.
+
+**Elsewhere:**
+
+- **Last fix round:**
+  - An **unpaid** run made by the 1.2 code (a plan week from before the rule date, with no stored calculation) is treated like a paid one. Its breakdown shows the run's own columns once a fresh calculation no longer equals them, for example after a change of pay plan or team (a plan or team change does not recalculate it). So the breakdown, the invoice lines and **Mark paid** agree. The breakdown says: "These are the figures this pay run was made with, which is what will be paid. A fresh calculation would differ (for example after a change of pay plan)."
+  - A paid 1.2 week is corrected at the rate it was paid at: commission ÷ sales from the run, not the plan the person is on today. Its plan bonus is held as paid, unless today's plan pays the same bonus at a threshold the week reached; then a cancellation below that threshold takes the bonus back.
+  - A statement's correction line takes its kind from the sign of its own total: a negative total is 'cancellation' and a positive one is 'statement'. Its words follow the total too. An older statement re-read after a newer one (2 cancelled, but +£10) now reads "Paid for 30, 2 cancelled by FXC, which changes the week's earlier correction: +£10.00 on the pay for w/c 12 Oct." Its note says "FXC confirmed 28 of the 30 paid for, which changes the week's earlier correction". The totals were always right.
+  - Corrections that Linear Hub moves off a week with no work are recorded as an automatic step (`SYSTEM pay.carry_forward`, entity `pay_adjustment`): "Moved 1 correction (−£20) for Megan Shaw from w/c 5 Oct to w/c 19 Oct: no work that week". One row covers the whole move, even when a run of empty or paid weeks moves the lines several times. A preview that is rolled back leaves no row. The seed writes none.
+- Payroll flags never warn "near the bonus" in a 1.3 week (there is none).
+- The digest counts no plan bonus.
+- Smoke checks every seeded run is `base` or `commission` with no overrides, and that Company → By campaign commission equals subs × rate.
+
+**Demo data** (the seed):
+
+- Every plan is £63.50 a day with no commission, bonus or override. The owner's plan is salaried.
+- Rep rates: BCN £20 (it was £18 until a client change from a Thursday six weeks ago), CHN £18, VLT £35 and FCB £15 (£14 until an admin change 14 weeks ago). About 31% of weeks pay commission.
+- Statements: CHN confirms two days after the week (before payday), with about 7% cancelled. BCN confirms nine days after (the week is already paid, so the correction lands a week later), with about 6% cancelled.
+- Bonuses: £50 for each month's top seller over three months, and £25 for each team's top seller last week.
+- The result is 674 runs (502 base, 172 commission), none negative.
+
+### 16.2 Self-billing invoices: accept or dispute (P2)
+
+**Who.** Reps and leaders (`INVOICED_ROLES`: the field people, decision 1). Office recruiters and administrators keep
+the payslip. A run is invoiced when it is unpaid (`pending` or `failed`) and has no invoice yet.
+
+**When.** `startInvoiceJobs` (index.ts) runs at start-up and every 15 minutes: it makes sure the closed week has its
+runs (`ensurePayrollMaterialised`), then `syncInvoices`: (1) invoices whose unpaid run changed are brought up to date
+(refreshed or reissued, below); (2) every unpaid field run without an invoice gets one; (3) issued invoices past their
+deadline become `deemed_accepted`. Nothing is ever deemed accepted in the tick that issues it: every version has at
+least 24 hours (Deadline, below). An issued invoice past its deadline already *reads* as deemed accepted. Reading an invoice (`GET
+/invoices/:id`, `/by-run/:runId`, the list, the payroll rows' summaries) or accepting, disputing or paying it first
+brings it up to date with its run, so nobody sees an old total until the next tick. Paid runs never change, so their
+invoices never do.
+
+**Removed runs.** A run removed because nothing is payable any more (or a deleted account) takes its invoice with it
+(CASCADE), but the trigger `invoices_keep_void` first copies it into `invoice_voids` (number, person, run, last
+version, status, total, lines, reason, and `versions_json`: every earlier version from `invoice_versions` — lines,
+total, status, acceptance, dispute, why it was replaced — read before the cascade removes them), so every number and
+every version ever issued is accounted for. A database whose trigger predates `versions_json` gets the column and the
+new trigger once (`upgrade`: `invoice_voids.versions_json`, `trigger invoices_keep_void`).
+
+**Number.** `LM-SB-<year>-<6 digits>` (`formatInvoiceNumber`), in issue order per calendar year of the issue date
+(meta `ext:invoices:seq:<YYYY>`, never below a number already used). A reissue keeps the number and raises the
+version; each replaced version is kept in `invoice_versions` (lines, total, status, dispute).
+
+**Lines and total.** From P1's `weekPayBreakdown(db, userId, weekStart)` when its paid lines add up to the run's gross
+(base or commission, the other listed as *Not paid*, per-campaign subs with cancellations, corrections from earlier
+weeks, bonus, deductions); otherwise from the stored run (base, commission, bonus, overrides, corrections from
+`adjustments_total`, deductions, and an "Other adjustments" line if the stored figures do not add up). Either way
+**the total is the run's gross**: what Mark paid pays. Worked example (1.2 figures, the fixture rep): 4 days × £60.00
+= £240.00 + 12 sales × £45.00 = £540.00 + £75.00 bonus = **£855.00**; a £20.00 deduction later reissues it as
+version 2 at **£835.00**. With P1's rule: 4 days × £63.50 = £254.00 paid; BCN 16 subs × £10.00 = £160.00 listed, not
+paid; bonus £25.00; correction for w/c 5 Oct −£20.00; deduction −£12.50 → **£246.50**.
+
+**Change detection.** An invoice remembers its run's figures when its lines were last written (`run_fingerprint`:
+days, sales, team sales, base, commission, bonus, overrides, deductions, gross, and P1's paid-as / confirmed /
+cancelled / adjustments). A different value on an unpaid run means the run was recalculated (gauges, a statement, an
+adjustment, an approved rate). The lines are rebuilt and compared with the invoice's (`sameInvoicePayment`):
+
+- **the same payment** — the same total and the same paid lines (kind, campaign, quantity, unit price, amount; "Not
+  paid" lines and wording do not count): the lines are **refreshed in place** and the status, acceptance, version and
+  deadline stay. Example: BCN cancels 2 of Sophie's 5 subs on a week paid as the base (4 days × £63.50 = £254.00):
+  the BCN line now reads 3 subs, still not paid, the total stays £254.00, and her accepted invoice stays accepted.
+  When the version had been accepted (or counted as accepted, or kept by the office) and its wording changes, the
+  lines it was accepted with are kept first in `invoice_refreshes` (invoice, number, version, status, when it was
+  accepted, the lines, when they were replaced; no foreign key, so the record outlives a voided invoice): what the
+  person agreed to is never lost;
+- **a different payment**: a new version ("The amounts changed after it was issued") for the person to check.
+
+A **disputed** invoice is never refreshed or reissued by itself: it is held for the office.
+
+**Deadline (the rule).** An invoice counts as accepted if it is not disputed by **12:00 the day before payday, or 24
+hours after the version was issued, whichever is later** (`invoiceDeadline(payday, issuedLocal)`, Europe/London wall
+clock; "24 hours" is the same time the next day, rounded up to the whole minute). So every version gives the person
+at least a day to accept it or say something's wrong:
+
+| Issued (payday Fri 23 Oct) | Counts as accepted at |
+| --- | --- |
+| Mon 19 Oct 07:00 (the usual Monday issue) | 12:00 Thu 22 Oct |
+| Wed 21 Oct 11:00 (reissued: a late gauge) | 12:00 Thu 22 Oct |
+| Wed 21 Oct 16:30 | 16:30 Thu 22 Oct |
+| Thu 22 Oct 13:05 (a statement applied after the usual deadline) | 13:05 Fri 23 Oct |
+| Fri 23 Oct 08:30 (payday morning) | 08:30 Sat 24 Oct |
+| Wed 21 Oct 15:00, for an old failed transfer (payday Fri 4 Sep) | 15:00 Thu 22 Oct |
+
+Until then the invoice is *issued*: the person is told ("Your invoice changed: £300.00 (was £345.00)") and has
+**Accept invoice** and **Something's wrong**; Mark paid needs their acceptance or the office's reason (the lead's
+rule), and bulk Mark paid skips it and says so. A deemed acceptance is dated at the deadline, so never before the
+version existed (`deemedAcceptanceMoment` also guards rows written by an earlier build). The earlier build capped
+every deadline at 00:00 on payday: a version issued on or after payday was stored as deemed accepted at once, dated
+before it existed, with no way to dispute it (re-review P2 major); that cap is gone. A disputed invoice is never
+deemed accepted.
+
+**Statuses.** `issued` → `accepted` (the person, needs the agreement) · `deemed_accepted` (the deadline) ·
+`disputed` (the person, before the deadline, while unpaid) → `resolved` ("Keep as it is", payable) or a new `issued`
+version ("Fix and reissue"). Payable: accepted, deemed accepted, resolved.
+
+**Fix and reissue with a correction.** The admin's correction becomes a `pay_adjustments` row (kind `dispute`,
+`invoice_id`, target and source = the disputed week, created by the admin); the run is recalculated with
+`db/maintenance.ts syncPayrollRun` (P1's rule) and the new version is built from it: with P1, a +£63.50 correction on
+a £254.00 week moves the run's gross to £317.50 and version 2 is issued at £317.50 (version 1 kept).
+
+**Parties.** Supplier = the person's name, address lines, postcode, UTR (optional), VAT number (optional, else "Not
+VAT registered"); customer = Settings → Company plus the signatory and the signature file. Both are copied onto the
+invoice when issued and refreshed while it is open (issued or disputed, unpaid); once accepted they are frozen, so a
+later edit never rewrites an accepted invoice. Only the person and the office see the supplier's home address and UTR;
+a team leader opening a team member's invoice sees the name, the VAT registration (public), the lines and the total.
+
+**Mark paid.** Accepted, deemed accepted or resolved → paid. Issued and before its deadline → a reason is needed
+("Mark paid anyway", in the invoice). Disputed → held: resolve it first (Keep as it is makes it payable at once). A
+version issued late (on payday, say) waits for the person like any other: they accept it, or the office pays it with a
+reason, or it counts as accepted 24 hours later.
+
+**Bulk Mark paid.** Selected runs whose invoice is not accepted are not sent (`payableRuns`); the bar says how many
+("18 invoices not accepted yet: skipped"), the confirm step for runs with checks counts and lists only the runs that
+will be paid ("Mark 10 paid"; no confirm step when none of those has a check), and the summary reads "20 marked paid ·
+3 skipped (invoice not accepted) · 0 skipped (already paid) · 0 failed". When held runs are in the selection, the
+confirm step's description says so: "These checks are advisory. 3 selected runs with an invoice not accepted yet are
+skipped. Here is why each run you are paying stood out:" (`bulkConfirmDescription`), never "you can still pay every
+selected run".
+
+**Payslip (runs without an invoice).** Office roles and weeks paid before invoices began keep the payslip. For a field
+person's week under P1's base-or-commission rule, P1's breakdown (fetched once, the query PayBreakdown makes) replaces
+the 1.2 pay table and the plan box, whose plan figures ("Commission 10 sales × £0.00 £254.00", "Base pay 4 days ×
+£63.50 £0.00") contradicted it (re-review P1 minor). The 1.2 table stays for plan-rule weeks, salaried office weeks
+and when the breakdown cannot be read.
+
+**Demo seed.** Invoices for the field people's runs of the last six completed weeks, each issued at 07:xx on the
+Monday after its week. Self-billing "started" with the first of those weeks, so every older unpaid run (a failed
+transfer) is invoiced on that first Monday at 06:30–06:59 (before that morning's other invoices, keeping the numbers
+in issue order), not backdated to its own week as if 1.3 had existed then; with 24 hours to answer, they are accepted
+or counted as accepted by now. The demo agreements are dated a few days before that first Monday (or on a newer
+person's start date), and an invoice is only marked accepted after its person accepted the agreement (else it counts
+as accepted at its deadline). The first job tick on a fresh demo issues, refreshes, reissues and deems nothing.
+
+**Files.** The signature is stored under `uploads/` next to the app secret (server/data/uploads/; `LM_UPLOADS_DIR`
+relocates it), content-addressed so an issued invoice always shows the signature it was issued with.
+
+Tests: `shared/src/logic/invoices.test.ts` (14, hand-computed fixtures: the deadline across issue times — the usual
+Monday, a late reissue, payday itself, an old failed transfer, month and year ends, a sweep checking it is never under
+24 hours —, the deadline in words, the acceptance moment, the same-payment rule, effective status, lines from a 1.2 run
+and from a P1 breakdown, the balancing line, formats) and `server/src/test/invoices.test.ts` (24: every route for
+anonymous, client, rep, leader, recruiter and admin; the job, with the late week waiting 24 hours; the hooks; refresh
+in place vs reissue, keeping the accepted lines; a version issued after the usual deadline (24 hours, "Your invoice
+changed", accept or dispute, payday Mark paid needs acceptance) and one issued on payday for an old transfer (never
+accepted at once, deemed 24 hours later and dated then); a disputed invoice refused even with a reason; the leader's
+withheld supplier block; malformed PNGs; the write limit; void records with every version; the old void trigger's
+upgrade; the deadline; the 1.2 upgrade of the foundation's table; the demo seed: first tick, no acceptance before the
+agreement, older transfers issued when self-billing started). Line checks go by kind, amount and paid flag, so they
+pass with P1's breakdown and with the stored run.
+
+### 16.3 Client statements from Gmail (P3)
+
+**Files.** PDFs are kept as `<sha256>.pdf` in `statements/` next to the database (`server/data/statements/` by default,
+git-ignored; `LM_STATEMENTS_DIR` moves it; an in-memory test database uses a temp folder). The same bytes are stored
+once; the database keeps the path relative to that folder.
+
+**Reading a PDF** (`lib/statements/pdf.ts`, `pdfWorker.ts`, `store.ts`, shared `logic/statements.ts`). pdfjs-dist
+(legacy build, no fonts, no XFA, the first 40 pages) runs in a **worker thread**, started on first use and kept for the
+next PDF (it never keeps the process alive while idle). A read that takes more than 30 s ends that thread outright — the
+only way to stop a parser that is stuck — and the next PDF gets a fresh one, so a hostile PDF can never stall the
+server. (pdfjs-dist 6 has no `isEvalSupported` option any more: it removed the code path it guarded and never compiles
+code from a PDF.) It gives each piece of text with its position.
+`statementLines` groups pieces on the same baseline into lines and cuts a line into cells at gaps wider than half the
+font size. `findStatementTable` takes the line with the most header words (it must have a name or ID column, a count,
+date, status or amount column, and no numbers) as the header, joins a header split over two lines, then places every
+later line's cells into the header's columns by horizontal overlap; a header repeated on a later page re-anchors the
+columns, "Page 2 of 3" lines are skipped, and a "Total" line ends the table (kept to check the sum). The period comes
+from the lines: "Period: 05/10/2026 to 11/10/2026", "Week ending 11 October 2026", "w/c 5 Oct 2026", "1–31 October
+2026", "28 Sep – 4 Oct 2026", "Statement for October 2026" (UK day/month order; at most 92 days); else from the rows'
+own periods or sign-up dates. A PDF with no text ("it may be a scan"), no table, a password, or damage is stored as
+`failed` with that reason.
+
+**Columns.** `detectStatementColumns` reads the header words: fundraiser ID (`Fundraiser ID`, `Agent no.`, `ID`, `Ref` —
+never a donor's or supporter's), name (`Fundraiser name`, `Fundraiser`, `Name`), sign-ups before cancellations
+(`Sign-ups`, `Subs`, `Sales`), confirmed (`Paid subs`, `Successful`, `Net`, `Confirmed`), cancelled (`Cancelled`,
+`Lapsed`, `Refunded`, `Attrition`), amount (`£`, `Amount`, `Commission`; a "Paid" column whose cells are money is the
+amount), sign-up date, status and period. A campaign's saved columns (its template, by header text, so a new column
+elsewhere does not break it) win over detection. **Totals layout** (a row per fundraiser): confirmed = the paid count,
+else sign-ups − cancelled. **Per-sub layout** (a row per sign-up): each row counts 1, or 0 when its status reads as
+cancelled (cancel, lapse, refund, decline, fail, reverse, reject, void, charge-back, claw-back, not paid, bounced,
+returned, withdrawn, stopped).
+
+**The campaign** is the one given at upload, else the sender's (Settings → Integrations), else the one whose name (or
+code, as literal text — a code like `C++` is fine) the PDF mentions; otherwise the page asks for it.
+
+**Matching** (`autoMatch`): the person's client fundraiser ID for that campaign (Team → person → Client IDs, case
+aside), else their exact full name (case and punctuation aside; "Lee, Jordan" works; initials do not), and only when
+exactly one person has it. Client portal accounts are never matched. Picks made by hand are never overwritten.
+
+**Status.** `failed` (unreadable), `needs_review`, `parsed` ("Ready to apply"), `applied`. `parsed` needs all of:
+nothing blocks Apply, the campaign's columns are saved, every row is inside the statement's period, for an email
+Gmail's confirmation that it came from the sender (below), and no applied statement for exactly the same period (a
+replacement always waits for the office). Anything else is `needs_review`, with a warning saying why. A statement **from
+email** that reaches `parsed` is applied straight away by "Linear Hub"; an **upload** waits for the admin's Apply.
+Applying a statement whose columns were detected saves them as the campaign's template, so the client's next statements
+in the same layout apply themselves.
+
+**From rows to pay weeks** (`statementPlan`, shared `allocateConfirmedToWeeks`). Logged subs are the person's gauge
+`sales` at events of the statement's campaign on the period's days. Per-sub rows count in their own sign-up week. A
+totals row covers its period: every pay week keeps what was logged in it, and when the client confirmed fewer the
+cancellations come off the **latest week first**, then the one before (decided in the plan); when it confirmed more,
+the extra subs go on the latest week. Hand-computed: logged 5, 6, 2 over three weeks, confirmed 9 → cancel 4: the last
+week 2 → 0, then 6 → 4 → 5, 4, 0. Each person-week goes to P1's `applyConfirmedSales` as a **whole-week**
+`ConfirmedSalesRow`: this statement's confirmed subs for its days of the week, plus the week's other days — what another
+applied statement of the same client confirmed for them (`statement_allocations`), else as logged — so a monthly
+statement that splits a pay week keeps the other month's confirmation. People not on the statement are left alone (and
+listed).
+
+*Which days a statement speaks for* (the review's blocker). For each person: the statement's period, plus that person's
+own rows' days outside it (a sign-up dated the day before the period; a row whose own Period column is longer). So a
+sign-up dated Monday on a Tue–Sun statement counts on Monday **in place of** what that person logged on Monday — never on
+top of it — and says nothing about anyone else's Monday. Hand-computed (a test): logged 4 on Monday and 3 on Wednesday;
+the Tue–Sun statement lists the 4 Monday sign-ups and the 3 Wednesday ones, one cancelled → the week sends 6 (it sent
+10 before the fix). Rows dated outside the period keep the statement in **Needs review** with a warning, so an emailed
+one never applies itself. Another applied statement of the client that speaks for any of the same days (by its period
+or its rows' dates) blocks Apply: "Some of its dates are already covered by the BCN statement for …, which is applied, so
+they would count twice." A period that overlaps another's only in part is refused as before. A week where the statement
+has nothing for a person (nothing logged and nothing confirmed on its days for them) is **not sent** — no "All 0
+confirmed: no change" lines — unless the statement it replaces sent it.
+
+*A statement sent again for exactly the same period* **replaces** the applied one (`superseded_by`). Every (person,
+week) the old one sent is sent again; people only the old one listed (`dropped`) go back to their logged subs. Before
+calling P1, P3 hands the old statement's correction lines that still wait on an unpaid week
+(`pay_adjustments.statement_id`, kind cancellation / statement) to the new statement, so P1's
+`applyConfirmedSales` updates each line in place: one line per person, week and campaign ("2 cancelled by BCN: paid for
+22, confirmed 20", −£X), not a −£80 line plus a contradictory +£40 one. A line already paid out stays with the statement
+it was paid for. The preview does the same inside a savepoint that is rolled back, so it shows exactly what Apply does.
+
+**Applying** makes sure last week's pay runs exist (`ensurePayrollMaterialised`, which P1 only does outside a
+transaction), then in **one savepoint**: the hand-over of a replaced statement's waiting corrections, P1's
+`applyConfirmedSales(db, rows, { statementId, actorId })` (P1 nests its own savepoint and is idempotent per statement:
+unpaid weeks are recalculated; for paid weeks the difference becomes an adjustment on the next unpaid run), and P3's
+per-week allocation, the replacement link, the effect, the status and the template. A failure anywhere leaves nothing
+half done. Paid runs are never touched by P3. The response cache is bumped.
+
+**The mail job** (`lib/statements/mail.ts`, `job.ts`). One minute after start-up and every 15 minutes while the server
+runs, when the check is on: connect to `imap.gmail.com:993` (TLS) with the address and the decrypted app password, open
+Gmail's All Mail (the `\All` special-use folder, else INBOX) with **EXAMINE — read-only**: nothing is marked read,
+flagged, moved or deleted; search for messages FROM the listed senders with a UID above the last one seen (the first
+time: the last 60 days); download at most 40 per check; parse each with mailparser; every PDF attachment (up to 20 MB)
+goes through the same path as an upload, keyed `<Message-ID>#<n>` so it is stored once; a message whose From is not a
+listed sender — or that has no From at all — is skipped. The mailbox, its UIDVALIDITY and the last UID are kept (a new
+UIDVALIDITY or address starts again from 60 days back; Message-IDs keep it from storing anything twice). An email that
+fails to process (a full disk, a bug) stops the cursor just before it, so the next check tries it again; after 3 failed
+checks it is skipped with "One email (UID n) could not be read after 3 tries, so it was skipped. Open it in Gmail and
+upload its PDF in Finance → Statements."
+
+*Is it really from the client?* A From address can be faked, so an email statement applies itself only when Gmail
+confirmed the sender (`senderAuthenticated`, stored as `statements.sender_verified`): the **topmost**
+`Authentication-Results` header — the one Gmail's own servers (`mx.google.com`) add on arrival; a lower one could have
+been written by the sender — says `dmarc=pass` with `header.from` aligned to the From address's domain, or `dkim=pass`
+signed (`header.d` / `header.i`) by an aligned domain (the same domain or a subdomain; never a bare `.com`). SPF alone
+is not enough. Otherwise it waits in **Needs review** with "Gmail could not confirm that this email really came from
+Breast Cancer Now …". Failures become sentences: "Wrong app
+password: …", "Gmail wants an app password, not your normal Google password …", "IMAP is off in Gmail …", "Google
+stopped the sign-in …", "Could not reach Gmail (imap.gmail.com) …". `LM_STATEMENTS_JOB=0` turns the job off. Tests
+use a fake mail source (`setMailSource`) and .eml messages; nothing in the tests talks to Gmail.
+
+**Demo seed** (`lib/statements/demo.ts`, a fresh demo seed only): the senders for BCN and CHN, BCN fundraiser IDs
+(`FR-2041`…) for everyone who has worked BCN, and three statements built from the seeded gauges and **lined up with P1's
+seeded pay** (`sale_confirmations`, only read), so applying one never contradicts what pay already says — BCN for **last
+week** (P1's demo has not had BCN's statement for it yet and its runs are unpaid; one row per fundraiser with IDs; at
+least three people with cancellations; all matched; "Needs review" because BCN's columns are not saved yet; Apply
+recalculates those weeks: "1 cancelled by BCN: the week's pay goes from £360.00 to £340.00 (not paid yet)"), CHN for
+**the four pay weeks before last week** (one row per sign-up; each person's cancellations per week are exactly what
+P1's seed confirmed, so Apply reads "no change"; one rep written with an initial, "J. Lee", so those rows wait for a
+pick), and a CHN remittance advice with no table ("Couldn't read"). Where P1's seed has no confirmation for a person and
+week, the cancellations are drawn. The demo emails count as confirmed by Gmail. Their PDFs are
+drawn with jsPDF the first time someone opens one (the specs are in meta `ext:statements:demo`), so seeding writes no
+files; a test checks each PDF reads back exactly as the seed stored it. Nothing is applied in the demo (applying would
+change payroll runs, which a seed must not).
+
+**Tables and columns** (P3 adds to its own `statements` table: `table_json`, `mapping_json`, `mapping_source`,
+`layout`, `effect_json`, `sender`, `subject`, `superseded_by`, `sender_verified`; new table `statement_allocations
+(statement_id, user_id, campaign_id, week_start, logged, confirmed, week_confirmed)`). Nothing is added to core tables.
+P3 writes nothing outside its own tables (last fix round). The hand-over of a replaced statement's lines that still wait
+on an unpaid week is P1's: `applyConfirmedSales(…, { replacesStatementId })`.
+
+**Last fix round: dates and silent weeks.**
+
+- A row's own date (a sign-up date, or the start of a totals row's own period) **after today**, or a row reaching
+  **more than 31 days** (`STATEMENT_DATE_SLACK_DAYS`) outside the statement's period, blocks Apply. A typo'd year or a
+  US-format date would otherwise write a confirmation for a week far away, which would take over what the person logs
+  that week. Rows marked "not one of ours" do not count.
+- **Silent days** (`silentDays`). A person listed only on totals rows that each have their own period may have days
+  in the statement's period that none of their rows covers. Those days count as 0 confirmed (the rule is unchanged), so
+  their logged sales there count as cancelled. A warning names the person, the sales and the weeks, and the statement
+  never applies itself. It costs one grouped query, made only when a row has its own period. A per-sub statement lists
+  each successful sub, so a week with none of a person's subs is read as 0 on purpose and is not reported.
+- Week labels on the statement page show the year when it is not this year ("w/c 11 Oct 2027"). When a person's pay
+  effect spans several weeks, each sentence starts with its week ("w/c 28 Sep: 1 cancelled by CHN, but the base still
+  applied: no change.").
+- The demo statements leave out admin users (the owners are not on field pay). On some seed dates they had CHN gauges
+  and showed up with figures P1 did not pay.
+
+### 16.4 PDF downloads (P4)
+
+- **Where it runs.** On the device, in the browser. jsPDF 4.2.1 and jspdf-autotable 5.0.8 (exact versions in
+  `client/package.json`) live in their own chunk (`engine-*.js`, about 430 kB, 140 kB gzipped), loaded on the first PDF
+  and from then on reused; opening an Export menu starts the download early. The main chunk grew by 2.5 kB in all
+  (472.19 → 474.72 kB; the review fixes add 1.96 kB, the transliteration tables file names use), under the 5 kB limit.
+  The fix round I3 leaves the merged main chunk as it was (481.86 kB at 094570e and after; the engine chunk +0.06 kB). jsPDF's optional `html()` helpers (html2canvas, DOMPurify, canvg) are emitted as chunks but
+  never loaded.
+- **Page.** A4, millimetres. Tables up to six columns portrait, seven or more landscape (`pdfOrientationFor`). Margins
+  14 mm portrait, 12 mm landscape. Page 1: the brand band (the violet mark, "Linear Hub", and on the right "Linear MCR
+  Limited" and "Generated Thu 22 Oct 2026, 15:04 by Danil Varianyk"), the title (17 pt), the subtitle, the filter lines
+  and the row count, a hairline. Later pages: a slim running header (mark, "Linear Hub", the document title). Every
+  page: "Linear Hub · <title>" and "Page x of y" under a hairline. Document metadata: title, author Linear MCR Limited,
+  creator Linear Hub, language en-GB. The title and subject keep the real characters (`pdfInfoText`; jsPDF writes
+  them as UTF-16 when needed), so a viewer's title bar shows "St Ann’s Square – events", not "St Ann™s Square Œ
+  events"; the default footer is folded once, so it keeps ’ – … “ ”.
+- **Table PDFs** show exactly the CSV's columns and rows (the rows on screen, in screen order, when the item was
+  picked). Each cell starts from the CSV text and is written the way the screen writes it: money "£1,234.50"
+  (`-£12.50`), dates "Wed 21 Oct 2026", local times "21 Oct 2026, 09:30", counts "1,240", percentages as the CSV has
+  them. A text cell that is a bare ISO date or CSV timestamp is written as one too. Tables over twelve columns drop the
+  weekday ("21 Oct 2026") so a date fits a narrow column. Numeric columns are right-aligned (header too). Body font 9 pt
+  up to six columns, 8.5 (7–9), 7.5 (10–13), 7 (14–16), 6.5 pt beyond (the 19-column team pay table). The header row
+  repeats on every page; a totals row (`pdfTotals`) prints once, at the end; a row never splits across pages; a table
+  short enough to fit 40% of a page moves whole to the next page rather than split.
+- **Titles from the file name** (`pdfHeadingFor`), so no call site changed: `leaderboard-week-sales` → "Leaderboard" ·
+  "This week" · "Ranked by sales"; `gauges-by-user-deansgate` → "Gauges by person" · "Team: Deansgate";
+  `gauges-jordan-lee-entries` → "Gauge entries"; `team-directory-on-leave` → "Team directory" · "Status: On leave";
+  `candidates-open` → "Candidates" · "Open candidates"; `event-…` → "Event gauges"; `payslips`, `team-pay`,
+  `weekly-money-flow`, `finance-by-campaign`, `runs-to-pay`, `expenses`, `hired`; anything else sentence-cased. The
+  subtitle is the page heading exactly as on screen ("Finance", "Jordan Lee", "Volt Energy — Manchester Business
+  Park"), left out when the title already says it ("Gauges", "Team", "Leaderboard"); a name the subtitle shows is not
+  repeated as a filter. The file name's date range becomes "1 – 21 Oct 2026"; a single date that is just today's
+  file stamp is left out (the generated line has it). Filters set on screen beside the button are added
+  (`screenFilters`, see ExportButton); a file-name line with the same label gives way to the screen's exact wording
+  ("Team: St Ann’s" rather than the slug's "Team: St Ann S"), the date range stays last, a line is printed once.
+- **Text the built-in font can draw** (`toPdfText`). jsPDF's Helvetica speaks WinAnsi; one character outside it turns
+  the whole line into spaced-out gibberish. So Latin-1 stays as it is, the WinAnsi marks (– — … ‘ ’ “ ” • € ™) are
+  passed as their bytes (with their real widths, so wrapping and right alignment stay true), accents outside Latin-1
+  are stripped ("Łukasz" → "Lukasz"), Cyrillic and Greek are spelled in Latin letters (a plain spelling close to
+  BGN/PCGN: "Иван Петров" → "Ivan Petrov", "Юлия Щербакова" → "Yuliya Shcherbakova", "Γιώργος Παπαδόπουλος" →
+  "Giorgos Papadopoulos"), symbols folded ("→" → "->", "−" → "-", "≥" → ">="), unusual spaces become a space, control
+  and zero-width characters go, and anything else (emoji, Chinese, Arabic…) prints "?". File names use the same
+  folds in plain ASCII (`asciiFold`: "Łukasz O’Brien–Ștefan" → `lukasz-o-brien-stefan`, "Straße" → `strasse`).
+- **Formula guard** (`pdfSafeText`): as in the CSV, a cell starting with `=`, `+`, `-`, `@`, tab or CR gets an
+  apostrophe in front unless it is only digits, signs, currency and separators (numbers, money, phone numbers such as
+  "+44 7700 900123" keep their sign), so a table copied out of the PDF into a spreadsheet cannot run a formula. The
+  guard looks at the text **as printed** (after `toPdfText`, and again with leading spaces taken off), so a zero-width
+  space, word joiner, BOM or soft hyphen in front, a minus sign "−" or hyphen "‐" (printed "-") or a full-width "＝"
+  cannot carry a formula past it. **Per line (fix round I3):** a PDF prints a multi-line text as separate lines, and a
+  line copied out of the PDF becomes a cell of its own, so every line is guarded, not only the first ("Call back
+  Monday" then "'=HYPERLINK(…)" on the next line; CR, CR LF and LF all count; a tab in front of a typed line too). And
+  the guard runs once more on every line **as drawn** (`pdfGuardLine` in `render.ts` `write()` and in the table's
+  `willDrawCell`), so a line the wrapping starts — a long note or cell whose continuation begins with "=" — is
+  guarded as well. Every text every block draws goes through it: the header (title, subtitle, filters, meta labels
+  and values), address blocks (heading, name, lines, extra), headings, paragraphs, key values (labels and values),
+  line tables and tables (headers and cells), totals (labels and values), signature blocks (label, name, note), the
+  footer and the running header. `server/src/test/pdf-export.test.ts` builds a document with every block (and a table
+  PDF) full of such text and checks that no text-show operator in the file starts a formula. A guarded line can stand
+  out of its box by the apostrophe's width (about 0.6 mm), as the line was measured before.
+- **Audit PDF**: with `total` and `query` from the page, every entry that matches its filters (newest first, up to
+  2,000: about 55 A4 pages, made in about a second), read 200 at a time; an entry pushed to the next page by new
+  activity while they are read is printed once. Without them, the entries on screen (50), with the line "The 50
+  entries on screen (more may match the filters)". Columns: When (local time), Who (as the Audit page names it:
+  "Attempt on Jordan Lee's account", "Unknown person", "Linear Hub" for automatic steps), What happened, Record ("Pay
+  run #123"), Changes (shared `auditChangeText`, up to four fields). The audit report's `rows` is the number of
+  entries in the file.
+- **Exports made without signal** (`report.ts`): the report waits in `localStorage` under
+  `lm-export-reports:<userId>` (at most 100, oldest dropped first) and is sent, oldest first and one at a time, when
+  the window says it is online again, when `api/client.ts` announces an answer after a failed request, after the
+  next export that gets through, and whenever a page with an export button opens (every page, also after signing
+  back in; fix round I3 — before, only the first one per page load). Before sending it checks `GET /auth/me`: only
+  that person's session sends their reports (someone else signed in on the same phone sends nothing). **Several tabs
+  (I3):** one tab sends at a time (Web Locks, lock name `lm-export-reports:<userId>`; the others wait, then find the
+  queue empty) and each report is taken off the queue before it is sent (put back at the front if it has to wait), so
+  a report is sent once however many tabs are open — measured: 3 offline exports with two tabs open, 3 POSTs (it was
+  6). Where a browser has no Web Locks (Safari before 15.4) the tabs start after a random 0.1–1 s, so one tab's claim
+  reaches the other first; that is very likely, not certain, to send once. A report claimed by a tab that is closed
+  mid-request is lost. The audit row is stamped when the report arrives (the route keeps no other time); the file
+  name keeps the day the file was made.
+- **Progress PDF**: read through the same React Query keys the page uses (cache first), so the server's scoping is
+  unchanged (a leader can download only their own team's people, as on screen). The checklist (lesson, learned,
+  self-check score, teach-back sent, signed off by whom; lessons not started in grey), "Next level: …" with each
+  requirement met or not and where things are, and the required videos that apply to that person.
+- **Tests**: `shared/src/logic/exportFormat.test.ts` (hand-worked fixtures: money, counts, dates on known weekdays,
+  ranges across months and years, WinAnsi folding, the formula guard, cells, alignment, file names, every current CSV
+  file name's heading). `server/src/test/pdf-export.test.ts` runs the real `render.ts` + `csv.ts` under Node with jsPDF
+  and reads the files back byte by byte: header and `%%EOF`, every xref offset on its object, trailer, page count and
+  A4 size (portrait / landscape), and the inflated text of each page — brand header, cells as on screen, header row on
+  every page, totals once, "Page x of y", running headers, formula guard, folded characters, no 16-bit strings, the
+  invoice blocks (P2), page flow, `needs()`, identical bytes on a second save; the review fixes (a title with ’ and
+  – in the footer and in the document properties, hidden formulas in table cells and page blocks, Cyrillic and Greek
+  names, file names, the required-video counts with P5's response shapes); the fix round I3 (every block and a table
+  PDF with multi-line, later-line and wrapped formulas: no drawn line starts one; the audit PDF's Who wording and
+  coverage line); plus the audit-event route contract.
+
+### 16.5 Learning videos (P5)
+
+- **Tables** (`db/extensions/videos.ts`): the foundation's `learning_videos` and `video_views`, plus P5 columns added
+  with `addColumnIfMissing` so a database made at the foundation commit upgrades: `learning_videos.poster_path` (the
+  still, `videos/<uuid>.jpg`), `video_views.ranges` (JSON `[[from, to], …]` in whole seconds), `video_views.marked`
+  (1 when **Mark as watched** made it watched; stored, so changing a length later never turns a real watch into
+  "Marked"), and the watch credit `video_views.credit_s` / `credit_at` (real-clock milliseconds of the last report).
+  Meta `ext:videos:leaders_can_add` ('1' / '0'). No core table is touched.
+- **Files** (`lib/videos/files.ts`): the media folder sits next to the database file: `server/data/media` by default
+  (git-ignored), `<folder of DB_PATH>/media` otherwise; uploads in `media/videos/`. The database stores the path
+  relative to the media folder (`videos/<uuid>.mp4`), and only names matching `videos/<uuid>.(mp4|webm|mov|jpg)` are
+  ever opened, so a row can never point outside the folder. Unfinished `*.upload` files older than a day (a server
+  stopped mid-upload) are removed when the server starts. The nightly backup copies the database only.
+- **Who sees what** (shared `videoAudiencesFor`): admins and leaders see every audience (leaders coach reps, so they
+  see the reps' videos); reps see "everyone" and "reps"; recruiters "everyone". **Required for** (`videoRequiredFor`):
+  "everyone" → every staff role (admins included); "leaders" → leaders; "reps" → reps.
+- **Watched** (`isVideoComplete`): 90% of the length seen (598 s × 0.9 = 538.2 s), counted as merged ranges
+  (`mergeWatchedRanges`, `watchedRangesSeconds`): replaying a minute counts it once, skipping ahead counts nothing
+  (the player's `recordWatchSample` treats a forward step over 4 s, or any step back, as a seek). Ranges a second apart
+  are one range; beyond 500 stored ranges the two closest are joined. An upload counts as watched only once it has a
+  length of its own (from the file, the editor's browser, or Edit video); a link may use the length its player reports
+  for that viewer. When a video gets a length, everyone who has already seen 90% of it is counted as watched in one
+  statement (`completeViewsAtLength`). Once watched it stays watched (`completed_at` is never cleared).
+- **Watch credit** (shared `watchCreditAt`, `creditedWatchSeconds`; `lib/videos/progress.ts`): the seconds counted may
+  grow at most as fast as a player at double speed could show them — 2 s per second of the real clock (never the
+  business clock), from a credit of up to 2 minutes that refills between reports and that each report spends. A first
+  report starts with the full 2 minutes. Worked by hand: claiming all of a 10-minute upload in one report counts 120 s;
+  claiming it again every 15 s adds 30 s each time, so it is watched (540 s) after 14 more reports, 3.5 minutes — no
+  faster than playing it at double speed. **Last fix round:** a viewing starts with 40 s
+  (`VIDEO_WATCH_CREDIT_START_S`: two reports at double speed plus a margin). That applies to the first report, and to
+  the first after 10 minutes without one (`VIDEO_WATCH_SESSION_GAP_S`; a credit is never banked between viewings). The
+  player reports as soon as it starts playing, so the clock runs from then. A 100 s upload claimed in one report now
+  counts 40 s (it was 100 s, watched), and the 10-minute example needs 17 reports (4.25 minutes). The answer's `owedS`
+  says what is over the credit, and the player sends again on its next tick until nothing is owed, even if nothing new
+  was seen. A viewer at normal speed reporting every 15 s loses nothing; one whose
+  reports were lost for two minutes gets the rest counted on the next reports (what is over the credit stays in the
+  ranges). Reports every 100 ms gain nothing extra (the credit is per second, not per report).
+- **The player** reports when it starts playing, then every 15 s while something new was seen or anything is still
+  owed (`VIDEO_PROGRESS_INTERVAL_S`), on pause, at the end, and with `keepalive` when the page is hidden or closed. A
+  failed report keeps its ranges for the next one, and a failed end report is repeated with the next report (so the
+  resume point still goes back to the start). A report sent twice changes nothing. **Resume** (`videoResumeAt`): the saved position, except within 5 s of the start,
+  within 10 s of the end, or once watched (then from the beginning).
+- **Lengths**: an MP4 / MOV's own length is read on the server from its `moov → mvhd` box (wherever `moov` sits);
+  a WebM's comes from the browser. Uploads: the first time someone who may edit it opens the video, their browser reads
+  the server's copy in a hidden muted player, takes a 640 px still and the length, and sends them (`POST /:id/poster`)
+  — the page's CSP (`media-src` falls back to `'self'`) lets the browser play Linear Hub's own stream but not a local
+  file, so this cannot happen in the upload form. Once it has a still nothing is sent again. A length still unknown can
+  be typed in Edit video. Links: the length is typed when adding (mm:ss or minutes) or reported by the admin's player.
+- **Links** (`parseVideoLink`, `videoEmbedUrl`): YouTube (watch, youtu.be, shorts, live, embed; `t=`/`start=`) plays
+  from youtube-nocookie.com with `rel=0`; Vimeo (incl. unlisted hashes, showcases, `#t=`) with `dnt=1`; Google Drive
+  (`/file/d/<id>/…`, `open?id=`, `resourcekey`) from its `/preview` page. Stored with their scheme. CSP
+  (`lib/videoEmbeds.ts`): `frame-src` youtube-nocookie.com, youtube.com, player.vimeo.com, drive.google.com;
+  `img-src` i.ytimg.com, i.vimeocdn.com. No provider script is loaded: YouTube and Vimeo report their position by
+  `postMessage` (`embedListenMessages`, `parseEmbedMessage`, origin-checked). A player counts as reporting only once it
+  sends its time while it plays. Google Drive cannot report, so its page offers **Mark as watched**; so does a YouTube
+  / Vimeo player that stays silent for 10 s, or that answers but sends no time within 10 s of saying it plays or of
+  being tapped (a time arriving later hides the button again).
+- **Team view** (`GET /videos/team`, cached; one grouped query for the views): the required videos as columns
+  (newest first) and, per person, a cell for each one required for their role, "watched required" of "required
+  total", and how many videos they have watched in all. Leader: active members of their own team; admin: every active
+  member of staff. Client accounts never appear.
+- **Demo seed** (fresh `npm run seed` only, its own random stream): three **example** LINK videos, public TED talks on
+  YouTube marked `example = 1` (each card and page says **Example**; no file is uploaded): "How to speak so that people
+  want to listen" (Pitching, required for everyone, 9:58), "Your body language may shape who you are" (Interviews,
+  21:02), "How great leaders inspire action" (Leadership, required for leaders, 18:04), with viewing for the demo
+  people (Jordan Lee: the first watched, the second a third of the way; Amelia Hart: the first watched, the leaders'
+  one half way). An upgraded database gets none.
+
+### 16.6 Client accounts and campaign pages (P6)
+
+- **Shared rules** (`shared/src/logic/clientPortal.ts`, tested in `clientPortal.test.ts`): `clientPostProblems(input,
+  today)` (the form and the server use the same rules: title ≤ 120, message ≤ 2,000, rates > £0, ≤ £1,000, pence at
+  most, a date from today to 366 days ahead), `clientPostStatusText` ("Approved from Mon 2 Nov", "Declined: reason"),
+  `clientPostOfficeStatusText` (the same, except "Waiting for approval" where the client reads "Waiting for Linear"),
+  `clientCommissionSummary`, `clientPostDayLabel`, `clientCommissionTitle`, `clientInviteInstructions`,
+  `isClientAccessCode`, the labels and limits.
+- **The client PIN rule** (`lib/pin.ts accountFlags`, body only, as the foundation contracted):
+  `pinSetupRequired = !hasPin && (settings.requirePin || (role === 'client' && !demoClient))`. So an invited client's
+  first sign-in (email + access code) lands on **Create your PIN** and the gate holds every other route until it is set;
+  every later sign-in asks for the PIN. The seeded demo client (recognised by the seed's marker) is exempt unless the
+  admin requires a PIN for everyone. `pinStatusFor` reports `required: true` for client accounts, so neither Settings nor
+  the portal offers **Remove**, and `POST /auth/pin/remove` refuses a client account (409 "A PIN is required for client
+  accounts…"; a two-line check in the foundation's `routes/auth.ts`). Whole truth table in `client-portal-seed.test.ts`.
+- **Read receipts** (`client_post_reads`, new table of the client extension): one per (post, person), real clock. A
+  post counts as unread for the office while it has no receipt, is less than 30 days old (business clock) and is not
+  unpublished. The campaign page marks the posts it shows as read, in one `POST /client-posts/read`.
+- **Unpublish** deletes the announcement (the client post keeps the text and its history), so read receipts of that
+  announcement go too.
+- **Approval** uses P1's rate history; the post's `effectiveFrom` becomes the confirmed date, `requestedFrom` keeps the
+  client's. Until P1 lands the approval answers 501 and writes nothing (tested both ways; checked with P1's commit
+  applied in a scratch copy: 200, a `campaign_rates` row `source 'client'` linked to the post). P1 recalculates only
+  **unpaid** runs from that date: weeks already paid keep the old rate and nothing corrects them automatically (no
+  adjustment line is made), which is why the Approve dialog warns when the date is on or before `paidThrough`.
+- **Schema** (`db/extensions/client.ts`): `client_posts.requested_from`, `client_posts.posted_at` (the real-clock
+  moment a portal post arrived; `NULL` for demo rows and posts from before this column, which therefore never count
+  towards the limits) — both also added to a database created at the foundation commit — and `client_post_reads`. No
+  data step for upgraded databases.
+- **Demo rows** (fresh seed only, no random stream): the campaign briefs and contacts of BCN, CHN, VLT and FCB
+  (columns this extension added); from Hannah Price (BCN) a declined payout change (24 days ago, "We agreed £120 per sub
+  until the end of March…"), a published announcement (9 days ago) and update (3 days ago) with their Announcements
+  rows, and a pending change to £22.00 per sub from the Monday after next (yesterday); for every client rate change in
+  P1's demo history (BCN £18 → £20 six weeks ago) the approved post it came from, linked through
+  `campaign_rates.client_post_id`. The owner has read the older posts, the leaders the announcement, so the demo opens
+  with a commission change to approve and one new update. The two published posts' Announcements rows get read
+  receipts from a share of the active staff that grows with age, like the audit seed's (`announcement_reads`; e.g.
+  "Read by 27 of 29" for the nine-day-old walk, "19 of 29" for the three-day-old update), never "Read by 0". The
+  audience of a client's announcement is every active staff member: a client account is never in it, so nobody is
+  taken off for being the author.
+
+### 16.7 Recruitment: date of birth, schedule, question bank, interview sheets (P7)
+
+**Date of birth** (`shared/src/logic/recruitmentPlus.ts`): `ageOn(dob, today)` is whole years (the birthday itself
+counts; a 29 February birthday turns over on 1 March); `isUnderAge` is under `CANDIDATE_ADULT_AGE` (18);
+`dateOfBirthProblem(dob, today)` is the one rule the form and the server share (real date, not future, 14–100). The
+profile shows "18 Oct 2007 · 19", an **Under 18** badge and, while under 18, a note with the 18th birthday. Recruitment
+roles only, like every candidate field; it is never copied to the person's account on hire and is not in the CSV.
+
+**Who handled what.** "Who moved each stage" is `stage_changes.changed_by_id` (recorded since 1.0). Bookings,
+reassignments, reschedules, changes of type and outcomes are rows of `interview_changes (interview_id, field, from_value,
+to_value, changed_by, changed_at)`; field is `booked` · `interviewer` · `scheduled_at` · `type` · `outcome`.
+
+**The timeline** (`buildCandidateTimeline`, pure, tested with hand-written fixtures) merges three lists, newest first:
+every stage move ("Moved from Applied to Phone screen by Priya Shah", "Rejected at Interview by …", "Withdrew at Offer
+(recorded by …)", "Hired by …", "Reopened at Offer by …", "Applied for the Trainee position (added by …)"), every
+interview at its own time ("First interview with Amelia Hart", with its outcome; an upcoming one sits at the top), and
+every change ("First interview: interviewer changed from Amelia Hart to Rhys Morgan by Priya Shah", "Phone screen moved
+from Thu 22 Oct, 10:00 to Fri 23 Oct, 14:00 by …", "Phone screen changed to first interview by …", "First interview
+outcome recorded as passed by …", "First interview booked for Mon 28 Sep, 12:45 by …"). Times are Europe/London; the
+year is written only for another year. Ties at the same instant keep the story's order (applied, stage, booked,
+interviewer / reschedule, interview, outcome; newest first, so an outcome sits above its interview), then the later row.
+Interviewers who have left keep their name ("a former colleague" if the row is gone). Three queries per candidate.
+
+**The interview sheet.** Until anything is saved, a sheet is a *draft*: the bank's active questions for the interview's
+type, for every position or the candidate's (`draftSheetQuestions`, ordered by sort then id); reading it writes nothing.
+The first save (anything at all: an answer, a score, "Not asked", a question added) fixes the questions: each
+`interview_answers` row stores the words the interviewer had on screen, and a stored question keeps its words for good,
+whatever a later save or a bank edit says — so changing the bank never changes a past interview. A bank question is
+matched by its id, a question of the interviewer's own by its words.
+
+**One sheet on two devices** (a laptop tab opened before the interview, a phone in the room, a second interviewer on
+an observation day). After the first save a save holds only the questions this device changed, each with its `base`
+(the answer and score it started from). Server rules (`saveInterviewAnswers`): a question left out of a save is never
+touched; one comes off only with `removed: true` ("Not asked", only offered while it has no answer and no score); a
+question whose answer equals its base is left as it is (another device's newer words stand); a changed one is written
+only while the stored row still equals its base, else it is a **conflict** and nothing in that save is written (409
+with the latest sheet); an answer already equal to the stored one is never a conflict (the same save arriving twice).
+Taking off a question another device has answered is a conflict too. New questions go at the end; the order of stored
+ones never changes. **A device's own saves never clash with each other** (the 1.3 re-review found the last save, sent
+as the tab closes or reloads while an earlier one was still on its way, refused as "another device's" change and lost):
+each save carries the tab's device id (`SHEET_DEVICE`, made once per page load with `crypto.getRandomValues`, which works
+over plain http on the office network) and its save number, and every row written is stamped with
+`interview_answers.device` = `<user id>:<device id>` and `device_version`. When the stored row was last written by the
+same person from the same device the base is not checked: a later save (higher number) is written, an older or repeated
+one arriving late leaves the row as it is (it never writes back older words, and never takes off a question the newer
+save wrote); a save that finds a row already holding its words notes its number on it without counting as a change.
+Another device's or another person's change is checked against the base as before (a device id sent by someone else is
+not theirs: the user id is part of the stamp). Only rows whose answer or score changed are written, with who and when; each answer shows who last
+changed it. The page's side (`mergeSheetRows`, pure, tested): after every save, 409 and refetch it takes in other
+devices' words for questions it has not touched, keeps whatever is being typed, and flags a question both devices
+changed with the other version, until the interviewer picks **Keep mine** (sent with theirs as the base) or **Use
+theirs**; every other question keeps saving meanwhile. A stored row stamped with one of the page's own device ids (or
+equal to what the save it answers sent) is the page's own save: what is typed is kept and the base moves on, never a
+conflict (typed, sent, then rubbed out: the box stays empty and the next save sends that). While a question is in
+conflict the line under its box reads "Not saved yet" (the box holds this device's words; the conflict panel says who
+wrote the other version, and when). `sheetSavePayload` stamps the device id and save number on every item, and also
+sends a question changed since the save still on its way even when it is back to its base.
+`sheetSummary`: questions, answered (a written answer), scored (a 1–5 score), and the mean score to one decimal place,
+half up (hand-computed tests: 13 / 3 → 4.3, 15 / 4 → 3.75 → 3.8).
+
+**Autosave** (the sheet page): 2.5 s after typing stops, when an answer box loses focus, 0.3 s after a score, on adding
+or taking off a question, when the page is hidden (a phone put away) and when it is left. Saves go one at a time, in
+order, through a queue outside React (`features/recruitment/sheetSaveQueue.ts`); each builds its payload when it runs
+from the page's latest rows, so a change made while one is in flight is sent straight after it — also when the page has
+been left in the meantime (the 1.3 review found the later answers lost then: TanStack Query skips a `mutate()` call's
+own callbacks once the component has gone). Closing or reloading the tab sends what is left at once with `keepalive`
+(the server knows the earlier save still on its way as this tab's own). **What is not saved is kept in the tab**
+(`features/recruitment/sheetDrafts.ts`, in memory and in sessionStorage, for the same person only): as the page is left,
+and as the tab closes or reloads, the page's rows (words still on their way, questions taken off, questions in conflict
+with both versions) and its device ids; opening the sheet again in that tab — straight back after leaving it, or after
+a reload — starts from them, merged with the server's sheet, instead of a cached copy from before the last save, and
+saves them again (harmless: the server takes its own save as no change). A page left with a question in conflict says
+so in a toast that names it ("Your answer to question 3 was not saved: Amelia Hart changed it on another device. Open
+the sheet to choose which to keep."); opening it again shows the conflict, with **Keep mine** / **Use theirs**. A save
+that fails after the page was left says so in a toast, and the words are kept the same way. The draft is dropped once
+everything is saved, when a newer sheet page takes it over, and when the page comes back from the browser's page
+cache. "Saving…", "Saved 10:42" (or "Last saved Tue 20 Oct, 13:44"), "Not
+saved: … Try again", or the conflict line. A refetch (an outcome saved, a reschedule) never overwrites what is being
+typed. The pacing keeps the audit trail to about one row per answer, not one per keystroke.
+
+**The schedule** groups interviews by their Europe/London day (an interview at 23:30 UTC in summer is on the next day):
+the server reads a UTC window one day wider each side and trims by London date. Quick ranges: today, this week and next
+week (Monday–Sunday, `scheduleRange`). The filters live in the address (`?range=today&who=none&type=phone`).
+
+**The question bank** starts with a default set on every database (`lib/recruitmentPlus/defaults.ts`, 25 questions:
+6 phone screen, 8 first interview — one for team leader applicants only — 6 observation day, 5 final interview): plain
+questions about the job, experience, availability, travel and how pay works. A fresh demo seed writes it; an existing
+database gets it once on the next start (`upgrade`, meta `ext:recruitment:questions`, only while the bank is empty; a
+fresh install's upgrade runs before the seed with no people yet and leaves it to the seed). It is a data step in P7's own
+table, so it is not in the start-up "Upgraded schema" line (the 1.2 upgrade tests compare that list exactly). Questions are never deleted,
+only turned off, so past sheets keep their link; the same words twice in one list are refused (see API).
+`questionTopicWarning(text)` flags a question that seems to touch a protected characteristic (age, health — "health and
+safety" is fine — family, religion, nationality or race, sexual orientation or gender, trade union membership) with a
+warning under the field; it never blocks. It leaves the agency's own clients and causes alone ("Children's Hospice
+North", "a children's charity"), matches whole words where a longer word means something else ("faith", not
+"faithful"; "how old are you", not "how old is your car"), and flags "first language" and "mother tongue". The
+re-review added a baby or babies, a spouse or civil partner, "your partner" / "have (got) a partner" / "live with a
+partner" (not "partner charities" or "partnership"), the year someone left school, college or university or graduated,
+and "your second language" / "English isn't your first language". Every default question passes it (tested, with both
+reviews' fixtures).
+
+**Demo data** (the extension's seed, its own random stream, fresh databases only; on core tables it changes only
+`candidates.date_of_birth`): a date of birth for about 85% of candidates (two open applicants are 17, one turning 18 in a
+few weeks); the change log of every seeded interview (booked soon after the stage move, in office hours — Mon–Fri 09:00–18:00
+local time, like the core seed's interview slots; a stage move out of hours books the next working morning, or the last
+working afternoon when the interview comes first, always at least 30 minutes before the interview and never after now;
+about 10% first booked for an earlier slot and moved, about 12% of the non-phone interviews reassigned from another
+leader, every recorded outcome); and the sheets of about 80% of the passed or failed interviews of the last six weeks with sample answers and
+scores. Nothing is dated in the future; the same day gives the same rows.
+
+**Files.** Shared: `types/recruitmentPlus.ts`, `logic/recruitmentPlus.ts` (+ test). Server: `db/extensions/recruitment.ts`,
+`lib/recruitmentPlus/store.ts` and `defaults.ts`, `routes/recruitmentPlus.ts`, `routes/recruitment.ts`,
+`lib/audit/recruitmentSpecs.ts`, tests `recruitment-plus.test.ts` and `recruitment-plus-seed.test.ts`. Client:
+`api/recruitmentPlus.ts` (keys now under `['recruitment', 'plus', …]`, so the 1.0 recruitment hooks refresh them;
+`putInterviewAnswers` / `storeSavedSheet` for the sheet's queue), `pages/InterviewSchedule.tsx`,
+`pages/InterviewSheet.tsx` (mounts P9's `RecordOpened` — entity `candidate`, "interview sheet" — since the sheet shows
+the date of birth and the answers), `pages/CandidateDetail.tsx`, `pages/Recruitment.tsx`, `features/recruitment/`
+(QuestionBankSection, QuestionTopicHint, ScheduleInterviewModal (now with a candidate picker), RescheduleInterviewModal,
+CandidateTimeline, CandidateSheets, DateOfBirth, AddCandidateModal, linkStyles, pdf, sheetSaveQueue).
+
+**PDFs** (`features/recruitment/pdf.ts`, P4's `pdfDocument`): the candidate profile (details with the date of birth and
+age, notes, the timeline, every saved sheet) and one interview sheet (the questions as asked, answers, scores, outcome),
+each reported to the audit trail as a PDF export. The **PDF** buttons appear only while `PDF_EXPORTS_READY` is true
+(P4 sets it), so they are not in this package's screenshots.
+
+### 16.8 Venues, rosters and event plans (P8)
+
+All the maths is in `shared/src/logic/venues.ts` (`VENUE_RULES`), unit-tested against hand-computed fixtures.
+
+**What counts.** A **shift** is one gauge entry: one person at one event on its day. Only **finished days** count:
+entries on events dated before today (business clock) that are not live, so a half-logged day never drags an average
+down (cancelled events with entries count, as everywhere else: the work was done). A **visit** is an event at the venue
+with at least one counted shift. Every finished shift ever logged at a venue counts.
+
+**The law of averages** (venue profile):
+
+- **Fitted rate** = Σ sales ÷ Σ stops — the line through the origin fitted by weighted least squares with variance
+  proportional to stops (sales from N stops behave like a Poisson count), which is the plain pooled rate.
+  `stopsPerSale` = Σ stops ÷ Σ sales. `correlation` is Pearson's r of stops and sales per shift (null below 3 shifts).
+- **Sentence**: "At Golden Square, every 26 stops made a sale on average, steady across 89 shifts." N = round(stops ÷
+  sales). Under 5 shifts: "…made a sale so far, but 3 shifts are too few to call it a pattern yet."; no sales: "No sales
+  at X yet across 4 shifts (240 stops)."; no shifts: "No shifts logged at X yet." The steadiness word is the overall
+  conversion's (below 3 visits it is left out).
+- **Three groups by stops** (9 shifts or more): the shifts sorted by stops and cut at round(n/3) and round(2n/3); each
+  group's stop range, average stops and sales per shift. The page adds "The busiest shifts (about 80 stops) sold 1.6
+  times as much as the quietest (about 54): the rate holds, so volume is the lever."
+- **Stability of each ratio**, visit to visit (each visit's shifts together; visits that reached the stage, at least
+  3): CV = sample SD ÷ mean of the visits' ratios; **chance CV** = √(mean over visits of p(1 − p) ÷ n_visit) ÷ p, the
+  spread binomial luck alone gives at the pooled ratio p with each visit's own numbers. **Steady** when CV ≤ max(1.5 ×
+  chance, 0.05); **fairly steady** when ≤ max(2.5 × chance, 0.10); otherwise it **varies**. This is the proof: a steady
+  ratio means the visits differ by no more than luck would explain — the rate belongs to the place, and more stops is
+  the way to more sales.
+
+**Who an event is expected to have** (`expectedHeadcount`; the forecast's `expectedReps` and the plan's
+`sharedAmong`). The habit = the mean number of people over the team's completed events in the last 8 weeks (null below
+5 such events). Counting only active people booked:
+
+- nobody booked → the habit (the 1.1 rule, unchanged; null with too little history);
+- booked by a **leader or the office** (any `source: 'leader'` row) → **the people booked**: the leader has done the
+  roster, and a short crew should show as a short crew (Stretch / Behind target);
+- **only self-bookings** so far → the **larger** of those booked and the habit: a roster still filling up is a floor,
+  not the crew (no false Stretch flags, no inflated shares);
+- a **live** event with bookings → at least the people who have **logged it** so far (walk-ups, an unfinished roster),
+  so the estimate never falls below what is already happening.
+
+On the demo seed, 21–28 Oct: 9 of 26 open events are flagged Stretch against 8 with the habit alone (the extra one is
+a genuinely short crew: 4 of 7 booked on a target of 19); before these fixes and the seed change below it was 14.
+
+**The event plan** (each booked person, scheduled and live events):
+
+1. Counts: the person's own finished shifts in the **last 8 weeks**, anywhere (`ownShifts`); every counted shift at the
+   event's venue (`venueShifts`); the company's counted shifts.
+2. Ratios, stage by stage (stop → table … tap → sale):
+   `location = w_v × venue + (1 − w_v) × company`, `w_v = venueShifts ÷ (venueShifts + 10)`;
+   `ratio = (1 − w) × own + w × location`, `w = 10 ÷ (ownShifts + 10)` = **venueWeight** (1 with no own shifts, 0.5 at
+   10, about 0.24 at 32). A stage with no data on one side (its stage before is 0) takes the other side alone; a stage
+   with no conversion anywhere makes the plan impossible (no steps).
+3. Target from the **event's share** ⌈event target ÷ sharedAmong⌉ (sharedAmong = round(expected headcount), at least
+   1) and a **good day** — round(75th percentile, type 7) of the person's sales per shift over the 8 weeks (at least 1;
+   needs 5 shifts), else the venue's good day:
+   - a good day above the share → the **good day** (strong people aim for their own good day);
+   - a share up to 1.5 × the good day, or less than 2 sales above it → the **share** (never below the team's need; a
+     tie is the share);
+   - a share **more than 1.5 × the good day and at least 2 sales above it** → the **good day**, flagged
+     `shareAboveGoodDay`; the page says "The event's target works out at 7 sales each for the 3 booked, well above a
+     good day, so the plan aims for a good day." (An aim nobody reaches helps nobody; the forecast's Stretch flag tells
+     the leader.)
+4. Steps: `conv_s` = the product of the ratios from stage s down to a sale; **need = ⌈T ÷ conv_s⌉** (an epsilon keeps an
+   exact multiple exact). **Range**: λ_low and λ_high solve λ ± √λ = T (one standard deviation of Poisson luck, about
+   two days in three); low = round(λ_low ÷ conv_s) but never under T, high = round(λ_high ÷ conv_s) but never under need.
+   For 10 sales: λ 7.30 – 13.70.
+5. Sentence: "To make 5 sales at Golden Square you need about 120 stops → 42 to table → 21 presentations → 9 closes →
+   6 taps." The one-line aim: "120 stops → 42 → 21 → 9 → 6 taps for 5 sales".
+
+Worked example (route test, hand-computed and re-checked independently): own 8 shifts of 100 / 35 / 18 / 7 / 4 / 4;
+venue 12 shifts of 80 / 28 / 14 / 6 / 4 / 2; company both. w = 10/18, w_v = 12/22 → ratios 0.35 · 0.5080 · 0.4063 ·
+0.6138 · 0.7727. One person (a self-booking; the team usually has 1) on a target of 10: the share is 10, more than 1.5 ×
+his good day of 4 and 6 above it → he aims for **4 sales: 117 stops → 41 to table → 21 presentations → 9 closes → 6
+taps**, stops range 71–191. The same ratios for 10 sales give 292 → 103 → 52 → 22 → 13, stops 213–400.
+
+**By campaign and weekday** (venue profile): each campaign's and each weekday's six gauges per shift and five stage
+ratios at the venue, against the **same campaign / weekday** company-wide (from the venue index: no extra query).
+
+**Cost.** The venue index is one grouped query over events and their gauge totals; a venue's shifts one more (its
+events only). Plans for any number of events and people (one event's page, or the aims on a whole events list) cost at
+most two more — the people's 8 weeks, and the venues' shift sales for anyone with fewer than 5 own shifts — plus the
+forecast's headcount query, shared with the forecasts of the same list (a test counts exactly 4 statements for 12
+events × 2 people, and 0 once remembered). Booking summaries on event lists are one grouped query. Everything is
+memoised per database, data version and business day (every write bumps the version), and `/venues…` and
+`/events/:id/plan` sit behind the response cache. On the demo seed the list and a profile answer in about 20 ms and 10
+ms uncached. The forecast still runs at most 2 statements per call (the bookings ride in the habit's query).
+
+**Kill switch.** `LM_SMART=0` empties plans (estimates) and leaves venue numbers, bookings and the roster on (figures
+and workflow).
+
+### 16.9 Audit of every action (P9)
+
+#### Kinds
+
+`audit_log.kind` (new column, indexed with `at`) is one of `change`, `sign_in`, `export`, `opened`, `automatic`,
+`client`. A row's kind is what the writer says (failed attempts say `sign_in`; client events `export` / `opened`;
+system events `automatic`), else shared `auditKindOf(action, actorRole)`, in this order:
+
+1. `SYSTEM …` → automatic
+2. `EVENT export` or `GET /finance/payroll/export` → export
+3. `EVENT opened` → opened
+4. `POST /auth/login`, `POST /auth/login/2fa`, `POST /auth/logout` → sign_in (a client account's sign-in too)
+5. anything a client account did, or a write to `/client` or `/client/…` → client (e.g. a client setting their PIN on
+   Security, posting an update)
+6. everything else → change (the office approving a client post is an office change)
+
+`db/extensions/audit.ts` adds the column to a 1.2 database and classifies its rows once by the same rules in SQL
+(`KIND_CASE`; a test holds the SQL and `auditKindOf` equal for every action the app writes). It runs on every start but
+only touches rows whose kind is still NULL, so a second start reports nothing. A 1.2 database's rows come out as
+`sign_in` (sign-ins and sign-outs), `export` (the payroll exports) and `change` (everything else).
+
+#### The coverage test (`server/src/test/audit-coverage.test.ts`)
+
+Every POST, PUT, PATCH and DELETE route the app mounts (`lib/routeTable.ts listApiRoutes`) must be matched by an audit
+spec **of its own pattern** (a spec of another route catching it first fails: list literal paths before `:param`
+ones). A route still answering 501 for every role is a 1.3 stub whose package has not landed: it writes nothing, so it
+needs no spec yet, and the test lists it as a diagnostic; the moment it answers anything else, the test fails until its
+package registers a spec. Only routes without a spec are probed (made-up id, empty body), so a merged release probes
+nothing. Also: every spec names a route that exists with the same method; a pattern has at most two specs (a package
+refining a 1.2 spec); and the only skips are read receipts — of one record (`POST /…/:id/read`, e.g. POST
+/announcements/:id/read) or a batch (`POST /…/read`, e.g. P6's POST /client-posts/read) — and `POST /audit/events`.
+(Review fix: the batch form was missing, which turned `npm test` red once P6 merged; checked on a P9 + P6 merge.)
+
+At this commit 41 write routes are 1.3 stubs (P1, P2, P3, P5, P6, P7, P8). Each of those packages has written its specs
+on its own branch; after the merge the test checks them all.
+
+#### Opened records
+
+`features/audit/RecordOpened.tsx` reports `{ kind: 'opened', what, entity, entityId }` once per mount and record (not
+for a client account or while signed out). The server checks access, names the record ("Opened the candidate profile:
+Sam Brown", "Opened the payslip: Jordan Lee w/c 12 Oct", "Opened the invoice LM-SB-2026-000123: Jordan Lee w/c 12 Oct",
+"Opened the audit trail") and keeps one row per person and record in any 5 minutes (one indexed lookup on
+`user_id, at`; `what` compared without case), so React's development double mount or a page re-rendering adds nothing. Team → person → Activity is not
+itself recorded (a summary on a person's page); opening the audit trail is.
+
+#### Exports
+
+A table's export, shared `auditExportSummary`: "Exported Gauges by team as CSV: 124 rows", "Exported Leaderboard as
+PDF" (no count sent), "Printed Payslip". `auditWhatLabel` turns the page's slug or file name into words
+("linear-hub-leaderboard-2026-10-21.csv" → "Linear hub leaderboard"). An export of one record, server
+`recordExportSummary`: "Exported the candidate profile as PDF: Mia Parker", "Printed the invoice LM-SB-2026-000123:
+Jordan Lee w/c 12 Oct", with a count "… as CSV: Mia Parker (12 rows)"; the name is left out when the `what` names the
+record already. The snapshot keeps `what`, `format`, `rows` and `filename`, and `record` (its name) for a record.
+
+#### How a row reads
+
+- A failed try on the sign-in page (shared `isAuditAttemptOnAccount`: kind `sign_in`, a `reason`, action
+  `POST /auth/login` or `/auth/login/2fa`) is filed under the account it was tried on, but it is not shown as
+  something that person did: the Audit page says **"Attempt on Jordan Lee's account"** beside a shield (not his
+  avatar), Team → person → Activity says **"Attempt on this account"**, and "Last active" leaves it out. A wrong current
+  PIN or code in Settings is the signed-in person's own and keeps their name.
+- Once opened, a sign-in or failed attempt, an export or an opened record shows its details as facts (shared `auditFacts`):
+  "Reason: Wrong PIN", "Tries left: 8", "Format: PDF", "Record: Mia Parker" — not as a "— → wrong pin" change, and
+  without a "2 fields" count. Changes, automatic steps and client-portal actions keep the before → after table.
+
+#### Performance
+
+The INSERT is now prepared once per database (`WeakMap<Db, StatementSync>`) instead of on every row, which more than
+pays for the new column: 10,000 `recordAudit` calls take **21.5 µs each, down from 25.6 µs** (median of 5 runs).
+
+Burst benchmark (`server/src/test/audit-burst.bench.ts`, not part of `npm test`): the in-memory test server, 1,000
+requests per burst, 10 at a time; median of 3 runs on the same machine, the foundation commit (before) against this one
+(after):
+
+| Burst of 1,000 | Before | After | Audit rows after |
+| --- | --- | --- | --- |
+| Audited writes, `PATCH /gauges/:id` | 3,398 ms | 3,340 ms | 1,000 (as before) |
+| Trail reads, `GET /audit?limit=50` | 2,996 ms | 3,003 ms | 0 |
+| Failed sign-ins, 1,000 unknown emails | 1,185 ms | 1,105 ms | 31 (30, then the pause row; before: 0) |
+| Page reports, `POST /audit/events` from 6 people | 992 ms | 1,094 ms | 360 (60 a person, then 429; before: a no-op) |
+
+Writes and reads are unchanged within noise. The new rows cost about 0.1 ms per request; a flood never writes more than
+the failure budget and the per-person report limit allow. Retention is unchanged (two years, `purgeAuditLog`).

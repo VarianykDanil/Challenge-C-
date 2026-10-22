@@ -8,7 +8,7 @@
  *  - the event plan: a blend of the person's own ratios (last 8 weeks) and the venue's (with the company's filling in
  *    for a venue with few shifts), the target (the event's share or a good day, the higher), the five steps with a range,
  *    and its sentence.
- * The server (lib/venueInsights.ts) gathers the counts with grouped queries and hands them here. docs/r3/P8-venue-insights.md.
+ * The server (lib/venueInsights.ts) gathers the counts with grouped queries and hands them here. docs/LOGIC.md §16.8.
  */
 import { RATIO_KEYS, type RatioKey } from '../constants.ts';
 import { GAUGE_KEYS, type FunnelRatios, type GaugeKey, type GaugeTotals } from '../types.ts';

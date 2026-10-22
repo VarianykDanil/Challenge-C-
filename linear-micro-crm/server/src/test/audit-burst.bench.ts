@@ -10,7 +10,7 @@
  *   2. trail reads      GET /audit?limit=50 (admin)
  *   3. failed sign-ins  POST /auth/login with 1,000 different unknown emails (1.3 records them, within its budget)
  *   4. page reports     POST /audit/events from the six staff accounts (1.3 records them, 60 a minute per person)
- * Run it before and after a change on the same machine; docs/r3/P9-audit-everything.md has the numbers.
+ * Run it before and after a change on the same machine; docs/LOGIC.md §16.9 has the numbers.
  */
 import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';

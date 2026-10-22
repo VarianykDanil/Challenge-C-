@@ -23,7 +23,7 @@
  * forecasts).
  * Table (server/src/db/extensions/venues.ts): event_roster.
  *
- * What counts (docs/r3/P8-venue-insights.md, "Logic"): a SHIFT is one person's gauge entry at one event (one person-day).
+ * What counts (docs/LOGIC.md §16.8): a SHIFT is one person's gauge entry at one event (one person-day).
  * Only finished days count: entries dated before today on events that are not live (a half-logged day would drag the
  * averages down). A VISIT is an event at the venue with at least one counted shift.
  */

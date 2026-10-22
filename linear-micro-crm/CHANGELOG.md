@@ -9,6 +9,62 @@ response field is renamed or removed, and new fields are optional.
 
 Nothing yet. What comes next is in [docs/ROADMAP.md](docs/ROADMAP.md).
 
+## [1.3.0] - 2026-10-22
+
+Pay you can check, clients on board, data that coaches. Details: [docs/USER_GUIDE.md](docs/USER_GUIDE.md) ("What's new
+in 1.3"), [docs/LOGIC.md](docs/LOGIC.md) §16, [docs/API.md](docs/API.md) ("1.3 endpoints") and, for the owner,
+[docs/OWNER_NOTES_1.3.md](docs/OWNER_NOTES_1.3.md).
+
+### Changed
+
+- **Pay: base or commission, whichever is higher.** Each pay week (Mon–Sun) pays the base (£63.50 × the days worked)
+  or the commission (paid subs × each campaign's rate on the day), whichever is higher, never both. No automatic sales
+  bonus and no automatic leader overrides: Matt adds a bonus to a person's week by hand, with a note. The rule applies
+  from the week the upgrade first runs (**Settings → Pay** shows the date and the day rate); weeks before it keep the
+  1.2 maths, and paid weeks never change. Every week opens a breakdown that says which applied and why.
+
+### Added
+
+- **Cancellations from the clients' statements.** Linear Hub reads the charities' commission statements from Matt's
+  Gmail (an app password in **Settings → Integrations**, read-only, only the senders listed per campaign), takes the
+  table out of the PDF, matches each row to the person and corrects pay: an unpaid week is recalculated with the
+  confirmed subs, a paid week's difference goes on the person's next unpaid week ("2 cancelled by BCN: −£20.00", or
+  "no change" when the base still applied). Rows it cannot match wait in Matt's top box. **Finance → Statements**
+  shows each statement, its PDF and its effect; a PDF can also be uploaded by hand.
+- **Self-billing invoices.** Everyone in the field is self-employed: each closed pay week issues an invoice in the
+  person's name to Linear MCR Limited, numbered `LM-SB-…`, with the breakdown, the office's signatory and signature,
+  and the person's electronic acceptance. **Accept invoice** or **Something's wrong** (say which lines and why); the
+  office fixes and reissues it or keeps it with a note. Not disputed by 12:00 the day before payday (or 24 hours after
+  a late reissue) counts as accepted; **Mark paid** needs acceptance or an override with a reason. A one-off
+  self-billing agreement, supplier details (address, UTR, VAT) and company details in **Settings**.
+- **Client accounts.** Each campaign's client gets an access code and a PIN and sees only a portal: post an update, an
+  announcement or a commission change. Posts appear in Announcements ("From Breast Cancer Now") and in Matt's top box;
+  commission changes wait for Matt's approval and apply from the date he confirms. Campaign pages hold the brief, rates
+  history, client contacts and every post; the Campaigns item shows unread posts.
+- **Learning videos.** Matt uploads a video (up to 2 GB) or adds a YouTube, Vimeo or Drive link, with a topic,
+  audience and a required flag. The player resumes where you stopped; required videos join the checklist and leaders
+  see who has watched.
+- **PDF everywhere.** **Export ▾** offers CSV or PDF on every table, plus PDFs of invoices, candidate profiles and
+  interview sheets, venue reports, the audit view, the leaderboard and learning progress. Every export is recorded.
+- **Recruitment detail.** Date of birth (age and an under-18 warning, recruitment roles only); a timeline of every
+  stage, interviewer change and reschedule with who did it; **Recruitment → Schedule**; a question bank per interview
+  type; interview sheets where the interviewer writes each answer and a score, kept as asked.
+- **Venues and event plans.** **Events → Venues**: every venue's shifts, per person-day averages and stage ratios
+  against the company, and the law of averages in a chart and a sentence. Leaders book their team on events, reps tap
+  **I'm working this**, and every booked person sees how many stops, tables, presentations, closes and taps their
+  target needs there.
+- **Audit of every action.** The audit trail also records sign-ins and failed attempts, PIN and two-step failures,
+  every export and download, opened invoices, candidates and the audit trail, client portal actions and automatic
+  steps; a test fails for any write route without an audit entry. **Audit**: Everything or Changes only, a kind
+  filter, and **Team → person → Activity**.
+- `npm run pin:reset` is joined by new settings: `LM_STATEMENTS_JOB=0` turns the statement reader off,
+  `LM_STATEMENTS_DIR` and `LM_UPLOADS_DIR` move where statements and the signature image are kept. Learning videos
+  live in `media/videos` next to the database; the nightly backup does not copy them.
+
+### Fixed
+
+- The test server no longer drops idle keep-alive connections, which made one route test fail at random under load.
+
 ## [1.2.0] - 2026-10-20
 
 ### Added

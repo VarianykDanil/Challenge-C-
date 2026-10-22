@@ -35,6 +35,8 @@ Linear Hub fixes those four things without asking the business to change how it 
 | **Smart features** (1.1) | Pace notes, this week's pay estimate, **Check in with…**, the **Needs attention** bell, event forecasts, signal-proof logging, recruitment deadlines and **Your week in review** — see [Smart features](#smart-features-11) below. |
 | **Learning** (1.2) | The COD pack as 21 lessons with self-checks, teach-backs your leader signs off, the leadership checklist and the progression tracker; a **pitch studio** per campaign (starting with Breast Cancer Now) with the theory behind each line, a step timer, a teleprompter and flashcards. |
 | **Field & office** (1.2) | One-tap **Check in** with a roll call; leader **Bulk entry** (or paste from WhatsApp); an optional sign-in **PIN**; the **Audit** trail and announcement read receipts; ⌘K search for people, events, candidates and campaigns; **Export for payroll** to Xero or Sage. See [What's new in 1.2](docs/USER_GUIDE.md#whats-new-in-12). |
+| **Pay you can check** (1.3) | Each week pays the base (£63.50 a day) or the commission, whichever is higher, with a full breakdown; the clients' PDF statements (read from Gmail) correct cancellations on the next week; a **self-billing invoice** each week to accept or query. See [What's new in 1.3](docs/USER_GUIDE.md#whats-new-in-13). |
+| **Clients, learning, data** (1.3) | **Client accounts** that post updates and commission changes; **learning videos**; **PDF** downloads everywhere; recruitment with date of birth, a schedule and interview sheets; **Venues** that prove the law of averages and plan each booked person's shift; an audit of **every action**. |
 
 ### Roles
 
@@ -161,6 +163,9 @@ Every command below exists in `package.json` (root) or `server/package.json`.
 | `LM_DEMO_ACCOUNTS` | unset | Set to `0` on any deployment with real users: the sign-in page then shows no demo accounts and the API never publishes a login |
 | `LM_SMART` | on | `0` switches the 1.1 smart features off: pace notes, pay estimates, payroll checks, check-in lists, the Needs-attention feed, event forecasts, streaks and the week in review answer empty, and the optional fields are left out of existing payloads. Recruitment deadlines stay on (they are workflow rules) |
 | `LM_BUSINESS_NOW` | unset (real time) | Pins the business clock — "today" and "now" for events, gauges, pay and the demo seed — to this instant, e.g. `2026-10-19T15:00:00`, for demos and screenshots out of hours (use a fresh `DB_PATH` so the seed is built around it). The clock keeps ticking from there; sessions, rate limits, two-step codes and backups stay on the real clock. The server warns at start-up while it is set. Never set it for real use |
+| `LM_STATEMENTS_JOB` | on | `0` stops the 15-minute check of the Gmail inbox for client statements (uploading a statement by hand still works) |
+| `LM_STATEMENTS_DIR` | `server/data/statements` | Where the statement PDFs are kept (never committed) |
+| `LM_UPLOADS_DIR` | `server/data/uploads` | Where the office's signature image is kept (never committed; back it up with the database). Learning videos live in `media/videos` next to the database and are not in the nightly backup: copy that folder yourself |
 | `LM_APP_SECRET` | unset (generated key file) | Key material for encrypting two-step verification secrets at rest (AES-256-GCM, key = SHA-256 of the value) and for peppering sign-in PINs (HMAC-SHA256 before scrypt). When unset, a random key is generated on first start into `server/data/app-secret` (mode 600, next to the database). Back that file up with the database (the backups folder keeps a copy of it, so keep that folder private), or set the variable to manage the key yourself |
 | `LM_APP_SECRET_FILE` | `<data dir>/app-secret` | Where the generated key file lives when `LM_APP_SECRET` is unset |
 | `TRUST_PROXY` | unset (off) | Behind a TLS-terminating reverse proxy: `1` (one hop), the proxy's address or CIDR, or a comma list, so `X-Forwarded-Proto` is honoured (Secure cookies, HSTS). Leave unset otherwise |
@@ -403,10 +408,11 @@ linear-micro-crm/
 - [`docs/USER_GUIDE.md`](docs/USER_GUIDE.md) — step-by-step for reps, leaders, recruiters and administrators, using the app's own button and tab names
 - [`docs/PITCH.md`](docs/PITCH.md) — the business case and rollout plan for Linear MCR
 - [`docs/ROADMAP.md`](docs/ROADMAP.md) — what comes next
+- [`docs/OWNER_NOTES_1.3.md`](docs/OWNER_NOTES_1.3.md) — what the owner needs to set up or decide for 1.3 (Gmail app password, company details, client accounts, videos)
 - [`docs/DEPLOY.md`](docs/DEPLOY.md) — putting Linear Hub online (HTTPS, backups off the server, a go-live checklist)
-- [`CHANGELOG.md`](CHANGELOG.md) — what changed in each release (1.2.0: learning, field and office; 1.1.0: the smart release)
+- [`CHANGELOG.md`](CHANGELOG.md) — what changed in each release (1.3.0: pay, invoices, statements, clients; 1.2.0: learning, field and office; 1.1.0: the smart release)
 - [`docs/API.md`](docs/API.md) — the API contract and implementation notes
-- [`docs/LOGIC.md`](docs/LOGIC.md) and [`docs/DESIGN.md`](docs/DESIGN.md) — the maths (section 14: the smart release, backups and what loads when; section 15: release 1.2) and the design system
+- [`docs/LOGIC.md`](docs/LOGIC.md) and [`docs/DESIGN.md`](docs/DESIGN.md) — the maths (section 14: the smart release, backups and what loads when; section 15: release 1.2; section 16: release 1.3) and the design system
 - [`docs/LOAD_TEST.md`](docs/LOAD_TEST.md) — the load and robustness report (§10: 1.1 against 1.0 on the same machine)
 - [`docs/TEAM.md`](docs/TEAM.md) and [`docs/TEAM_CONTRACT.md`](docs/TEAM_CONTRACT.md) — who built it and how
 

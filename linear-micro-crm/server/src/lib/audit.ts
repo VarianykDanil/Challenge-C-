@@ -29,7 +29,7 @@
  *    Other failed requests still write nothing.
  *  - Exports and opened records reported by a page (POST /audit/events) and automatic steps go through
  *    lib/audit/events.ts, which calls recordAudit.
- *  - The INSERT is prepared once per database, so a burst of writes costs less than in 1.2 (docs/r3/P9-audit-everything.md
+ *  - The INSERT is prepared once per database, so a burst of writes costs less than in 1.2 (docs/LOGIC.md §16.9
  *    has the before/after benchmark).
  */
 import { createHash } from 'node:crypto';

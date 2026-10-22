@@ -1,7 +1,7 @@
 /**
  * Release 1.3 — OWNED BY P8 venue-insights: an event's roster (event_roster, db/extensions/venues.ts) — who is booked.
  *
- * Rules (docs/r3/P8-venue-insights.md):
+ * Rules (docs/LOGIC.md §16.8):
  *  - Bookings are open while the event is scheduled or live and dated today or later (business clock). Completed and
  *    cancelled events keep their roster as it was: nobody can book on or come off them.
  *  - The admin books any active field member of staff (rep, leader or admin — recruiters work in the office); the

@@ -8,7 +8,7 @@
  *  - isVideoProgressReport: the progress report path (POST /videos/:id/progress, every 15 s per viewer). The route
  *    bumps the response cache's data version itself when a report makes a video watched; this predicate is for the
  *    app's blanket "every write bumps the cache" step, so it can leave the in-between reports out (lead merge note in
- *    docs/r3/P5-learning-videos.md).
+ *    docs/LOGIC.md §16.5).
  */
 import { VIDEO_COMPLETE_SHARE, VIDEO_WATCH_CREDIT_MAX_S, VIDEO_WATCH_CREDIT_START_S, VIDEO_WATCH_RATE, VIDEO_WATCH_SESSION_GAP_S } from '@lm/shared';
 import { run, type Db } from '../../db/connection.ts';

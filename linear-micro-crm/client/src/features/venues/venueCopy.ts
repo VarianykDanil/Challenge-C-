@@ -1,5 +1,5 @@
 // Release 1.3 — P8 venue-insights: the words around venue figures and event plans (British English, numbers with units,
-// estimates called estimates, kind about people — docs/r3/P8-venue-insights.md). Pure helpers, no React.
+// estimates called estimates, kind about people — docs/LOGIC.md §16.8). Pure helpers, no React.
 import { VENUE_RULES, type EventPlan, type GaugeKey, type SalesEventWithMeta, type VenueStability, type VenueStabilityKey } from '@lm/shared';
 import { formatNumber, pluralise } from '@/lib/format';
 import { todayISO } from '@/lib/dates';

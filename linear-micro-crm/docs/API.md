@@ -972,6 +972,806 @@ failed transfers, `runs=all` every run of the week. Sorted by surname then first
 Like `GET /finance/payroll`, it first creates the pending runs of a week that has just closed when that week has none
 yet (it never changes a paid run); when it does, the response cache is cleared as it is after that route.
 
+## 1.3 endpoints
+
+Release 1.3. Every change is additive: no response field was renamed or removed; new fields on existing payloads are optional. Every route is mounted behind `requireAuth` (anonymous → 401). A **client** session (role `client`, new) may call only `/auth/*` (me, logout, PIN), `/health` and `/client/*`; every other route answers `403 { clientPortalOnly: true }`.
+
+### Pay: base or commission, whichever is higher; cancellations (P1)
+
+All routes are under `/api/pay` (`server/src/routes/pay.ts`). Types are in `shared/src/types/pay.ts`. Every route
+needs a signed-in session: an anonymous caller gets **401**, and a client account gets **403** with code
+`clientPortalOnly` from the client guard before the router runs. "Own team" means the leader's `teamId`; a leader with no
+team sees only their own pay.
+
+| Method and path | Body / query | Answer | admin | leader | rep / recruiter |
+| --- | --- | --- | --- | --- | --- |
+| `GET /pay/settings` | — | `PayRuleSettings` `{ dayRate, ruleFrom }` | ✓ | 403 | 403 |
+| `PUT /pay/settings` | `PayRuleSettingsInput` `{ dayRate?, ruleFrom? }` (strict) | `PayRuleSettings` | ✓ | 403 | 403 |
+| `GET /pay/rates?campaignId=` | optional campaign | `CampaignRate[]`, newest first | ✓ | ✓ | 403 |
+| `POST /pay/rates` | `CampaignRateInput` `{ campaignId, repRate, payoutRate, effectiveFrom }` | **201** `CampaignRate` (source `admin`) | ✓ | 403 | 403 |
+| `GET /pay/breakdown?userId=&weekStart=` | default: the caller, this week | `WeekPayBreakdown` | anyone | own team | own only |
+| `GET /pay/adjustments?userId=&weekStart=` | `weekStart` = the week a line lands on | `PayAdjustment[]` (newest week first, up to 200) | everyone (no `userId`) | own team | own only |
+| `POST /pay/bonuses` | `BonusInput` `{ userId, weekStart, amount > 0, note }` | **201** `PayAdjustment` (kind `bonus`) | ✓ | 403 | 403 |
+| `POST /pay/adjustments` | `ManualAdjustmentInput` `{ userId, targetWeekStart, sourceWeekStart?, amount ≠ 0, note }` | **201** `PayAdjustment` (kind `manual`); its `targetWeekStart` is the week it landed on (see below) | ✓ | 403 | 403 |
+| `DELETE /pay/adjustments/:id` | — | **204** | ✓ | 403 | 403 |
+
+**Status codes:**
+
+- **400**:
+  - a day rate that is not more than £0 or is over £500;
+  - a rule date that is not a Monday or is after this week;
+  - unknown keys in the settings body;
+  - a breakdown more than 28 days ahead;
+  - a bonus or adjustment more than four weeks ahead, or before the person started;
+  - a £0 amount, or a note that is missing or over 300 characters;
+  - a person on a salaried plan, which is not paid weekly;
+  - a rate dated more than a year ahead;
+  - a line taking off more than a finished week pays: "That would take Bo's pay for w/c 5 Oct below £0 (−£36.50). Take off at most £63.50 here and put the rest on a later week." Nothing is written.
+- **201 on another week**: a line put on a past week the person did not work lands on their next open week (see Logic), and the answer's `targetWeekStart` says which.
+- **403**: the role is not allowed, or the person is outside the caller's scope ("You can only see your own pay", "Leaders can only see their own team's pay").
+- **404**: an unknown person, a client account as `userId`, an unknown campaign or an unknown adjustment.
+- **409**:
+  - the week is already paid: "The week w/c 5 Oct has already been paid. Choose the next unpaid week.";
+  - removing a line that came from a statement or a dispute;
+  - `POST /finance/payroll/:id/pay` for a run below £0: "Bo's pay for w/c 5 Oct comes to −£36.50, below £0, so it cannot be marked paid. Add an adjustment to carry part of a correction to a later week first." (before P2's invoice check).
+
+**`WeekPayBreakdown`**:
+
+- The STABLE fields from the foundation: `rule`, `daysWorked`, `dayRate`, `baseAmount`, `commissionAmount`, `paidAs`, `lines[]`, `salesLogged`, `salesConfirmed`, `salesCancelled`, `perCampaign[]`, `adjustments[]`, `explanation[]`, `runId`, `status`.
+- The additive optional fields:
+  - `adjustmentsTotal`, `userName`, `dueDate` and `paidDate`;
+  - `corrections[]`: the lines this week's statement figures put on later weeks;
+  - `asCalculated`: true when the figures are the run's stored calculation, or a paid 1.2 run's own stored columns;
+  - `salaried`;
+  - `awaiting[]`: campaign codes whose statement for the week has not arrived.
+- `status` is `estimate` when the week has no run yet.
+- The explanation says "you" to the person and uses their first name for anyone else: "Jordan worked 4 days".
+
+**Caching:**
+
+- `GET /pay/breakdown` goes through the response cache (`X-Cache: HIT` / `MISS`), keyed on user, role and URL. `GET /pay/adjustments` is a plain list (newest week first, at most 200 lines) and is not cached.
+- Every write route above, and every recalculation, bumps the data version, so the next read is fresh.
+
+**Audit.** Each write route has a spec in `server/src/lib/audit/paySpecs.ts`. Examples:
+
+- "Changed pay settings: day rate £63.50 → £65"
+- "Added a rate for FXC: £45 a sub to the rep, £125 payout, from 2026-10-05"
+- "Added a bonus: Remy Rep w/c 5 Oct, £50 — Top seller in October", followed by a second row "Recalculated after a bonus: … £127 → £177" on the run
+- "Added an adjustment …"
+- "Removed a bonus …"
+- A settings change or a new rate adds one summary row for the unpaid runs it recalculated (none when nothing moved): "Recalculated 7 unpaid pay runs after the pay settings change: £1,778 → £1,960 in all", "Recalculated 1 unpaid pay run after the rate change: £128 → £181 in all".
+- The automatic takeover of a dated rate is recorded as Linear Hub (`SYSTEM pay.rates`, entity `campaign`): "FXC rate from Fri 16 Oct in effect: £31 a sub to the rep (was £30), £130 payout (was £120)"
+
+**Changes to existing responses (additive only):**
+
+- `PayrollRun` (`GET /finance/payroll`, `/finance/me`, CSV) fills `paidAs`, `salesLogged`, `salesConfirmed`, `salesCancelled` and `adjustmentsTotal`. The stored calculation (`payroll_runs.breakdown_json`) is never returned.
+- `GET /finance/me` → `forecast` and `GET /me/insights` → `personal.payForecast` gain a `rule` block (`PayForecastWithRule`) in a 1.3 week: `{ dayRate, projectedDays, baseLikely, commissionSoFar, commissionLikely, paidAsLikely, ratePerSub, subsToBeatBase, stopsToBeatBase, beatBaseProbability, extras }`. In that case the bonus fields are 0 and `none`. A salaried plan gets no forecast.
+- `GET /finance/summary` → `byCampaign[].commission` for 1.3 weeks is subs × the campaign's rep rate on each sale's date (the plan maths before the rule date).
+
+**Server helpers for other packages** (`server/src/lib/payRule.ts`, STABLE):
+
+- `applyConfirmedSales(db, rows, { statementId, actorId, dryRun })` → `ApplyResult` `{ people[], totalDifference }` for P3's statements. Each person gets `{ before, after, difference, effect: 'recalculated' | 'adjustment' | 'no-change', targetWeekStart, adjustmentId, sentence }`. `dryRun` writes nothing.
+  - Last fix round: `replacesStatementId` (the applied statement this one replaces) hands that statement's correction lines still on unpaid weeks to `statementId` first, in the same savepoint, so each is updated in place. P3 no longer writes `pay_adjustments` itself. It must be another statement's id (400 otherwise).
+  - A row with `notOnStatement: true` (P3's "dropped" people: on the replaced statement, not on this one) is worded "Not on BCN's corrected statement: back to the 22 subs logged, so the earlier correction is withdrawn." (also "…; the week's pay goes from £90.00 to £135.00 (not paid yet)." and "…: no change.").
+- `DELETE /pay/adjustments/:id` now answers 400 when removing a bonus (or another positive line) would take a finished unpaid week below £0. The answer is "Removing this would take Bo's pay for w/c 5 Oct below £0 (−£40.00), so it could not be paid. Remove or reduce the lines that take money off that week first." Nothing is removed.
+- `addCampaignRate(db, input, actorId)` for P6's approved client changes (`source: 'client'`, `clientPostId`). A missing `repRate` or `payoutRate` keeps the one in effect on the date.
+- `recordCampaignRateChange(db, id, before, after, actorId)` is called by the Campaigns routes when a rate changes in the Campaigns form.
+- Breakdown, adjustments and recalculation: `weekPayBreakdown`, `addPayAdjustment` (P2's disputes), `recalculateUnpaidRuns` and `nextUnpaidWeek`.
+- Rates and settings: `campaignRateOn`, `listCampaignRates`, `payRuleSettings` and `updatePaySettings`.
+
+### Self-billing invoices: accept or dispute (P2)
+
+All routes are under `/api/invoices`, behind `requireAuth`; anonymous → 401, a client portal account → 403
+`clientPortalOnly` (the foundation's client guard). Types: `shared/src/types/invoices.ts`.
+
+| Route | Who | Answer |
+| --- | --- | --- |
+| `GET /invoices/agreement` | every staff role | `SelfBillingAgreement` `{ version, title, body, acceptedAt }` (the text names the company's legal name) |
+| `POST /invoices/agreement/accept` | reps and leaders (others 403) | `SelfBillingAgreement`; records version, time and IP once (a second call changes nothing) |
+| `GET /invoices/profile` · `PUT /invoices/profile` | the signed-in person | `InvoiceProfile` (+ `invoiced`, `agreement { version, acceptedAt }`); PUT takes `InvoiceProfileInput` (strict: only the address lines, town, postcode, UTR, VAT number; `null`/empty clears) |
+| `GET /invoices/profile/:userId` · `PUT …` | admin | the same for anyone (404 for an unknown id or a client account) |
+| `GET /invoices/company` | every staff role | `CompanySettings` (defaults: the brand's legal name and address, the owner as signatory) |
+| `PUT /invoices/company` | admin | `CompanySettings`; `CompanySettingsInput.signatureImage` is a `data:image/png;base64,…` (a complete PNG: IHDR first with a width and height of 1–4000 px, every chunk's CRC right, IEND last with nothing after it; ≤ 200 KB) or `null` to remove. 400 otherwise, and nothing is written |
+| `GET /invoices/signatures/:file` | every staff role | the signature PNG an invoice prints (content-addressed `<16 hex>.png`, cached privately) |
+| `GET /invoices?from=&to=&userId=&weekStart=&status=` | rep/recruiter own; leader own team + self; admin all | `InvoiceListRow[]` (an `InvoiceSummary` plus `payrollRunId, userId, userName, weekStart, weekEnd, dueDate, runStatus`), newest week first; default range the last 12 weeks |
+| `GET /invoices/by-run/:runId` · `GET /invoices/:id` | admin, the person, their team leader (others 403; none 404 "Invoice not found") | `Invoice` with `runStatus`, `paidDate`, `paidOverride`, `previousVersions` (after a reissue), `actions { accept, dispute, resolve, markPaidWithReason }` for the viewer, `agreementAccepted` for the supplier only, and `runTotal` + `figuresChanged` for the admin. A team leader's view has `supplier { name, vatNumber, withheld: true }` with no address, postcode or UTR. A deemed acceptance of someone who had not accepted any self-billing agreement by then has `acceptance.withoutAgreement: true`. An invoice whose run changed since is brought up to date first (see Logic) |
+| `POST /invoices/:id/accept` | the supplier only (403 otherwise) | `Invoice`. 409 `{ details.code: 'agreement_required' }` until the agreement is accepted; idempotent once accepted or deemed accepted; also from disputed (the person changed their mind) or resolved |
+| `POST /invoices/:id/dispute` `{ reason (3–1000), lines: [{ line, note? }] }` | the supplier only | `Invoice` (status `disputed`). 400 for a line that is not on the invoice or picked twice; 409 once paid, already disputed or already answered, or past the deadline ("The time to dispute this invoice passed at 12:00 Thu 22 Oct. Speak to the office: a correction can go on a later week.") |
+| `GET /invoices/disputes` | admin | `InvoiceDisputeRow[]` oldest first, with `disputedLines` (description, amount, the person's note), `ours { total, salesLogged, salesConfirmed? }`, `payrollRunId`, `dueDate`, `teamName`, `figuresChanged`, `runTotal`, and `statements [{ id, campaignCode }]`: the client statements that confirmed the person's sales for that week (P1's `sale_confirmations`) |
+| `POST /invoices/:id/resolve` `{ action: 'reissue' \| 'keep', note (3–1000), adjustment?: { amount, note? } }` | admin | `Invoice`. Disputed only (else 409). `keep` → `resolved` (payable); `reissue` (unpaid runs only) → optional correction, then version + 1, status `issued` |
+
+`PUT /invoices/profile`, `POST /invoices/agreement/accept`, `POST /invoices/:id/accept` and `/dispute` share a
+per-person limit of 60 a minute (the numbers and wording of `middleware/writeLimit.ts`, a counter of their own inside
+the router): the next one is 429 "That is more than 60 changes in a minute. Wait a minute, then try again." with
+`Retry-After: 60`, and is not audited.
+
+Changes to the finance routes (through the foundation's hooks, no edit to `routes/finance.ts`):
+
+- `GET /finance/payroll`, `GET /finance/me` (runs) and `GET /finance/payroll/:id`: each run with an invoice carries
+  `invoice: InvoiceSummary` (status as it stands now, so an issued invoice past its deadline already reads
+  `deemed_accepted`, and the invoice of a run that changed is brought up to date first); runs without one gain no key.
+- `POST /finance/payroll/:id/pay` (admin): **409** when the run's invoice is issued and before its deadline —
+  `"This invoice is not accepted yet. Open the run to mark it paid with a reason."` (`details.code
+  'invoice_not_accepted'`); body `{ overrideReason }` (3–500 characters) pays it anyway and the reason is stored on the
+  invoice. A **disputed** invoice is held until the office resolves it: 409 `'invoice_disputed'` *even with a reason* —
+  `"This invoice is disputed, so it is held until the office answers. Resolve it first in Finance → Company → Disputed
+  invoices: Keep as it is, or Fix and reissue."` (named as the card is). A run whose pay changed since its invoice was
+  issued gets a new version first; while that version waits for the person, 409 `'invoice_reissued'` (or pay it with
+  a reason). `details.deemedAcceptedAt` is the version's deadline. A run without an invoice (office roles, weeks before
+  1.3) is unchanged.
+
+Audit (`server/src/lib/audit/invoiceSpecs.ts`): accept the agreement (entity `agreement`, once), save invoice details
+(own / admin, entity `user`, the changed fields named), save company details (entity `settings`; the signature as a
+file name, never its bytes), accept / dispute / resolve an invoice (entity `invoice`), and a refinement of Mark paid
+(same row and wording as 1.2, plus "without an accepted invoice (LM-SB-…). Reason: "…"" when overridden). Automatic
+steps are `SYSTEM invoices.issue` / `invoices.reissue` / `invoices.refresh` / `invoices.deem` rows (actor "Linear
+Hub"): one per week for issue and deem, one per reissued invoice, one per batch of refreshed ones. Unchanged saves write nothing. The client reports "Print invoice" and "Download PDF" as exports
+(`reportAuditEvent`, formats `print` / `pdf`).
+
+Attention (`lib/attention/invoices.ts`, kind `invoices`, read-only):
+
+- reps and leaders: `invoices:open:<id>:v<version>` "Check and accept your invoice" ("… by 12:00 Thu 22 Oct" once
+  the deadline is under 24 hours away); for a new version "Your invoice changed: £300.00 (was £345.00)" when the total
+  moved, "Your invoice was reissued" when only the paid lines did, "The office fixed your invoice" after Fix and
+  reissue. The body names the deadline: "w/c 12 Oct, £300.00. Accept it or say what's wrong by 08:30 Sat 24 Oct;
+  after that it counts as accepted." A deadline at 00:00 reads "midnight on Thu 22 Oct", never "00:00 Fri 23 Oct";
+  `invoices:resolved:<id>:<at>` "The office replied about your invoice" for 7 days. All severity `info`: they sit in
+  the bell and the top box and never pop up as a toast (a warning toast covered the open invoice's own Accept / Send
+  buttons on phones, and offered "Open My pay" on My pay);
+- admin: `invoices:dispute:<id>:v<version>` "Harry Donnelly says something's wrong" → `/finance?tab=company#disputes`,
+  and on the day before and the day of a deadline `invoices:waiting:<date>` "12 invoices not accepted yet" (count).
+
+One SQL statement per caller (the person's own invoices, with the replaced version's total from a sub-select; the
+admin's disputes and the waiting count in one `UNION ALL`). Measured on the merged demo: the whole feed takes the
+admin 12 statements (was 13 with P2's two admin queries, over the 1.1 budget of 12), a leader 12, a rep 6, a
+recruiter 4.
+
+### Client statements from Gmail (P3)
+
+Every `/statements` path is **admin only** (router-wide). Anonymous → 401; a client account → 403
+`{ clientPortalOnly: true }` (the client guard); leader, recruiter, rep → 403. Types: `shared/src/types/statements.ts`.
+
+| Route | Answer |
+| --- | --- |
+| `GET /statements?campaignId=&status=` | `StatementSummary[]`, newest first (`status` one of `parsed`, `needs_review`, `applied`, `failed`; 400 otherwise). Adds `unmatchedCount`, `campaignColor`, `appliedByName`, `sender`, `senderVerified` (email only: Gmail confirmed the sender; `null` for an upload) and `supersededBy` (the later statement for the same period that replaced an applied one). |
+| `GET /statements/:id` | `StatementDetail`: the rows (with `userName`), `table` (headers, body cells, the column mapping and whether it came from the campaign's saved columns, the layout `totals` / `per-sub`), `people` (per matched person and pay week: logged, confirmed, cancelled, and `weekConfirmed`, the whole-week figure sent to pay), `notListed` (people who logged sales for the campaign in the period but are on no row — worked out once every row is matched), `blockers` (why Apply is refused, in plain words), `warnings`, `effect` (P1's `applyConfirmedSales` dry run while nothing blocks; the stored real result once applied), `template`, `subject`, `replaces` / `replacedBy` (`StatementLink { id, receivedAt, appliedAt, periodStart, periodEnd }`: the applied statement for exactly the same period this one replaces — or replaced, once applied — and the later one that replaced it), `dropped` (`StatementDropped { userId, userName, logged, confirmedBefore }`: people on the statement being replaced who are not on this one) and `outsidePeriodCount` (rows dated outside the period). An applied statement shows the figures as applied (from `statement_allocations`), whatever the gauges say later. |
+| `GET /statements/:id/file[?download=1]` | The PDF (`inline`, or `attachment` with `download=1`), `Cache-Control: private, no-store`, `X-Frame-Options: SAMEORIGIN` and `Content-Security-Policy: frame-ancestors 'self'` so the statement page can frame it (every other response keeps `DENY` / `'none'`). A demo statement's PDF is drawn the first time it is asked for. 404 "Statement PDF not found" when the file is missing; a stored path outside the statements folder is never read. **Audited** (the PDF lists people's earnings) through P9's `recordClientEvent`: an inline open as "Opened the statement PDF: BCN 12–18 Oct 2026" (the same person again within a few minutes adds no row), a download as "Exported BCN statement for 12–18 Oct 2026 as PDF". |
+| `POST /statements/upload?fileName=&campaignId=` | **The body is the PDF itself** (`Content-Type: application/pdf`), read on this route only with `express.raw` (limit `STATEMENT_MAX_BYTES`, 20 MB). 415 another content type, 400 empty, 413 "This PDF is over 20 MB", 422 "This file is not a PDF", 404 unknown campaign, 409 with `details.statementId` when the same bytes are already stored ("This PDF is already here: the BCN statement for 5–11 Oct 2026, received Wed 14 Oct."). → **201** `StatementSummary`. A PDF that cannot be read is still stored, with status `failed` and the reason in `error`. The stored file name never keeps a path. |
+| `PATCH /statements/:id` `{ campaignId?, periodStart?, periodEnd? }` | → `StatementDetail`. Both period ends or neither; start ≤ end; at most 92 days. A new campaign re-reads the rows with that campaign's saved columns and matches them again (picks by hand are kept). 409 once applied. |
+| `DELETE /statements/:id` | 204; the rows go too, and the file when no other statement uses it. 409 once applied. |
+| `POST /statements/:id/apply` | → `StatementDetail` (status `applied`, `appliedAt`, `appliedByName`, the stored `effect`). 409 with the first blocker in plain words ("1 row is not matched to anyone yet: …"), or "This statement is already applied." |
+| `PUT /statements/:id/rows/:rowId` `{ userId: number \| null }` | → `StatementRow` + `rememberedRef` + `alsoMatched`. `null` = "not one of ours" (left out of Apply). The pick also goes to every other unmatched row of the statement written the same way (same name and fundraiser ID — a per-sign-up statement lists a person once per sub); `alsoMatched` says how many. When the row has a fundraiser ID that nobody has at that campaign and the person has none there yet, it is saved as theirs (`rememberedRef`) and the campaign's unapplied statements match again. 404 an unknown row or person (client accounts are not people here), 409 once applied. |
+| `GET /statements/templates/:campaignId` | `StatementTemplate` (404 until saved). |
+| `PUT /statements/templates/:campaignId` `StatementColumnMapping` | → `StatementTemplate`. Each field a header text (what the page sends) or a column index; `null` leaves it out. Needs the name or ID column and a count, date or status column (400 otherwise). Re-reads the campaign's unapplied statements with it (picks kept). |
+| `GET /statements/client-refs?userId=` | `ClientRef[]` (everyone's without `userId`). |
+| `PUT /statements/client-refs/:userId` `ClientRef[]` (or `{ campaignId, ref }[]`) | → that person's `ClientRef[]`. Replaces all of them; a blank `ref` removes one; at most 40 characters. 409 "FR-2041 is already Jordan Lee’s fundraiser ID at BCN." 404 unknown person or campaign, or a client account. Unapplied statements of the campaigns concerned match again. |
+| `GET /statements/senders`, `PUT /statements/senders` `StatementSender[]` | The whole list (PUT replaces it; addresses lower-cased, duplicates dropped; 400 a bad address, 404 an unknown campaign). |
+| `GET /statements/mail` | `MailSettings` + `lastFetchAt`, `checkEveryMinutes` (15). Never the app password, only `hasPassword`. |
+| `PUT /statements/mail` `{ address?, appPassword?, enabled? }` | → `MailSettings`. The app password is 16 letters (Google shows four groups of four; spaces are fine; 400 otherwise), stored encrypted (`lib/crypto.ts` `encrypt`, the app-secret key); `''` removes it. `enabled: true` needs an address and a password (400). Removing either turns the check off. A new address forgets where the last check got to. |
+| `POST /statements/mail/test` | `MailTestResult` `{ ok, message }` — "Connected to Gmail as matt@… (read-only). 2 emails from your statement senders in the last 60 days." or the failure in plain words (also kept as `lastError`). 409 when no address / password is saved. One test at a time (presses while one runs share it) and at most one connection every 10 seconds: a quicker press answers the last result, so the button can never get the account throttled by Google; a new address or app password is tested afresh. |
+| `POST /statements/check-now` | `CheckNowResult` `{ checked, fetched, parsed, applied, errors[] }` — one check now (a check already running is shared). 409 when Gmail is not set up. 429 after 12 checks by the same person in 10 minutes: "That is more than 12 Gmail checks in 10 minutes. Linear Hub also checks by itself every 15 minutes, so wait a few minutes before you press Check now again." A press that shares a running check, and a 409, do not count. The 15-minute job is not limited. |
+
+**Last fix round:**
+
+- **Upload limit.** `POST /statements/upload` answers 429 after 30 PDFs read for the same person in 10 minutes: "That is more than 30 statement uploads in 10 minutes. Wait a few minutes, then upload the rest." A duplicate, refused before reading, does not count. The counters are in P3's router (`STATEMENT_CHECKS_PER_WINDOW`, `STATEMENT_UPLOADS_PER_WINDOW`), not `middleware/writeLimit.ts`.
+- **A failed PDF can be uploaded again.** The same bytes as a statement with status `failed` (a reader that timed out or stopped) are no longer refused with 409. The failed copy is discarded and the PDF is read afresh: 201, with `replacedFailedId` in the answer. Its audit row ends "(it replaces the copy received before, which could not be read either)" when it fails again. A statement that was read is still a duplicate (409).
+- **`StatementDetail.dropped` stays on an applied replacement** (kept with the effect in `effect_json`; `effect` is still P1's `ApplyResult` as it was). Its warning reads "1 person was on the statement this replaced but not on this one (Oliver Bennett): their weeks went back to the subs they logged." Their pay lines are sent with `notOnStatement: true`, so P1 words them "Not on BCN's corrected statement: back to the 22 subs logged, …".
+- **The Apply audit row counts them:** "Applied the BCN statement for 28 Sep – 4 Oct 2026: 1 person, 1 person back to the subs they logged, 0 cancelled subs, +£40.00 on the next pay runs". The automatic `SYSTEM statements.apply` row does the same.
+- **New blockers** (409 on Apply, listed in `blockers`): "A sign-up for Rhys Morgan is dated Thu 14 Oct 2027, after today. Check the dates with the PDF, or mark the row as not one of ours." and "… more than 31 days outside the statement's period (12–18 Oct 2026). …". Several rows: "3 sign-ups are dated after today (the first: …)". A totals row with its own period reads "A row for … covers …".
+- **New warning (holds the statement in Needs review):** "Rhys Morgan logged 4 FCB sales on days this statement has no row for them (w/c 28 Sep): they count as cancelled. Check with the PDF before you press Apply." It appears for a totals statement whose rows for a person each have their own period and leave some of the statement's days out.
+
+Audit (`server/src/lib/audit/statementSpecs.ts`): every write above has a spec — "Changed the Gmail statements settings:
+address matt@gmail.com, app password saved, automatic check on" (never the password, and nothing when nothing
+changed), "Tested the Gmail connection: failed (IMAP is off …)", "Checked Gmail for statements: 2 new statements, 1
+applied automatically", "Changed the statement senders: added BCN commissions@…", "Saved the statement columns for
+BCN: …", "Changed Jordan Lee’s client IDs: BCN FR-2065", "Uploaded a statement: BCN statement for 5–11 Oct 2026 (20
+rows, 20 matched)", "Applied the BCN statement for 5–11 Oct 2026: 20 people, 4 cancelled subs, −£40.00 on the next pay
+runs", "Matched “J. Lee” (and 15 more rows written the same way) on the CHN statement for September 2026 to Jordan Lee",
+"Changed …: campaign BCN, period …", "Discarded …". Automatic steps are recorded as "Linear Hub" (`recordSystemEvent`):
+`SYSTEM statements.fetch` ("Fetched 2 statements from Gmail: BCN 5–11 Oct 2026, CHN September 2026; 1 applied
+automatically"), `SYSTEM statements.apply`, and `SYSTEM statements.mail_error` (once per new failure, not every 15
+minutes).
+
+Needs attention (`server/src/lib/attention/statements.ts`, admins only, one SQL statement, the last 60 days, at most 6
+statement items): `statements:review:<id>` (warning, "BCN statement for 12–18 Oct 2026 needs a look" — the period tells
+two statements of one client apart — with what to do: rows to pick, no campaign, no period, it replaces an applied
+statement, rows dated outside its period, Gmail could not confirm the sender, or the client's columns not saved yet),
+`statements:failed:<id>` (warning, "A statement could not be read", with the reason), `statements:ready:<id>` (info, "…
+ready to apply"), `statements:mail:<hash>` (danger, "The Gmail check for statements is failing", while the check is on).
+Each links to `/finance/statements?statement=<id>` (or `/settings#integrations`).
+
+### PDF downloads (P4)
+
+P4 adds no server routes and no tables. Everything runs in the browser; the only server call is the audit report.
+
+#### POST /audit/events (P9's route, called by every export)
+
+Each download sends one event (`features/pdf/report.ts` `reportExport(format, filename, rows, what?, ownerId?)`); the
+file is already on the device, so a report never blocks or fails it. A report Linear Hub could not take — no signal,
+a 5xx, 408, 429 (P9's 60 a minute), or 401 (the session ended) — waits on the device and is sent later (see Logic,
+"Exports made without signal"); a 400 or 403 is dropped, since it would be refused again:
+
+| Export | Body |
+| --- | --- |
+| Export ▾ CSV | `{ kind: 'export', format: 'csv', what, rows, filename }` |
+| Export ▾ PDF | `{ kind: 'export', format: 'pdf', what, rows, filename }` (the file name ends in `.pdf`) |
+| Audit → Download PDF | `{ kind: 'export', format: 'pdf', what: 'audit-trail', rows: <entries>, filename }` |
+| Learning → Progress → Download PDF | `{ kind: 'export', format: 'pdf', what: 'learning-progress', rows: <lessons>, filename }` |
+
+Release 1.3 fix round (I3): `reportExportEvent(event, ownerId?)` in the same file takes a whole
+`ClientAuditEventInput` (so a PDF of ONE record can name it: `entity`, `entityId`) and uses the same outbox when
+`ownerId` (the signed-in person's id) is given; without it, it is sent once, like `reportAuditEvent`.
+**For the lead (one line each, outside P4's files):** P2's `features/invoices/invoicePdf.ts` (PDF) and
+`features/finance/PayslipModal.tsx` (print), P7's `features/recruitment/pdf.ts` (profile, interview sheet) and P8's
+`features/venues/venueReport.ts` still call `reportAuditEvent`, so those PDFs made without signal are not recorded;
+switching each to `reportExportEvent({ …same event… }, user.id)` gives them the outbox (the caller needs the signed-in
+person's id).
+
+`what` is the page's `auditWhat` prop, else the CSV file name's section (shared `exportWhatFor`): e.g.
+`gauges-by-team-deansgate`, `leaderboard-week-sales`, `payslips` — lower case, hyphens, at most 80 characters.
+`server/src/test/pdf-export.test.ts` sends exactly these bodies: 204 for admin, leader, recruiter and rep; 403
+(`clientPortalOnly`) for a client portal session; 401 anonymous. P9's validation must keep accepting them (checked
+against P9's branch: its zod schema accepts them and drops unknown keys, so a replayed report carries no extra field).
+Waiting reports also call `GET /auth/me` once before they are sent, to check the session is still that person's.
+
+#### Client: `client/src/lib/pdf` (STABLE; additions marked "Release 1.3 (P4)")
+
+- `PDF_EXPORTS_READY = true`.
+- `exportTablePdf(TablePdfOptions)` → downloads the file. Options as laid down (`title`, `subtitle?`, `filters?`,
+  `columns` = the CSV `CsvColumn`s, `rows`, `totals?`, `filename`, `orientation?` 'auto') plus `generatedBy?` (name after
+  "Generated …") and `now?` (the clock, for tests).
+- `pdfDocument(PdfDocumentOptions)` → `PdfDoc`. Options: `orientation?`, `title?` (metadata and the running header of
+  later pages), `generatedBy?`, `now?`. Chainable blocks, each drawn once:
+  - `header({ title, subtitle?, meta?, filters? })` — the brand band, then the title; `meta` pairs on the right
+    (`[['Invoice', 'LM-SB-2026-000123'], ['Due', 'Fri 23 Oct 2026']]`), `filters` lines under the subtitle.
+  - `addressBlocks(left, right)`, `heading(text)`, `paragraph(text, { muted?, size? })`, `keyValues(rows)`,
+    `lineTable(columns, rows)` (`width` relative, `align`, `muted` rows in grey), `table(csvColumns, rows)`,
+    `totals(rows)` (`strong` = the bold total with a rule above), `signatureBlock(left, right?)` (`imageDataUrl` a PNG
+    or JPEG data URL; an unreadable image leaves the line blank), `footer(text)`.
+  - New: `space(mm?)`, `pageBreak()`, `needs(mm)` (start a new page unless that much room is left — keep a heading with
+    its table), `bytes()` (the file as `Uint8Array`).
+  - `save(filename)` / `blob()` / `bytes()` finish the file once (running headers, "Page x of y"); later calls return
+    the same bytes.
+- `preloadPdf()` starts loading the PDF chunk (ExportButton calls it when its menu opens).
+- `PdfUnavailableError` when the chunk cannot load ("You are offline. Connect and try the PDF again — the CSV works
+  offline." or "Could not load the PDF maker … Reload the page and try again.").
+- `PdfLineRow` is now `{ [key: string]: string | boolean | undefined; muted?: boolean }` (the laid-down
+  `Record<string, string> & { muted?: boolean }` could not be written as a literal with `muted: true`). Cells are
+  strings; anything else prints empty.
+- `render.ts` (the drawing, `buildTablePdf`, `createPdfDoc`, `prepareTable`, `tableFontSize`, `PDF_COLOURS`) and
+  `engine.ts` (jsPDF + jspdf-autotable, the lazy chunk) are internal: import `@/lib/pdf`.
+
+#### Client: `client/src/lib/csv.ts`
+
+- `CsvColumn.kind?: PdfCellKind` ('text' | 'number' | 'money' | 'date' | 'datetime' | 'percent') — how the PDF writes
+  the column. Without it the formatter says (`csvMoney` → money, `csvDate` → date, `csvDateTime` → datetime,
+  `csvPct(n)` → percent, `csvDecimal(n)` → number), else a column of plain numbers without a formatter is 'number',
+  else 'text'. CSV output is unchanged (byte for byte).
+- New helpers: `csvColumnKind(column, sample?)`, `csvCellText(row, column)` (the exact CSV cell text before quoting),
+  `downloadBlob(filename, blob)` (`downloadCsv` uses it).
+
+#### Client: `ExportButton` (`features/common/ExportButton.tsx`)
+
+Every call site is unchanged. With `PDF_EXPORTS_READY` and `pdf !== false` it is an **Export ▾** menu: **CSV**
+("Spreadsheet · opens in Excel") and **PDF** ("To print or share"). The default label "Export CSV" now reads "Export";
+a custom label keeps its words ("Export hired candidates"). `pdfTitle`, `pdfFilters`, `pdfTotals`, `auditWhat` refine
+the PDF and the audit name. While nothing is on screen the button is disabled with the old hint.
+
+- Filter lines: without `pdfFilters`, the PDF prints what the file name says (status, team, dates) plus the filters
+  set in the button's own filter bar (`report.ts` `screenFiltersNear`): drop-downs with an "all" choice that are set
+  ("Team: Northern Lights", "Position: Field Representative", "Source: Indeed", "Owner: Priya Shah") and search boxes
+  with words in them ("Search: “Zed”"). That covers Team, Recruitment's list and Gauges with no call-site change. A
+  page whose filters are not beside its button (or not drop-downs / search boxes) passes them in words.
+- Release 1.3 fix round (I3): `pdfScreenFilters?: string[]` — the filters set on screen, in words, used instead of
+  what is read beside the button and printed the same way (with the file name's lines, a line with the same label
+  giving way to it, the date range last). `pdfFilters` still replaces every filter line. Two call sites pass it (the
+  only call-site changes, outside P4's files): Recruitment's board **Hired** column (`pages/Recruitment.tsx`: "Source:
+  Indeed", "Owner: Priya Shah", "Search: “…”" from the same state its query uses) and a rep's **Leaderboard**
+  (`pages/Leaderboard.tsx`: "Team: Northern Lights", shown on screen as a badge, not a picker).
+- The menu opens above the toast stack (`Dropdown aboveToasts`, see below), so a toast never covers CSV / PDF.
+- Each mounted button sends any export reports that waited on this device for its signed-in person.
+
+#### Client: `components/ui/Dropdown.tsx` (outside P4's files: one additive prop)
+
+`aboveToasts?: boolean` (default false): the menu panel uses `z-[90]` instead of `z-[70]`, above the toasts
+(`z-[80]`). Only ExportButton passes it; every other menu is unchanged. Needed because near the foot of the window
+the Export menu opens upwards into the toast corner, where an attention toast ("34 runs to pay · …") or an export
+toast covered the items and took the click.
+
+#### Client: slots filled
+
+- `features/pdf/AuditPdfButton` `{ entries, filters, total?, query? }` — **Download PDF** in the Audit header (When,
+  Who, What happened, Record, Changes) under P9's filter lines. New optional props: `total` (GET /audit `total`) and
+  `query` (the view's GET /audit query without `limit` / `offset`). With both, the PDF holds every matching entry,
+  newest first, up to 2,000 (read 200 at a time, the server's most), and says "The newest 2,000 of 2,550 matching
+  entries" when capped; without them it is the page on screen and says so ("The 50 entries on screen (more may match
+  the filters)", fix round I3). The Who column names a row as the Audit page does (`features/pdf/auditPdfText.ts`
+  `auditPdfWho`, from the shared rules behind `kinds.tsx` `auditActorName`): "Attempt on Jordan Lee's account" for a
+  failed try on the sign-in page, "Unknown person" for an email nobody has, "Linear Hub" for an automatic step.
+  **P9 / the lead: wire it in
+  `pages/Audit.tsx`:** `total={total}` and `query={{ userId, entity: entity || undefined, entityId, from: from ||
+  undefined, to: to || undefined, q: q || undefined, kind: kind || undefined }}` (on the foundation's page:
+  `signIns: signIns ? undefined : 0` instead of `kind`).
+- `features/pdf/ProgressPdfButton` `{ userId? }` — **Download PDF** on Learning → Progress (own view and a person's):
+  the COD pack checklist, the next level's requirements and the required videos (P5's `GET /videos` for oneself,
+  `GET /videos/team?userId=` for someone else; left out while none apply). `features/pdf/progressVideos.ts` (pure,
+  node-tested) picks them: the own view lists the required videos that apply to the person's role (`videoRequiredOf`,
+  the same rule as P5's shared `videoRequiredFor`, which can replace it once P5 lands); another person's view says
+  "2 of 2 required videos watched" from that person's `requiredTotal` (not the body's `required`, which counts every
+  audience's videos) and lists them from `cells` / `videos`.
+
+#### Shared: `shared/src/logic/exportFormat.ts`
+
+`PDF_PORTRAIT_MAX_COLUMNS`, `PdfOrientation`, `pdfOrientationFor` (as laid down) plus `PdfCellKind`,
+`PDF_WINANSI_EXTRAS`, `toPdfText`, `pdfSafeText` (per line since fix round I3), `pdfGuardLine` (I3: the guard for a
+line exactly as drawn), `pdfInfoText`, `pdfMoney`, `pdfNumber`, `pdfDate`, `pdfDateShort`,
+`pdfDateTime`, `pdfDateRange`, `pdfPageLabel`, `pdfCellText`, `isNumericCell`, `isNumericColumn`, `parseExportFilename`,
+`pdfFilenameFor`, `exportWhatFor`, `pdfHeadingFor` (now also takes `screenFilters`), `pdfGeneratedLine`, and
+`asciiFold` (re-exported from the new `shared/src/logic/textFold.ts`, which holds the fold and transliteration tables
+so the main chunk, which names every CSV file, does not pull in the rest). Unit tests: `exportFormat.test.ts` (22).
+
+#### For the packages that draw page PDFs (P2, P7, P8)
+
+```ts
+import { PDF_EXPORTS_READY, pdfDocument, exportTablePdf } from '@/lib/pdf';
+import { reportExport, reportExportEvent } from '@/features/pdf/report';
+
+const doc = await pdfDocument({ title: `Self-billed invoice ${inv.number}`, generatedBy: fullName(me) });
+doc.header({ title: 'Self-billed invoice', subtitle: weekLabel, meta: [['Invoice', inv.number], ['Due', due]] })
+  .addressBlocks(supplier, customer)
+  .lineTable(columns, lines)        // muted: true for "not paid" lines
+  .totals([{ label: 'Total due', value: '£234.00', strong: true }])
+  .signatureBlock(office, person)
+  .footer(`Linear MCR Limited · Self-billed invoice ${inv.number}`)
+  .save(`linear-hub-invoice-${inv.number}.pdf`);
+reportExport('pdf', filename, lines.length, 'invoice');
+// or, naming the one record the PDF is of (I3):
+reportExportEvent({ kind: 'export', format: 'pdf', what: `invoice ${inv.number}`, filename, entity: 'invoice', entityId: inv.id }, me.id);
+```
+
+P8's venue report: `exportTablePdf({ title, subtitle, filters, columns, rows, totals, filename })`, or a
+`pdfDocument` with `heading` + `table(columns, rows)` per section. Money passed to `lineTable` / `totals` is already
+text ("£1,234.50"); in `table`/`exportTablePdf` use the CSV formatters (or `kind`) and the PDF writes it as on screen.
+
+### Learning videos (P5)
+
+All under `/api/videos` (`server/src/routes/videos.ts`), behind `requireAuth`: anonymous → 401; a client portal
+account → 403 `{ clientPortalOnly: true }` on every one of them (the foundation's client guard). Types in
+`shared/src/types/videos.ts`. A video outside the caller's audience answers **404 "Video not found"**, exactly like one
+that does not exist.
+
+| Route | Who | Answer |
+| --- | --- | --- |
+| `GET /videos` | staff | `LearningVideo[]` the caller's role sees, newest first, each with `my` (their own progress or null) |
+| `GET /videos/access` | staff | `{ canAdd, uploadRoomBytes? }`: `canAdd` is true for admins always, and for leaders while Settings → Learning videos allows it. `uploadRoomBytes` (only for admins and leaders who may add videos) is the bytes an upload may use now: free space, less the reserve, less what the uploads already arriving will still write. It is null when the server cannot tell |
+| `GET /videos/settings` · `PUT /videos/settings { leadersCanAdd }` | admin | `VideoSettings { leadersCanAdd, storage: { uploads, bytes, folder } }` (`storage` on GET and PUT answers only) |
+| `GET /videos/team[?userId=]` (cached) | admin (everyone), leader (own team) | `TeamVideoProgress { required, rows, videos }`; `?userId=` one person (a leader: themself or their team, else 403; a client account or unknown id 404) |
+| `POST /videos` `VideoLinkInput` | admin; leader when allowed | 201 `LearningVideo`. 400 for anything but a YouTube, Vimeo or Google Drive video link; 409 "This video is already in Learning as “…”" for the same video in any form of link |
+| `POST /videos/upload` (multipart) | admin; leader when allowed | 201 `LearningVideo`. See *Uploads* below |
+| `GET /videos/:id` | staff in its audience | `LearningVideo` |
+| `GET /videos/:id/stream` (+ `HEAD`) | staff in its audience | the file: 200, or 206 for a `Range: bytes=…` request, 416 past the end; `Accept-Ranges: bytes`, `Cache-Control: private, no-store`, `ETag`, `If-Range`. 404 for a link; 404 "The video file is missing on the server: restore the media folder from your backup, or upload the video again" when the row's file is gone |
+| `GET /videos/:id/poster` | staff in its audience | the upload's still (JPEG, `private, max-age=86400`); 404 without one |
+| `POST /videos/:id/poster { image, durationS? }` | whoever may edit it | `LearningVideo`. `image` = `data:image/jpeg;base64,…` of at most 600 KB (fits the 1 MB JSON limit); `durationS` fills a missing length only (and then counts everyone who has already seen 90% of it as watched). 400 for a link or anything but a JPEG |
+| `GET /videos/:id/views` | admin | `VideoViewRow[]`: everyone who started it (never client accounts), watched first, with `marked` when **Mark as watched** made it watched (stored when it happened) |
+| `PATCH /videos/:id` `VideoUpdateInput` | admin; the leader who added it while leaders may add | `LearningVideo`. Title, description, topic, audience, required, `durationS` (the link itself never changes; a new length counts everyone who has already seen 90% of it as watched, and never takes "watched" back); 400 "Nothing to change" for `{}` |
+| `DELETE /videos/:id` | same | 204; an upload's file and still are deleted too; everyone's progress goes (CASCADE) |
+| `POST /videos/:id/progress` `VideoProgressInput` | staff in its audience | `VideoProgress` (their own row only), with `marked` and `owedS`: seconds the report showed as seen that are not counted yet (over the watch credit). 429 after 30 reports by the same person for the same video in a minute: "That is more than 30 progress reports for this video in a minute. What you watch is kept and counted from your next report." The player sends about 4 a minute |
+
+`LearningVideo` adds to the foundation's fields: `provider` ('youtube' \| 'vimeo' \| 'drive'), `thumbnailUrl`
+(YouTube's still from i.ytimg.com, or `/api/videos/:id/poster`), `canEdit`; `VideoProgress` (and so `LearningVideo.my`)
+adds `marked`. File paths are never sent. `embedUrl` is
+the plain embed; the page builds the tracking one (`videoEmbedUrl(url, { startS, origin })`).
+
+**Uploads** (`POST /videos/upload`, the app's only multipart route; `lib/videos/upload.ts`, busboy 1.6.0). Parts in
+the order `VIDEO_UPLOAD_FIELDS`: `title`, `description`, `topic`, `audience`, `required` ("true"/"false"),
+`durationS` (whole seconds, optional), `poster` (optional JPEG ≤ 600 KB; one that is not a JPEG is left out), then
+`video` last. The fields are validated when the video part starts, so a missing title fails at once, not after 2 GB.
+The file streams straight to `media/videos/<uuid>.upload` and is renamed to `<uuid>.mp4|webm|mov` once complete.
+Refusals: 400 not multipart / no file / empty file / cut off; 413 over 2 GB (a declared `Content-Length` over the cap
+is refused before reading; the counter stops a lying one) or too many parts; 415 "Upload an MP4, WebM or MOV video"
+when the first bytes are not an ISO media (MP4 / MOV) or WebM container, whatever the name says; **507 before the
+file is read** when the disk has no room for it: an upload may use the disk's free space less a reserve of a tenth of
+the disk, at most 500 MB (a 1 GB cloud volume keeps 100 MB for the database and its backups): "The server has room for
+420 MB more and this video is 1.3 GB. Free some disk space on the server, or add the video as a YouTube, Vimeo or
+Google Drive link." (or "The server is almost out of disk space. …" without a declared size). The room counts the
+uploads already arriving: each holds its declared size, less what it has written, until it ends (last fix round). So
+two uploads that each fit, but not together, are never both let in. 507 also if the disk fills while it arrives:
+"The server ran out of disk space while this video arrived. Free some disk space on the server, or add the video as a
+YouTube, Vimeo or Google Drive link." Any failure removes the partial file and answers with `Connection: close`. While at least one upload is
+arriving the HTTP server's `requestTimeout` is raised from Node's 5 minutes to 3 hours (a 2 GB file over a hotspot)
+and put back once the last one ends.
+
+**Progress** (`POST /videos/:id/progress`): `{ watchedS, positionS?, ended?, ranges?, durationS?, markWatched? }`.
+`ranges` (≤ 200 per report) are the parts seen since the page opened; the server merges them with the stored ones and
+counts each second once (`watched_s` never goes down). Without `ranges` a link keeps the larger of `watchedS` and what
+it had; for an upload a bare `watchedS` adds nothing (its player always sends the parts it showed). What one report
+adds is limited by the **watch credit** (below), so "watched" cannot be claimed with one request. `ended` puts the
+resume position back to 0. `markWatched` is for links only (400 for an upload: "An uploaded video counts as watched
+once you have seen 90% of it"). A video without a length takes `durationS` from a report by someone who may edit it
+(and then everyone who has already seen 90% of it counts as watched); anyone else's reported length only limits their
+own ranges, and decides their own "watched" for a link only — **an upload without a length of its own counts as
+watched only once it has one**. A link watched to 90% of a length only the viewer's own player reported is stored as
+**Marked** (their own word, like Mark as watched). Once the link has a length, a viewing measured at 90% of it becomes a
+watch (last fix round). A report that makes a video watched clears the response cache itself. The others no longer
+clear it either: the blanket "every write clears the cache" step in `app.ts` skips progress reports (the P5 merge
+note, applied in the last fix round).
+
+**Audit** (`lib/audit/videoSpecs.ts`): "Added video: “…” (YouTube link)" / "(upload, 312 MB)"; "Updated video “…”:
+required no → yes" (nothing when nothing changed; a description is named, never quoted); "Deleted video “…”"; "Added a
+still to video “…” (length 0:42)" / "Replaced the still of video “…”"; "Changed learning video settings: leaders can
+add videos no → yes". Progress writes a row only when it makes the video watched for that person ("Watched “…”" or
+"Marked “…” as watched"). The report every 15 s writes nothing. Last fix round: a report from an editor's player that
+gives the video its length writes "Set the length of video “Team talk” to 1:04 (from Danil Varianyk’s player);
+counted 1 person as watched". Edit video and the still step add "; counted N people as watched" when a new length
+counts people. Snapshots never hold a file path.
+
+### Client accounts and campaign pages (P6)
+
+Every route is behind `requireAuth` (anonymous → 401). A client session reaches **only** `/client/*` (and its own
+`/auth/me`, `/auth/pin(/*)`, `/auth/logout`, `/health`): the foundation's client guard answers 403
+`{ error: 'This account can only use the client portal', clientPortalOnly: true }` everywhere else, `/client-posts`,
+`/client-accounts` and `/campaigns/:id/page` included (P6's test walks every route of the app).
+
+#### The client's portal (`routes/client.ts`, client accounts only — staff 403)
+
+| Route | Answer |
+| --- | --- |
+| `GET /client/portal` | `ClientPortal { campaign: { id, code, name, color }, me: { id, name, email }, posts }` — the client's own campaign only, posts newest first (at most 200). |
+| `GET /client/posts` | `ClientPost[]`, the same list. |
+| `POST /client/posts` `ClientPostInput` | **201** `ClientPost`. `update` / `announcement`: published straight away — an `announcements` row authored by the client account (so it carries `fromClient`, the badge "From Breast Cancer Now"), `status: 'published'`, `announcementId` set. `commission`: `status: 'pending'`, no announcement; `rateRep` (£ per sub to the fundraiser) and / or `ratePayout` (£ per sub to Linear), `effectiveFrom` today … today + 366 days (business clock), kept as `requestedFrom` too; title and message optional (default title "Commission change from Mon 2 Nov"). **400** `{ error: <first problem>, details: [{ path, message }] }` from the shared `clientPostProblems` (the portal form's own rules); **429** after 20 posts in 24 hours; the same post again within two minutes (a double tap) answers **200** with the first post and writes nothing. Both windows count on the **real clock** (`client_posts.posted_at`), like every rate limit; `created_at`, what everyone reads, is the business clock. The campaign always comes from the session, never the body. |
+
+The client's copy of a post never names the office: `decidedBy` is `null` and `decidedByName` / `unread` are absent.
+`decisionNote` reaches the client **only on a declined change** (the reason, written for them); the note Matt may add
+when he approves or unpublishes is the office's own and is always `null` in `GET /client/portal` and `GET /client/posts`.
+
+#### The office (`routes/clientOffice.ts`)
+
+| Route | Roles | Answer |
+| --- | --- | --- |
+| `GET /client-posts?status=&campaignId=` | admin, leader | `ClientPost[]` newest first, each with `unread` for the caller (no read receipt and newer than 30 days, not unpublished). 400 for an unknown status. |
+| `GET /client-posts/unread` | admin, leader | `{ count }` — the sidebar Campaigns badge. |
+| `POST /client-posts/read` `{ ids: number[] }` | admin, leader | 204: the caller's receipts for every listed post in **one** statement (at most 200 ids, unknown ids ignored, idempotent; not audited). The campaign page sends one of these per visit instead of one request per post. 400 for a missing or bad list. |
+| `POST /client-posts/:id/read` | admin, leader | 204, idempotent (the caller's own receipt; not audited, like announcement reads). |
+| `POST /client-posts/:id/approve` `{ effectiveFrom?, note? }` | admin | `ClientPost` (`status: 'approved'`, `effectiveFrom` = the date Matt confirmed, default the client's; `requestedFrom` keeps the client's; `note` is an office note, never shown to the client). Adds the campaign rate through **P1's `addCampaignRate`** (`source: 'client'`, `clientPostId`), which recalculates unpaid weeks from that date; a rate the change leaves out keeps the one in effect on that date. The post and the rate are written in one transaction: if P1's call fails (the foundation stub answers 501), nothing changes. 409 unless a pending commission change; 400 for a date that is not a date, more than a year ahead, or before the campaign started. |
+| `POST /client-posts/:id/decline` `{ note }` | admin | `ClientPost` (`status: 'declined'`, `decisionNote` shown to the client). The reason is required (400). 409 unless pending. |
+| `POST /client-posts/:id/unpublish` `{ note? }` | admin | `ClientPost` (`status: 'unpublished'`, `announcementId: null`): the Announcements row is deleted (its read receipts with it). The note stays in the office. 409 unless published. |
+| `PATCH /client-accounts/:id` `ClientAccountUpdateInput { status?, firstName?, lastName?, email? }` | admin | `ClientAccount`. `status: 'left'` signs the client out everywhere at once. 400 with nothing to change, 409 for an email in use, 404 for an unknown id **or a staff member**. |
+| `POST /client-accounts/:id/reset-pin` | admin | `ClientAccount` (`hasPin: false`): PIN, failed count and lock cleared, every session ended; they create a new PIN at the next sign-in. 404 for staff. |
+
+#### The campaign page (`routes/campaignPages.ts`, mounted before `/campaigns`)
+
+| Route | Roles | Answer |
+| --- | --- | --- |
+| `GET /campaigns/:id/page` (cached per person) | every staff role | `CampaignPage`. **Admin, leader** (`full: true`): the campaign with its money, brief and client contact, `rates` (P1's `listCampaignRates`), every post with its status and `unread`; admin also `clientAccounts` and `paidThrough` (the last day of the latest pay week with a paid run, or `null`: the Approve dialog's warning). **Recruiter, rep** (`full: false`): no `payoutPerSale` / `repCommissionPerSale`, no rates, no accounts, `contactName` / `contactEmail` / `contactPhone` are `null` (the client contact's details are for the office), only published posts (never a commission change). Everyone: the client's announcements (authored by this campaign's client accounts, newest 50), this calendar month's events (a rep: own team only, as `GET /events`) and `sales: { thisMonth, lastMonth }` (gauge sales of this campaign's events). 404 for an unknown campaign. |
+| `GET /campaigns/:id/client-accounts` | admin | `ClientAccount[]`, active first. |
+| `POST /campaigns/:id/client-accounts` `ClientInviteInput { firstName, lastName, email, signInUrl? }` | admin | **201** `ClientInviteResult { account, accessCode, instructions }`: a `client` user (no team, the owner's pay plan, no PIN) with the next access code (`nextClientAccessCode`: CL-0002 onwards, never a demo code). `instructions` is the plain text to email (it names `signInUrl` when sent, an http(s) address). 409 for an email that already has an account (staff included). |
+
+#### Changed 1.0 routes
+
+- `POST /campaigns` and `PATCH /campaigns/:id` (`routes/campaigns.ts`) also take `longDescription`, `brief`,
+  `contactName`, `contactEmail`, `contactPhone` (each optional; `''` or `null` clears it, a field left out keeps its
+  value; `contactEmail` must be an email) and answer the campaign **plus** those five fields. P1's
+  `recordCampaignRateChange` calls are unchanged.
+- `GET /auth/pin` (`lib/pin.ts pinStatusFor`): `required` is also `true` for a client account (never for the demo client).
+
+#### Needs attention (`lib/attention/clientPosts.ts`, kind `client`, the bell's "Client updates")
+
+- Admin: `client:commission:<id>` (warning) for every pending commission change, until it is decided — "Breast Cancer
+  Now asks to change commission", **Review** → `/campaigns/<id>?post=<id>`.
+- Admin and leader: `client:post:<id>` (info) for every other post they have not read, from the last 30 days —
+  "Update from Breast Cancer Now", **Read it**. A leader sees a pending change as info ("Waiting for the office").
+- Every other role: nothing. One statement per caller, so the feed's 1.1 budget (12 statements) holds with P2's and
+  P3's providers merged: for an admin a `UNION ALL` of the pending changes, **all of them** up to the feed's 20 (a
+  change to approve is never pushed out by newer posts; the feed keeps warnings ahead of info items), and at most 8
+  unread posts, newest first, each part with its own `ORDER BY` and `LIMIT`; for a leader the unread posts alone. Reading a client's announcement in Announcements does not clear its item; opening the campaign page does.
+
+#### Audit (`lib/audit/clientSpecs.ts`)
+
+Every write is recorded: the client's posts with the **client account as the actor** ("Breast Cancer Now posted an
+update: “New welcome pack”", "… asked for a commission change: £22.00 per sub to the fundraiser, from Mon 2 Nov"),
+approve (plus the `campaign_rate` row it added), decline (with the reason), unpublish (plus the removed announcement and
+its text), invite ("Invited Jo Bloggs (CL-0002) to the Breast Cancer Now client portal"), deactivate / reactivate /
+edit an account, reset a PIN. Reactivating with nothing else changed reads "Reactivated the client account of Rachel
+Okafor (Children's Hospice North)". Read receipts are skipped. `POST /campaigns` and `PATCH /campaigns/:id` are refined from
+the 1.2 specs (same wording) so the snapshot holds the brief too. Snapshots never hold a PIN or its hash (`pinSet` only).
+
+### Recruitment: date of birth, schedule, question bank, interview sheets (P7)
+
+Every route is for the recruitment roles only (admin, leader, recruiter; reps 403, a client account 403
+`clientPortalOnly`, anonymous 401). The question bank is the admin's and the recruiter's (leaders 403).
+
+| Route | Body / query | Answer |
+| --- | --- | --- |
+| `GET /recruitment/schedule` | `from`, `to` (YYYY-MM-DD, Europe/London days; default today … today + 6; `from` alone is one day; at most 93 days), `interviewerId` (a person, or `none` for "no interviewer yet"), `type` (`phone` · `first` · `observation` · `final`) | `InterviewScheduleItem[]` by time: the interview, `candidateName`, `candidateStage`, `positionApplied`, `day` (its London date), `sheetQuestions` / `sheetAnswered` (the saved sheet's counts, else the bank's draft count for the type and position) |
+| `GET /recruitment/candidates/:id/timeline` | — | `CandidateTimelineItem[]`, newest first (see Logic); 404 "Candidate not found" |
+| `GET /recruitment/candidates/:id/sheets` | — | `CandidateSheet[]`: every interview of the candidate with a saved sheet — its type, time, interviewer, outcome, the answers as asked and `summary` |
+| `GET /recruitment/questions` | `type` (optional) | `InterviewQuestion[]` in interview order (phone, first, observation, final), then the bank's order |
+| `POST /recruitment/questions` | `InterviewQuestionInput { interviewType, text (5–300 characters, whitespace tidied), position? (null = every position), sort? (default: the end of its type), active? }` | 201 `InterviewQuestion`; 409 "That question is already in the final interview list" when the same words (ignoring case and spaces) are already in that type's list for the same position or for every position (a sheet would show it twice) — "…, turned off. Turn it back on instead" when that one is turned off |
+| `PATCH /recruitment/questions/:id` | any of the above | `InterviewQuestion` (moving it to another type puts it at the end there); a save of the same values changes nothing; the same 409 when the new words, type or position clash with another question |
+| `PUT /recruitment/questions/order` | `{ interviewType, ids }` — every question of that type, once each, in the new order | `InterviewQuestion[]` of that type |
+| `GET /recruitment/interviews/:id/sheet` | — | `InterviewSheet { interview (+ candidateName), answers, saved, candidate { id, name, stage, positionApplied, dateOfBirth }, summary, changes }`; a read never writes |
+| `PUT /recruitment/interviews/:id/answers` | `InterviewAnswerInput[]` (1–30 items) — the first save sends every question on screen, in order; later saves only **what this device changed**: `{ questionId (a bank question) or null (a question of their own), questionText (required for their own; for a bank question, the words on screen), answer (≤ 4,000 characters), score? (1–5 or null), base? { answer, score } (what this device started from), removed? (true: take the question off), device? + version? (both or neither: the sending browser tab's made-up id, 8–64 letters, digits, `-` or `_`, and its save number, a whole number rising with each save) }` | `InterviewSheet` (each stored answer also says `device`: the tab whose save last wrote it, or null); **409** `{ error: "Question 3 was changed by Rhys Morgan on another device. Choose which answer to keep.", details: InterviewSheetConflictDetails { conflicts: [{ questionId, questionText }], sheet } }` when another device changed (or answered) the same question since this one saw it — nothing is written then; 400 for an unknown bank question, a question twice, their own question without words, an empty list, a bad score, a long answer, or a sheet left with no question or more than 30 |
+
+Changes to the 1.0 routes (`routes/recruitment.ts`, P7's in 1.3):
+
+- `POST /recruitment/candidates` and `PATCH /recruitment/candidates/:id` take `dateOfBirth` (YYYY-MM-DD; `null` or `""`
+  clears it). It must be a real date, not in the future, giving an age of 14 to 100 (400 with the reason, e.g. "That
+  makes them 11. Check the year: candidates are at least 14"). Every candidate payload carries `dateOfBirth` only when
+  it is recorded (`db/queries.ts` mapCandidate, the foundation's hook).
+- `POST /recruitment/interviews` also records who booked it, for when (`interview_changes` field `booked`).
+- `PATCH /recruitment/interviews/:id` also records each field that really changed — the interviewer (ids), the time
+  (compared as instants, so the same moment written another way is no change), the type, the outcome — with who and
+  when, in the same transaction. Notes are not logged there (the audit trail has them). It refuses to move an
+  interview to another candidate (400 "An interview stays with its candidate. Book a new interview for the other
+  candidate"): its bookings, interviewers and sheet belong to its candidate. Sending its own `candidateId` is fine.
+
+Audit (`lib/audit/recruitmentSpecs.ts`): "Added a phone screen question: “…”", "Edited a first interview question:
+text …", "Turned off / on a … question", "Reordered the … questions", "Started / Updated the first interview sheet for
+Sam Brown: 4 of 6 answered, average score 4.5" (filed under the candidate, the snapshot holds the questions as asked and
+the answers). A save that changes nothing writes no row. `POST /recruitment/candidates` and `PATCH
+/recruitment/candidates/:id` are refined from the 1.2 specs (same rows, same wording) so a date of birth change is
+explained — "Updated candidate Sam Brown: date of birth set to 12 Mar 2001" / "changed from … to …" / "removed (was …)"
+— instead of "(no changes)"; when the date of birth does not change the 1.2 rows pass through untouched. If a 1.2
+spec is ever not found (P9's file changed), only this refinement is lost, with a warning at start-up; the server still
+starts. A refused (409) save writes no audit row.
+
+### Venues, rosters and event plans (P8)
+
+Every endpoint needs a signed-in **staff** account: anonymous → 401, a client account → 403 `clientPortalOnly` (the
+client guard, before any router). Nothing here writes a gauge row or touches pay.
+
+#### Venues (`routes/venues.ts`, every staff role, response-cached)
+
+**`GET /venues?sort=sales_per_shift|shifts|last_visit`** → `VenueSummary[]` (default `sales_per_shift`; anything else
+→ 400 "Invalid sort"). One row per venue key (`venueKey(venue, city)`, so "Golden Square" and "golden  square" are one
+venue), for every venue with a counted shift or an upcoming event (a venue only ever cancelled is left out).
+
+| Field | Meaning |
+|---|---|
+| `key`, `venue`, `city` | the key; the name as typed on the venue's latest event |
+| `eventCount` | **visits**: events at the venue with at least one counted shift |
+| `shifts`, `sales`, `stops` | counted shifts (person-days) and their sales and stops |
+| `salesPerShift` | sales ÷ shifts, 2 dp (0 without shifts) |
+| `lastVisit` | the latest counted visit's date, or null |
+| `nextVisit` | the next scheduled or live event dated today or later, or null |
+| `campaigns` | campaign codes worked or booked there, most shifts first |
+
+Sorts: sales per shift (highest first; venues with **fewer than 10 shifts** after the rest, venues without a shift
+last), shifts (most first), last visit (latest first). Ties: more shifts, then the name.
+
+**`GET /venues/:key`** → `VenueProfile`: 400 "Invalid venue" unless `isVenueKey(key)`; 404 "Venue not found" when no
+event was ever held there. Everything in the summary, plus:
+
+- `perShift` (six gauges per shift, 1 dp) and `ratios` (`funnelRatios` of the venue's totals); `company` — the same for
+  every counted shift in the company, with `shifts` and `salesPerShift`.
+- `byCampaign[]` `{ campaignId, code, name, color, sector, shifts, perShift, salesPerShift, ratios, company }`, most
+  shifts first. `company` (`VenueGroupFigures { shifts, perShift, ratios, salesPerShift }`) is the **same campaign
+  everywhere** in the company (this venue included).
+- `byWeekday[]` `{ weekday (ISO 1 = Monday … 7 = Sunday), shifts, salesPerShift, stopsPerShift, perShift, ratios,
+  company }`, days with shifts only; `company` is the **same weekday everywhere**.
+- `events[]` — every event at the venue, newest first: `{ id, name, date, type, status, teamName, campaignCode,
+  campaignColor, sales, people, booked? }` (`people` = who logged it; `booked` on upcoming events somebody is booked on).
+- `lawOfAverages` `{ points, pointsCapped, fittedRate, stopsPerSale, correlation, bands, visits, sentence, stability,
+  steadiness, chanceCv }` — see Logic. `points` are anonymous person-days `{ stops, sales, date }` (the 400 most recent;
+  every figure uses them all).
+- `you?` — the caller's own numbers at the venue `{ shifts, sales, salesPerShift, perShift, ratios }` (absent without a
+  shift there).
+- `people?` — named rows `{ userId, name, avatarColor, shifts, sales, salesPerShift, stopsPerSale, lastVisit }`: the
+  **admin** gets everyone who worked there; a **leader** gets their own (current) team and themself; **reps and
+  recruiters never get the key**. Sorted by sales per shift, people with fewer than 3 shifts there after the rest.
+
+#### Bookings and plans (`routes/eventPlans.ts`, mounted at `/events` before the events router)
+
+| Route | Who | Answer |
+|---|---|---|
+| `GET /events/:id/roster` | every staff role | `EventBooking[]` `{ eventId, userId, userName, avatarColor, bookedBy, bookedByName, bookedAt, source, onLeave? }`, by first name (`onLeave: true` only for someone on leave) |
+| `PUT /events/:id/roster` `{ userIds }` or `{ add?, remove? }` | the admin; the leader of the event's team | the roster after the change |
+| `POST /events/:id/roster/me` | the admin (any event); a leader or rep of the event's team | the roster ("I'm working this") |
+| `DELETE /events/:id/roster/me` | the admin, leaders, reps | the roster ("I can't make it") |
+| `GET /events/:id/plan[?userId=]` | every staff role (response-cached) | `EventPlan[]` |
+
+- **PUT `{ add, remove }`** (last fix round; what Edit bookings sends): the changes from the list the page loaded.
+  `add` is booked by the caller, `remove` is taken off, and everyone else stays as they are now. So someone who taps
+  **I'm working this** while the leader has Edit bookings open stays booked, and the audit row names only the changes.
+  It follows the same rules as below. Send at least one of the two; mixing them with `userIds` is a 400.
+- **PUT `{ userIds }`** replaces the roster with exactly `userIds` (deduplicated, at most 200; a bad body → 400): people already
+  booked keep their row (who booked them, when, how — a self-booking stays `self`); people left out come off; new
+  people are booked by the caller with `source: 'leader'`. A new person must be an **active** member of staff in a
+  field role (rep, leader or admin; recruiters work in the office) — for a leader, a member of the event's team or the
+  leader themself. Another team's event → 403. Unknown event → 404.
+- **Error messages name a person only inside the caller's scope.** An unknown id or a client portal account → 400
+  "Unknown person (id 35)" (for the admin too: a client account is nobody on the staff side). A leader adding anyone
+  outside their team (another team's rep, a recruiter) → 400 "That person is not on the Team A team (id 16)". Inside
+  the scope the name helps: "Ben Ashworth cannot be booked on an event" (left, or an office role).
+- **People who have left** (`users.status = 'left'`) drop off everything: the roster, `bookings.booked`, the plans,
+  the forecasts' headcount and the venue page's booked counts. Their row stays as it was (back at work, they are
+  booked again), and a leader's save neither keeps nor removes it (the audit trail sees no change).
+- **People on leave** (`users.status = 'on_leave'`) stay booked and counted, as the rule above says only people who
+  have left drop off. Until the last fix round they vanished from every list and count as well. The roster marks them
+  `onLeave`, and the page shows "· on leave", so the leader can take them off. They cannot be newly booked until they
+  are back ("Rita Rep cannot be booked on an event").
+- **Bookings are open** while the event is **scheduled or live and dated today or later** (business clock); otherwise
+  409 "This event has finished, so its bookings are closed" / "This event is cancelled, so its bookings are closed".
+  That applies to coming off too, so the roster of a finished day stays as it was.
+- **POST /me** twice changes nothing; **DELETE /me** when not booked changes nothing (200, no audit row). Anyone booked
+  may take themself off, whoever booked them. Another team's event → 403 for a leader or rep; recruiters → 403.
+- **GET /plan**: the admin and the event team's leader get everyone booked (or `?userId=`'s plan); anyone else gets
+  their own plan when booked, `[]` otherwise, and 403 for another person's `userId`. Scheduled and live events only (a
+  finished or cancelled event → `[]`); `[]` with `LM_SMART=0` (a plan is an estimate). `EventPlan`:
+  `{ eventId, userId, userName, avatarColor, targetSales, targetSource ('event' | 'good-day' | 'venue-good-day'),
+  eventShare, sharedAmong, goodDay, shareAboveGoodDay?, limited?, steps: [{ key, need, low, high }] (stops → taps),
+  sentence, venueWeight, basis: { ownShifts, venueShifts }, venueName, ratios }`. `steps` is empty (and the sentence
+  says so) when there is no conversion at some stage anywhere to plan from. `sharedAmong` is the headcount the event's
+  target is divided by (see Logic); `shareAboveGoodDay` marks a plan that aims for the good day because the share is
+  far above it.
+- **Someone booked from another team** (the admin can book anyone): their own numbers stay with their own leader. The
+  event's leader gets a plan built from the venue's numbers alone — `limited: true`, `basis.ownShifts` 0, venueWeight
+  1, the venue's good day — never their ratios or good day. The person and the admin see the full plan.
+
+#### `bookings` on events (`routes/events.ts`)
+
+`GET /events` and `GET /events/:id` attach `bookings: { booked, me, aim? }` to every event somebody (active) is booked
+on (one grouped query); an event nobody is booked on carries no key, so 1.2 payloads are unchanged. Bookings are a
+workflow rule, not an estimate: `booked` and `me` stay with `LM_SMART=0`. `/me/dashboard` is not changed (P1's file):
+the dashboard's upcoming list reads `bookings` from the `/events` list it already fetches for forecasts.
+
+**`aim`** `{ targetSales, steps }` — the caller's **own** plan, only where `me` is true, the event is still open
+(scheduled or live, today or later), there is something to plan from and `LM_SMART` is on. The same numbers as
+`GET /events/:id/plan` (one `eventPlans` call for the whole list: at most two queries, memoised), so the Events rows,
+the dashboard and Quick gauges make **no request per row**; only the event page asks for plans.
+
+**Forecasts** (`forecast` on the same payloads, and **every** other caller of `eventForecasts`: the Needs-attention
+"behind target" item and the leader digest's next week). `lib/smart/eventForecast.ts` reads the bookings itself, in
+the same grouped query as the team's habit, so all of them agree. `expectedReps` = shared `expectedHeadcount` (Logic).
+The chip reads "expect ≈ 9 (4–14) · 3 booked", or "· 3 booked, 5 expected" when the estimate counts more people than
+are booked; the event page "Estimate: about 9 sales · for the 3 booked".
+
+#### Audit (`lib/audit/venueSpecs.ts`, entity `event_roster`, filed under the event's id)
+
+- `PUT /events/:id/roster` — "Bookings for BCN — Golden Square, 22 Oct: booked Jordan Lee and Sam Patel; took off Alex Kim"
+- `POST /events/:id/roster/me` — "Jordan Lee is working BCN — Golden Square, 22 Oct (I'm working this)"
+- `DELETE /events/:id/roster/me` — "Jordan Lee can no longer work BCN — Golden Square, 22 Oct"
+
+Before/after snapshots: `{ event, date, booked: [names], count }`. A save that changes nothing writes no row.
+
+#### Database (`db/extensions/venues.ts`)
+
+`event_roster (event_id → events CASCADE, user_id → users CASCADE, booked_by, booked_at, source; PK event + user)`, as
+the foundation laid it down; `upgrade` adds nothing (an existing database gets the empty table: nobody is booked until
+a leader books, so its forecasts are exactly as before). The fresh demo seed books the scheduled and live events of the
+next 14 days from the extension's own random stream: the **coming week is the leader's roster** (nine in ten of each
+team booked, most by the leader, the rest by themselves); **further out only self-bookings** (about two in five have
+tapped "I'm working this"), so those forecasts keep the team's usual turnout as their floor. The demo rep Jordan Lee
+is booked on his team's first three upcoming events (two by Amelia, one by himself) and not on the fourth, and Amelia
+books herself on today's event. Only `event_roster` rows are written.
+
+### Audit of every action (P9)
+
+All routes are behind `requireAuth` (anonymous → 401). A client portal session gets 403 `clientPortalOnly` from the
+client guard on every one of them. Types: `shared/src/types/audit.ts`.
+
+#### `POST /audit/events` → 204 (any staff role)
+
+What a page reports itself: an export it built, or a sensitive record it opened (`ClientAuditEventInput`).
+
+| Field | Rule |
+| --- | --- |
+| `kind` | `export` or `opened`; anything else → 400 |
+| `what` | required text; control characters and runs of spaces become one space; invisible format characters (bidi overrides such as U+202E, zero-width characters, the BOM: Unicode `Cf`) are removed, so a row never displays reversed or disguised; cut at 80 characters (`"gauges-by-team"`, `"candidate profile"`, `"invoice LM-SB-2026-000123"`, `"audit trail"`) |
+| `format` | exports: `csv`, `pdf`, `xero`, `sage`, `print` (optional; anything else → 400) |
+| `rows` | exports: a whole number 0–1,000,000 (optional; anything else → 400) |
+| `filename` | exports: the file's name, cleaned like `what` (so `invoice\u202Efdp.exe` is stored as `invoicefdp.exe`, never displayed as "invoiceexe.pdf"), cut at 120 characters; a path keeps its last part only (optional) |
+| `entity`, `entityId` | an `AuditEntity` and a positive id. **Opened**: the record; leave both out (or `null`) for the audit trail itself. **Export**: an export of ONE record — P7's candidate profile and interview sheet PDFs (`candidate`), P2's invoice PDF and print (`invoice`); leave both out (or `null`, or `export`) for an export of a table |
+
+Unknown keys are dropped, not refused (a newer page reporting an extra detail still gets its event recorded).
+An opened record **and an export of a record** are checked against the rule of the record's own page: a candidate —
+admin, leader, recruiter (`GET /recruitment/candidates/:id`); a pay run — admin, the person, their team's leader
+(`GET /finance/payroll/:id`); an invoice — the same rule through its pay run; the audit trail — administrators; any
+other record — administrators. Not allowed → **403** "You cannot open that record"; no such record, or an entity
+without its id → **404**. The row keeps the record (entity and id) and names it:
+
+| Report | Summary |
+| --- | --- |
+| P7 `{kind:'export', format:'pdf', what:'candidate profile', entity:'candidate', entityId}` | "Exported the candidate profile as PDF: Mia Parker" |
+| P7 interview sheet (`what:'interview sheet'`) | "Exported the interview sheet as PDF: Mia Parker" |
+| P2 `{kind:'export', format:'pdf', what:'invoice LM-SB-2026-000123', entity:'invoice', entityId}` | "Exported the invoice LM-SB-2026-000123 as PDF: Jordan Lee w/c 12 Oct" |
+| P2 print (`format:'print'`) | "Printed the invoice LM-SB-2026-000123: Jordan Lee w/c 12 Oct" |
+| P3 (server side, `recordClientEvent` with the label "BCN 5–11 Oct 2026") | "Exported the BCN statement for 5–11 Oct 2026 as PDF" (a `what` that names the record already is not followed by the name again) |
+| a table (P4, no record) | "Exported Gauges by team as CSV: 124 rows" (entity `export`, as before) |
+
+So an export of a record shows under the Record filter (`GET /audit?entity=candidate&entityId=…`) and a name search
+finds it; the record's History panel still lists its changes only. The same person opening the same record again
+within 5 minutes (`AUDIT_OPENED_REPEAT_MINUTES`; `what` compared without case, so "Candidate Profile" and "candidate
+profile" are one opening) answers 204 and adds no row. Exports are never merged: each is a file.
+
+Rate limit: at most `AUDIT_EVENTS_PER_MINUTE` (60) reports per person per minute, on a counter of its own
+(`middleware/writeLimit.ts`); the next one is **429** "That is more than 60 exports and opened records in a minute.
+Wait a minute, then try again." with `Retry-After: 60`. A refused report does not count and is not recorded. The 1.2
+write limit (learning, pitches, check-ins, PINs, bulk gauges) keeps its own 60. `writeLimitPerMinute: 0` (createApp)
+turns both off; `auditEventsPerMinute: 0` (perUserWriteLimit) only this one.
+
+The audit middleware skips this route (`lib/audit/auditEventSpecs.ts` `skip: true`): the route writes its own row, so
+there is never a second, generic `POST /audit/events` row.
+
+#### `GET /audit` (admin) — new parameters
+
+| Param | Meaning |
+| --- | --- |
+| `kind` | One `AuditEventKind` (`change`, `sign_in`, `export`, `opened`, `automatic`, `client`) or a comma list (`kind=export,opened`); an empty value is no filter; any other value → 400. |
+| `view` | `everything` (the default) or `changes` (= `kind=change`, the 1.2 view). Anything else → 400; `view=changes` together with `kind` → 400. |
+| `entity` | Now also takes the 1.3 entities (`campaign_rate`, `pay_adjustment`, `invoice`, `agreement`, `statement`, `video`, `client_post`, `client_account`, `interview_question`, `event_roster`, `export`). |
+
+`signIns=0` keeps working exactly as before (it leaves out the three sign-in actions). Every row now carries
+`kind: AuditEventKind` and `userRole` (the role of the person who acted; `null` for "Linear Hub" and an unknown person).
+Both are new optional fields; nothing was renamed or removed.
+
+#### `GET /audit/people` (admin) → `AuditPerson[]`
+
+Everyone the trail can name, for the Audit page's Person filter: `{ id, name, role, status }` for every user, staff
+and client accounts, any status, by name — no employee IDs or client access codes (the page never shows them; review
+fix: `employeeId` was dropped before any other package used it). (`GET /users` leaves client accounts out, so it cannot serve this
+filter any more.) Leader, recruiter, rep → 403.
+
+#### `GET /audit/person/:userId?kind=&view=&limit=&offset=` (admin) → `AuditPersonActivity`
+
+Team → person → Activity: `{ person: AuditPerson, rows, total, lastSignInAt, lastActiveAt, failedSignIns }` — the rows
+**made by** that person (their own changes, sign-ins, exports and openings, plus the failed attempts on their account,
+which are filed under it, and Linear Hub's note when it paused recording those attempts — no actor, entity `user` and
+the account's id), newest first, paged like `GET /audit` (limit 1–200, default 50). `lastSignInAt` is their
+latest successful sign-in, `lastActiveAt` their latest row **not counting failed tries on the sign-in page** (those are
+filed under the account but may be somebody else's: shared `isAuditAttemptOnAccount`) nor a sign-out by the idle timeout, `failedSignIns` the failed
+sign-ins, wrong PINs and wrong two-step codes on their account in the last 30 days. Unknown person → 404, bad id or kind → 400; leader,
+recruiter, rep (their own included) → 403. Registered before `/audit/:entity/:entityId`, which would otherwise read
+"person" as an entity. Two indexed queries plus the count.
+
+#### `GET /audit/:entity/:entityId` — new parameter
+
+`kind=` (and `view=`) as on `GET /audit`. The History panels (payslip, gauge entry) ask for
+`kind=change,automatic,client`, so "Opened the payslip" never reads as a change of it.
+
+#### What the recorder writes now (no new endpoint)
+
+- **Failed attempts** (kind `sign_in`, filed under the account the email or the challenge belongs to; never the PIN,
+  the employee ID typed, the code or the challenge token):
+
+| Route | Answer | Summary |
+| --- | --- | --- |
+| `POST /auth/login` | 401 | "Failed sign-in: wrong employee ID" · "Failed sign-in: the account is deactivated" · "Failed sign-in with an unknown email: jo@example.com" (no person; the email typed is kept only when it is an email — the Login page's test, and no control or invisible character, so an address disguised with a right-to-left override is never stored — so "Failed sign-in with an unknown email" and `typedEmail: null` for an employee ID typed into the email box) · "Failed sign-in: wrong PIN (4 tries left before a lock)" |
+| `POST /auth/login` | 423 | "PIN locked after 10 wrong PINs in a row, until 14:35" (this try started the lock) · "Sign-in refused: the PIN is locked until 14:35" |
+| `POST /auth/login`, `/auth/login/2fa` | 429 | "Sign-in refused: too many attempts, try again in 12 minutes" |
+| `POST /auth/login/2fa` | 401 / 410 | "Failed sign-in: wrong two-step code" · "Sign-in stopped: too many wrong two-step codes" · "Sign-in stopped: the two-step code was not entered within 5 minutes" (an unknown challenge writes nothing) |
+| `POST /auth/pin`, `/auth/pin/remove` | 400 / 423 / 429 | "Wrong current PIN while changing their PIN" · "… while removing their PIN" · "PIN locked after wrong current PINs while changing their PIN, until 14:35" |
+| `POST /auth/2fa/enable`, `/disable`, `/recovery-codes` | 400 / 429 | "Wrong two-step code while turning on two-step verification" · "… turning off …" · "… making new recovery codes" |
+
+  Every row's snapshot has a `reason` (shared `AUDIT_SIGN_IN_REASONS`: `wrong_employee_id`, `deactivated`,
+  `unknown_email`, `wrong_pin`, `pin_locked_now`, `pin_locked`, `too_many_attempts`, `wrong_code`, `too_many_codes`,
+  `challenge_expired`, `wrong_current_pin`), which the trail says in words (`AUDIT_SIGN_IN_REASON_LABELS`).
+  Validation answers (a missing field, a PIN that breaks the rules) and step one of a sign-in (the PIN or two-step
+  challenge) write nothing. **The failure budget**, per 15 minutes (`FAILED_ROWS_*` in `lib/audit.ts`):
+  - 30 rows per account a try is filed under — and only that: every real account has room of its own, so a flood of
+    made-up emails, from many addresses or from the same one, can never use up the room for a try on Matt's account
+    (a signed-in person's own wrong PIN or code counts against their account too);
+  - for emails nobody has: 30 rows per address of the sign-in page, and 600 rows in all.
+
+  The row that reaches a cap is followed by one that says so (no person): "Stopped recording failed sign-ins with
+  unknown emails from 203.0.113.7 after 30 in 15 minutes; recording starts again within 15 minutes" · "… on Jordan
+  Lee's account after 30 in 15 minutes; …" (entity `user` and that account's id, so it shows on Jordan's Activity as
+  Linear Hub's note) · "… with unknown emails after 600 in 15 minutes from many addresses; …". Worst case per 15
+  minutes: 600 + 30 × the accounts tried. Successful sign-ins are never held back.
+- **Sign-outs by the idle timeout** (kind `sign_in`, action `SESSION idle`, filed under the person, real clock):
+  "Signed out after 12 hours without activity (last active 18:02 Wed 21 Oct)" — written once, when the person comes
+  back to the idle session (`middleware/auth.ts authenticate`), or at start-up for a session that went idle while the
+  server was off (`purgeExpiredSessions`). A session that reaches its 14-day end, and one of a deactivated account
+  (the deactivation is the admin's recorded change), write nothing. `lib/audit/signIns.ts recordIdleSignOut`.
+- **New 1.2 specs** (found by the coverage test): `POST /auth/pin/remove` → "Removed their PIN" (was a bare route
+  name); `PUT /learning/milestones/:userId/:key` → "Updated a progression milestone for Jordan Lee: “Trained 3
+  personalities” 2 → 3" (a save of the same value writes nothing).
+- **Exports and openings**: action `EVENT export` / `EVENT opened` (see `POST /audit/events`); an export is filed
+  under the record it is of, or under entity `export` for a table.
+- **Automatic steps**: `recordSystemEvent` rows (action `SYSTEM <name>`) are kind `automatic`.
+- **The payroll export** (`GET /finance/payroll/export`, Xero / Sage CSV; its own route writes the row) is kind
+  `export` — classified in P9's code, neither file edited.
+
 ## Seed & demo accounts
 The server seeds `server/data/linear.sqlite` on first start (or `npm run seed` to reset) with deterministic
 sample data for the last 26 weeks. Demo logins (email / employee ID):

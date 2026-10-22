@@ -12,6 +12,336 @@ Step-by-step for everyone at Linear MCR, by role. Start with **Everyone**, then 
 
 ---
 
+## What's new in 1.3
+
+Linear Hub 1.3 makes pay something everyone can check: each week is paid as the base (£63.50 a day) or the commission, whichever is higher; the clients' statements correct cancellations automatically; and a self-billing invoice comes to each person to accept or query. Clients get their own login for updates, Matt can add learning videos, every table downloads as PDF, recruitment keeps much more detail, venues show what it takes to make a sale there, and the audit trail records every action.
+
+### Pay: base or commission, and cancellations
+
+**Everyone on weekly pay: Finance → My pay.**
+
+- **Commission weeks** shows how many of the last 12 weeks the commission beat the base, and what those weeks paid ("4 of 12", "£1,228 · beat the base").
+- **This week so far** shows the likely pay and a bar of commission so far against the base for the days you are likely to work, with a line such as "9 more subs and commission beats your £381.00 base — about 188 stops (likely)".
+- **How this week is worked out** opens the week's breakdown as it stands.
+- **Payslips** lists every week. The **Paid as** column shows Base or Commission with its amount. Under the gross it shows "incl. £25.00 bonus", "incl. −£16.50 corrections" or "after £20.00 deductions". Sales show "2 cancelled" when a client cancelled subs.
+- Select a week to see the full breakdown:
+  - two tiles, **Base** (days × £63.50) and **Commission** (subs at the campaign rates). On a paid week the one paid is marked **Paid** and the other **Not paid**, with the badge **Paid the base** or **Paid the commission**;
+  - on a week not paid yet (waiting for payday, or a transfer that failed) they read **Applies** and **Does not apply**, with the badge **Pays the base** or **Pays the commission**;
+  - while the week is still going, the tiles read **Ahead** and **Behind**;
+  - each campaign's subs × rate, with "18 logged, 2 cancelled by BCN" or "Not yet confirmed by BCN";
+  - any bonus with its note, any correction from an earlier week, the total, and the reasons in plain sentences.
+- A week a client corrected after it was paid shows **Corrected after payment** with the amount and the week it went on.
+
+**Leaders: Finance → Team pay.** The same columns for the team, plus **Paid as commission**: how many of the team's runs the commission beat the base. A leader can open a team member's week and read the same breakdown.
+
+**Administrators: Finance → Company.**
+
+- **Runs to pay** has the same columns.
+- Open a run to see the breakdown, where **Add a bonus** and **Add an adjustment** work on an unpaid week, and the bin removes a bonus or a manual line.
+- **Bonuses and corrections** lists the last six weeks' bonuses, manual lines and statement corrections.
+  - **Add a bonus**: choose the person and the week it is paid with (last week by default), the amount and what it is for. The person sees the note.
+  - **Add an adjustment**: choose **Add money** or **Take money off**, and optionally the week it corrects.
+  - A paid week cannot take a line; choose the next unpaid week.
+  - A line on a past week the person did not work goes on their next unpaid week; the message after **Add adjustment** says which ("−£20.00 on w/c 5 Oct: no work in w/c 14 Sep, so it goes on the next unpaid week").
+  - Taking off more than a finished week pays is refused; split it over two weeks.
+  - Removing a bonus that made room for a deduction is refused in the same way: remove or reduce the deduction first.
+
+**Administrators: Settings → Pay.**
+
+- **Day rate (£)** and **The rule applies from** (a Monday), then **Save pay settings**. Unpaid weeks are recalculated and paid weeks never change.
+- **Rate per sub, by campaign** lists each campaign's current rep rate and payout. Open one to see its history (who approved a client's change).
+- **Add a rate** adds a new rate from a date. Sales on and after that day use it.
+
+### Self-billing invoices
+
+**Your invoice (reps and leaders).** You are self-employed, so each week Linear MCR Limited writes a self-billing
+invoice for you. Open **Finance → My pay** and tap a week: you see the invoice — your details as the supplier, Linear
+MCR Limited as the customer, every line (if your commission beat your base you are paid the commission and the base
+is listed as *Not paid*, and the other way round), the total, and the deadline.
+
+- **Accept invoice** when it is right. The first time, read and accept the **self-billing agreement** (it also opens
+  by itself once, and is always in **Settings → Invoices**).
+- **Something's wrong**: tick the lines that are wrong, say what they should be ("18 sales") and why ("I made 18
+  sales, not 16"), then **Send to the office**. The invoice is held until the office answers; you see the answer on
+  the invoice and in your notifications.
+- Do nothing, and the invoice **counts as accepted at 12:00 the day before payday** (Thursday for a Friday payday).
+  You always get at least 24 hours: an invoice that arrives later than Wednesday 12:00 counts as accepted 24 hours
+  after it arrived (the invoice and your notification say exactly when).
+- If what you are paid changes (a late gauge, a client's statement, a correction), you get a new version to accept,
+  and a notification such as "Your invoice changed: £300.00 (was £345.00)". It has the same 24 hours at least, even on
+  payday. Until you accept it, the office needs a reason to pay it, so accept it as soon as it is right. A change that
+  does not change your pay (for example cancellations on a week you were paid the base) just updates the lines:
+  nothing to accept again.
+- **Print invoice** gives a clean A4 page (and **Download PDF** once PDFs are switched on).
+- **Settings → Invoices**: your address, postcode, Unique Taxpayer Reference (if you have one) and VAT number (only
+  if you are VAT registered). They are printed on every invoice still waiting to be accepted.
+
+**The office (administrators).**
+
+- **Finance → Company → Disputed invoices** (top of the tab, only when there are some): who, which week, what they
+  say is wrong, our figures, **Open the week** (the invoice, the week's gauges and the pay breakdown), **Statements**.
+  **Fix and reissue**: correct the gauges first or type a correction (£, minus to take money off) and a note; a new
+  version goes to the person to accept. **Keep as it is**: a note that explains why; the invoice can then be paid.
+- **Runs to pay**: each row shows the invoice's status. **Mark paid** refuses an invoice that is not accepted yet and
+  says so; **Mark week paid** skips those and tells you how many. To pay one anyway, open the run and tap **Mark paid
+  anyway**, with a reason: it is kept on the invoice and in the audit trail. A **disputed** invoice cannot be paid
+  until you answer the dispute (**Keep as it is** makes it payable straight away).
+- **Team leaders** can open their team's invoices to check the lines and the total; the person's home address and UTR
+  are shown only to them and the office.
+- **Settings → Company details on invoices**: the legal name, address, postcode, company number, the authorised
+  signatory and an optional signature image (PNG or JPEG, scaled down for you).
+- **Team → a person → Invoice details**: their supplier details (you can correct them) and whether they accepted the
+  agreement.
+
+### Client statements from Gmail
+
+**Finance → Statements** (administrators). Every commission statement the clients emailed you (once Gmail is connected)
+or that you uploaded, newest first: the campaign, the period, when it arrived, how many rows matched a person, and its
+status — **Needs review**, **Ready to apply**, **Applied** or **Couldn't read** (on a phone the status sits under the
+campaign). An applied statement that a corrected copy replaced also says **Replaced**. The top of the page says whether Gmail
+is being checked. **Check Gmail now** looks straight away; **Upload statement** takes a PDF from your computer or phone.
+
+Open a statement to check it:
+
+- **Before you can apply it** lists what is left, in plain words: rows nobody is matched to, a missing campaign or
+  period, a column the client's saved columns expect but this statement does not have, or dates another applied
+  statement already covers.
+- The blue box says what is worth a look: Gmail could not confirm the email came from the client, some sign-ups are
+  dated outside the statement's period (they count on their own days, in place of what was logged), or **This replaces
+  the BCN statement for … applied on …** — applying the corrected copy puts pay right to its figures, and a correction
+  already waiting on an unpaid week is changed rather than added to. Anyone on the old copy but not the new one goes back
+  to the subs they logged (listed under Pay).
+- **Pay** shows, for each person on the statement, the subs they logged in the period, what the client confirmed, and
+  how many were cancelled, with the pay effect: Linear Hub works out what applying would change before you press
+  anything.
+- **Rows** shows the statement's rows and who each one is. For a row nobody matched, choose the person in **Pick the
+  person…** (or **Not one of ours**). Every other row written the same way gets the same choice, and if the row had the
+  client's fundraiser ID, Linear Hub remembers it as that person's ID for next time.
+- **Details**: fix the campaign or the period if the PDF did not say them, then **Save campaign and period**.
+- **Columns**: which column holds what. Linear Hub reads the headings itself; if it got one wrong, change it and press
+  **Save columns for BCN**. Applying the first statement from a client saves its columns too, so the client's next
+  statements in the same layout **apply themselves** as soon as they arrive, when every row matches.
+- **Apply** corrects pay: weeks not paid yet are recalculated with the confirmed subs; for a week already paid, the
+  difference goes on that person's next unpaid pay run with a line saying why. Paid runs never change. A statement for a
+  period longer than a week takes cancellations off its latest week first.
+- **Discard** removes a statement that is not applied (a remittance advice, a wrong file). **Open PDF** shows the PDF;
+  on a laptop or tablet **Show it here** shows it in the page. Opening or downloading a statement PDF is on the audit
+  trail.
+- A statement that was replaced says **Replaced by the statement received …** with a link; pay follows the newer one.
+
+**Settings → Integrations** (administrators): your Gmail address and an **app password**, **Save**, **Test
+connection**, and **Check for statements every 15 minutes**; below, **Statement senders**: for each campaign, the
+address its statements come from (only those emails are read). **How to make an app password** explains the steps.
+
+**Team → a person → Client IDs** (administrators): the person's fundraiser ID at each client, exactly as the client's
+statements write it. A statement row with that ID matches them even if the name is spelt differently.
+
+The dashboard's **Needs attention** box (and the bell) shows a statement that needs a look ("BCN statement for 12–18
+Oct 2026 needs a look", with what to do), one that could not be read, one ready to apply, and a Gmail check that keeps
+failing.
+
+### PDF downloads
+
+- **Export ▾** (every table that had **Export CSV**: Gauges, a person's gauges and entries, an event's gauges, the
+  Leaderboard, Team, Campaigns, Recruitment's list and Hired column, Finance → My pay / Team pay / Company): pick
+  **CSV** for a spreadsheet that opens in Excel, or **PDF** to print or share. The PDF holds exactly the rows on screen,
+  with the filters set on screen (team, position, search…) and the date range under the title, money and dates written
+  as on screen, and "Page 1 of 3" at the foot of each page. Wide tables print on landscape pages. On a phone the button
+  shows just the download icon.
+- **Audit → Download PDF**: every entry that matches the filters, newest first (up to 2,000) — who did what and when,
+  the record and what changed. (Until the Audit page passes its filters to the button, it is the 50 entries on
+  screen, and the PDF says so under the title.)
+- **Learning → Progress → Download PDF** (your own, or a person's from My team / Everyone): the COD pack checklist,
+  what the next level needs, and the required videos.
+- The first PDF of a visit takes a second or two while the PDF maker downloads (about 140 kB over the network); after
+  that PDFs are instant. Offline, the CSV still works, and so does the PDF once the PDF maker has loaded on that
+  visit; otherwise the PDF asks you to connect.
+- Every download — CSV or PDF — is recorded in the audit trail with what, how many rows and the file name. Downloads
+  from **Export ▾**, **Audit → Download PDF** and **Learning → Progress → Download PDF** made without signal are
+  recorded when the phone is back online (with several tabs open, once). An invoice, candidate profile, interview
+  sheet or venue report PDF made without signal is not recorded yet.
+
+### Learning videos
+
+**Learning → Videos** (everyone): under the pitches on the Learning page. Each video shows its still, length, topic
+and badges: **Required** (for you), **In progress**, **Watched** (with the day) and **Example**. What is required of you
+and not watched comes first, then what you are part way through. With more than four videos you can filter by topic.
+
+**Add video** (administrators, and team leaders when an administrator allows it): choose **Upload a file** (MP4, WebM
+or MOV up to 2 GB; a progress bar shows how far it is, **Cancel upload** stops it; keep the page open) or **Paste a
+link** (YouTube, Vimeo or Google Drive; a Drive file must be shared with "Anyone with the link"). Then a title, what it
+covers, the topic (Interviews, Pitching, Objections, Leadership, Other), who it is for (Everyone, Leaders, Reps) and
+**Required**, which adds it to the Learning checklist of everyone it is for. For a link you can give the length
+(mm:ss, e.g. 9:58): it counts as watched at 90% of it. After adding, the video's page opens. While a video uploads,
+pressing Escape or Back asks **Stop the upload?** (**Keep uploading** / **Stop the upload**), and closing or reloading
+the tab asks before leaving. Ctrl+K / ⌘K (the search) waits until the upload has finished ("Search opens once the
+upload has finished"). **Cancel upload** stops it at once.
+
+**The video's page**: the player, picking up where you left off ("Picked up where you left off, at 8:15." with
+**Start from the beginning**). **Your progress** fills in as you watch and says **Watched** once you have seen 90%;
+skipping ahead does not count, and watching a part twice counts once. An uploaded video whose length Linear Hub could
+not read counts as watched once it knows the length (the office can type it in Edit video). A Google Drive video cannot tell Linear Hub how
+much you watched: tap **Mark as watched** when you have. Administrators see **Who watched** (who has watched it and
+when, and who is part way). Whoever may change a video sees **Edit** (title, description, topic, who it is for,
+required, a link's length) and **Delete video** there.
+
+**Learning → Progress**: **Required videos** lists the ones required of you, with a bar ("1 of 3 watched"); each
+counts once you have seen 90% of it. Leaders on **My team**
+(administrators on **Everyone**) see how many people have watched every required video and a row per person
+("6 of 8 watched", a numbered dot per video, green once watched); a person's own page shows their required videos.
+
+**Settings → Learning videos** (administrators): **Leaders can add videos** (off at first), and how many uploaded
+videos the server holds, how big they are and the folder they are in.
+
+### Client accounts and campaign pages
+
+**For clients (the client portal).** Sign in with your email and the access code from your invite (CL-0002…). The
+first time, create a PIN of 4 to 6 digits; you type it after your email and access code every time (a client account
+always keeps a PIN: you can change it, not remove it). **Updates** has one form: choose **Update** or **Announcement**
+(published to the Linear MCR team's Announcements straight away, with your organisation's name on it) or **Commission
+change** (a new rate per sub to the fundraiser and / or the payout per sub to Linear, and the date it starts — it waits
+for Linear MCR to approve it). If something is missing when you tap the button, the page scrolls to the first field to
+fix and puts the cursor in it. **Your posts** lists everything your
+organisation posted: Published, Waiting for Linear, Approved from Mon 2 Nov, Declined (with the reason) or Unpublished.
+**Security** shows your account and lets you change your PIN. Forgotten it? Ask Linear MCR to reset it.
+
+**For Matt (admin).** A new client post shows in **Needs attention** and the bell ("Client updates"), and as a count on
+**Campaigns** in the sidebar. **Campaigns** → a campaign → **Open page** shows the client's brief and contact, this
+month's sales and events, the rate history and **Client posts** (a change waiting for you reads "Waiting for
+approval"): **Approve** a commission change (confirm the date it starts — unpaid weeks from that date are recalculated;
+if the change has a new rate to the fundraiser and the date reaches back into a week already paid, the dialog says
+so: those weeks keep the old rate; a payout-only change changes nobody's pay, so it gets no such warning), **Decline** it
+with a reason the client sees, **Unpublish** an update or announcement (also from the dashboard: the crossed-out eye
+next to "From BCN"). The optional **Note for the office** on Approve and Unpublish stays in the office (the campaign page
+and the audit trail); only a decline's reason reaches the client. **Edit brief** changes the description, the brief for
+the field team and the contact. **Client accounts** → **Invite** (name and email) shows the access code and the sign-in
+instructions to copy into an email; per account **Edit** (name or email; the access code stays), **Reset PIN** and
+**Turn off** / **Turn on**. "No PIN yet" means the account has not created its PIN (a new invite, after Reset PIN, or
+the demo client).
+
+**For leaders.** The same campaign page and posts, read only (no decisions, no client accounts).
+
+**For reps and recruiters.** Tap the "From BCN" badge on a client's announcement (dashboard) to open the campaign's
+page: the brief for the field team, the client's announcements and this month's events (reps: your team's), never any
+money and not the client contact's email or phone. The contact card says who to ask instead: a rep with a team
+"Questions for Breast Cancer Now go through your team leader or the Linear MCR office"; a recruiter (office staff, no
+team) or a rep without a team "Questions for Breast Cancer Now go to the owner or another administrator".
+
+### Recruitment: date of birth, schedule and interview sheets
+
+**Recruitment → Schedule.** Every interview by day with its time, type, candidate (and the stage they are at now),
+interviewer and how far the sheet has got. Choose **Today**, **This week** or **Next week**, and filter by interviewer
+(**Me**, **No interviewer yet**, or a person) or by type. **Schedule interview** books one for any open candidate.
+**Reschedule** moves it to another time or gives it to another interviewer; **Open sheet** opens the interview sheet.
+
+**The interview sheet.** Open it from the schedule, from a candidate's **Interviews** card (**Sheet**) or from the
+timeline. Each question has an answer box and an optional score from 1 to 5 (tap the score again to clear it). Write
+the candidate's answers in a few words as you go — the sheet saves by itself ("Saved 10:42"). If you asked something
+that is not on the sheet, add it under **Add a question you asked**; if you did not ask a question, tap **Not asked**.
+Record the outcome on the right (at the bottom on a phone). Under each answer you can see who last changed it and
+when. Until anything is saved the sheet shows today's questions; as soon as anything on it is saved its questions are
+fixed, so changes in Settings never alter an interview that has happened.
+
+The same sheet can be open on two devices: each saves only what it changed, so one never wipes the other's answers. If
+both change the same question, the second sees "Rhys Morgan changed this on another device" with their answer under
+yours ("Not saved yet" under your box): tap **Keep mine** or **Use theirs**. Nothing else on the sheet waits for that
+choice. If you leave the sheet before choosing, a message names the question; your words are kept on this device and
+the choice is waiting when you open the sheet again. Closing, reloading or leaving the sheet while it is still saving
+(a slow hotspot) loses nothing: what you typed is saved, and opening the sheet again shows it.
+
+**A candidate's page** now shows the date of birth and age in the profile (the pencil edits it) with an **Under 18**
+warning when it applies, every interview with **Reschedule** and **Sheet**, **Questions and answers** (each saved
+sheet, the questions as they were asked, with who last changed each answer), and a **Timeline** of everything: who moved each stage, every interview and
+its interviewer, bookings, interviewer changes, reschedules and outcomes. **Add candidate** has an optional **Date of
+birth**.
+
+**Settings → Recruitment: interview questions** (administrators and recruiters): pick the interview type, then **Add
+question** (optionally only for one position), edit the words (pencil), move a question up or down, or **Turn off** one
+you no longer ask (**Turn on** brings it back). A question already in the list is refused ("That question is already in
+the final interview list"). Ask about the job only; a warning appears if a question seems to be about age,
+health, family, religion, where someone is from or another protected characteristic.
+
+### Venues, rosters and event plans
+
+**Venues** (sidebar, under Events; or **Venues** at the top of the Events page). Every venue the team has worked, each
+with its sales a shift, shifts and visits, "a sale every N stops", the last and next visit and its campaigns. Sort by
+**Sales a shift**, **Shifts** or **Last visit**, or search by venue or town. The bar under each venue compares its sales
+a shift with the best listed; the tick marks the company-wide figure. Venues with fewer than 10 shifts come after the
+rest when sorting by sales a shift: a handful of shifts is too few to rank. **Export CSV** downloads the list (and
+**PDF** once PDF exports arrive).
+
+**A venue's page** (tap a venue, or **Venue numbers** on an event's page):
+
+- Four tiles: sales a shift, stops per sale, stops a shift (each against the company) and shifts.
+- **The law of averages**: the sentence ("At Golden Square, every 26 stops made a sale on average, steady across 89
+  shifts."), a dot for every shift (stops across, sales up) with the fitted line, the shifts in three groups by stops
+  (fewest, middle, most) and how steady each step is from visit to visit — **Steady** means the visits differ by no more
+  than luck alone would explain.
+- **A shift here and company-wide**: each gauge per shift and each step's rate, here and across the company (▲ / ▼ when
+  a step is more than 5% above or below).
+- **By campaign**: each campaign's sales a shift here and company-wide; pick a campaign to see its six gauges and five
+  steps here against the same campaign everywhere. **By weekday**: sales a shift by day, then pick a day for the same
+  comparison (Mondays here against Mondays everywhere).
+- **Your numbers here** and **Events here** (coming up, with who is booked, then earlier ones with their sales).
+- **Venue report** (once PDF exports arrive): the whole page as a PDF — the law of averages, the comparisons, how
+  steady each step is, the events (and, for the office and leaders, the people).
+- **People here** — the office sees everyone who worked the venue; a leader sees their own team. Reps see the venue's
+  numbers and their own, never a colleague's.
+
+**Who's working** (an event's page). Everyone booked, with who booked them ("booked yourself", "booked by you",
+"booked by Amelia Hart"). A leader (or the office) taps **Edit bookings**, ticks the team members working that day (or
+**Tick the whole … team**) and taps **Save bookings**. Saving changes only the people ticked or unticked, so someone
+who books themself while the list is open stays booked. Someone on leave stays booked, marked "on leave". A rep taps
+**I'm working this** on their team's events, or **I can't make it** to come off. Bookings close once the event is over or cancelled. Once a leader has booked people, the
+forecast counts the people booked ("· 3 booked"); while only people's own bookings are in, it keeps the team's usual
+number as a floor ("· 3 booked, 6 expected"). Someone who leaves drops off the list.
+
+**Your plan** (an event's page, for everyone booked). "To make 4 sales you need about: 88 stops, 33 to table, 18
+presentations, 8 closes, 5 taps", where the target comes from (the event's target shared among the people expected, or
+your good day when that is higher — and when the share is far above a good day, the plan aims for a good day and says
+so), the range most days fall in, and how much comes from your own last 8 weeks and how much from everyone's shifts at
+the venue. A leader sees every booked person's plan under their own (someone the office booked from another team: a
+plan from the venue's numbers only). The same plan shows in one line as **Aim** on the event's row in Events, on the
+dashboard's upcoming events and in Quick gauges, where it takes the first line under the event ("Aim 4 sales · 88
+stops → 33 → 18 → 8 → 5 taps", cut short with "…" on a small phone) and the help keeps its first sentence, so all six
+tiles stay on one screen. Plans are estimates: luck evens out over many shifts, not in one.
+
+### Audit of every action
+
+#### Audit (administrators)
+
+**Audit** now lists **everything** done in Linear Hub, newest first, under the day it happened:
+
+- **Changes** — pay, gauges, people, events, campaigns, announcements, settings and every 1.3 record (as in 1.2).
+- **Sign-ins** — every sign-in and sign-out, and every failed attempt in red: a wrong employee ID, a wrong PIN ("8 tries
+  left before a lock"), a locked PIN, a wrong two-step code, an email nobody has ("Unknown person"). A failed try on
+  someone's account reads "Attempt on Jordan Lee's account": whoever typed it may not have been Jordan.
+- **Exports** — every CSV or PDF someone downloaded, with how many rows, and every Xero / Sage payroll export. A
+  download of one record names it ("Exported the candidate profile as PDF: Mia Parker") and shows when you filter by
+  that record or search for the name.
+- **Opened** — who opened a candidate's profile, a payslip or invoice, or the audit trail itself.
+- **Automatic** — what Linear Hub did by itself (statements fetched from Gmail and applied, invoices issued and deemed
+  accepted), shown as "Linear Hub".
+- **Client portal** — what a client account did (their updates, announcements and commission changes, setting their
+  PIN).
+
+Tap a chip at the top to see one kind; **Everything** shows them all. **Changes** is the view 1.2 had. The **Person**
+filter lists client accounts too ("Hannah Price (Client)"). Tap any row to see the details: the fields that changed
+(for a sign-in, an export or an opening: what happened, e.g. "Reason: Wrong PIN", "Format: PDF"), the action and, for
+administrators, the address it came from. **Download PDF** (P4) prints every entry that matches the filters (newest
+first, up to 2,000 — not only the 50 on screen), with the filters written out ("Showing: Sign-ins", "Person: Jordan
+Lee", "Dates: 1 – 21 Oct 2026").
+
+#### Team → person → Activity (administrators)
+
+A person's page has an **Activity** card under their performance: everything they did and the failed attempts to sign
+in to their account ("Attempt on this account"), newest first, with their last sign-in, when they were last active
+(failed tries on the sign-in page do not count: they may be somebody else's) and how many failed attempts there were
+on their account in the last 30 days (in red when there were any). The chips narrow it to changes, sign-ins, exports or opened records; **Show more** loads 20
+more; **Open in the audit trail** shows the full list with every filter.
+
+---
+
 ## What's new in 1.2
 
 Linear Hub 1.2 adds a **Learning** page for the COD pack and your campaign pitches, and a set of upgrades for the

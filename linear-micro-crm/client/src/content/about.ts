@@ -1,14 +1,14 @@
 // Owned by Marketing & Content. Product story and facts for the About page and README.
 import type { Role } from '@lm/shared';
 
-export const APP_VERSION = '1.2.0';
+export const APP_VERSION = '1.3.0';
 
 export interface StackItem { name: string; detail: string }
 export interface RoleSummary { role: Role; title: string; description: string }
 
 export const ABOUT = {
   version: APP_VERSION,
-  releaseDate: '2026-10-20',
+  releaseDate: '2026-10-22',
   madeIn: 'Made in Manchester',
 
   /** The product story, one paragraph per entry. */
