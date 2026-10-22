@@ -221,8 +221,8 @@ function makeDoc(engine: PdfEngine, opts: PdfDocumentOptions): { api: PdfDoc; in
   let written: ArrayBuffer | null = null;
   const output = (): ArrayBuffer => {
     finalise();
-    written ??= doc.output('arraybuffer');
-    return written;
+    // one expression, so the narrowing holds whatever type jsPDF's typings give `output`
+    return (written ??= doc.output('arraybuffer') as ArrayBuffer);
   };
 
   const finalise = () => {

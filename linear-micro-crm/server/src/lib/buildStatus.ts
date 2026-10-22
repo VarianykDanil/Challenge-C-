@@ -135,6 +135,30 @@ export function depsStatus(repoDir: string): DepsStatus {
   return { installed, stale: lockAt !== null && lockAt > installedAt + SLACK_MS };
 }
 
+/**
+ * Does node_modules hold every package package-lock.json lists, at the listed version? Compares the lockfile with npm's
+ * own record of what it installed (node_modules/.package-lock.json), so it does not depend on file times (a pull in the
+ * same second as an install, or a copy that keeps old times). Optional packages are skipped (npm leaves out those for
+ * other platforms), and dev packages when `includeDev` is false (a production install leaves them out on purpose).
+ */
+export function lockfileInstalled(repoDir: string, { includeDev = true }: { includeDev?: boolean } = {}): boolean {
+  type Entry = { version?: string; optional?: boolean; dev?: boolean; devOptional?: boolean; link?: boolean };
+  let wanted: Record<string, Entry>;
+  let have: Record<string, Entry>;
+  try {
+    wanted = (JSON.parse(readFileSync(path.join(repoDir, 'package-lock.json'), 'utf8')) as { packages?: Record<string, Entry> }).packages ?? {};
+    have = (JSON.parse(readFileSync(path.join(repoDir, 'node_modules', '.package-lock.json'), 'utf8')) as { packages?: Record<string, Entry> }).packages ?? {};
+  } catch {
+    return false;
+  }
+  for (const [key, entry] of Object.entries(wanted)) {
+    if (!key.includes('node_modules/') || entry.link || entry.optional) continue;
+    if (!includeDev && (entry.dev || entry.devOptional)) continue;
+    if (have[key]?.version !== entry.version) return false;
+  }
+  return true;
+}
+
 /** "3 Oct 14:05" in the business zone, for messages. */
 export function shortStamp(ms: number): string {
   return new Date(ms).toLocaleString('en-GB', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit', timeZone: 'Europe/London' });

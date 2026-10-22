@@ -10,6 +10,7 @@
   ],
   "scripts": {
     "dev": "concurrently -k -n server,client -c cyan,magenta \"npm run dev -w server\" \"npm run dev -w client\"",
+    "prebuild": "NODE_NO_WARNINGS=1 node server/src/prepare.ts --deps-only",
     "build": "npm run build -w client",
     "setup": "NODE_NO_WARNINGS=1 node server/src/prepare.ts",
     "prestart": "npm run --silent setup",

@@ -7,11 +7,13 @@
  * 2. Screens: when client/dist is missing or older than any file it is built from, run npm run build.
  *
  * Each step says what it is doing and why. LM_SKIP_PREPARE=1 skips both (for setups that build elsewhere).
+ * `--deps-only` runs step 1 alone: the root "prebuild" script, so `git pull` then `npm run build` installs new
+ * dependencies first instead of failing with "Cannot find module" (1.3 added jspdf for the PDF downloads).
  * Only Node built-ins are imported: this must work before the dependencies are installed.
  */
 import { spawnSync } from 'node:child_process';
 import path from 'node:path';
-import { clientBuildStatus, depsStatus, recordInstalledLockfile, shortStamp } from './lib/buildStatus.ts';
+import { clientBuildStatus, depsStatus, lockfileInstalled, recordInstalledLockfile, shortStamp } from './lib/buildStatus.ts';
 
 const repoDir = path.resolve(import.meta.dirname, '..', '..');
 const npm = process.platform === 'win32' ? 'npm.cmd' : 'npm';
@@ -28,7 +30,11 @@ function run(args: string[], what: string): void {
 
 if (process.env.LM_SKIP_PREPARE === '1') process.exit(0);
 
+const depsOnly = process.argv.includes('--deps-only');
 const deps = depsStatus(repoDir);
+// Before a build every package must be there (the build needs the client's and the dev packages too), so check the
+// installed packages against the lockfile itself, not only the record of the last install.
+if (depsOnly && deps.installed && !deps.stale && !lockfileInstalled(repoDir)) deps.stale = true;
 if (deps.stale) {
   console.log(
     deps.installed
@@ -37,9 +43,11 @@ if (deps.stale) {
   );
   run(['ci', '--no-audit', '--no-fund'], 'npm ci');
   recordInstalledLockfile(repoDir);
-} else if (deps.installed) {
-  recordInstalledLockfile(repoDir); // first run after an install by hand: start fingerprinting
+} else if (deps.installed && lockfileInstalled(repoDir, { includeDev: process.env.NODE_ENV !== 'production' })) {
+  recordInstalledLockfile(repoDir); // first run after an install by hand: start fingerprinting (only when it matches)
 }
+
+if (depsOnly) process.exit(0);
 
 const build = clientBuildStatus(repoDir);
 if (build.stale) {

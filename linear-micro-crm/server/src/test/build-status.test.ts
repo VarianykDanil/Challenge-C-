@@ -4,7 +4,7 @@ import { mkdirSync, mkdtempSync, rmSync, utimesSync, writeFileSync } from 'node:
 import os from 'node:os';
 import path from 'node:path';
 import { after, describe, it } from 'node:test';
-import { clientBuildStatus, depsStatus, recordInstalledLockfile, staleBuildMessage } from '../lib/buildStatus.ts';
+import { clientBuildStatus, depsStatus, lockfileInstalled, recordInstalledLockfile, staleBuildMessage } from '../lib/buildStatus.ts';
 
 const roots: string[] = [];
 after(() => { for (const r of roots) rmSync(r, { recursive: true, force: true }); });
@@ -102,5 +102,43 @@ describe('depsStatus', () => {
     assert.deepEqual(depsStatus(root), { installed: true, stale: false });
     touch('package-lock.json', 1_000_950); // appends: different content
     assert.deepEqual(depsStatus(root), { installed: true, stale: true });
+  });
+});
+
+describe('lockfileInstalled: node_modules against package-lock.json, by content not by file times', () => {
+  const dirs: string[] = [];
+  after(() => { for (const d of dirs) rmSync(d, { recursive: true, force: true }); });
+  const make = (wanted: Record<string, object>, have: Record<string, object> | null) => {
+    const dir = mkdtempSync(path.join(os.tmpdir(), 'lm-lock-'));
+    dirs.push(dir);
+    writeFileSync(path.join(dir, 'package-lock.json'), JSON.stringify({ packages: { '': {}, ...wanted } }));
+    if (have) {
+      mkdirSync(path.join(dir, 'node_modules'));
+      writeFileSync(path.join(dir, 'node_modules', '.package-lock.json'), JSON.stringify({ packages: have }));
+    }
+    return dir;
+  };
+
+  it('true when every package is installed at the locked version', () => {
+    const dir = make({ 'node_modules/a': { version: '1.0.0' }, 'client/node_modules/b': { version: '2.0.0' } },
+      { 'node_modules/a': { version: '1.0.0' }, 'client/node_modules/b': { version: '2.0.0' } });
+    assert.equal(lockfileInstalled(dir), true);
+  });
+
+  it('false when a pull added a package (the 1.3 jspdf case) or changed a version', () => {
+    assert.equal(lockfileInstalled(make({ 'node_modules/a': { version: '1.0.0' }, 'node_modules/jspdf': { version: '4.2.1' } }, { 'node_modules/a': { version: '1.0.0' } })), false);
+    assert.equal(lockfileInstalled(make({ 'node_modules/a': { version: '1.1.0' } }, { 'node_modules/a': { version: '1.0.0' } })), false);
+  });
+
+  it('skips optional and linked packages, and dev packages when asked; false with nothing installed', () => {
+    const dir = make({
+      'node_modules/a': { version: '1.0.0' },
+      'node_modules/@esbuild/darwin-arm64': { version: '0.25.0', optional: true },
+      'node_modules/@lm/shared': { link: true },
+      'node_modules/vite': { version: '6.0.0', dev: true },
+    }, { 'node_modules/a': { version: '1.0.0' } });
+    assert.equal(lockfileInstalled(dir), false, 'vite (dev) is missing');
+    assert.equal(lockfileInstalled(dir, { includeDev: false }), true);
+    assert.equal(lockfileInstalled(make({ 'node_modules/a': { version: '1.0.0' } }, null)), false);
   });
 });
