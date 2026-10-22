@@ -10,7 +10,7 @@ import { useMemo, useState } from 'react';
 import { CheckCircle2, MapPinCheck, Smartphone, X } from 'lucide-react';
 import clsx from 'clsx';
 import type { SalesEventWithMeta, ShiftCheckIn, UserWithTeam } from '@lm/shared';
-import { shiftCheckInClock, shiftCheckInStatusText, shiftCheckInWindow } from '@lm/shared';
+import { firstNameWithInitial, shiftCheckInClock, shiftCheckInStatusText, shiftCheckInWindow } from '@lm/shared';
 import { Avatar, Badge, Button, Skeleton, useToast } from '@/components/ui';
 import { useUndoCheckIn } from '@/api/checkins';
 import { useUsers } from '@/api/hooks';
@@ -184,7 +184,7 @@ function TeamRollCall({ event, me, today, nowHHMM, checkIns, loading, ownChecked
             {notYet.map((u) => (
               <li key={u.id} className="inline-flex min-h-8 items-center gap-1.5 rounded-full border border-border bg-surface py-0.5 pl-0.5 pr-2.5 text-xs font-medium text-fg">
                 <Avatar name={fullName(u)} color={u.avatarColor} size="xs" />
-                {notYet.some((o) => o.id !== u.id && o.firstName === u.firstName) ? `${u.firstName} ${u.lastName.slice(0, 1)}.` : u.firstName}
+                {notYet.some((o) => o.id !== u.id && o.firstName === u.firstName) ? firstNameWithInitial(u) : u.firstName}
               </li>
             ))}
           </ul>

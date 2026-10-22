@@ -129,7 +129,7 @@ export function recruitmentRouter(db: Db): Router {
     const q = optionalString(req.query.q);
     if (q) {
       const like = `%${q.toLowerCase()}%`;
-      where.add(`(lower(c.first_name || ' ' || c.last_name) LIKE ? OR lower(c.email) LIKE ? OR lower(COALESCE(c.city, '')) LIKE ?)`, like, like, like);
+      where.add(`(lower(TRIM(c.first_name || ' ' || c.last_name)) LIKE ? OR lower(c.email) LIKE ? OR lower(COALESCE(c.city, '')) LIKE ?)`, like, like, like);
     }
     if (req.query.open === 'true') where.add(`c.stage NOT IN ${TERMINAL_SQL}`);
     res.json(listCandidates(db, `${where}`, where.params));

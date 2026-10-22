@@ -46,6 +46,7 @@ import {
   type PayRuleSettingsInput,
   type WeekPayBreakdown,
   type WeekPayResult,
+  personName,
 } from '@lm/shared';
 import { all, get, placeholders, run, type Db, type Param } from '../db/connection.ts';
 import { applyRatesInEffect, ensurePayrollMaterialised, syncPayrollRun } from '../db/maintenance.ts';
@@ -367,7 +368,7 @@ export function weekPayBreakdown(db: Db, userId: number, weekStart: string, opts
     deductions: result.deductions,
     gross: result.gross,
     userId,
-    userName: `${user.firstName} ${user.lastName}`,
+    userName: personName(user),
     weekStart: monday,
     weekEnd: sunday,
     rule,
@@ -550,7 +551,7 @@ export function applyConfirmedSales(db: Db, rows: readonly ConfirmedSalesRow[], 
       if (!user) continue;
       const stored = storedRun(db, user.id, g.monday);
       const campaigns = [...g.rows].sort((a, b) => a[0] - b[0]);
-      const name = `${user.firstName} ${user.lastName}`;
+      const name = personName(user);
 
       if (stored && isPaidStatus(stored.status)) {
         // ── a paid week: corrected − paid, from the run's own inputs ──
@@ -689,7 +690,7 @@ function upsertStatementAdjustment(db: Db, a: {
 const RATE_SELECT = `
   SELECT r.id, r.campaign_id AS campaignId, r.rep_rate AS repRate, r.payout_rate AS payoutRate, r.effective_from AS effectiveFrom,
          r.source, r.approved_by AS approvedBy,
-         CASE WHEN u.id IS NULL THEN NULL ELSE u.first_name || ' ' || u.last_name END AS approvedByName,
+         CASE WHEN u.id IS NULL THEN NULL ELSE TRIM(u.first_name || ' ' || u.last_name) END AS approvedByName,
          r.client_post_id AS clientPostId, r.created_at AS createdAt
   FROM campaign_rates r LEFT JOIN users u ON u.id = r.approved_by`;
 
@@ -843,7 +844,7 @@ export function listPayAdjustments(db: Db, f: AdjustmentFilter = {}): PayAdjustm
   const select = ADJUSTMENT_SELECT.replace(
     'FROM pay_adjustments a',
     `, EXISTS (SELECT 1 FROM payroll_runs p WHERE p.user_id = a.user_id AND p.week_start = a.target_week_start AND p.status IN ('paid', 'late')) AS targetPaid,
-       tu.first_name || ' ' || tu.last_name AS userName
+       TRIM(tu.first_name || ' ' || tu.last_name) AS userName
      FROM pay_adjustments a JOIN users tu ON tu.id = a.user_id`,
   );
   return all<Omit<PayAdjustment, 'targetPaid'> & { targetPaid: number }>(db, `${select} ${where.length ? `WHERE ${where.join(' AND ')}` : ''} ORDER BY a.target_week_start DESC, a.created_at DESC, a.id DESC LIMIT ${limit}`, params)

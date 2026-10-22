@@ -3,7 +3,7 @@
 // week fixed) or from Finance → Company → Bonuses and corrections (pick both). POST /pay/bonuses, POST /pay/adjustments;
 // the week's run is recalculated by the server and the person sees the line, with its note, on their pay.
 import { useId, useMemo, useState } from 'react';
-import { payMoney, payWeekLabel } from '@lm/shared';
+import { payMoney, payWeekLabel, personName } from '@lm/shared';
 import { Button, Field, Input, Modal, SegmentedControl, Select, useToast } from '@/components/ui';
 import { useUsers } from '@/api/hooks';
 import { useAddAdjustment, useAddBonus } from '@/api/pay';
@@ -73,7 +73,7 @@ function AdjustmentForm({ onClose, kind, userId, weekStart }: AdjustmentModalPro
   const busy = bonus.isPending || manual.isPending;
   const options = (people.data ?? [])
     .filter((u) => u.role !== 'client')
-    .map((u) => ({ value: String(u.id), label: `${u.firstName} ${u.lastName}${u.teamName ? ` · ${u.teamName}` : ''}` }));
+    .map((u) => ({ value: String(u.id), label: `${personName(u)}${u.teamName ? ` · ${u.teamName}` : ''}` }));
 
   const submit = async () => {
     const e: Record<string, string> = {};

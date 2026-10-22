@@ -1,4 +1,4 @@
-// Admin-only create / edit user form.
+// Admin-only create / edit user form. Release 1.3.1: recruiters and leaders add people with AddPersonModal instead.
 import { useId, useState } from 'react';
 import { ShieldCheck, ShieldOff } from 'lucide-react';
 import type { Position, Role, UserStatus, UserWithTeam } from '@lm/shared';
@@ -16,7 +16,7 @@ import { USER_STATUS_LABELS, optionsFrom } from '@/lib/labels';
 
 export function UserFormModal({ open, onClose, user, onSaved }: { open: boolean; onClose: () => void; user?: UserWithTeam | null; onSaved?: (u: UserWithTeam) => void }) {
   return (
-    <Modal open={open} onClose={onClose} title={user ? `Edit ${user.firstName} ${user.lastName}` : 'Add team member'} size="lg">
+    <Modal open={open} onClose={onClose} title={user ? `Edit ${fullName(user)}` : 'Add person'} size="lg">
       <UserForm onClose={onClose} user={user} onSaved={onSaved} />
     </Modal>
   );
@@ -51,9 +51,11 @@ function UserForm({ onClose, user, onSaved }: { onClose: () => void; user?: User
   const submit = async () => {
     const e: Record<string, string> = {};
     if (!f.firstName.trim()) e.firstName = 'Required';
-    if (!f.lastName.trim()) e.lastName = 'Required';
+    // Release 1.3.1: someone added without a surname (the Sapiens demo accounts) can be saved until one is added; a
+    // surname, once given, cannot be cleared. A new person's employee ID may be left blank: the next free one is given.
+    if (!f.lastName.trim() && (!user || user.lastName.trim())) e.lastName = 'Required';
     if (!/^\S+@\S+\.\S+$/.test(f.email)) e.email = 'Enter a valid email';
-    if (!/^LM-\d{4}$/i.test(f.employeeId.trim())) e.employeeId = 'Format LM-0000';
+    if ((user || f.employeeId.trim()) && !/^LM-\d{4}$/i.test(f.employeeId.trim())) e.employeeId = 'Format LM-0000';
     if (!f.payPlanId) e.payPlanId = 'Choose a pay plan';
     setErrors(e);
     if (Object.keys(e).length) return;
@@ -61,7 +63,7 @@ function UserForm({ onClose, user, onSaved }: { onClose: () => void; user?: User
       firstName: f.firstName.trim(),
       lastName: f.lastName.trim(),
       email: f.email.trim().toLowerCase(),
-      employeeId: f.employeeId.trim().toUpperCase(),
+      ...(user || f.employeeId.trim() ? { employeeId: f.employeeId.trim().toUpperCase() } : {}),
       role: f.role,
       position: f.position,
       teamId: f.teamId ? Number(f.teamId) : null,
@@ -73,8 +75,8 @@ function UserForm({ onClose, user, onSaved }: { onClose: () => void; user?: User
       avatarColor: f.avatarColor,
     };
     try {
-      const saved = user ? await update.mutateAsync({ id: user.id, ...body }) : await create.mutateAsync(body);
-      toast.success(user ? 'Profile updated' : 'Team member added', `${saved.firstName} ${saved.lastName}`);
+      const saved = user ? await update.mutateAsync({ id: user.id, ...body, employeeId: f.employeeId.trim().toUpperCase() }) : await create.mutateAsync(body);
+      toast.success(user ? 'Profile updated' : 'Person added', fullName(saved));
       onSaved?.(saved);
       onClose();
     } catch (err) {
@@ -86,9 +88,9 @@ function UserForm({ onClose, user, onSaved }: { onClose: () => void; user?: User
     <form onSubmit={(e) => { e.preventDefault(); void submit(); }} className="space-y-4">
       <div className="grid gap-4 md:grid-cols-2">
         <Field label="First name" required htmlFor={`${uid}-fn`} error={errors.firstName}><Input id={`${uid}-fn`} value={f.firstName} onChange={(e) => set('firstName')(e.target.value)} invalid={!!errors.firstName} autoFocus /></Field>
-        <Field label="Last name" required htmlFor={`${uid}-ln`} error={errors.lastName}><Input id={`${uid}-ln`} value={f.lastName} onChange={(e) => set('lastName')(e.target.value)} invalid={!!errors.lastName} /></Field>
+        <Field label="Last name" required={!user || !!user.lastName.trim()} htmlFor={`${uid}-ln`} error={errors.lastName} hint={user && !user.lastName.trim() ? 'Not added yet' : undefined}><Input id={`${uid}-ln`} value={f.lastName} onChange={(e) => set('lastName')(e.target.value)} invalid={!!errors.lastName} /></Field>
         <Field label="Work email" required htmlFor={`${uid}-email`} error={errors.email}><Input id={`${uid}-email`} type="email" value={f.email} onChange={(e) => set('email')(e.target.value)} invalid={!!errors.email} /></Field>
-        <Field label="Employee ID" required htmlFor={`${uid}-emp`} error={errors.employeeId} hint="Used with the email to sign in"><Input id={`${uid}-emp`} value={f.employeeId} onChange={(e) => set('employeeId')(e.target.value.toUpperCase())} placeholder="LM-0042" invalid={!!errors.employeeId} /></Field>
+        <Field label="Employee ID" required={!!user} htmlFor={`${uid}-emp`} error={errors.employeeId} hint={user ? 'Used with the email to sign in' : 'Used with the email to sign in. Leave blank for the next free ID.'}><Input id={`${uid}-emp`} value={f.employeeId} onChange={(e) => set('employeeId')(e.target.value.toUpperCase())} placeholder="LM-0042" invalid={!!errors.employeeId} /></Field>
         <Field label="Role" htmlFor={`${uid}-role`}><Select id={`${uid}-role`} value={f.role} onChange={(e) => set('role')(e.target.value)} options={optionsFrom(ROLE_LABELS, STAFF_ROLES)} /></Field>
         <Field label="Position" htmlFor={`${uid}-pos`}><Select id={`${uid}-pos`} value={f.position} onChange={(e) => set('position')(e.target.value)} options={optionsFrom(POSITION_LABELS, POSITIONS)} /></Field>
         <Field label="Team" htmlFor={`${uid}-team`}><Select id={`${uid}-team`} value={f.teamId} onChange={(e) => set('teamId')(e.target.value)} placeholder="No team" options={(teams.data ?? []).map((t) => ({ value: String(t.id), label: t.name }))} /></Field>
@@ -116,7 +118,7 @@ function UserForm({ onClose, user, onSaved }: { onClose: () => void; user?: User
 
       <div className="flex justify-end gap-2">
         <Button type="button" variant="ghost" onClick={onClose}>Cancel</Button>
-        <Button type="submit" loading={create.isPending || update.isPending}>{user ? 'Save changes' : 'Add member'}</Button>
+        <Button type="submit" loading={create.isPending || update.isPending}>{user ? 'Save changes' : 'Add person'}</Button>
       </div>
     </form>
   );

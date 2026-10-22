@@ -61,7 +61,7 @@ function sendersSnapshot(db: Db): Snap {
 
 function refsSnapshot(db: Db, userId: number | null): Snap | null {
   if (!userId) return null;
-  const person = get<{ name: string }>(db, `SELECT first_name || ' ' || last_name AS name FROM users WHERE id = ?`, [userId]);
+  const person = get<{ name: string }>(db, `SELECT TRIM(first_name || ' ' || last_name) AS name FROM users WHERE id = ?`, [userId]);
   if (!person) return null;
   const refs: Snap = {};
   for (const r of all<{ code: string; ref: string }>(db, `SELECT c.code, r.ref FROM user_client_refs r JOIN campaigns c ON c.id = r.campaign_id WHERE r.user_id = ? ORDER BY c.code`, [userId])) refs[r.code] = r.ref;
@@ -214,7 +214,7 @@ export const AUDIT_SPECS: readonly AuditRouteSpec<any>[] = [ // eslint-disable-l
       return get<Snap>(
         db,
         `SELECT r.id, r.name, r.fundraiser_ref AS fundraiserRef, r.user_id AS userId, r.match,
-                CASE WHEN u.id IS NULL THEN NULL ELSE u.first_name || ' ' || u.last_name END AS userName
+                CASE WHEN u.id IS NULL THEN NULL ELSE TRIM(u.first_name || ' ' || u.last_name) END AS userName
            FROM statement_rows r LEFT JOIN users u ON u.id = r.user_id WHERE r.id = ? AND r.statement_id = ?`,
         [toId(call.params.rowId), toId(call.params.id)],
       ) ?? null;

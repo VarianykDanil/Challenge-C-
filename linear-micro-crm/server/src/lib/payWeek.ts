@@ -146,7 +146,7 @@ export const ADJUSTMENT_SELECT = `
   SELECT a.id, a.user_id AS userId, a.target_week_start AS targetWeekStart, a.source_week_start AS sourceWeekStart, a.kind,
          a.amount, a.note, a.campaign_id AS campaignId, a.statement_id AS statementId, a.invoice_id AS invoiceId,
          a.created_by AS createdBy, a.created_at AS createdAt, c.code AS campaignCode,
-         CASE WHEN cb.id IS NULL THEN NULL ELSE cb.first_name || ' ' || cb.last_name END AS createdByName
+         CASE WHEN cb.id IS NULL THEN NULL ELSE TRIM(cb.first_name || ' ' || cb.last_name) END AS createdByName
   FROM pay_adjustments a
   LEFT JOIN campaigns c ON c.id = a.campaign_id
   LEFT JOIN users cb ON cb.id = a.created_by`;

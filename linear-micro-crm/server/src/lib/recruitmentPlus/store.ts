@@ -76,7 +76,7 @@ export function insertDefaultQuestions(db: Db, at: string): number {
 
 const CHANGE_SELECT = `
   SELECT ic.id, ic.interview_id AS interviewId, ic.field, ic.from_value AS fromValue, ic.to_value AS toValue,
-         ic.changed_by AS changedBy, u.first_name || ' ' || u.last_name AS changedByName, ic.changed_at AS changedAt
+         ic.changed_by AS changedBy, TRIM(u.first_name || ' ' || u.last_name) AS changedByName, ic.changed_at AS changedAt
   FROM interview_changes ic LEFT JOIN users u ON u.id = ic.changed_by`;
 
 function insertChange(db: Db, interviewId: number, field: InterviewChangeField, from: string | null, to: string | null, by: number | null, at: string): void {
@@ -130,7 +130,7 @@ function interviewerNames(db: Db, changes: readonly ChangeRow[]): Map<number, st
   }
   if (!ids.size) return new Map();
   const list = [...ids];
-  return new Map(all<{ id: number; name: string }>(db, `SELECT id, first_name || ' ' || last_name AS name FROM users WHERE id IN (${placeholders(list.length)})`, list).map((r) => [r.id, r.name]));
+  return new Map(all<{ id: number; name: string }>(db, `SELECT id, TRIM(first_name || ' ' || last_name) AS name FROM users WHERE id IN (${placeholders(list.length)})`, list).map((r) => [r.id, r.name]));
 }
 
 function labelled(changes: ChangeRow[], names: Map<number, string>, today: string): InterviewChange[] {
@@ -177,7 +177,7 @@ interface AnswerRow {
 
 const ANSWER_SELECT = `
   SELECT a.id, a.interview_id AS interviewId, a.question_id AS questionId, a.question_text AS questionText, a.sort, a.answer, a.score,
-         a.updated_at AS updatedAt, a.updated_by AS updatedById, u.first_name || ' ' || u.last_name AS updatedByName,
+         a.updated_at AS updatedAt, a.updated_by AS updatedById, TRIM(u.first_name || ' ' || u.last_name) AS updatedByName,
          a.device AS writer, a.device_version AS writerVersion
   FROM interview_answers a LEFT JOIN users u ON u.id = a.updated_by`;
 
@@ -417,8 +417,8 @@ export function scheduleItems(db: Db, q: ScheduleQuery): InterviewScheduleItem[]
   const rows = all<Interview & { candidateName: string; candidateStage: InterviewScheduleItem['candidateStage']; positionApplied: Position; saved: number; answered: number }>(
     db,
     `SELECT i.id, i.candidate_id AS candidateId, i.type, i.scheduled_at AS scheduledAt, i.interviewer_id AS interviewerId,
-            u.first_name || ' ' || u.last_name AS interviewerName, i.outcome, i.notes,
-            c.first_name || ' ' || c.last_name AS candidateName, c.stage AS candidateStage, c.position_applied AS positionApplied,
+            TRIM(u.first_name || ' ' || u.last_name) AS interviewerName, i.outcome, i.notes,
+            TRIM(c.first_name || ' ' || c.last_name) AS candidateName, c.stage AS candidateStage, c.position_applied AS positionApplied,
             COALESCE(s.saved, 0) AS saved, COALESCE(s.answered, 0) AS answered
      FROM interviews i
      JOIN candidates c ON c.id = i.candidate_id

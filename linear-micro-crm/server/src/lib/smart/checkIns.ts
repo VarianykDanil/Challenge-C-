@@ -93,7 +93,7 @@ export function checkInList(db: Db, scope: CheckInScope, today: string): CheckIn
   }
   const people = all<PersonRow>(
     db,
-    `SELECT u.id AS userId, u.first_name || ' ' || u.last_name AS userName, u.position, u.avatar_color AS avatarColor,
+    `SELECT u.id AS userId, TRIM(u.first_name || ' ' || u.last_name) AS userName, u.position, u.avatar_color AS avatarColor,
             u.team_id AS teamId, t.name AS teamName, u.start_date AS startDate
      FROM users u LEFT JOIN teams t ON t.id = u.team_id
      WHERE ${peopleWhere.join(' AND ')}

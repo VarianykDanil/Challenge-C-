@@ -36,7 +36,7 @@ function soft<T>(fn: () => T, fallback: T): T {
 function invoiceSnapshot(db: Db, id: number): Snap | null {
   return soft(() => get<Snap>(
     db,
-    `SELECT i.id, i.number, i.version, i.status, i.total, i.user_id AS userId, u.first_name || ' ' || u.last_name AS userName,
+    `SELECT i.id, i.number, i.version, i.status, i.total, i.user_id AS userId, TRIM(u.first_name || ' ' || u.last_name) AS userName,
             p.week_start AS weekStart, i.accepted_at AS acceptedAt, i.disputed_at AS disputedAt, i.dispute_reason AS disputeReason,
             i.resolved_at AS resolvedAt, i.resolution_action AS resolutionAction, i.resolution_note AS resolutionNote,
             i.paid_override_reason AS paidOverrideReason
@@ -48,7 +48,7 @@ function invoiceSnapshot(db: Db, id: number): Snap | null {
 function profileSnapshot(db: Db, userId: number): Snap | null {
   return soft(() => get<Snap>(
     db,
-    `SELECT id, first_name || ' ' || last_name AS name, address_line1 AS addressLine1, address_line2 AS addressLine2,
+    `SELECT id, TRIM(first_name || ' ' || last_name) AS name, address_line1 AS addressLine1, address_line2 AS addressLine2,
             address_town AS addressTown, postcode, utr, vat_number AS vatNumber FROM users WHERE id = ?`,
     [userId],
   ) ?? null, null);

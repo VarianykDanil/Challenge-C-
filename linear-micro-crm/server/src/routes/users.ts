@@ -1,11 +1,13 @@
 import { Router } from 'express';
 import { z } from 'zod';
-import { POSITIONS, type Position, type UserWithTeam } from '@lm/shared';
+import { POSITIONS, addPersonRefusal, staffSignInInstructions, type AddPersonResult, type Position, type UserWithTeam } from '@lm/shared';
 import { all, get, run, type Db } from '../db/connection.ts';
 import { USER_SELECT, Where, getUser, listGauges } from '../db/queries.ts';
 import { AVATAR_PALETTE } from '../db/seed-data.ts';
 import { mondayOf, todayISO } from '../lib/dates.ts';
-import { badRequest, conflict, notFound } from '../lib/errors.ts';
+import { HttpError, badRequest, conflict, notFound } from '../lib/errors.ts';
+import { nextEmployeeId, personOrderSql } from '../lib/people.ts';
+import { readSecuritySettings } from '../lib/pin.ts';
 import { punctualityFor, ratiosOf, salesPerDay, summaryRows, totalsFor, trendFor } from '../lib/metrics.ts';
 import { redactEntry, redactUser } from '../lib/scope.ts';
 import { clearTwoFactor } from '../lib/twofactor.ts';
@@ -19,7 +21,7 @@ const userBody = z.object({
   employeeId: z.string().trim().min(3).max(20),
   email: z.string().trim().email(),
   firstName: z.string().trim().min(1).max(60),
-  lastName: z.string().trim().min(1).max(60),
+  lastName: z.string().trim().min(1, 'Enter their last name').max(60),
   role: z.enum(ROLES),
   position: z.enum(POSITIONS as [Position, ...Position[]]),
   teamId: z.number().int().positive().nullable().default(null),
@@ -31,16 +33,28 @@ const userBody = z.object({
   city: z.string().trim().max(60).nullable().optional().default(null),
 });
 
+/**
+ * Release 1.3.1: POST /users — the employee ID is optional for everyone (missing → the next one); the role too, for a
+ * recruiter or a leader (always `rep`); `signInUrl` (the sign-in page as the caller opened it) goes into the sign-in
+ * instructions of the answer only, never stored. Who may set what: shared addPersonRefusal.
+ */
+const createBody = userBody.extend({
+  employeeId: userBody.shape.employeeId.optional(),
+  role: userBody.shape.role.optional(),
+  signInUrl: z.string().trim().max(300).regex(/^https?:\/\/[^\s]+$/i, 'Expected an http(s) address').optional(),
+});
+
+/** PATCH: a last name may stay blank only when it is blank already (the demo accounts start without one). */
+const patchBody = userBody.partial().extend({ lastName: z.string().trim().max(60).optional() });
+
 export function defaultPayPlanId(db: Db, position: Position): number {
   const row = get<{ id: number }>(db, `SELECT id FROM pay_plans WHERE position = ? ORDER BY id LIMIT 1`, [position]);
   if (!row) throw badRequest(`No pay plan exists for position ${position}`);
   return row.id;
 }
 
-export function nextEmployeeId(db: Db): string {
-  const row = get<{ n: number | null }>(db, `SELECT MAX(CAST(substr(employee_id, 4) AS INTEGER)) AS n FROM users WHERE employee_id LIKE 'LM-%'`);
-  return `LM-${String((row?.n ?? 0) + 1).padStart(4, '0')}`;
-}
+/** Release 1.3.1: lives in lib/people.ts (the demo teams use it too); re-exported for the recruitment hire. */
+export { nextEmployeeId } from '../lib/people.ts';
 
 export function pickAvatarColor(seed: number): string {
   return AVATAR_PALETTE[seed % AVATAR_PALETTE.length]!;
@@ -77,10 +91,11 @@ export function usersRouter(db: Db): Router {
     if (q) {
       const like = `%${q.toLowerCase()}%`;
       // The employee ID is a credential: only admins may search by it (otherwise `q` would be a guessing oracle).
-      if (me.role === 'admin') where.add(`(lower(u.first_name || ' ' || u.last_name) LIKE ? OR lower(u.email) LIKE ? OR lower(u.employee_id) LIKE ?)`, like, like, like);
-      else where.add(`(lower(u.first_name || ' ' || u.last_name) LIKE ? OR lower(u.email) LIKE ?)`, like, like);
+      if (me.role === 'admin') where.add(`(lower(TRIM(u.first_name || ' ' || u.last_name)) LIKE ? OR lower(u.email) LIKE ? OR lower(u.employee_id) LIKE ?)`, like, like, like);
+      else where.add(`(lower(TRIM(u.first_name || ' ' || u.last_name)) LIKE ? OR lower(u.email) LIKE ?)`, like, like);
     }
-    res.json(all<UserWithTeam>(db, `${USER_SELECT} ${where} ORDER BY u.last_name, u.first_name`, where.params).map((u) => redactUser(me, u)));
+    // Release 1.3.1: someone without a surname sorts by their first name in its place (lib/people.ts personOrderSql).
+    res.json(all<UserWithTeam>(db, `${USER_SELECT} ${where} ORDER BY ${personOrderSql('u')}`, where.params).map((u) => redactUser(me, u)));
   });
 
   router.get('/:id', (req, res) => {
@@ -112,22 +127,56 @@ export function usersRouter(db: Db): Router {
     });
   });
 
-  router.post('/', requireRole('admin'), (req, res) => {
-    const body = userBody.parse(req.body);
-    if (get(db, `SELECT 1 FROM users WHERE lower(employee_id) = lower(?)`, [body.employeeId])) throw conflict(`Employee ID ${body.employeeId} is already in use`);
+  /**
+   * Add a person. Release 1.3.1: administrators as before (any role, position, team, pay plan, employee ID — now
+   * optional); recruiters add trainees and field reps to any team; leaders (Team and Crew Leaders) to their own team
+   * (the default). What a non-administrator may not set is refused with 403 and a sentence (shared addPersonRefusal),
+   * before anything is checked or written. The 201 answer carries the new person's employee ID — this once, for the
+   * recruiter or leader too, who passes on the sign-in details — and `signInInstructions`; every later read redacts it
+   * as before (lib/scope.ts redactUser). Audited by the 1.2 spec (lib/auditSpecs.ts: "Added Sam Smith: Representative,
+   * Trainee, Sapiens", the actor is whoever added them) and counted in the per-person write limit.
+   */
+  router.post('/', requireRole('admin', 'recruiter', 'leader'), (req, res) => {
+    const me = currentUser(req);
+    const raw = (req.body ?? {}) as Record<string, unknown>;
+    const team = me.teamId === null ? undefined : get<{ name: string }>(db, `SELECT name FROM teams WHERE id = ?`, [me.teamId]);
+    const refusal = addPersonRefusal({ role: me.role, teamId: me.teamId, teamName: team?.name ?? null }, raw);
+    if (refusal) throw new HttpError(refusal.status, refusal.message, [{ path: refusal.field, message: refusal.message }]);
+    const admin = me.role === 'admin';
+    // empty values of the office-only fields are not attempts (shared addPersonRefusal): drop them before validating
+    const fieldPerson = Object.fromEntries(
+      Object.entries(raw).filter(([k, v]) => !(['role', 'payPlanId', 'status', 'avatarColor', 'employeeId'].includes(k) && (v === null || v === '' || (typeof v === 'string' && !v.trim())))),
+    );
+    const body = createBody.parse(admin ? raw : { ...fieldPerson, teamId: raw.teamId ?? me.teamId ?? null });
+    if (admin && !body.role) throw badRequest('Choose a role', [{ path: 'role', message: 'Choose a role' }]);
+    const role = body.role ?? 'rep';
+    if (body.employeeId && get(db, `SELECT 1 FROM users WHERE lower(employee_id) = lower(?)`, [body.employeeId])) throw conflict(`Employee ID ${body.employeeId} is already in use`);
     if (get(db, `SELECT 1 FROM users WHERE lower(email) = lower(?)`, [body.email])) throw conflict(`Email ${body.email} is already in use`);
     if (body.teamId !== null && !get(db, `SELECT 1 FROM teams WHERE id = ?`, [body.teamId])) throw badRequest('Unknown teamId');
     const payPlanId = body.payPlanId ?? defaultPayPlanId(db, body.position);
     if (!get(db, `SELECT 1 FROM pay_plans WHERE id = ?`, [payPlanId])) throw badRequest('Unknown payPlanId');
+    const employeeId = body.employeeId ?? nextEmployeeId(db);
     // Release 1.3: staff only, so client portal accounts never shift the avatar colours.
     const count = get<{ n: number }>(db, `SELECT COUNT(*) AS n FROM users WHERE role <> 'client'`)!.n;
     const r = run(
       db,
       `INSERT INTO users (employee_id, email, first_name, last_name, role, position, team_id, pay_plan_id, start_date, status, phone, avatar_color, city)
        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-      [body.employeeId, body.email, body.firstName, body.lastName, body.role, body.position, body.teamId, payPlanId, body.startDate, body.status, body.phone, body.avatarColor ?? pickAvatarColor(Number(count)), body.city],
+      [employeeId, body.email, body.firstName, body.lastName, role, body.position, body.teamId, payPlanId, body.startDate, body.status, body.phone, body.avatarColor ?? pickAvatarColor(Number(count)), body.city],
     );
-    res.status(201).json(getUser(db, r.lastInsertRowid));
+    const created = getUser(db, r.lastInsertRowid)!;
+    const result: AddPersonResult = {
+      ...created,
+      signInInstructions: staffSignInInstructions({
+        firstName: created.firstName,
+        email: created.email,
+        employeeId: created.employeeId,
+        teamName: created.teamName,
+        signInUrl: body.signInUrl ?? null,
+        pinRequired: readSecuritySettings(db).requirePin,
+      }),
+    };
+    res.status(201).json(result);
   });
 
   router.patch('/:id', requireRole('admin'), (req, res) => {
@@ -135,7 +184,10 @@ export function usersRouter(db: Db): Router {
     const id = idParam(req);
     const existing = getStaffUser(db, id);
     if (!existing) throw notFound('User');
-    const patch = userBody.partial().parse(req.body);
+    const patch = patchBody.parse(req.body);
+    if (patch.lastName === '' && existing.lastName.trim() !== '') {
+      throw badRequest('Enter their last name', [{ path: 'lastName', message: 'Enter their last name' }]);
+    }
     if (patch.status === 'left' && id === me.id) throw badRequest('You cannot deactivate your own account');
     if (patch.employeeId && get(db, `SELECT 1 FROM users WHERE lower(employee_id) = lower(?) AND id <> ?`, [patch.employeeId, id])) throw conflict(`Employee ID ${patch.employeeId} is already in use`);
     if (patch.email && get(db, `SELECT 1 FROM users WHERE lower(email) = lower(?) AND id <> ?`, [patch.email, id])) throw conflict(`Email ${patch.email} is already in use`);

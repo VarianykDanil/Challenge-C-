@@ -83,7 +83,7 @@ interface AuditRow {
 }
 
 const AUDIT_SELECT = `
-  SELECT a.id, a.at, a.user_id AS userId, u.first_name || ' ' || u.last_name AS userName, a.action, a.entity,
+  SELECT a.id, a.at, a.user_id AS userId, TRIM(u.first_name || ' ' || u.last_name) AS userName, a.action, a.entity,
          a.entity_id AS entityId, a.summary, a.before_json AS beforeJson, a.after_json AS afterJson, a.ip, a.kind,
          u.role AS userRole
   FROM audit_log a LEFT JOIN users u ON u.id = a.user_id`;
@@ -159,7 +159,7 @@ function pushKinds(clauses: string[], params: (string | number)[], kinds: AuditE
 }
 
 /** What the Person filter and the Activity card name a person by: no employee IDs or client access codes. */
-const PERSON_SELECT = `SELECT u.id, u.first_name || ' ' || u.last_name AS name, u.role, u.status FROM users u`;
+const PERSON_SELECT = `SELECT u.id, TRIM(u.first_name || ' ' || u.last_name) AS name, u.role, u.status FROM users u`;
 
 /** The UTC instant of midnight in London on `date` (audit times are UTC; the filters are London calendar days). */
 export function londonMidnightUtc(date: string): string {
@@ -400,7 +400,7 @@ export function announcementReadsRouter(db: Db): Router {
     const annIds = announcements.map((a) => a.id);
     const reads = all<{ announcementId: number; userId: number; name: string; readAt: string }>(
       db,
-      `SELECT r.announcement_id AS announcementId, r.user_id AS userId, u.first_name || ' ' || u.last_name AS name, r.read_at AS readAt
+      `SELECT r.announcement_id AS announcementId, r.user_id AS userId, TRIM(u.first_name || ' ' || u.last_name) AS name, r.read_at AS readAt
        FROM announcement_reads r JOIN users u ON u.id = r.user_id JOIN announcements a ON a.id = r.announcement_id
        WHERE r.announcement_id IN (${placeholders(annIds.length)}) AND u.status = 'active' AND u.role <> 'client' AND r.user_id <> a.author_id
        ORDER BY r.read_at DESC, u.last_name, u.first_name`,

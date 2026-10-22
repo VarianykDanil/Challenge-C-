@@ -260,7 +260,7 @@ export function statementsRouter(db: Db): Router {
     if (wanted.length) {
       const clashes = all<{ campaignId: number; ref: string; owner: string; code: string }>(
         db,
-        `SELECT r.campaign_id AS campaignId, r.ref, u.first_name || ' ' || u.last_name AS owner, c.code
+        `SELECT r.campaign_id AS campaignId, r.ref, TRIM(u.first_name || ' ' || u.last_name) AS owner, c.code
            FROM user_client_refs r JOIN users u ON u.id = r.user_id JOIN campaigns c ON c.id = r.campaign_id
           WHERE r.user_id <> ? AND r.campaign_id IN (${placeholders(wanted.length)})`,
         [userId, ...wanted.map(([c]) => c)],

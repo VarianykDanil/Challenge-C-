@@ -2,6 +2,8 @@
 
 Step-by-step for everyone at Linear MCR, by role. Start with **Everyone**, then jump to your section. Buttons, tabs and fields are named exactly as they appear in the app, in **bold**.
 
+- [What's new in 1.3.1](#whats-new-in-131) — the Sapiens team's demo sign-ins, and leaders and recruiters can add people
+- [What's new in 1.3](#whats-new-in-13) — pay you can check, client accounts, learning videos, PDFs, venues and the audit
 - [What's new in 1.2](#whats-new-in-12) — learning the COD pack and your pitch, and field and office upgrades
 - [What's new in 1.1](#whats-new-in-11) — the smart release
 - [Everyone](#everyone) — signing in, what your role can do, your dashboard, the six gauges, logging a day, ratios and benchmarks, the Gauges page, pay and punctuality, the leaderboard, events, the team directory, settings
@@ -11,6 +13,35 @@ Step-by-step for everyone at Linear MCR, by role. Start with **Everyone**, then 
 - [If something goes wrong](#if-something-goes-wrong)
 
 ---
+
+## What's new in 1.3.1
+
+### The Sapiens team on the demo
+
+The demo now has a fifth team, **Sapiens**, with seven people whose accounts start **blank**: every page works, but
+nothing has been logged yet — no gauges, events, pay, invoices, learning or check-ins. They have first names only; an
+administrator adds surnames in **Team → the person → Edit profile** (the last name can stay empty until then).
+
+| Name | Employee ID | Email | Position |
+| --- | --- | --- | --- |
+| Theo (leads the team) | LM-0101 | theo@linear-mcr.co.uk | Team Leader |
+| Daniel | LM-0102 | daniel@linear-mcr.co.uk | Team Leader |
+| Ridwan | LM-0103 | ridwan@linear-mcr.co.uk | Team Leader |
+| Jamie | LM-0104 | jamie@linear-mcr.co.uk | Team Leader |
+| Olivia | LM-0105 | olivia@linear-mcr.co.uk | Trainee |
+| Owens | LM-0106 | owens@linear-mcr.co.uk | Trainee |
+| Yasmin | LM-0107 | yasmin@linear-mcr.co.uk | Trainee |
+
+On the sign-in page, under the four demo buttons, open **Sapiens team (7)** and tap a name to sign in as them. There is
+no PIN on these demo accounts. The first time a Sapiens leader or trainee signs in, Linear Hub asks them to read the
+self-billing agreement, as it does for every new field person (**Later** puts it off until the next visit). The group
+is shown only on the demo database, like the other demo buttons; `LM_DEMO_ACCOUNTS=0` hides it.
+
+### Leaders and recruiters can add people
+
+**Team → Add person** is now there for recruiters and for leaders (Team Leaders and Crew Leaders), as well as
+administrators. See [Adding a person (leaders)](#adding-a-person-leaders) and
+[Adding a person (recruiters)](#adding-a-person-recruiters).
 
 ## What's new in 1.3
 
@@ -1065,7 +1096,7 @@ and data (about a third of the bytes it sent before).
 
 There is no password yet, so your employee ID is the second half of your credential — treat it like one. Linear Hub shows employee IDs only to administrators and to you: nobody else can read yours on the Team page, a payslip or your profile. After **eight failed attempts in fifteen minutes** the sign-in for that email is paused and the message says how many minutes to wait. If the office sets your status to **Left**, you are signed out on every device immediately.
 
-On a demo database the sign-in page also shows **Try a demo account** — one button per role. The office switches this off on the live database, so if you do not see it, that is why.
+On a demo database the sign-in page also shows **Try a demo account** — one button per role, then **Sapiens team (7)**: open it for the seven blank Sapiens accounts (see [What's new in 1.3.1](#whats-new-in-131)). The office switches this off on the live database, so if you do not see it, that is why.
 
 **Signing out:** open your avatar at the top right and choose **Sign out**.
 **Light or dark:** use the sun/moon toggle in the top bar, the **Light** / **Dark** / **Match system** entries in the same avatar menu, or **Settings → Appearance** (**Light**, **Dark**, **System**). The choice is remembered on this device.
@@ -1076,8 +1107,8 @@ On a demo database the sign-in page also shows **Try a demo account** — one bu
 | Role | You can see | You can change |
 |---|---|---|
 | **Representative** | Your own gauges and pay; your team's events, leaderboard and gauges summary; the directory; any event or colleague's profile read-only (other people's check-in times and notes are hidden) | Your own gauges, at your team's events |
-| **Leader** | Everything company-wide — every team's events, the full leaderboard, any profile — plus your own team's check-in times and notes, your team's pay runs, and recruitment | Events for your team; gauges for your team's members at your team's events; candidates, interviews and stage changes; announcements |
-| **Recruiter** | The whole recruitment pipeline, the directory, your own pay; events and the leaderboard read-only (no Gauges page) | Candidates, interviews, stage changes — hiring creates the rep's account |
+| **Leader** | Everything company-wide — every team's events, the full leaderboard, any profile — plus your own team's check-in times and notes, your team's pay runs, and recruitment | Events for your team; gauges for your team's members at your team's events; candidates, interviews and stage changes; announcements; adding trainees and field representatives to your team |
+| **Recruiter** | The whole recruitment pipeline, the directory, your own pay; events and the leaderboard read-only (no Gauges page) | Candidates, interviews, stage changes — hiring creates the rep's account; adding trainees and field representatives to any team |
 | **Administrator** | Everything, including every employee ID | Everything — people, campaigns, events, any gauges, payroll payments, expenses, announcements |
 
 A page your role cannot open shows "This area isn't available on your account" with a **Back to dashboard** link.
@@ -1232,6 +1263,23 @@ Choose **Log gauges** (Dashboard, Gauges or the event page), pick the event, the
 
 On the Dashboard choose **New announcement**, add a **Title** and the **Message**, switch on **Pinned** if it should stay at the top, and **Post announcement**. Everyone sees it on their dashboard, pinned ones first.
 
+### Adding a person (leaders)
+
+Team Leaders and Crew Leaders can add a new trainee or field representative to their own team.
+
+1. Open **Team** and choose **Add person**.
+2. Fill in **First name**, **Last name**, **Email** (they sign in with it), **Phone** (optional), **Position**
+   (**Trainee** or **Field Representative**) and **Start date**. **Team** shows your own team; you cannot change it.
+3. Choose **Add person**.
+4. **Sign-in details** opens: their name, team, email and **Employee ID**. Choose **Copy instructions** and paste them into
+   a message to the new person — they say which address to open (the one your phone or laptop is using), and to enter the
+   email and the employee ID. This is the only time you see their employee ID: afterwards only administrators and the
+   person themselves can. Choose **Done**.
+
+They start as **Active**, on the standard pay plan for their position. Only an administrator can give someone another
+role or position, a pay plan, a status, an avatar colour or a chosen employee ID, put them on another team, or change
+anything later (**Edit profile**). If something is refused, the message says why in a sentence.
+
 ---
 
 ## Recruiters
@@ -1277,6 +1325,19 @@ Choose **Schedule interview** (or **Schedule** in the Interviews card): the **Ty
 
 Move the candidate to **Hired**. The **Hire …?** dialog asks for the **Team** (it defaults to the owner's team) and the **Position** (Trainee or Field Representative, from the application), with an optional **Note**; **Confirm hire**. Linear Hub creates the employee record straight away: role Representative, the team and position you chose, the standard pay plan for that position, start date today, a work email in the `first.last@linear-mcr.co.uk` pattern and the next free employee ID. You will see "Rep account created · Field Representative · Deansgate" or similar, and the candidate's profile gains **Hired as → View profile**. An administrator reads the new employee ID off the profile and gives it to the new starter so they can sign in on day one.
 
+### Adding a person (recruiters)
+
+Recruiters can add a trainee or field representative straight to any team (for someone who did not come through the
+pipeline; a hire from the pipeline creates the account by itself).
+
+1. Open **Team** and choose **Add person**.
+2. Fill in **First name**, **Last name**, **Email**, **Phone** (optional), **Position** (**Trainee** or **Field
+   Representative**), **Team** (choose one) and **Start date**, then **Add person**.
+3. In **Sign-in details**, choose **Copy instructions** and send them to the new person. Their employee ID is shown only
+   this once; then **Done**.
+
+As for leaders, the role, pay plan, status, avatar colour and employee ID are the office's to set.
+
 ### Your pay
 
 **Finance → My pay** works for you as for everyone. Recruiters are on the **Office recruiter plan**: a daily rate Monday to Friday, no sales commission, and a **bonus in any week with two or more hires**. On your payslips the **Sales** column counts the **hires you closed** that week — candidates you own who were moved to Hired.
@@ -1293,7 +1354,7 @@ Open **Campaigns** (tabs **Active**, **Inactive**, **All**). Choose **New campai
 
 ### People
 
-On **Team**, choose **Add member**: **First name**, **Last name**, **Work email**, **Employee ID** (format `LM-0000`; used with the email to sign in), **Role** (Administrator, Leader, Recruiter or Representative), **Position** (Trainee, Field Representative, Team Leader, Crew Leader, Assistant Owner, Owner or Recruiter), **Team**, **Pay plan**, **Start date**, **Status** (Active, On leave, Left), **Phone**, **City** and **Avatar colour**; then **Add member**. To change anything, open the person and choose **Edit profile**, then **Save changes**.
+On **Team**, choose **Add person**: **First name**, **Last name**, **Work email**, **Employee ID** (format `LM-0000`; used with the email to sign in — leave it blank for the next free ID), **Role** (Administrator, Leader, Recruiter or Representative), **Position** (Trainee, Field Representative, Team Leader, Crew Leader, Assistant Owner, Owner or Recruiter), **Team**, **Pay plan**, **Start date**, **Status** (Active, On leave, Left), **Phone**, **City** and **Avatar colour**; then **Add person**. To change anything, open the person and choose **Edit profile**, then **Save changes**. Someone added without a surname (the Sapiens demo accounts) can be saved with **Last name** still empty until you add one; once given, a surname cannot be cleared. Recruiters and leaders can add trainees and field representatives too (see [Leaders](#adding-a-person-leaders)); each addition is in the audit trail under the person who made it.
 
 When someone leaves, set their **Status** to **Left**: they are signed out everywhere at that moment and can no longer sign in; their gauges, pay runs and history stay so the numbers still add up. You cannot set your own status to Left. Only administrators see other people's employee IDs — on the Team page, profiles and payslips — and the Team search finds people by ID for administrators only.
 

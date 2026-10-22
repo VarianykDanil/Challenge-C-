@@ -15,5 +15,7 @@ export * from './types/videos.ts';
 export * from './types/client.ts';
 export * from './types/recruitmentPlus.ts';
 export * from './types/venues.ts';
+// Release 1.3.1: adding people, demo teams on the sign-in page.
+export * from './types/people.ts';
 export * from './constants.ts';
 export * from './logic/index.ts';

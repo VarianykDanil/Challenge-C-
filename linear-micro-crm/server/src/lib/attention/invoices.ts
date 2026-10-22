@@ -115,7 +115,7 @@ export const provider: AttentionProvider = {
       const rows = all<OfficeRow>(
         db,
         `SELECT 'dispute' AS kind, i.id, i.number, i.version, i.total, p.week_start AS weekStart, i.disputed_at AS disputedAt,
-                i.dispute_reason AS reason, u.first_name || ' ' || u.last_name AS userName, NULL AS n, NULL AS deemAt
+                i.dispute_reason AS reason, TRIM(u.first_name || ' ' || u.last_name) AS userName, NULL AS n, NULL AS deemAt
          FROM invoices i JOIN payroll_runs p ON p.id = i.payroll_run_id JOIN users u ON u.id = i.user_id
          WHERE i.status = 'disputed'
          UNION ALL

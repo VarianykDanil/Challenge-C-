@@ -101,7 +101,7 @@ export interface ShiftCheckInRow {
 }
 
 const ROW_SELECT = `
-  SELECT ci.id, ci.user_id AS userId, u.first_name || ' ' || u.last_name AS userName, u.team_id AS teamId,
+  SELECT ci.id, ci.user_id AS userId, TRIM(u.first_name || ' ' || u.last_name) AS userName, u.team_id AS teamId,
          ci.event_id AS eventId, ci.date, ci.checked_in_at AS checkedInAt, ci.source, ci.created_at AS createdAt,
          e.start_time AS startTime
   FROM check_ins ci

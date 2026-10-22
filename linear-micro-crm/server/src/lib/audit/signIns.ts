@@ -59,7 +59,7 @@ export interface SignInState {
   pinLockedBefore: boolean;
 }
 
-const ACCOUNT_SELECT = `SELECT u.id, u.first_name || ' ' || u.last_name AS name, u.status FROM users u`;
+const ACCOUNT_SELECT = `SELECT u.id, TRIM(u.first_name || ' ' || u.last_name) AS name, u.status FROM users u`;
 
 /**
  * The Login page's email test (client/src/pages/Login.tsx EMAIL_RE): text, one "@", text with a dot — and, stricter

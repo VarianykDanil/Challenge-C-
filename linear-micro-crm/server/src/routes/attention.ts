@@ -141,7 +141,7 @@ export function attentionInput(db: Db, me: UserWithTeam, now: AttentionNow): Att
       db,
       `SELECT i.id, i.candidate_id AS candidateId, i.type, i.scheduled_at AS scheduledAt, i.interviewer_id AS interviewerId,
               NULL AS interviewerName, i.outcome, NULL AS notes,
-              c.first_name || ' ' || c.last_name AS candidateName, c.first_name AS candidateFirstName,
+              TRIM(c.first_name || ' ' || c.last_name) AS candidateName, c.first_name AS candidateFirstName,
               c.owner_id AS candidateOwnerId, c.stage AS candidateStage
        FROM interviews i JOIN candidates c ON c.id = i.candidate_id
        WHERE i.outcome = 'pending' AND i.scheduled_at BETWEEN ? AND ? AND c.stage NOT IN ${TERMINAL_SQL}

@@ -35,8 +35,8 @@ export const BOOKABLE_ROLES: readonly Role[] = ['admin', 'leader', 'rep'];
 export const ROSTER_MAX_PEOPLE = 200;
 
 const ROSTER_SELECT = `
-  SELECT r.event_id AS eventId, r.user_id AS userId, u.first_name || ' ' || u.last_name AS userName, u.avatar_color AS avatarColor,
-         r.booked_by AS bookedBy, CASE WHEN b.id IS NULL THEN NULL ELSE b.first_name || ' ' || b.last_name END AS bookedByName,
+  SELECT r.event_id AS eventId, r.user_id AS userId, TRIM(u.first_name || ' ' || u.last_name) AS userName, u.avatar_color AS avatarColor,
+         r.booked_by AS bookedBy, CASE WHEN b.id IS NULL THEN NULL ELSE TRIM(b.first_name || ' ' || b.last_name) END AS bookedByName,
          r.booked_at AS bookedAt, r.source, u.status = 'on_leave' AS onLeave
   FROM event_roster r
   JOIN users u ON u.id = r.user_id AND u.status <> 'left'
@@ -63,7 +63,7 @@ export interface RosterPerson {
 export function rosterPeople(db: Db, eventId: number): RosterPerson[] {
   return all<RosterPerson>(
     db,
-    `SELECT r.user_id AS userId, u.first_name || ' ' || u.last_name AS userName, u.avatar_color AS avatarColor, u.team_id AS teamId
+    `SELECT r.user_id AS userId, TRIM(u.first_name || ' ' || u.last_name) AS userName, u.avatar_color AS avatarColor, u.team_id AS teamId
      FROM event_roster r JOIN users u ON u.id = r.user_id AND u.status <> 'left'
      WHERE r.event_id = ? ${ROSTER_ORDER}`,
     [eventId],
@@ -130,7 +130,7 @@ export function saveRoster(db: Db, me: UserWithTeam, event: SalesEventWithMeta, 
     const found = new Map(
       all<Candidate>(
         db,
-        `SELECT id, first_name || ' ' || last_name AS name, role, status, team_id AS teamId FROM users WHERE id IN (${placeholders(added.length)})`,
+        `SELECT id, TRIM(first_name || ' ' || last_name) AS name, role, status, team_id AS teamId FROM users WHERE id IN (${placeholders(added.length)})`,
         added,
       ).map((u) => [Number(u.id), u]),
     );

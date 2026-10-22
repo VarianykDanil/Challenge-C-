@@ -67,7 +67,7 @@ function questionOrder(db: Db, type: unknown): string[] {
 export function sheetSnapshot(db: Db, interviewId: number): Snap | null {
   const iv = get<Snap>(
     db,
-    `SELECT i.id AS interviewId, i.candidate_id AS candidateId, c.first_name || ' ' || c.last_name AS candidateName, i.type
+    `SELECT i.id AS interviewId, i.candidate_id AS candidateId, TRIM(c.first_name || ' ' || c.last_name) AS candidateName, i.type
      FROM interviews i JOIN candidates c ON c.id = i.candidate_id WHERE i.id = ?`,
     [interviewId],
   );

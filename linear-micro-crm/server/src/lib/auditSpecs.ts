@@ -144,7 +144,7 @@ const withChanges = (head: string, diff: AuditFieldChange[], skip: readonly stri
 // ───────────────────────────── snapshot loaders ─────────────────────────────
 
 const GAUGE_SNAP = `
-  SELECT g.id, g.user_id AS userId, u.first_name || ' ' || u.last_name AS userName, g.event_id AS eventId, e.name AS eventName,
+  SELECT g.id, g.user_id AS userId, TRIM(u.first_name || ' ' || u.last_name) AS userName, g.event_id AS eventId, e.name AS eventName,
          g.date, g.stops, g.table_count AS "table", g.presentations, g.closes, g.taps, g.sales, g.checked_in_at AS checkedInAt, g.notes
   FROM gauge_entries g JOIN users u ON u.id = g.user_id JOIN events e ON e.id = g.event_id`;
 
@@ -153,7 +153,7 @@ export function gaugeSnapshot(db: Db, id: number): Snap | null {
 }
 
 const PAYROLL_SNAP = `
-  SELECT p.id, p.user_id AS userId, u.first_name || ' ' || u.last_name AS userName, p.week_start AS weekStart,
+  SELECT p.id, p.user_id AS userId, TRIM(u.first_name || ' ' || u.last_name) AS userName, p.week_start AS weekStart,
          p.week_end AS weekEnd, p.status, p.due_date AS dueDate, p.paid_date AS paidDate, p.days_worked AS daysWorked,
          p.sales, p.team_sales AS teamSales, p.base_pay AS basePay, p.commission, p.bonus, p.overrides, p.deductions,
          p.gross, p.reference, p.adjusted_at AS adjustedAt
@@ -168,7 +168,7 @@ export function userSnapshot(db: Db, id: number): Snap | null {
   const pin = hasColumn(db, 'users', 'pin_hash') ? ', (u.pin_hash IS NOT NULL) AS pinSet' : '';
   const row = get<Snap>(
     db,
-    `SELECT u.id, u.first_name || ' ' || u.last_name AS name, u.email, u.employee_id AS employeeId, u.role, u.position,
+    `SELECT u.id, TRIM(u.first_name || ' ' || u.last_name) AS name, u.email, u.employee_id AS employeeId, u.role, u.position,
             u.team_id AS teamId, t.name AS teamName, u.pay_plan_id AS payPlanId, pp.name AS payPlanName, u.start_date AS startDate,
             u.status, u.phone, u.city, (u.totp_enabled_at IS NOT NULL) AS twoFactor${pin}
      FROM users u LEFT JOIN teams t ON t.id = u.team_id LEFT JOIN pay_plans pp ON pp.id = u.pay_plan_id WHERE u.id = ?`,
@@ -181,11 +181,11 @@ function candidateSnapshot(db: Db, id: number): Snap | null {
   return (
     get<Snap>(
       db,
-      `SELECT c.id, c.first_name || ' ' || c.last_name AS name, c.email, c.phone, c.city, c.source, c.stage,
-              c.position_applied AS positionApplied, c.owner_id AS ownerId, o.first_name || ' ' || o.last_name AS ownerName,
-              c.referred_by_id AS referredById, r.first_name || ' ' || r.last_name AS referredByName, c.rating, c.notes,
+      `SELECT c.id, TRIM(c.first_name || ' ' || c.last_name) AS name, c.email, c.phone, c.city, c.source, c.stage,
+              c.position_applied AS positionApplied, c.owner_id AS ownerId, TRIM(o.first_name || ' ' || o.last_name) AS ownerName,
+              c.referred_by_id AS referredById, TRIM(r.first_name || ' ' || r.last_name) AS referredByName, c.rating, c.notes,
               c.next_action AS nextAction, c.next_action_at AS nextActionAt, c.hired_user_id AS hiredUserId,
-              h.first_name || ' ' || h.last_name AS hiredUserName
+              TRIM(h.first_name || ' ' || h.last_name) AS hiredUserName
        FROM candidates c LEFT JOIN users o ON o.id = c.owner_id LEFT JOIN users r ON r.id = c.referred_by_id
        LEFT JOIN users h ON h.id = c.hired_user_id WHERE c.id = ?`,
       [id],
@@ -197,8 +197,8 @@ function interviewSnapshot(db: Db, id: number): Snap | null {
   return (
     get<Snap>(
       db,
-      `SELECT i.id, i.candidate_id AS candidateId, c.first_name || ' ' || c.last_name AS candidateName, i.type,
-              i.scheduled_at AS scheduledAt, i.interviewer_id AS interviewerId, u.first_name || ' ' || u.last_name AS interviewerName,
+      `SELECT i.id, i.candidate_id AS candidateId, TRIM(c.first_name || ' ' || c.last_name) AS candidateName, i.type,
+              i.scheduled_at AS scheduledAt, i.interviewer_id AS interviewerId, TRIM(u.first_name || ' ' || u.last_name) AS interviewerName,
               i.outcome, i.notes
        FROM interviews i JOIN candidates c ON c.id = i.candidate_id LEFT JOIN users u ON u.id = i.interviewer_id WHERE i.id = ?`,
       [id],
@@ -246,7 +246,7 @@ function expenseSnapshot(db: Db, id: number): Snap | null {
 function announcementSnapshot(db: Db, id: number): Snap | null {
   const row = get<Snap>(
     db,
-    `SELECT a.id, a.title, a.body, a.pinned, a.author_id AS authorId, u.first_name || ' ' || u.last_name AS authorName
+    `SELECT a.id, a.title, a.body, a.pinned, a.author_id AS authorId, TRIM(u.first_name || ' ' || u.last_name) AS authorName
      FROM announcements a LEFT JOIN users u ON u.id = a.author_id WHERE a.id = ?`,
     [id],
   );
@@ -274,7 +274,7 @@ function learningSnapshot(db: Db, userId: number, lessonKey: string): Snap | nul
       get<Snap>(
         db,
         `SELECT lp.lesson_key AS lessonKey, lp.learned_at AS learnedAt, lp.quiz_score AS quizScore, lp.teachback_at AS teachbackAt,
-                s.first_name || ' ' || s.last_name AS signedOffByName, lp.taught_signed_off_at AS signedOffAt
+                TRIM(s.first_name || ' ' || s.last_name) AS signedOffByName, lp.taught_signed_off_at AS signedOffAt
          FROM learning_progress lp LEFT JOIN users s ON s.id = lp.taught_signed_off_by WHERE lp.user_id = ? AND lp.lesson_key = ?`,
         [userId, lessonKey],
       ) ?? null,
@@ -296,7 +296,7 @@ interface TeachbackState {
 }
 
 const CHECK_IN_SNAP = `
-  SELECT ci.id, ci.user_id AS userId, u.first_name || ' ' || u.last_name AS userName, ci.event_id AS eventId, e.name AS eventName,
+  SELECT ci.id, ci.user_id AS userId, TRIM(u.first_name || ' ' || u.last_name) AS userName, ci.event_id AS eventId, e.name AS eventName,
          ci.date, ci.checked_in_at AS checkedInAt, ci.source
   FROM check_ins ci JOIN users u ON u.id = ci.user_id JOIN events e ON e.id = ci.event_id`;
 
@@ -307,7 +307,7 @@ function checkInSnapshot(db: Db, id: number): Snap | null {
 
 function userName(db: Db, id: number | null): string | null {
   if (!id) return null;
-  return get<{ n: string }>(db, `SELECT first_name || ' ' || last_name AS n FROM users WHERE id = ?`, [id])?.n ?? null;
+  return get<{ n: string }>(db, `SELECT TRIM(first_name || ' ' || last_name) AS n FROM users WHERE id = ?`, [id])?.n ?? null;
 }
 
 // ───────────────────────────── a generic entity route ─────────────────────────────

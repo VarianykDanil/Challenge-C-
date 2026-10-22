@@ -1,5 +1,5 @@
 // Owned by the Frontend Developer. Number, money and date formatting helpers (British English, GBP).
-import { BRAND } from '@lm/shared';
+import { BRAND, personName } from '@lm/shared';
 import {
   differenceInCalendarDays,
   format,
@@ -112,8 +112,9 @@ export function formatRangeLabel(from: string, to: string): string {
   const sameMonth = a.getMonth() === b.getMonth() && a.getFullYear() === b.getFullYear();
   return sameMonth ? `${format(a, 'd')} – ${format(b, 'd MMM yyyy')}` : `${format(a, 'd MMM')} – ${format(b, 'd MMM yyyy')}`;
 }
+/** "Amelia Hart"; "Theo" when there is no surname yet (release 1.3.1: the shared personName rule, no stray spaces). */
 export function fullName(p: { firstName: string; lastName: string }): string {
-  return `${p.firstName} ${p.lastName}`.trim();
+  return personName(p);
 }
 /** Plural helper: pluralise(3, 'rep') → "3 reps" */
 export function pluralise(n: number, singular: string, plural = `${singular}s`): string {

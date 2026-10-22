@@ -126,7 +126,7 @@ interface VideoRow {
 
 const VIDEO_SELECT = `SELECT v.id, v.title, v.description, v.topic, v.kind, v.url, v.file_path AS filePath, v.poster_path AS posterPath,
   v.mime, v.size, v.duration_s AS durationS, v.required, v.audience, v.example, v.created_by AS createdBy,
-  CASE WHEN c.id IS NULL THEN NULL ELSE c.first_name || ' ' || c.last_name END AS createdByName, v.created_at AS createdAt`;
+  CASE WHEN c.id IS NULL THEN NULL ELSE TRIM(c.first_name || ' ' || c.last_name) END AS createdByName, v.created_at AS createdAt`;
 
 const MY_SELECT = `, my.watched_s AS myWatchedS, my.position_s AS myPositionS, my.completed_at AS myCompletedAt, my.last_at AS myLastAt,
   my.marked AS myMarked
@@ -212,7 +212,7 @@ interface Person {
   avatarColor: string;
 }
 
-const PERSON_SELECT = `SELECT u.id, u.first_name || ' ' || u.last_name AS name, u.role, u.team_id AS teamId, t.name AS teamName,
+const PERSON_SELECT = `SELECT u.id, TRIM(u.first_name || ' ' || u.last_name) AS name, u.role, u.team_id AS teamId, t.name AS teamName,
   u.avatar_color AS avatarColor FROM users u LEFT JOIN teams t ON t.id = u.team_id`;
 
 function parseStoredRanges(text: string | null | undefined): WatchedRange[] {
@@ -628,7 +628,7 @@ export function videosRouter(db: Db): Router {
     const v = visibleRow(me, idParam(req));
     const rows = all<{ userId: number; userName: string; avatarColor: string; teamName: string | null; watchedS: number; positionS: number; completedAt: string | null; lastAt: string | null; marked: number }>(
       db,
-      `SELECT vv.user_id AS userId, u.first_name || ' ' || u.last_name AS userName, u.avatar_color AS avatarColor, t.name AS teamName,
+      `SELECT vv.user_id AS userId, TRIM(u.first_name || ' ' || u.last_name) AS userName, u.avatar_color AS avatarColor, t.name AS teamName,
               vv.watched_s AS watchedS, vv.position_s AS positionS, vv.completed_at AS completedAt, vv.last_at AS lastAt,
               vv.marked AS marked
          FROM video_views vv JOIN users u ON u.id = vv.user_id LEFT JOIN teams t ON t.id = u.team_id

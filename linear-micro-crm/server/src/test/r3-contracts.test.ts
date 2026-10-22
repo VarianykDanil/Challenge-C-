@@ -26,6 +26,8 @@ import { addClientUser, addClientUserWithPin, FIXTURE_ACCOUNTS, startTestServer,
 
 const R2_EXTENSIONS = ['learning', 'pitches', 'pin', 'audit', 'checkins'];
 const R3_EXTENSIONS = ['pay', 'invoices', 'statements', 'videos', 'client', 'recruitment', 'venues'];
+/** Release 1.3.1: team Sapiens' blank demo accounts on an existing demo database (no seed; sapiens.test.ts). */
+const R31_EXTENSIONS = ['sapiens'];
 
 /** The tables and core-table columns the 1.3 extensions lay down (STABLE: owners may add, never rename or drop). */
 const R3_TABLES = [
@@ -44,8 +46,8 @@ const R3_CORE_COLUMNS: Record<string, string[]> = {
   candidates: ['date_of_birth'], // P7
 };
 
-test('extensions: the 1.2 five, then the seven 1.3 ones in package order, unique names, the DbExtension shape', () => {
-  assert.deepEqual(EXTENSIONS.map((e) => e.name), [...R2_EXTENSIONS, ...R3_EXTENSIONS]);
+test('extensions: the 1.2 five, then the seven 1.3 ones in package order (and 1.3.1 after them), unique names, the DbExtension shape', () => {
+  assert.deepEqual(EXTENSIONS.map((e) => e.name), [...R2_EXTENSIONS, ...R3_EXTENSIONS, ...R31_EXTENSIONS]);
   assert.equal(new Set(EXTENSIONS.map((e) => e.name)).size, EXTENSIONS.length);
   for (const e of EXTENSIONS) {
     assert.equal(typeof e.sql, 'string', `${e.name}.sql`);

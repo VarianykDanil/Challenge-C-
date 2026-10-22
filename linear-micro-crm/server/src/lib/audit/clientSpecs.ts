@@ -74,7 +74,7 @@ export function clientPostSnapshot(db: Db, id: number): Snap | null {
       `SELECT p.id, p.kind, p.title, p.body, p.rate_rep AS rateRep, p.rate_payout AS ratePayout, p.effective_from AS effectiveFrom,
               p.requested_from AS requestedFrom, p.status, p.decision_note AS decisionNote, p.announcement_id AS announcementId,
               p.campaign_id AS campaignId, c.name AS campaignName, c.code AS campaignCode,
-              a.first_name || ' ' || a.last_name AS authorName, d.first_name || ' ' || d.last_name AS decidedByName
+              TRIM(a.first_name || ' ' || a.last_name) AS authorName, TRIM(d.first_name || ' ' || d.last_name) AS decidedByName
        FROM client_posts p JOIN campaigns c ON c.id = p.campaign_id JOIN users a ON a.id = p.author_id LEFT JOIN users d ON d.id = p.decided_by
        WHERE p.id = ?`,
       [id],
@@ -85,7 +85,7 @@ export function clientPostSnapshot(db: Db, id: number): Snap | null {
 export function clientAccountSnapshot(db: Db, id: number): Snap | null {
   const row = get<Snap>(
     db,
-    `SELECT u.id, u.first_name || ' ' || u.last_name AS name, u.email, u.employee_id AS accessCode, u.status,
+    `SELECT u.id, TRIM(u.first_name || ' ' || u.last_name) AS name, u.email, u.employee_id AS accessCode, u.status,
             (u.pin_hash IS NOT NULL) AS pinSet, u.client_campaign_id AS campaignId, c.name AS campaignName
      FROM users u LEFT JOIN campaigns c ON c.id = u.client_campaign_id WHERE u.id = ? AND u.role = 'client'`,
     [id],
@@ -111,7 +111,7 @@ function announcementSnapshot(db: Db, id: number | null): Snap | null {
   if (!id) return null;
   const row = get<Snap>(
     db,
-    `SELECT a.id, a.title, a.body, a.pinned, a.author_id AS authorId, u.first_name || ' ' || u.last_name AS authorName
+    `SELECT a.id, a.title, a.body, a.pinned, a.author_id AS authorId, TRIM(u.first_name || ' ' || u.last_name) AS authorName
      FROM announcements a LEFT JOIN users u ON u.id = a.author_id WHERE a.id = ?`,
     [id],
   );

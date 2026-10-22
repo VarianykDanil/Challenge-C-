@@ -2,12 +2,12 @@ import { useMemo, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { LayoutGrid, List, Search, UserPlus, Users } from 'lucide-react';
 import type { Position, UserStatus, UserWithTeam } from '@lm/shared';
-import { POSITIONS, POSITION_LABELS } from '@lm/shared';
+import { POSITIONS, POSITION_LABELS, canAddPeople } from '@lm/shared';
 import { Avatar, Badge, Button, Card, DataTable, EmptyState, Input, PageHeader, Select, Skeleton, type Column } from '@/components/ui';
 import { useTeams, useUsers } from '@/api/hooks';
 import { useCurrentUser } from '@/auth/AuthProvider';
 import { ErrorState, ExportButton, UserStatusBadge, ViewToggle } from '@/features/common';
-import { UserFormModal, userCsvColumns } from '@/features/team';
+import { AddPersonModal, UserFormModal, userCsvColumns } from '@/features/team';
 import { csvFilename, sortRows } from '@/lib/csv';
 import { formatDate, formatNumber, formatRelative, fullName } from '@/lib/format';
 import { USER_STATUS_LABELS, optionsFrom } from '@/lib/labels';
@@ -30,6 +30,8 @@ export function TeamPage() {
   const q = useUsers({ q: search.trim() || undefined, teamId: teamId ? Number(teamId) : undefined, status });
   const teamColor = useMemo(() => new Map((teams.data ?? []).map((t) => [t.id, t.color])), [teams.data]);
   const list = (q.data ?? []).filter((u) => (position ? u.position === position : true));
+  // Release 1.3.1: administrators, recruiters and leaders add people (a leader to their own team, so only with one).
+  const canAdd = canAddPeople(me.role) && (me.role !== 'leader' || me.teamId !== null);
 
   const columns: Column<UserWithTeam>[] = [
     { key: 'name', header: 'Name', render: (u) => <span className="flex items-center gap-3"><Avatar name={fullName(u)} color={u.avatarColor} size="sm" /><span><span className="block font-medium text-fg">{fullName(u)}{u.id === me.id && <span className="ml-1 text-xs text-primary">(you)</span>}</span><span className="block text-xs text-muted">{u.email}</span></span></span>, sortValue: (u) => fullName(u) },
@@ -46,7 +48,7 @@ export function TeamPage() {
       <PageHeader
         title={COPY.nav.team.title}
         description={teams.data ? `${COPY.nav.team.description} ${formatNumber(teams.data.length)} teams · ${formatNumber(q.data?.length ?? 0)} people.` : COPY.nav.team.description}
-        actions={me.role === 'admin' ? <Button onClick={() => setAddOpen(true)} leftIcon={<UserPlus className="h-4 w-4" aria-hidden />}>Add member</Button> : undefined}
+        actions={canAdd ? <Button onClick={() => setAddOpen(true)} leftIcon={<UserPlus className="h-4 w-4" aria-hidden />}>Add person</Button> : undefined}
       />
 
       {teams.data && teams.data.length > 0 && (
@@ -113,6 +115,7 @@ export function TeamPage() {
       )}
 
       {me.role === 'admin' && <UserFormModal open={addOpen} onClose={() => setAddOpen(false)} onSaved={(u) => navigate(`/team/${u.id}`)} />}
+      {me.role !== 'admin' && canAdd && <AddPersonModal open={addOpen} onClose={() => setAddOpen(false)} />}
     </>
   );
 }

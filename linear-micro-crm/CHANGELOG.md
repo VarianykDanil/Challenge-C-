@@ -9,6 +9,37 @@ response field is renamed or removed, and new fields are optional.
 
 Nothing yet. What comes next is in [docs/ROADMAP.md](docs/ROADMAP.md).
 
+## [1.3.1] - 2026-10-22
+
+The Sapiens team's demo sign-ins, and leaders and recruiters can add people. Details:
+[docs/USER_GUIDE.md](docs/USER_GUIDE.md) ("What's new in 1.3.1"), [docs/LOGIC.md](docs/LOGIC.md) §16.10 and
+[docs/API.md](docs/API.md) ("1.3.1 endpoints").
+
+### Added
+
+- **Team Sapiens on the demo, with seven blank accounts.** Theo (leads the team), Daniel, Ridwan and Jamie as Team
+  Leaders; Olivia, Owens and Yasmin as trainees (LM-0101 to LM-0107, `<first name>@linear-mcr.co.uk`). Every page works
+  for them, with nothing logged: no gauges, events, pay, invoices, learning, check-ins or audit rows. First names only
+  until Matt adds surnames. A fresh demo seed adds them at its very end; an existing demo database gains them once on
+  its next start (a "Sapiens" team made by hand is reused, and only the missing accounts are added); a database the
+  demo seed did not create never does.
+- **Sapiens team (7) on the sign-in page**, under the four demo buttons: one tap signs in as any of the seven. Listed
+  only from what the seed recorded, like the demo client, and hidden with `LM_DEMO_ACCOUNTS=0`.
+- **Team → Add person for recruiters and leaders.** Recruiters add trainees and field representatives to any team;
+  Team Leaders and Crew Leaders to their own team. Afterwards **Sign-in details** shows the new person's employee ID —
+  the only time a recruiter or leader sees it — with instructions to copy and send. The role, pay plan, status, avatar
+  colour and employee ID stay the office's to set; trying to set them is refused with a sentence that says why.
+
+### Changed
+
+- `POST /users`: open to recruiters and leaders under those rules; `employeeId` is optional for everyone (the next free
+  ID is given); the answer adds `signInInstructions`. It counts towards the per-person limit of 60 writes a minute.
+  `PATCH /users/:id` stays admin only and accepts an empty last name only while it is still empty.
+- `GET /auth/demo-accounts` adds `demoTeams` (additive).
+- Names without a surname read well everywhere: "Theo", never "Theo " in a sentence, a label, a CSV or the audit trail;
+  initials from the first name alone; the Team list sorts Theo among the T surnames.
+- The administrator's form is called **Add person** (was **Add member**), and its employee ID may be left blank.
+
 ## [1.3.0] - 2026-10-22
 
 Pay you can check, clients on board, data that coaches. Details: [docs/USER_GUIDE.md](docs/USER_GUIDE.md) ("What's new

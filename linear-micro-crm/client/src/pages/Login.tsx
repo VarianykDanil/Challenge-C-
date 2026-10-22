@@ -2,11 +2,11 @@
 // U1 sign-in-pin (release 1.2); the client sign-in (an access code instead of an employee ID) and the demo client button
 // by P6 client-portal (release 1.3).
 // Contract: exports LoginPage(); uses useAuth() and pickDemoAccounts().
-import { useEffect, useRef, useState, type FormEvent } from 'react';
+import { useEffect, useId, useRef, useState, type FormEvent } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
-import { ArrowLeft, ArrowRight, Check, CircleAlert, IdCard, Info, KeyRound, Mail, MapPin, ShieldCheck, Smartphone } from 'lucide-react';
+import { ArrowLeft, ArrowRight, Check, ChevronDown, CircleAlert, IdCard, Info, KeyRound, Mail, MapPin, ShieldCheck, Smartphone } from 'lucide-react';
 import clsx from 'clsx';
-import { BRAND, PIN_MIN_LENGTH, ROLE_LABELS, isPinFormatValid, type LoginPinDetails } from '@lm/shared';
+import { BRAND, PIN_MIN_LENGTH, POSITION_LABELS, ROLE_LABELS, isPinFormatValid, type DemoTeamAccounts, type LoginPinDetails } from '@lm/shared';
 import { COPY } from '@/content/copy';
 import { useAuth } from '@/auth/AuthProvider';
 import { pickDemoAccounts } from '@/api/hooks';
@@ -279,6 +279,8 @@ export function LoginPage() {
   const demoAccounts = demo.data?.accounts ?? [];
   // Release 1.3 (P6): the seeded demo client portal account(s), listed apart from the four staff accounts.
   const demoClients = demo.data?.clientAccounts ?? [];
+  // Release 1.3.1: the blank demo teams (Sapiens), under the four.
+  const demoTeams = demo.data?.demoTeams ?? [];
   const showDemo = demo.isLoading || demo.isError || demoAccounts.length > 0;
 
   return (
@@ -479,6 +481,7 @@ export function LoginPage() {
                     <DemoAccounts
                       accounts={demoAccounts}
                       clientAccounts={demoClients}
+                      teams={demoTeams}
                       loading={demo.isLoading}
                       failed={demo.isError}
                       busyId={typeof submitting === 'string' && submitting !== 'form' ? submitting : null}
@@ -669,6 +672,8 @@ interface DemoAccountsProps {
   accounts?: { label: string; role: string; email: string; employeeId: string }[];
   /** Release 1.3 (P6): the demo client portal account(s), under their own heading. */
   clientAccounts?: { label: string; role: string; email: string; employeeId: string }[];
+  /** Release 1.3.1: the blank demo teams (team Sapiens), each a disclosure under the four. */
+  teams?: DemoTeamAccounts[];
   loading: boolean;
   failed: boolean;
   busyId: string | null;
@@ -684,7 +689,7 @@ const ROLE_TONE: Record<string, 'primary' | 'accent' | 'info' | 'success' | 'neu
   client: 'neutral',
 };
 
-function DemoAccounts({ accounts, clientAccounts, loading, failed, busyId, disabled, onPick }: DemoAccountsProps) {
+function DemoAccounts({ accounts, clientAccounts, teams, loading, failed, busyId, disabled, onPick }: DemoAccountsProps) {
   if (loading) {
     return (
       <div className="grid gap-2" aria-busy>
@@ -738,14 +743,73 @@ function DemoAccounts({ accounts, clientAccounts, loading, failed, busyId, disab
       })}
     </ul>
   );
-  if (!clientAccounts?.length) return list(accounts);
+  if (!clientAccounts?.length && !teams?.length) return list(accounts);
   return (
     <div className="space-y-4">
       {list(accounts)}
-      <div>
-        <p className="eyebrow mb-2 text-muted">Client portal</p>
-        {list(clientAccounts, 'demo-client-accounts')}
-      </div>
+      {teams?.map((team) => <DemoTeam key={team.name} team={team} busyId={busyId} disabled={disabled} onPick={onPick} />)}
+      {clientAccounts?.length ? (
+        <div>
+          <p className="eyebrow mb-2 text-muted">Client portal</p>
+          {list(clientAccounts, 'demo-client-accounts')}
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+/**
+ * Release 1.3.1: a blank demo team's one-click sign-ins (team Sapiens), folded into "Sapiens team (7)" so the page stays
+ * short on a phone. Opened, each row is the name and position; one tap signs in, like the four above.
+ */
+function DemoTeam({ team, busyId, disabled, onPick }: { team: DemoTeamAccounts } & Pick<DemoAccountsProps, 'busyId' | 'disabled' | 'onPick'>) {
+  const [open, setOpen] = useState(false);
+  const panelId = useId();
+  return (
+    <div className="rounded-xl border border-border bg-surface shadow-card" data-testid="demo-team">
+      <button
+        type="button"
+        onClick={() => setOpen((v) => !v)}
+        aria-expanded={open}
+        aria-controls={panelId}
+        className="focus-ring flex min-h-12 w-full items-center gap-3 rounded-xl px-3 py-2 text-left transition-colors hover:bg-surface-2"
+      >
+        <span className="h-2.5 w-2.5 shrink-0 rounded-full" style={{ backgroundColor: team.color }} aria-hidden />
+        <span className="min-w-0 flex-1">
+          <span className="block text-sm font-semibold text-fg">{team.name} team <span className="font-normal text-muted">({team.accounts.length})</span></span>
+          <span className="block text-xs text-muted">New accounts: everything works, nothing logged yet</span>
+        </span>
+        <ChevronDown className={clsx('h-4 w-4 shrink-0 text-subtle transition-transform duration-150', open && 'rotate-180')} aria-hidden />
+      </button>
+      {open && (
+        <ul id={panelId} className="grid grid-cols-1 gap-0.5 border-t border-border p-1.5" data-testid="demo-team-accounts">
+          {team.accounts.map((acc) => {
+            const name = acc.name ?? acc.label;
+            const what = acc.position ? POSITION_LABELS[acc.position] : (ROLE_LABELS[acc.role] ?? acc.role);
+            const isBusy = busyId === acc.employeeId;
+            return (
+              <li key={acc.employeeId} className="min-w-0">
+                <button
+                  type="button"
+                  onClick={() => onPick(acc)}
+                  disabled={disabled}
+                  aria-label={`Sign in as ${name}, ${what}, ${team.name} team`}
+                  className={clsx(
+                    'focus-ring flex min-h-11 w-full items-center gap-2.5 rounded-lg px-2 py-1.5 text-left transition-colors hover:bg-surface-2',
+                    'disabled:cursor-not-allowed disabled:opacity-60',
+                    isBusy && 'bg-primary-soft/40',
+                  )}
+                >
+                  <Avatar name={name} color={team.color} size="sm" />
+                  <span className="min-w-0 flex-1 truncate text-sm font-medium text-fg">{name}</span>
+                  <Badge size="sm" className="shrink-0" tone={ROLE_TONE[acc.role] ?? 'neutral'}>{what}</Badge>
+                  {isBusy && <span className="h-4 w-4 shrink-0 animate-spin rounded-full border-2 border-primary/30 border-t-primary" aria-hidden />}
+                </button>
+              </li>
+            );
+          })}
+        </ul>
+      )}
     </div>
   );
 }

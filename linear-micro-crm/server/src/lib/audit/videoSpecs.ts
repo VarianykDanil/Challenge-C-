@@ -26,6 +26,7 @@ import {
   type AuditFieldChange,
   type VideoAudience,
   type VideoTopic,
+  personName,
 } from '@lm/shared';
 import { get, type Db } from '../../db/connection.ts';
 import { LEADERS_CAN_ADD_META_KEY } from '../../db/extensions/videos.ts';
@@ -191,7 +192,7 @@ export const AUDIT_SPECS: readonly AuditRouteSpec<any>[] = [
       // re-review fix: an editor's player gave the video its length (and so counted the people who had seen 90% of it)
       const lengthNow = get<{ d: number | null }>(db, `SELECT duration_s AS d FROM learning_videos WHERE id = ?`, [id])?.d ?? null;
       if (state && state.length === null && lengthNow !== null) {
-        const who = done.me ? `${done.me.firstName} ${done.me.lastName}` : 'an editor';
+        const who = done.me ? personName(done.me) : 'an editor';
         const others = completedViews(db, id) - state.completed - (ownNow ? 1 : 0);
         drafts.push({
           entity: 'video',

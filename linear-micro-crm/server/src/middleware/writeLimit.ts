@@ -7,6 +7,7 @@
  *   POST /checkins          shift check-in
  *   POST /auth/pin, /auth/pin/*   setting, changing, removing or resetting a PIN
  *   POST /gauges/bulk       bulk gauge entry
+ *   POST /users, /users/*   adding a person (release 1.3.1: recruiters and leaders may now add people), the 2FA reset
  * The next one inside the minute is refused with 429 and a plain sentence (WRITE_LIMIT_MESSAGE, `Retry-After: 60`);
  * a refused request does not count. Reads, other writes and signed-out requests pass straight through (a signed-out
  * write still gets its 401 from requireAuth). Paths match case-insensitively, as Express routes them.
@@ -49,6 +50,8 @@ export const WRITE_LIMITED_ROUTES: readonly { method: 'POST' | 'PUT'; path: stri
   { method: 'POST', path: '/checkins' },
   { method: 'POST', path: '/auth/pin' },
   { method: 'POST', path: '/gauges/bulk' },
+  // Release 1.3.1
+  { method: 'POST', path: '/users' },
 ];
 
 /** Does the per-person write limit cover this request? `path` is relative to /api, e.g. "/checkins". */

@@ -153,7 +153,7 @@ function recordCarryForward(db: Db, userId: number, from: string, ids: readonly 
     [...ids],
   );
   if (!rows.length) return;
-  const name = get<{ name: string }>(db, `SELECT first_name || ' ' || last_name AS name FROM users WHERE id = ?`, [userId])?.name ?? 'Someone';
+  const name = get<{ name: string }>(db, `SELECT TRIM(first_name || ' ' || last_name) AS name FROM users WHERE id = ?`, [userId])?.name ?? 'Someone';
   const signed = (n: number) => (n < 0 ? `−${auditMoney(-n)}` : auditMoney(n));
   const n = rows.reduce((a, r) => a + Number(r.n), 0);
   const total = round2(rows.reduce((a, r) => a + Number(r.total), 0));
