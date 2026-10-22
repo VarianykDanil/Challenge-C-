@@ -1,7 +1,8 @@
 /**
  * Release 1.3 — OWNED BY P2 invoices (laid down by r3-foundation). Pure rules for self-billing invoices: the number
  * format and the "deemed accepted" moment (12:00 the day before payday) — both STABLE (P1's pay views and P9's audit
- * summaries may show them) — plus who is invoiced, the statuses, the deadline after a late (re)issue, the lines built
+ * summaries may show them) — plus who is invoiced, the statuses, the deadline of a version issued late (24 hours to
+ * accept or dispute it, whatever the day), the lines built
  * from P1's breakdown (or from the stored run while P1's breakdown is not there), the agreement text and the supplier
  * details' formats.
  *
@@ -12,7 +13,7 @@ import type { PayrollRun, Role } from '../types.ts';
 import type { InvoiceLine, InvoiceStatus } from '../types/invoices.ts';
 import { INVOICE_NUMBER_PREFIX, SELF_BILLING_AGREEMENT_VERSION } from '../types/invoices.ts';
 import type { PayLine, WeekPayBreakdown } from '../types/pay.ts';
-import { addDays, isValidISODate } from './dates.ts';
+import { addDays, isoToUTC, isValidISODate } from './dates.ts';
 import { round2 } from './finance.ts';
 
 /** "LM-SB-2026-000123". */
@@ -64,20 +65,59 @@ export function isInvoicePayable(status: InvoiceStatus | null | undefined): bool
 }
 
 /**
+ * How long a version issued late always stays open to accept or dispute: 24 hours (the same wall-clock time the next
+ * day, to the minute).
+ */
+export const LATE_INVOICE_OPEN_HOURS = 24;
+
+/** A naive London time plus whole hours ("2026-10-22T13:05:42" + 24 → "2026-10-23T13:06:00", rounded up to the minute). */
+function naivePlusHours(naive: string, hours: number): string | null {
+  const ms = Date.parse(`${naive.slice(0, 19)}Z`);
+  if (!Number.isFinite(ms) || !isValidISODate(naive.slice(0, 10))) return null;
+  const t = Math.ceil((ms + hours * 3_600_000) / 60_000) * 60_000;
+  return new Date(t).toISOString().slice(0, 19);
+}
+
+/**
  * The deadline of an invoice issued (or reissued) at `issuedLocal` (naive London time) for `payday`: 12:00 the day
- * before payday (the lead's rule). A version issued less than a day before that gets until 12:00 the day after it was
- * issued, but never past the start of payday (00:00): the office can always pay on payday. So a reissue on Thursday
- * morning has until midnight; a version issued on or after payday (a statement applied on Friday, an old failed
- * transfer invoiced late) counts as accepted at once. Returns a naive London time.
+ * before payday (the lead's rule), or 24 hours after it was issued, whichever is later. So every version gives the
+ * person at least a day to accept it or say something's wrong: a version issued on Monday morning has until Thursday
+ * 12:00; one reissued on Thursday at 13:05 (a statement, a bonus) has until 13:05 on Friday; one issued on or after
+ * payday (a statement applied on Friday morning, an old failed transfer invoiced late) has 24 hours from then. Until
+ * the deadline, Mark paid needs the person's acceptance or the office's reason (lead decision). Returns a naive London
+ * time ("YYYY-MM-DDTHH:MM:SS").
  */
 export function invoiceDeadline(payday: string, issuedLocal: string): string {
   const base = deemedAcceptedAt(payday);
-  const issuedDay = issuedLocal.slice(0, 10);
-  const floor = isValidISODate(issuedDay) ? `${addDays(issuedDay, 1)}T12:00:00` : null;
-  if (!base) return floor ?? `${issuedDay}T12:00:00`;
-  const cap = `${payday}T00:00:00`;
-  const late = floor && floor > base ? floor : base;
-  return late > cap ? cap : late;
+  const fair = naivePlusHours(issuedLocal, LATE_INVOICE_OPEN_HOURS);
+  if (!base) return fair ?? `${issuedLocal.slice(0, 10)}T12:00:00`;
+  return fair && fair > base ? fair : base;
+}
+
+const DOW = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+const MON = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+
+/**
+ * A deadline (naive London time) in words: "12:00 Thu 22 Oct". A deadline at 00:00 is the end of the day before, so it
+ * reads "midnight on Thu 22 Oct" (never "00:00 Fri 23 Oct", easy to read as Friday night). '—' for nothing.
+ */
+export function invoiceDeadlineText(deadline: string | null | undefined): string {
+  const day = (deadline ?? '').slice(0, 10);
+  if (!isValidISODate(day)) return '—';
+  const time = (deadline ?? '').slice(11, 16) || '00:00';
+  const label = (iso: string) => {
+    const d = new Date(isoToUTC(iso));
+    return `${DOW[d.getUTCDay()]} ${d.getUTCDate()} ${MON[d.getUTCMonth()]}`;
+  };
+  return time === '00:00' ? `midnight on ${label(addDays(day, -1))}` : `${time} ${label(day)}`;
+}
+
+/**
+ * The moment a deemed acceptance took effect: the deadline, never before the version existed (an invoice stored by an
+ * earlier build could have a deadline before its issue time).
+ */
+export function deemedAcceptanceMoment(deadline: string, issuedLocal: string): string {
+  return issuedLocal && issuedLocal.slice(0, 19) > deadline ? issuedLocal.slice(0, 19) : deadline;
 }
 
 /**
@@ -220,7 +260,7 @@ export function selfBillingAgreementText(legalName: string): { version: string; 
     `This agreement is between you (the supplier: you work for yourself) and ${legalName} (the customer). It lets ${legalName} write your invoices for you, so you do not have to.`,
     `1. Each pay week, ${legalName} issues a self-billed invoice on your behalf for the work you did that week: your base or your commission, any bonus, corrections from earlier weeks and any deductions. Each invoice has its own number (LM-SB-year-number).`,
     `2. You agree not to send your own invoices for the work these invoices cover.`,
-    `3. Check each invoice in Linear Hub (Finance → My pay). Accept it, or tap "Something's wrong" and say what is wrong. If you have not done either by 12:00 the day before payday, the invoice counts as accepted.`,
+    `3. Check each invoice in Linear Hub (Finance → My pay). Accept it, or tap "Something's wrong" and say what is wrong. If you have done neither by 12:00 the day before payday, the invoice counts as accepted. You always get at least 24 hours: an invoice issued or changed later than 12:00 two days before payday counts as accepted 24 hours after it was issued.`,
     `4. If you say something's wrong, the invoice is held until the office checks it. The office either fixes it and issues a new version for you to accept, or explains why it stands.`,
     `5. Keep your details up to date in Settings → Invoices: your address, and your Unique Taxpayer Reference if you have one. Tell the office straight away if you register for VAT, change your VAT number or stop being VAT registered.`,
     `6. You are self-employed: you are responsible for your own tax and National Insurance on what you are paid.`,

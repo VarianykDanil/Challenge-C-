@@ -2,7 +2,9 @@
 // Release 1.3 (P2 invoices, which owns this file in 1.3): a run with a self-billing invoice (reps and leaders) opens as
 // the invoice — the document replaces the pay table and plan box, with Accept / Something's wrong (or the office's
 // actions) above it, "Print invoice" and, once P4's PDFs are ready, "Download PDF". Runs without an invoice (office
-// roles, weeks paid before 1.3) keep the payslip exactly as before.
+// roles, weeks paid before invoices began) keep the payslip; for a field person's week under the 1.3 base-or-commission
+// rule, P1's breakdown (same query, fetched once) replaces the 1.2 pay table and plan box, whose plan figures (commission
+// per sale £0.00, "Base pay 4 days × £63.50 £0.00") contradicted it.
 import { useRef, useState, type RefObject } from 'react';
 import { CheckCircle2, Download, Info, Printer, TriangleAlert } from 'lucide-react';
 import clsx from 'clsx';
@@ -10,6 +12,7 @@ import type { PayrollFlag, PayrollRunWithUser } from '@lm/shared';
 import { BRAND, POSITION_LABELS } from '@lm/shared';
 import { Badge, Button, Modal, Skeleton, useToast } from '@/components/ui';
 import { usePayslip } from '@/api/hooks';
+import { usePayBreakdown } from '@/api/pay';
 import { useInvoiceForRun } from '@/api/invoices';
 import { reportAuditEvent } from '@/api/auditEvents';
 import { useCurrentUser } from '@/auth/AuthProvider';
@@ -167,6 +170,12 @@ function PayslipBody({ run, topRef }: { run: PayrollRunWithUser; topRef?: RefObj
   const current: PayrollRunWithUser = p ?? run;
   const hasInvoice = !!(current.invoice ?? run.invoice);
   const iq = useInvoiceForRun(run.id, { enabled: hasInvoice });
+  // Release 1.3: the same query PayBreakdown below makes (one request). A field person's week under the base-or-commission
+  // rule is explained by the breakdown alone; the 1.2 table stays for the plan rules, salaried office weeks and when the
+  // breakdown cannot be read.
+  const bq = usePayBreakdown(run.userId, run.weekStart, { enabled: !hasInvoice });
+  const ruleWeek = !hasInvoice && bq.data?.rule === 'base-or-commission' && !bq.data.salaried;
+  const payTable = !hasInvoice && !bq.isLoading && !ruleWeek;
   const unit = payUnit(run);
   const isRecruiter = unit === 'hire';
   const adjustedAt = runAdjustedAt(run) ?? (p ? runAdjustedAt(p) : null);
@@ -245,7 +254,7 @@ function PayslipBody({ run, topRef }: { run: PayrollRunWithUser; topRef?: RefObj
         ) : iq.data ? (
           <InvoiceDocument invoice={iq.data} mine={iq.data.userId === me.id} />
         ) : null
-      ) : (
+      ) : !payTable ? null : (
       <div className="grid grid-cols-1 gap-5 md:grid-cols-5 print:grid-cols-5" data-print-keep>
         <table className="w-full min-w-0 text-sm md:col-span-3 print:col-span-3">
           <caption className="sr-only">Pay breakdown</caption>

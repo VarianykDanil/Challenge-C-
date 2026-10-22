@@ -1,6 +1,6 @@
 // Release 1.3 — OWNED BY P2 invoices. The words and dates the invoice screens share (no React; also used by the PDF).
 import { format } from 'date-fns';
-import { formatUtr, formatVatNumber, type Invoice, type InvoiceParty, type InvoiceStatus } from '@lm/shared';
+import { formatUtr, formatVatNumber, invoiceDeadlineText, type Invoice, type InvoiceParty, type InvoiceStatus } from '@lm/shared';
 import { formatGBP, formatRangeLabel, parseDate } from '@/lib/format';
 
 /** "Thu 22 Oct 2026, 14:05" (a zoned timestamp, or a naive London time such as a deadline). */
@@ -9,10 +9,9 @@ export function invoiceMoment(value: string | null | undefined): string {
   return d ? format(d, 'EEE d MMM yyyy, HH:mm') : '—';
 }
 
-/** "12:00 Thu 22 Oct" — the deadline, short. */
+/** "12:00 Thu 22 Oct" — the deadline, short ("midnight on Thu 22 Oct" for 00:00 on the Friday, never "00:00 Fri"). */
 export function deadlineShort(value: string | null | undefined): string {
-  const d = parseDate(value);
-  return d ? format(d, 'HH:mm EEE d MMM') : '—';
+  return invoiceDeadlineText(value);
 }
 
 /** "Mon 19 Oct 2026" */

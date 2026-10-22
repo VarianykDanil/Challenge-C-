@@ -59,6 +59,16 @@ export function payableRuns<T extends Pick<PayrollRunWithUser, 'invoice'>>(runs:
   return runs.filter((r) => !invoiceNotAccepted(r));
 }
 
+/**
+ * Release 1.3 (P2): the bulk confirm dialog's description. The checks are advisory, but runs whose invoice is not
+ * accepted yet are skipped, so it never says every selected run will be paid when some will not.
+ */
+export function bulkConfirmDescription(selected: number, payable: number): string {
+  const held = Math.max(0, selected - payable);
+  if (!held) return 'These checks are advisory — you can still pay every selected run. Here is why each one stood out:';
+  return `These checks are advisory. ${plural(held, 'selected run')} with an invoice not accepted yet ${held === 1 ? 'is' : 'are'} skipped. Here is why each run you are paying stood out:`;
+}
+
 const INVOICE_REFUSAL_CODES = ['invoice_not_accepted', 'invoice_disputed', 'invoice_reissued'];
 const isInvoiceRefusal = (e: unknown): boolean =>
   e instanceof ApiError && e.status === 409 && INVOICE_REFUSAL_CODES.includes(String((e.details as { code?: unknown } | undefined)?.code ?? ''));

@@ -4,7 +4,8 @@
  * Owner's decision 1 (quote): "Everyone who works in the field is SELF-EMPLOYED. Each week Linear Hub issues a
  * SELF-BILLING INVOICE on the person's behalf (Linear MCR Limited issues it, the supplier is the person). The person
  * ACCEPTS it, or DISPUTES it so the office checks."
- * Lead decisions: deemed accepted if not disputed by 12:00 the day before payday; Mark paid needs accepted or deemed
+ * Lead decisions: deemed accepted if not disputed by 12:00 the day before payday (or 24 hours after a version issued
+ * later than a day before that: shared invoiceDeadline, so nobody's invoice counts as accepted unseen); Mark paid needs accepted or deemed
  * accepted, else an admin override with a reason (audited); a disputed invoice is held until the office resolves it;
  * each person accepts the versioned self-billing agreement once before their first invoice can be accepted.
  *
@@ -89,7 +90,10 @@ export interface InvoiceSummary {
   issuedAt: string;
   acceptedAt: string | null;
   disputedAt: string | null;
-  /** ISO: 12:00 the day before payday; after it an un-disputed invoice counts as accepted. */
+  /**
+   * The deadline, naive London time: 12:00 the day before payday, or 24 hours after this version was issued when that is
+   * later; after it an un-disputed invoice counts as accepted.
+   */
   deemedAcceptedAt: string;
   total: number;
 }

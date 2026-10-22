@@ -1,4 +1,4 @@
-// Release 1.3 slot — OWNED BY P2 invoices. Finance → Company → Disputes (admin): every disputed invoice with the
+// Release 1.3 slot — OWNED BY P2 invoices. Finance → Company → Disputed invoices (admin): every disputed invoice with the
 // person's reason, the lines they picked (and what they say they should be), our figures, a link to open the run (the
 // invoice, the week's gauges and P1's breakdown) and the commission statements; **Fix and reissue** / **Keep as it is**.
 // Mounted in pages/Finance.tsx (P1's) at the top of the Company tab, in an ErrorBoundary with fallback={null}. A whole
@@ -26,7 +26,8 @@ function DisputeItem({ row, onOpen, onResolve }: { row: InvoiceDisputeRow; onOpe
       <div className="flex flex-wrap items-start justify-between gap-2">
         <div className="min-w-0">
           <p className="font-semibold text-fg">
-            <Link to={`/team/${row.userId}`} className="hover:underline">{row.userName}</Link>
+            {/* a 40 px tap target on phones (the name is the only link on the line) */}
+            <Link to={`/team/${row.userId}`} className="focus-ring inline-flex min-h-10 items-center rounded hover:underline sm:min-h-0">{row.userName}</Link>
             {row.teamName && <span className="font-normal text-muted"> · {row.teamName}</span>}
           </p>
           <p className="text-xs text-muted">

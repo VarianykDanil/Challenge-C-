@@ -26,7 +26,7 @@ import { usePageTitle } from '@/lib/usePageTitle';
 import { useActionParam } from '@/lib/useActionParam';
 import { COPY } from '@/content/copy';
 // Release 1.3 (P2): bulk Mark paid skips runs whose invoice is not accepted; the confirm step counts only the rest.
-import { payableRuns } from '@/features/finance/bulkPay';
+import { bulkConfirmDescription, payableRuns } from '@/features/finance/bulkPay';
 
 type Tab = 'me' | 'team' | 'company';
 const EXPENSE_PAGE = 25;
@@ -582,7 +582,7 @@ function Company({ onOpen, scrollToRuns = false, onScrolled }: { onOpen: (r: Pay
         open={confirmBulk}
         onClose={() => setConfirmBulk(false)}
         title={flaggedSelected.length === 1 ? '1 selected run needs a look' : `${formatNumber(flaggedSelected.length)} selected runs need a look`}
-        description="These checks are advisory — you can still pay every selected run. Here is why each one stood out:"
+        description={bulkConfirmDescription(selectedRuns.length, payableSelected.length)}
         confirmLabel={`Mark ${formatNumber(payableSelected.length)} paid`}
         onConfirm={() => void payNow()}
       >

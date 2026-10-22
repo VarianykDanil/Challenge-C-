@@ -4,12 +4,14 @@ import assert from 'node:assert/strict';
 import type { WeekPayBreakdown } from '../types/pay.ts';
 import {
   canDisputeInvoice,
+  deemedAcceptanceMoment,
   deemedAcceptedAt,
   effectiveInvoiceStatus,
   formatInvoiceNumber,
   formatUtr,
   formatVatNumber,
   invoiceDeadline,
+  invoiceDeadlineText,
   invoiceLinesFor,
   invoiceLinesFromBreakdown,
   invoiceLinesFromRun,
@@ -44,21 +46,53 @@ test('who is invoiced: the field people only', () => {
   assert.equal(isInvoicedRole(undefined), false);
 });
 
-test('deadline: 12:00 the day before payday; a late version gets until midnight at most, never into payday', () => {
+test('deadline: 12:00 the day before payday, or 24 hours after issue when issued later — whichever is later', () => {
   // issued Mon 19 Oct 07:00 for payday Fri 23 Oct → Thu 22 Oct 12:00 (the usual case)
   assert.equal(invoiceDeadline('2026-10-23', '2026-10-19T07:00:00'), '2026-10-22T12:00:00');
-  // reissued Wed 21 Oct 16:30 → Thu 22 Oct 12:00 still (a day's notice is the same moment)
-  assert.equal(invoiceDeadline('2026-10-23', '2026-10-21T16:30:00'), '2026-10-22T12:00:00');
-  // reissued Thu 22 Oct 09:00 or 13:00 → the start of payday, Fri 23 Oct 00:00 (the office can pay on Friday)
-  assert.equal(invoiceDeadline('2026-10-23', '2026-10-22T09:00:00'), '2026-10-23T00:00:00');
-  assert.equal(invoiceDeadline('2026-10-23', '2026-10-22T13:00:00'), '2026-10-23T00:00:00');
-  // reissued on payday itself (a statement applied on Friday morning) → at once
-  assert.equal(invoiceDeadline('2026-10-23', '2026-10-23T08:15:00'), '2026-10-23T00:00:00');
-  assert.equal(effectiveInvoiceStatus('issued', invoiceDeadline('2026-10-23', '2026-10-23T08:15:00'), '2026-10-23T08:15:00'), 'deemed_accepted');
-  // an old unpaid run invoiced today (payday Fri 4 Sep long gone) → its own payday: counts as accepted at once
-  assert.equal(invoiceDeadline('2026-09-04', '2026-10-21T15:00:00'), '2026-09-04T00:00:00');
-  // never before the usual deadline when issued in good time
+  // reissued Wed 21 Oct 11:00 → Thu 22 Oct 12:00 still (more than a day's notice)
+  assert.equal(invoiceDeadline('2026-10-23', '2026-10-21T11:00:00'), '2026-10-22T12:00:00');
+  // exactly 24 hours before the usual deadline: the same moment
+  assert.equal(invoiceDeadline('2026-10-23', '2026-10-21T12:00:00'), '2026-10-22T12:00:00');
+  // reissued Wed 21 Oct 16:30 → 24 hours: Thu 22 Oct 16:30
+  assert.equal(invoiceDeadline('2026-10-23', '2026-10-21T16:30:00'), '2026-10-22T16:30:00');
+  // reissued Thu 22 Oct 13:05:42 → Fri 23 Oct 13:06 (rounded up to the whole minute: never under 24 hours)
+  assert.equal(invoiceDeadline('2026-10-23', '2026-10-22T13:05:42'), '2026-10-23T13:06:00');
+  // reissued on payday itself (a statement applied on Friday 08:30) → Sat 24 Oct 08:30: NOT accepted at once
+  const payday = invoiceDeadline('2026-10-23', '2026-10-23T08:30:00');
+  assert.equal(payday, '2026-10-24T08:30:00');
+  assert.equal(effectiveInvoiceStatus('issued', payday, '2026-10-23T08:30:00'), 'issued');
+  assert.equal(canDisputeInvoice('issued', payday, '2026-10-23T17:00:00', false), true, 'the person can still say something is wrong on payday');
+  assert.equal(effectiveInvoiceStatus('issued', payday, '2026-10-24T08:30:00'), 'deemed_accepted');
+  // an old unpaid run invoiced late (payday Fri 4 Sep long gone) → 24 hours from issue, not its old payday
+  assert.equal(invoiceDeadline('2026-09-04', '2026-10-21T15:00:00'), '2026-10-22T15:00:00');
+  // across a month and a year end
+  assert.equal(invoiceDeadline('2027-01-01', '2026-12-31T18:45:00'), '2027-01-01T18:45:00');
+  // the deadline is never before the usual one, nor less than 24 hours after issue (any issue time over two weeks)
+  for (let h = 0; h < 24 * 14; h += 7) {
+    const issued = new Date(Date.UTC(2026, 9, 12, 0, 13) + h * 3_600_000).toISOString().slice(0, 19);
+    const d = invoiceDeadline('2026-10-23', issued);
+    assert.ok(d >= '2026-10-22T12:00:00', `${issued} → ${d}`);
+    assert.ok(Date.parse(`${d}Z`) - Date.parse(`${issued}Z`) >= 24 * 3_600_000, `${issued} → ${d}`);
+  }
+  // never after the usual deadline when issued in good time
   assert.ok(invoiceDeadline('2026-10-23', '2026-10-12T07:00:00') === deemedAcceptedAt('2026-10-23'));
+  // a bad issue time falls back to the usual deadline
+  assert.equal(invoiceDeadline('2026-10-23', 'garbage'), '2026-10-22T12:00:00');
+});
+
+test('deadline in words: "12:00 Thu 22 Oct"; 00:00 reads as midnight on the day before', () => {
+  assert.equal(invoiceDeadlineText('2026-10-22T12:00:00'), '12:00 Thu 22 Oct');
+  assert.equal(invoiceDeadlineText('2026-10-23T13:06:00'), '13:06 Fri 23 Oct');
+  assert.equal(invoiceDeadlineText('2026-10-23T00:00:00'), 'midnight on Thu 22 Oct');
+  assert.equal(invoiceDeadlineText('2027-01-01T00:00:00'), 'midnight on Thu 31 Dec');
+  assert.equal(invoiceDeadlineText(null), '—');
+  assert.equal(invoiceDeadlineText('nope'), '—');
+});
+
+test('a deemed acceptance is never dated before the version existed', () => {
+  assert.equal(deemedAcceptanceMoment('2026-10-22T12:00:00', '2026-10-19T07:00:00'), '2026-10-22T12:00:00');
+  // a row stored by an earlier build: deadline (old payday) before the issue time → the issue time
+  assert.equal(deemedAcceptanceMoment('2026-05-08T00:00:00', '2026-10-21T15:00:12'), '2026-10-21T15:00:12');
 });
 
 test('the same payment: total and paid lines; "Not paid" lines and wording do not count', () => {
@@ -186,6 +220,7 @@ test('money and the words on the invoice', () => {
   const a = selfBillingAgreementText('Linear MCR Limited');
   assert.equal(a.version, '2026-10');
   assert.match(a.body, /12:00 the day before payday/);
+  assert.match(a.body, /at least 24 hours/);
   assert.match(a.body, /not to send your own invoices/);
   assert.ok(a.body.split('\n\n').length >= 8, 'paragraphs separated by blank lines');
 });

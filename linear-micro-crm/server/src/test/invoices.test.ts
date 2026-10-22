@@ -2,8 +2,9 @@
  * P2 invoices: every /invoices route for every role (anonymous, client, rep, leader, recruiter, admin), the finance
  * hooks (invoice summaries on payroll rows, Mark paid gated on acceptance with the admin's override), the job's issue /
  * refresh / reissue / deem steps, the attention items, the audit rows and the demo seed. The business clock is pinned
- * to Wed 21 Oct 2026, 15:00 London: last week (w/c 12 Oct) is paid on Fri 23 Oct, so its invoices count as accepted at
- * 12:00 Thu 22 Oct; the week before (payday Fri 16 Oct, gone) is invoiced late, so its invoices count as accepted at once.
+ * to Wed 21 Oct 2026, 15:00 London; the first job tick ran on Tue 20 Oct at 09:00. Last week (w/c 12 Oct) is paid on
+ * Fri 23 Oct, so its invoices count as accepted at 12:00 Thu 22 Oct; the week before (payday Fri 16 Oct, gone) is
+ * invoiced late, so its invoices get 24 hours (until Wed 21 Oct 09:00) and then count as accepted.
  *
  * Line checks go by kind, amount and paid flag, never by wording: with P1's breakdown the lines read "4 days × £60.00",
  * "FXC: 12 subs × £45.00"; with the stored run they read "Base: 4 days × £60.00" — the same invoice either way.
@@ -26,6 +27,8 @@ const WEDNESDAY = new Date('2026-10-21T15:00:00');
 setBusinessClock(WEDNESDAY);
 const LAST_WEEK = '2026-10-12';
 const WEEK_BEFORE = '2026-10-05';
+/** The first job tick: Tue 20 Oct 09:00, the day before the pinned clock. */
+const TUESDAY_9 = new Date('2026-10-20T09:00:00');
 
 const uploads = mkdtempSync(path.join(os.tmpdir(), 'lm-p2-uploads-'));
 process.env.LM_UPLOADS_DIR = uploads;
@@ -43,6 +46,7 @@ const db = (): Db => srv.db;
 
 const runOf = (userId: number, weekStart: string) => get<{ id: number; gross: number; status: string }>(db(), `SELECT id, gross, status FROM payroll_runs WHERE user_id = ? AND week_start = ?`, [userId, weekStart])!;
 const invoiceOfRun = (runId: number) => get<{ id: number; number: string; status: string; version: number; total: number; deemAt: string }>(db(), `SELECT id, number, status, version, total, deem_at AS deemAt FROM invoices WHERE payroll_run_id = ?`, [runId]);
+const invoiceOfRunLines = (runId: number) => JSON.parse(get<{ l: string }>(db(), `SELECT lines_json AS l FROM invoices WHERE payroll_run_id = ?`, [runId])!.l) as InvoiceLine[];
 /** The paid lines as [kind, amount] (the wording depends on whether P1's breakdown is there). */
 const paidLines = (lines: InvoiceLine[]) => lines.filter((l) => l.paid).map((l) => [l.kind, l.amount] as const);
 const auditRows = (action: string) => all<{ summary: string; entity: string | null; entityId: number | null; after: string | null }>(db(), `SELECT summary, entity, entity_id AS entityId, after_json AS after FROM audit_log WHERE action = ? ORDER BY id`, [action]);
@@ -88,10 +92,10 @@ test('anonymous → 401 and a client account → 403 clientPortalOnly on every /
 
 test('the job issues one invoice per unpaid field run (reps, leaders), numbered in order; never for the recruiter', async () => {
   assert.equal(get<{ n: number }>(db(), `SELECT COUNT(*) AS n FROM invoices`)!.n, 0, 'nothing before the job runs');
-  const r = syncInvoices(db());
+  const r = syncInvoices(db(), TUESDAY_9);
   assert.equal(r.issued, 8, 'rep, repA2, repB and the leader × 2 weeks');
-  assert.equal(r.deemed, 4, 'the week before was invoiced after its payday (Fri 16 Oct): those count as accepted at once');
-  assert.deepEqual(syncInvoices(db()), { issued: 0, reissued: 0, refreshed: 0, deemed: 0 }, 'idempotent');
+  assert.equal(r.deemed, 0, 'the week before was invoiced after its payday (Fri 16 Oct): 24 hours to check it, not accepted at once');
+  assert.deepEqual(syncInvoices(db(), TUESDAY_9), { issued: 0, reissued: 0, refreshed: 0, deemed: 0 }, 'idempotent');
   const rows = all<{ number: string; userId: number; total: number; gross: number; linesJson: string; deemAt: string; weekStart: string }>(
     db(),
     `SELECT i.number, i.user_id AS userId, i.total, p.gross, i.lines_json AS linesJson, i.deem_at AS deemAt, p.week_start AS weekStart
@@ -103,8 +107,8 @@ test('the job issues one invoice per unpaid field run (reps, leaders), numbered 
   for (const x of rows) {
     assert.equal(x.total, x.gross, 'the invoice total is what will be paid');
     assert.equal(invoiceLinesTotal(JSON.parse(x.linesJson) as InvoiceLine[]), x.gross);
-    // issued Wed 21 Oct: last week's by 12:00 Thu 22 Oct; the week before's payday has gone, so its own payday (at once)
-    assert.equal(x.deemAt, x.weekStart === LAST_WEEK ? '2026-10-22T12:00:00' : '2026-10-16T00:00:00');
+    // issued Tue 20 Oct 09:00: last week's by 12:00 Thu 22 Oct; the week before's payday has gone, so 24 hours from issue
+    assert.equal(x.deemAt, x.weekStart === LAST_WEEK ? '2026-10-22T12:00:00' : '2026-10-21T09:00:00');
   }
   const repLast = rows.find((x) => x.userId === fx().users.rep && x.weekStart === LAST_WEEK)!;
   assert.equal(repLast.total, 855);
@@ -114,7 +118,15 @@ test('the job issues one invoice per unpaid field run (reps, leaders), numbered 
   assert.equal(repLines.find((l) => l.kind === 'base')!.quantity, 4);
   assert.equal(repLines.find((l) => l.kind === 'commission')!.quantity, 12);
   assert.equal(auditRows('SYSTEM invoices.issue').length, 2, 'one automatic audit row per week');
-  assert.equal(auditRows('SYSTEM invoices.deem').length, 1, 'the late week, counted as accepted in the same tick');
+  assert.equal(auditRows('SYSTEM invoices.deem').length, 0, 'nothing counted as accepted the moment it was issued');
+  assert.deepEqual(
+    all<{ status: string }>(db(), `SELECT i.status FROM invoices i JOIN payroll_runs p ON p.id = i.payroll_run_id WHERE p.week_start = ?`, [WEEK_BEFORE]).map((x) => x.status),
+    ['issued', 'issued', 'issued', 'issued'],
+  );
+  // Wed 15:00 (the pinned clock): past those 24 hours, the late week counts as accepted
+  assert.deepEqual(syncInvoices(db()), { issued: 0, reissued: 0, refreshed: 0, deemed: 4 });
+  assert.deepEqual(syncInvoices(db()), { issued: 0, reissued: 0, refreshed: 0, deemed: 0 }, 'idempotent');
+  assert.equal(auditRows('SYSTEM invoices.deem').length, 1, 'the late week, counted as accepted in one tick');
   assert.deepEqual(
     all<{ status: string }>(db(), `SELECT i.status FROM invoices i JOIN payroll_runs p ON p.id = i.payroll_run_id WHERE p.week_start = ?`, [WEEK_BEFORE]).map((x) => x.status),
     ['deemed_accepted', 'deemed_accepted', 'deemed_accepted', 'deemed_accepted'],
@@ -163,10 +175,12 @@ test('reading an invoice: admin, the person and their team leader; nobody else',
   assert.equal(asAdmin.runTotal, 855, 'the office sees the run as it stands');
   assert.equal(asAdmin.figuresChanged, false);
   assert.ok(!('runTotal' in full), 'the person does not need it');
-  // the week before counted as accepted at its deadline, before Remy had accepted any self-billing agreement: it says so
+  // the week before counted as accepted at its deadline (24 hours after it was issued late, never before it existed),
+  // before Remy had accepted any self-billing agreement: it says so
   const deemed = (await rep.get(`/invoices/by-run/${runOf(fx().users.rep, WEEK_BEFORE).id}`)).json as Invoice;
   assert.equal(deemed.status, 'deemed_accepted');
-  assert.deepEqual(deemed.acceptance, { by: 'Remy Rep', at: '2026-10-16T00:00:00', deemed: true, withoutAgreement: true });
+  assert.equal(deemed.issuedAt, TUESDAY_9.toISOString());
+  assert.deepEqual(deemed.acceptance, { by: 'Remy Rep', at: '2026-10-21T09:00:00', deemed: true, withoutAgreement: true });
 });
 
 test('GET /invoices: own; leader own team and self; admin all; filters', async () => {
@@ -395,7 +409,7 @@ test('dispute: the supplier says what is wrong; the invoice is held; the office 
   const refused = await admin.post(`/finance/payroll/${runId}/pay`, {});
   assert.equal(refused.status, 409);
   assert.equal(refused.json.details.code, 'invoice_disputed');
-  assert.match(refused.json.error, /Finance → Company → Disputes/);
+  assert.match(refused.json.error, /Finance → Company → Disputed invoices:/, 'named as the card is');
   const withReason = await admin.post(`/finance/payroll/${runId}/pay`, { overrideReason: 'Paying now, will sort it out later' });
   assert.equal(withReason.status, 409, 'no "Mark paid anyway" for a disputed invoice');
   assert.equal(withReason.json.details.code, 'invoice_disputed');
@@ -497,6 +511,21 @@ test('a change that does not move the money refreshes the invoice in place: stat
   assert.deepEqual({ status: after.status, version: after.version, total: after.total, deemAt: after.deemAt }, { status: before.status, version: 1, total: before.total, deemAt: before.deemAt });
   assert.deepEqual(syncInvoices(db()), { issued: 0, reissued: 0, refreshed: 0, deemed: 0 }, 'up to date now');
   assert.match(auditRows('SYSTEM invoices.refresh').at(-1)!.summary, /^Brought invoice LM-SB-2026-\d{6} for Rita Rep \(w\/c 5 Oct\) up to date with the week: what is paid did not change$/);
+  // the wording the person had agreed to is kept when a refresh rewrites it (here: an older wording of a paid line)
+  const agreedLines = (JSON.parse(get<{ l: string }>(db(), `SELECT lines_json AS l FROM invoices WHERE id = ?`, [after.id])!.l) as InvoiceLine[])
+    .map((l) => (l.paid ? { ...l, description: `${l.description} (as first worded)` } : l));
+  run(db(), `UPDATE invoices SET lines_json = ? WHERE id = ?`, [JSON.stringify(agreedLines), after.id]);
+  run(db(), `UPDATE payroll_runs SET sales_cancelled = 2 WHERE id = ?`, [runId]);
+  assert.deepEqual(syncInvoices(db()), { issued: 0, reissued: 0, refreshed: 1, deemed: 0 });
+  const kept = all<{ number: string; version: number; status: string; acceptedAt: string; lines: string }>(
+    db(), `SELECT number, version, status, accepted_at AS acceptedAt, lines_json AS lines FROM invoice_refreshes WHERE invoice_id = ? ORDER BY id`, [after.id],
+  );
+  assert.equal(kept.length, 1, 'one record: the lines before this refresh');
+  assert.deepEqual({ ...kept[0]!, lines: JSON.parse(kept[0]!.lines) }, {
+    number: before.number, version: 1, status: 'deemed_accepted', acceptedAt: new Date('2026-10-21T09:00:00').toISOString(), lines: agreedLines,
+  });
+  assert.ok(!invoiceOfRunLines(runId).some((l) => l.description.endsWith('(as first worded)')), 'the invoice itself shows the current wording');
+  assert.equal(invoiceOfRun(runId)!.status, 'deemed_accepted');
   // an accepted invoice the person reads straight after the change: refreshed on the read, still accepted
   const lastRun = runOf(fx().users.repA2, LAST_WEEK).id;
   const accepted = invoiceOfRun(lastRun)!;
@@ -508,23 +537,69 @@ test('a change that does not move the money refreshes the invoice in place: stat
   assert.equal(invoiceOfRun(lastRun)!.status, 'accepted');
 });
 
-test('a run whose pay changes after the deadline: the new version waits only until payday starts, so payday is never blocked', async () => {
+test('a version issued after the usual deadline gets 24 hours: the person is told what changed and can accept or dispute it', async () => {
   const runId = runOf(fx().users.repA2, LAST_WEEK).id; // version 2, accepted, payday Fri 23 Oct
-  const v = invoiceOfRun(runId)!.version;
+  const before = invoiceOfRun(runId)!;
+  assert.equal(before.status, 'accepted');
+  assert.equal(before.total, 540);
   setBusinessClock(new Date('2026-10-22T13:00:00')); // Thu 13:00, after the usual 12:00 deadline
   try {
     run(db(), `UPDATE payroll_runs SET deductions = deductions + 15, gross = gross - 15 WHERE id = ?`, [runId]);
     const r = syncInvoices(db());
     assert.equal(r.reissued, 1);
     const now = invoiceOfRun(runId)!;
-    assert.equal(now.version, v + 1);
-    assert.equal(now.status, 'issued', 'Rita can still check it tonight');
-    assert.equal(now.deemAt, '2026-10-23T00:00:00', 'until the start of payday, not 12:00 on payday');
-    assert.equal((await admin.post(`/finance/payroll/${runId}/pay`, {})).json.details.code, 'invoice_not_accepted');
-    setBusinessClock(new Date('2026-10-23T08:30:00')); // payday morning
+    assert.equal(now.version, before.version + 1);
+    assert.equal(now.status, 'issued', 'not counted as accepted the moment it was issued');
+    assert.equal(now.deemAt, '2026-10-23T13:00:00', '24 hours from the reissue: into payday');
+    // Rita is told what changed, and can accept it or say something's wrong
+    srv.resetCache();
+    const item = (await repA2.get('/me/attention')).json.items.find((i: Json) => i.key === `invoices:open:${now.id}:v${now.version}`);
+    assert.ok(item, 'a bell item for the new version');
+    assert.equal(item.title, 'Your invoice changed: £525.00 (was £540.00)');
+    assert.equal(item.body, "w/c 12 Oct, £525.00. Accept it or say what's wrong by 13:00 Fri 23 Oct; after that it counts as accepted.");
+    const seen = (await repA2.get(`/invoices/${now.id}`)).json as Invoice;
+    assert.equal(seen.acceptance, null);
+    assert.deepEqual(seen.actions, { accept: true, dispute: true, resolve: false, markPaidWithReason: false });
+    // payday morning: still Rita's to answer, so Mark paid needs her acceptance or the office's reason
+    setBusinessClock(new Date('2026-10-23T08:30:00'));
+    const refused = await admin.post(`/finance/payroll/${runId}/pay`, {});
+    assert.equal(refused.status, 409);
+    assert.equal(refused.json.details.code, 'invoice_not_accepted');
+    assert.equal(refused.json.details.deemedAcceptedAt, '2026-10-23T13:00:00');
+    assert.equal((await repA2.post(`/invoices/${now.id}/accept`)).json.status, 'accepted');
     const paid = await admin.post(`/finance/payroll/${runId}/pay`, {});
-    assert.equal(paid.status, 200, 'counts as accepted from 00:00 on payday');
+    assert.equal(paid.status, 200, 'accepted on payday morning → paid');
     assert.equal(paid.json.status, 'paid');
+  } finally {
+    setBusinessClock(WEDNESDAY);
+  }
+});
+
+test('a version issued on or after payday (a statement on Friday, an old failed transfer) is never accepted at once', async () => {
+  // Lee's week before: payday Fri 16 Oct has gone (an unpaid transfer). A bonus is added on Fri 23 Oct at 08:30.
+  const runId = runOf(fx().users.leader, WEEK_BEFORE).id;
+  const before = invoiceOfRun(runId)!;
+  assert.equal(before.status, 'deemed_accepted');
+  setBusinessClock(new Date('2026-10-23T08:30:00'));
+  try {
+    run(db(), `UPDATE payroll_runs SET bonus = bonus + 25, gross = gross + 25 WHERE id = ?`, [runId]);
+    assert.equal(syncInvoices(db()).reissued, 1);
+    const now = invoiceOfRun(runId)!;
+    assert.deepEqual({ status: now.status, deemAt: now.deemAt }, { status: 'issued', deemAt: '2026-10-24T08:30:00' });
+    setBusinessClock(new Date('2026-10-23T17:00:00'));
+    const open = (await leader.get(`/invoices/${now.id}`)).json as Invoice;
+    assert.equal(open.status, 'issued');
+    assert.equal(open.actions?.dispute, true, "Something's wrong is still there on payday");
+    assert.equal((await admin.post(`/finance/payroll/${runId}/pay`, {})).json.details.code, 'invoice_not_accepted');
+    // nobody answers: 24 hours after the reissue it counts as accepted — dated then, never before the version existed
+    setBusinessClock(new Date('2026-10-24T08:31:00'));
+    const deemed = (await leader.get(`/invoices/${now.id}`)).json as Invoice;
+    assert.equal(deemed.status, 'deemed_accepted');
+    assert.equal(deemed.acceptance?.at, '2026-10-24T08:30:00');
+    assert.ok(Date.parse(deemed.issuedAt) < Date.parse('2026-10-24T07:30:00Z'), 'issued before it counted as accepted');
+    assert.equal(deemed.acceptance?.withoutAgreement, undefined, 'Lee accepted the agreement on Wed 21 Oct');
+    assert.equal(deemed.actions?.dispute, false);
+    assert.equal((await admin.post(`/finance/payroll/${runId}/pay`, {})).status, 200);
   } finally {
     setBusinessClock(WEDNESDAY);
   }
@@ -533,8 +608,8 @@ test('a run whose pay changes after the deadline: the new version waits only unt
 test('a run whose figures change is reissued (by the job, and before anyone accepts or pays it)', async () => {
   const runId = runOf(fx().users.rep, WEEK_BEFORE).id;
   const inv = invoiceOfRun(runId)!;
-  // A later payday (Fri 30 Oct, a transfer to redo), so the new versions wait for Remy instead of counting as accepted
-  // at once (the week's real payday has gone). The due date is not one of the figures, so nothing is reissued for it.
+  // A later payday (Fri 30 Oct, a transfer to redo), so the new versions' deadline is 12:00 Thu 29 Oct rather than 24
+  // hours after each reissue. The due date is not one of the figures, so nothing is reissued for it.
   run(db(), `UPDATE payroll_runs SET due_date = '2026-10-30' WHERE id = ?`, [runId]);
   assert.deepEqual(syncInvoices(db()), { issued: 0, reissued: 0, refreshed: 0, deemed: 0 });
   run(db(), `UPDATE payroll_runs SET deductions = 20, gross = gross - 20 WHERE id = ?`, [runId]);
@@ -578,7 +653,7 @@ test('the deadline: after 12:00 the day before payday an issued invoice counts a
     assert.equal(seen.actions?.dispute, false, 'too late to dispute');
     const late = await rep.post(`/invoices/${inv.id}/dispute`, { reason: 'Something', lines: [] });
     assert.equal(late.status, 409);
-    assert.match(late.json.error, /time to dispute this invoice has passed/);
+    assert.equal(late.json.error, 'The time to dispute this invoice passed at 12:00 Thu 29 Oct. Speak to the office: a correction can go on a later week.');
     assert.equal(invoiceOfRun(runId)!.status, 'issued', 'not stored yet');
     const r = syncInvoices(db());
     assert.ok(r.deemed >= 1);
@@ -592,8 +667,12 @@ test('the deadline: after 12:00 the day before payday an issued invoice counts a
 
 test('an unpaid run removed (nothing payable any more) takes its invoice with it; the number is kept as void', async () => {
   const runId = runOf(fx().users.repB, WEEK_BEFORE).id;
+  // a second version first (£5 taken off), so there is an earlier version to keep
+  const v1 = invoiceOfRun(runId)!;
+  run(db(), `UPDATE payroll_runs SET deductions = deductions + 5, gross = gross - 5 WHERE id = ?`, [runId]);
+  assert.equal(syncInvoices(db()).reissued, 1);
   const inv = invoiceOfRun(runId)!;
-  assert.ok(inv);
+  assert.equal(inv.version, 2);
   run(db(), `DELETE FROM payroll_runs WHERE id = ?`, [runId]);
   assert.equal(invoiceOfRun(runId), undefined);
   const voided = get<{ number: string; userId: number; total: number; status: string; reason: string }>(
@@ -601,6 +680,12 @@ test('an unpaid run removed (nothing payable any more) takes its invoice with it
   )!;
   assert.deepEqual({ ...voided, reason: undefined }, { number: inv.number, userId: fx().users.repB, total: inv.total, status: inv.status, reason: undefined });
   assert.match(voided.reason, /Removed with its pay run/);
+  // the earlier versions are kept with it (invoice_versions itself goes with the invoice)
+  const versions = JSON.parse(get<{ v: string }>(db(), `SELECT versions_json AS v FROM invoice_voids WHERE invoice_id = ?`, [inv.id])!.v) as { version: number; total: number; status: string; lines: InvoiceLine[]; replacedReason: string }[];
+  assert.deepEqual(versions.map((v) => [v.version, v.total, v.status]), [[1, v1.total, 'deemed_accepted']]);
+  assert.equal(invoiceLinesTotal(versions[0]!.lines), v1.total);
+  assert.equal(versions[0]!.replacedReason, 'The amounts changed after it was issued');
+  assert.equal(get<{ n: number }>(db(), `SELECT COUNT(*) AS n FROM invoice_versions WHERE invoice_id = ?`, [inv.id])!.n, 0);
 });
 
 test('the self-service invoice writes are limited to 60 a minute per person (429 after that, not audited)', async () => {
@@ -640,6 +725,29 @@ test('a database made at the foundation commit gets the new invoice columns once
   }
 });
 
+test('a database whose void trigger predates versions_json gets the column and the new trigger once', () => {
+  const fresh = openDb(':memory:');
+  try {
+    createSchema(fresh);
+    // invoice_voids and its trigger as the first 1.3 build made them
+    fresh.exec(`DROP TRIGGER invoices_keep_void; DROP TABLE invoice_voids;
+      CREATE TABLE invoice_voids (invoice_id INTEGER PRIMARY KEY, number TEXT NOT NULL, payroll_run_id INTEGER, user_id INTEGER, version INTEGER NOT NULL,
+        status TEXT NOT NULL, total REAL NOT NULL, lines_json TEXT NOT NULL, issued_at TEXT NOT NULL, voided_at TEXT NOT NULL, reason TEXT NOT NULL);
+      CREATE TRIGGER invoices_keep_void BEFORE DELETE ON invoices BEGIN
+        INSERT OR REPLACE INTO invoice_voids (invoice_id, number, payroll_run_id, user_id, version, status, total, lines_json, issued_at, voided_at, reason)
+        VALUES (OLD.id, OLD.number, OLD.payroll_run_id, OLD.user_id, OLD.version, OLD.status, OLD.total, OLD.lines_json, OLD.issued_at, 'x', 'y');
+      END;`);
+    fresh.exec(invoicesExtension.sql);
+    assert.deepEqual(invoicesExtension.upgrade(fresh), ['invoice_voids.versions_json', 'trigger invoices_keep_void']);
+    assert.deepEqual(invoicesExtension.upgrade(fresh), []);
+    assert.deepEqual(createSchema(fresh), []);
+    const sql = (fresh.prepare(`SELECT sql FROM sqlite_master WHERE type = 'trigger' AND name = 'invoices_keep_void'`).get() as { sql: string }).sql;
+    assert.match(sql, /versions_json/);
+  } finally {
+    fresh.close();
+  }
+});
+
 test('the demo seed: invoices for the last six weeks, Jordan still to accept, two disputes for the office', async () => {
   const demo = await startTestServer({ seed: true, today: '2026-10-21' });
   try {
@@ -658,14 +766,26 @@ test('the demo seed: invoices for the last six weeks, Jordan still to accept, tw
     assert.equal(get<{ n: number }>(d, `SELECT COUNT(*) AS n FROM invoices i JOIN users u ON u.id = i.user_id WHERE u.role NOT IN ('rep', 'leader')`)!.n, 0);
     const accepted = get<{ n: number }>(d, `SELECT COUNT(*) AS n FROM invoices i LEFT JOIN self_billing_agreements a ON a.user_id = i.user_id WHERE i.status = 'accepted' AND a.user_id IS NULL`)!.n;
     assert.equal(accepted, 0, 'nobody accepted an invoice without the agreement');
+    // …nor before it: the server refuses that (agreement_required), so the demo never shows it
+    const early = all<{ number: string; acceptedAt: string; agreedAt: string }>(d, `SELECT i.number, i.accepted_at AS acceptedAt, MIN(a.accepted_at) AS agreedAt
+      FROM invoices i JOIN self_billing_agreements a ON a.user_id = i.user_id WHERE i.accepted_at IS NOT NULL GROUP BY i.id HAVING i.accepted_at < MIN(a.accepted_at)`);
+    assert.deepEqual(early, [], 'no invoice accepted before its person accepted the agreement');
+    // every acceptance after the version was issued and before its deadline
+    const outOfOrder = get<{ n: number }>(d, `SELECT COUNT(*) AS n FROM invoices WHERE accepted_at IS NOT NULL AND accepted_at < issued_at`)!.n;
+    assert.equal(outOfOrder, 0);
     // every unpaid field run has its invoice (older failed transfers too, issued on their own Monday), so the first
     // job tick on a fresh demo changes nothing
     const uninvoiced = get<{ n: number }>(d, `SELECT COUNT(*) AS n FROM payroll_runs p JOIN users u ON u.id = p.user_id LEFT JOIN invoices i ON i.payroll_run_id = p.id
       WHERE i.id IS NULL AND p.status IN ('pending', 'failed') AND u.role IN ('rep', 'leader')`)!.n;
     assert.equal(uninvoiced, 0);
     assert.deepEqual(syncInvoices(d), { issued: 0, reissued: 0, refreshed: 0, deemed: 0 }, 'the first tick has nothing to do');
-    const late = all<{ issuedAt: string; weekEnd: string }>(d, `SELECT i.issued_at AS issuedAt, p.week_end AS weekEnd FROM invoices i JOIN payroll_runs p ON p.id = i.payroll_run_id WHERE p.week_start < ?`, [addDays(LAST_WEEK, -35)]);
-    assert.ok(late.every((x) => x.issuedAt.slice(0, 10) <= addDays(x.weekEnd, 1)), 'issued the Monday after their week, not today');
+    // older failed transfers: invoiced when self-billing started in the demo (the Monday after its first invoiced week),
+    // never backdated to their own week as if 1.3 had existed then, and never today
+    const started = addDays(LAST_WEEK, -28);
+    const late = all<{ issuedAt: string; status: string }>(d, `SELECT i.issued_at AS issuedAt, i.status FROM invoices i JOIN payroll_runs p ON p.id = i.payroll_run_id WHERE p.week_start < ?`, [addDays(LAST_WEEK, -35)]);
+    assert.ok(late.length > 0, 'the demo has older failed transfers');
+    assert.ok(late.every((x) => new Date(x.issuedAt).toLocaleDateString('en-CA', { timeZone: 'Europe/London' }) === started), JSON.stringify(late.slice(0, 3)));
+    assert.ok(late.every((x) => x.status === 'accepted' || x.status === 'deemed_accepted'));
     const jordan = await demo.login('rep');
     const mine = await jordan.get('/finance/me');
     const last = mine.json.runs.find((r: Json) => r.weekStart === LAST_WEEK);

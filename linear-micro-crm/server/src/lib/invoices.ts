@@ -14,7 +14,8 @@
  * The rules (shared/src/logic/invoices.ts): reps and leaders (the field people) are invoiced; one invoice per payroll
  * run, numbered LM-SB-<year>-<6 digits> in issue order per year; the lines come from P1's breakdown when it adds up to
  * the run's gross, else from the stored run, so the total is always what will be paid; the deadline is 12:00 the day
- * before payday (never sooner than 12:00 the day after it was issued); a disputed invoice is held until an admin
+ * before payday, or 24 hours after the version was issued when that is later (shared invoiceDeadline: a version issued
+ * late — on payday, or for an old failed transfer — is never accepted at once); a disputed invoice is held until an admin
  * resolves it ("Fix and reissue" → a new version to accept, or "Keep as it is" with a note the person sees). While an
  * invoice is open (issued or disputed) its supplier and customer blocks follow the person's and the company's details;
  * once accepted they are frozen. When an unpaid run's figures change, its invoice is reissued (the person accepts
@@ -30,10 +31,12 @@ import {
   MONEY_MAX,
   SELF_BILLING_AGREEMENT_VERSION,
   canDisputeInvoice,
+  deemedAcceptanceMoment,
   deemedAcceptedAt,
   effectiveInvoiceStatus,
   formatInvoiceNumber,
   invoiceDeadline,
+  invoiceDeadlineText,
   invoiceLinesFor,
   isInvoicePayable,
   isInvoicedRole,
@@ -613,8 +616,10 @@ const isStale = (r: Pick<InvoiceRow, 'runStatus' | 'status' | 'runFingerprint' |
  * Brings stale invoices up to date with their runs (inside the caller's transaction). The same payment — the same total
  * and paid lines (sameInvoicePayment) — refreshes the lines in place and keeps the status, the acceptance and the
  * deadline (a cancellation on a week paid as the base changes nothing the person accepted). Anything else is a new
- * version for the person to check (reissueInvoice; its deadline never runs into payday). One automatic audit row per
- * reissue, one for all the refreshed ones.
+ * version for the person to check (reissueInvoice; it always gets at least 24 hours, so the person can accept it or
+ * say something's wrong even when it comes on payday). One automatic audit row per reissue, one for all the refreshed
+ * ones. A refresh of a version the person accepted (or that counted as accepted) keeps the lines they accepted in
+ * invoice_refreshes first, so what they agreed to is never lost.
  */
 function applyStale(db: Db, rows: readonly InvoiceRow[], at: Date): { reissued: number; refreshed: number } {
   const refreshed: InvoiceRow[] = [];
@@ -624,7 +629,25 @@ function applyStale(db: Db, rows: readonly InvoiceRow[], at: Date): { reissued: 
     if (!pay) continue;
     const next = linesForRun(db, pay);
     if (sameInvoicePayment({ total: r.total, lines: parseJson<InvoiceLine[]>(r.linesJson, []) }, next)) {
-      run(db, `UPDATE invoices SET lines_json = ?, run_fingerprint = ? WHERE id = ?`, [JSON.stringify(next.lines), fingerprintOf(db, pay.id), r.id]);
+      const nextJson = JSON.stringify(next.lines);
+      const status = effectiveInvoiceStatus(r.status, deadlineOf(r), businessLocal(at));
+      // the person agreed to these lines (or they counted as agreed): keep them before the wording changes
+      if (nextJson !== r.linesJson && isInvoicePayable(status)) {
+        run(
+          db,
+          `INSERT INTO invoice_refreshes (invoice_id, number, version, status, accepted_at, lines_json, refreshed_at) VALUES (?, ?, ?, ?, ?, ?, ?)`,
+          [
+            r.id, r.number, r.version, status,
+            status === 'accepted'
+              ? r.acceptedAt
+              : status === 'deemed_accepted'
+                ? fromBusinessLocal(deemedAcceptanceMoment(deadlineOf(r), businessLocal(new Date(r.issuedAt)))).toISOString()
+                : r.resolvedAt,
+            r.linesJson, at.toISOString(),
+          ],
+        );
+      }
+      run(db, `UPDATE invoices SET lines_json = ?, run_fingerprint = ? WHERE id = ?`, [nextJson, fingerprintOf(db, pay.id), r.id]);
       refreshed.push(r);
       continue;
     }
@@ -658,8 +681,8 @@ function syncStale(db: Db, rows: readonly InvoiceRow[], at: Date): { reissued: n
 /**
  * The job's work (also safe to call any time; idempotent): bring the invoices of changed unpaid runs up to date
  * (refreshed in place or reissued — never a disputed one: it is held for the office), issue an invoice for every
- * unpaid run of a field person that has none, then deem accepted the issued invoices past their deadline (so an old
- * failed transfer invoiced today is stored as deemed accepted at once). One audit row per batch (actor "Linear Hub").
+ * unpaid run of a field person that has none, then deem accepted the issued invoices past their deadline (an old
+ * failed transfer invoiced today waits 24 hours like any late version). One audit row per batch (actor "Linear Hub").
  */
 export function syncInvoices(db: Db, at: Date = businessNow()): InvoiceSyncResult {
   const result: InvoiceSyncResult = { issued: 0, reissued: 0, refreshed: 0, deemed: 0 };
@@ -801,10 +824,10 @@ function toInvoice(db: Db, r: InvoiceRow, me: UserWithTeam, local: string): Invo
   const acceptance: Invoice['acceptance'] = status === 'accepted' && r.acceptedAt
     ? { by: supplier.name, at: r.acceptedAt, deemed: false }
     : status === 'deemed_accepted'
-      ? { by: supplier.name, at: summary.deemedAcceptedAt, deemed: true }
+      ? { by: supplier.name, at: deemedAcceptanceMoment(summary.deemedAcceptedAt, businessLocal(new Date(r.issuedAt))), deemed: true }
       : null;
   // deemed acceptance is a term of the agreement: say so when the person had not accepted one by then
-  if (acceptance?.deemed && !agreementAcceptedBy(db, r.userId, summary.deemedAcceptedAt)) acceptance.withoutAgreement = true;
+  if (acceptance?.deemed && !agreementAcceptedBy(db, r.userId, acceptance.at)) acceptance.withoutAgreement = true;
   const invoice: Invoice = {
     ...summary,
     payrollRunId: r.payrollRunId,
@@ -887,7 +910,7 @@ export function listInvoices(db: Db, me: UserWithTeam, q: { from: string; to: st
     .filter((r) => !q.status || r.status === q.status);
 }
 
-/** Finance → Company → Disputes (admin): every disputed invoice, oldest dispute first. */
+/** Finance → Company → Disputed invoices (admin): every disputed invoice, oldest dispute first. */
 export function listDisputes(db: Db): InvoiceDisputeRow[] {
   const local = businessLocal();
   const rows = all<InvoiceRow>(db, `${INVOICE_SELECT} WHERE i.status = 'disputed' ORDER BY i.disputed_at, i.id`);
@@ -1002,7 +1025,7 @@ export function disputeInvoice(db: Db, me: UserWithTeam, invoiceId: number, inpu
   if (!canDisputeInvoice(status, deadlineOf(r), local, false)) {
     throw conflict(status === 'resolved'
       ? 'The office has already checked this invoice. Speak to the office if something is still wrong.'
-      : 'The time to dispute this invoice has passed (12:00 the day before payday). Speak to the office.');
+      : `The time to dispute this invoice passed at ${invoiceDeadlineText(deadlineOf(r))}. Speak to the office: a correction can go on a later week.`);
   }
   const count = parseJson<InvoiceLine[]>(r.linesJson, []).length;
   const seen = new Set<number>();
@@ -1063,7 +1086,7 @@ export function resolveInvoice(
 // ───────────────────────────── Mark paid ─────────────────────────────
 
 export const NOT_ACCEPTED_MESSAGE = 'This invoice is not accepted yet. Open the run to mark it paid with a reason.';
-export const DISPUTED_MESSAGE = 'This invoice is disputed, so it is held until the office answers. Resolve it first in Finance → Company → Disputes: Keep as it is, or Fix and reissue.';
+export const DISPUTED_MESSAGE = 'This invoice is disputed, so it is held until the office answers. Resolve it first in Finance → Company → Disputed invoices: Keep as it is, or Fix and reissue.';
 
 /**
  * STABLE hook (POST /finance/payroll/:id/pay, admin, before the UPDATE): the run's invoice must be accepted, deemed
@@ -1084,7 +1107,8 @@ export function assertInvoicePayable(db: Db, run_: PayrollRunWithUser, me: UserW
   if (raw !== undefined && raw !== null && (typeof raw !== 'string' || reason.length < 3 || reason.length > 500)) {
     throw badRequest('Give a reason of 3 to 500 characters for paying without an accepted invoice');
   }
-  // payable as it now stands (a version reissued on payday counts as accepted at once: the run's gross is what is paid)
+  // payable as it now stands: accepted, counted as accepted (its deadline has passed) or kept by the office. A version
+  // issued late (a statement applied on payday) waits for the person, or for the admin's reason, like any other.
   if (isInvoicePayable(status)) return;
   if (status === 'disputed') {
     throw new HttpError(409, DISPUTED_MESSAGE, { code: 'invoice_disputed', invoiceId: row.id, status, deemedAcceptedAt: deadlineOf(row) });

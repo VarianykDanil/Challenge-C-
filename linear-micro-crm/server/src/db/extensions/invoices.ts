@@ -10,18 +10,22 @@
  *    and both parties as issued (JSON snapshots, so a later profile edit never rewrites an accepted invoice), acceptance,
  *    dispute (reason, the disputed lines as JSON) and resolution.
  *    P2 adds (addColumnIfMissing, so a database created at the foundation commit upgrades too):
- *      deem_at            the deadline, naive Europe/London time ("2026-10-22T12:00:00"): 12:00 the day before payday;
- *                         a version issued later than a day before that gets until 12:00 the next day, but never past
- *                         00:00 on payday (shared invoiceDeadline);
+ *      deem_at            the deadline, naive Europe/London time ("2026-10-22T12:00:00"): 12:00 the day before payday,
+ *                         or 24 hours after the version was issued when that is later (shared invoiceDeadline), so a
+ *                         version issued on payday or for an old failed transfer is never accepted at once;
  *      run_fingerprint    the run's figures when the lines were last written (lib/invoices.ts RUN_FINGERPRINT_SQL): a
  *                         different value later means the run was recalculated: the invoice is refreshed in place when
  *                         what is paid is the same, else reissued;
  *      resolution_action  'reissue' | 'keep' (the office's answer to a dispute);
  *      paid_override_reason / _by / _at: the run was marked paid before the invoice was accepted, and why.
  *  - invoice_versions (P2): each replaced version (its lines, total, status and dispute) when an invoice is reissued.
+ *  - invoice_refreshes (P2): the lines of a version the person had accepted (or that counted as accepted, or that the
+ *    office kept) when a refresh rewrote their wording without changing what is paid — so the document they agreed to
+ *    is never lost. No foreign key: it outlives the invoice.
  *  - invoice_voids (P2): an invoice removed with its run (an unpaid week with nothing payable any more, or a deleted
  *    account) is kept here by the trigger invoices_keep_void — number, person, week's run, last version, status,
- *    total and lines — so every number ever issued is accounted for (no silent gap in the sequence).
+ *    total, lines and (versions_json) every earlier version, copied before invoice_versions cascades away — so every
+ *    number ever issued, and every version of it, is accounted for (no silent gap in the sequence).
  *  - users columns (the supplier block): address_line1, address_line2, address_town, postcode, utr (optional),
  *    vat_number (optional; none → "Not VAT registered").
  *  - meta: `ext:invoices:company` (Settings → Company as JSON: legal name, address, company number, signatory name,
@@ -29,10 +33,12 @@
  *
  * Demo seed (fresh databases only): supplier details for the field people, the agreement accepted by everyone who has
  * worked a recent week (but the newest trainees), and an invoice for each field person's run of the last six completed
- * weeks and for every older unpaid run (failed transfers), each issued the Monday after its week — so the first job
- * tick has nothing to issue — paid weeks accepted or deemed accepted, one dispute the office kept as it was, and last week's (payday this
- * Friday) a mix of accepted, still to accept and two disputes waiting for the office. Jordan Lee (the demo rep) has
- * last week's invoice still to accept. Only this extension's tables, meta keys and users columns are written.
+ * weeks, issued the Monday after its week — self-billing "started" with the first of those six weeks, so every older
+ * unpaid run (a failed transfer) is invoiced on that first Monday too, not backdated to its own week; the first job tick
+ * has nothing to issue. Paid weeks accepted or deemed accepted (an invoice is only ever accepted after its person
+ * accepted the agreement), one dispute the office kept as it was, and last week's (payday this Friday) a mix of
+ * accepted, still to accept and two disputes waiting for the office. Jordan Lee (the demo rep) has last week's invoice
+ * still to accept. Only this extension's tables, meta keys and users columns are written.
  * Rules: ./types.ts.
  */
 import { SELF_BILLING_AGREEMENT_VERSION, effectiveInvoiceStatus, invoiceDeadline, isInvoicedRole, type InvoiceLine } from '@lm/shared';
@@ -41,6 +47,29 @@ import { addDays, mondayOf } from '../../lib/dates.ts';
 import { businessLocal, fromBusinessLocal, issueInvoiceForRun } from '../../lib/invoices.ts';
 import type { DbExtension, SeedContext } from './types.ts';
 import { addColumnIfMissing } from './types.ts';
+
+/**
+ * Keeps a removed invoice in invoice_voids, with every earlier version (invoice_versions rows still exist in a BEFORE
+ * DELETE trigger; the foreign key's cascade removes them right after).
+ */
+const VOID_TRIGGER_SQL = `CREATE TRIGGER invoices_keep_void BEFORE DELETE ON invoices
+BEGIN
+  INSERT OR REPLACE INTO invoice_voids (invoice_id, number, payroll_run_id, user_id, version, status, total, lines_json, issued_at, voided_at, reason, versions_json)
+  VALUES (OLD.id, OLD.number, OLD.payroll_run_id, OLD.user_id, OLD.version, OLD.status, OLD.total, OLD.lines_json, OLD.issued_at,
+          strftime('%Y-%m-%dT%H:%M:%fZ', 'now'), 'Removed with its pay run: nothing was payable for the week any more, or the account was deleted',
+          (SELECT json_group_array(json_object('version', v.version, 'issuedAt', v.issued_at, 'status', v.status, 'total', v.total,
+                    'lines', CASE WHEN json_valid(v.lines_json) THEN json(v.lines_json) ELSE v.lines_json END, 'acceptedAt', v.accepted_at, 'disputedAt', v.disputed_at, 'disputeReason', v.dispute_reason,
+                    'replacedAt', v.replaced_at, 'replacedReason', v.replaced_reason))
+           FROM (SELECT * FROM invoice_versions WHERE invoice_id = OLD.id ORDER BY version) v));
+END;`;
+
+/** A database whose invoices_keep_void trigger predates versions_json gets the new one (after the column is added). */
+function upgradeVoidTrigger(db: Db): string | null {
+  const current = (db.prepare(`SELECT sql FROM sqlite_master WHERE type = 'trigger' AND name = 'invoices_keep_void'`).get() as { sql: string } | undefined)?.sql ?? '';
+  if (current.includes('versions_json')) return null;
+  db.exec(`DROP TRIGGER IF EXISTS invoices_keep_void;\n${VOID_TRIGGER_SQL}`);
+  return 'trigger invoices_keep_void';
+}
 
 const SQL = `
 CREATE TABLE IF NOT EXISTS self_billing_agreements (
@@ -86,14 +115,22 @@ CREATE TABLE IF NOT EXISTS invoice_voids (
   lines_json TEXT NOT NULL,
   issued_at TEXT NOT NULL,
   voided_at TEXT NOT NULL,
-  reason TEXT NOT NULL
+  reason TEXT NOT NULL,
+  versions_json TEXT
 );
-CREATE TRIGGER IF NOT EXISTS invoices_keep_void BEFORE DELETE ON invoices
-BEGIN
-  INSERT OR REPLACE INTO invoice_voids (invoice_id, number, payroll_run_id, user_id, version, status, total, lines_json, issued_at, voided_at, reason)
-  VALUES (OLD.id, OLD.number, OLD.payroll_run_id, OLD.user_id, OLD.version, OLD.status, OLD.total, OLD.lines_json, OLD.issued_at,
-          strftime('%Y-%m-%dT%H:%M:%fZ', 'now'), 'Removed with its pay run: nothing was payable for the week any more, or the account was deleted');
-END;
+${VOID_TRIGGER_SQL.replace('CREATE TRIGGER', 'CREATE TRIGGER IF NOT EXISTS')}
+
+CREATE TABLE IF NOT EXISTS invoice_refreshes (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  invoice_id INTEGER NOT NULL,
+  number TEXT NOT NULL,
+  version INTEGER NOT NULL,
+  status TEXT NOT NULL,
+  accepted_at TEXT,
+  lines_json TEXT NOT NULL,
+  refreshed_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_invoice_refreshes_invoice ON invoice_refreshes(invoice_id, version);
 
 CREATE TABLE IF NOT EXISTS invoice_versions (
   invoice_id INTEGER NOT NULL REFERENCES invoices(id) ON DELETE CASCADE,
@@ -167,17 +204,23 @@ function seedInvoices(db: Db, ctx: SeedContext): void {
   // ── the agreement: everyone but trainees who started in the last five weeks ──
   const recent = addDays(mondayOf(ctx.today), -35);
   const acceptedAgreement = new Set<number>();
+  /** When each person accepted the agreement (ms): an invoice of theirs is only ever accepted after it. */
+  const agreedAt = new Map<number, number>();
   const insertAgreement = db.prepare(`INSERT OR IGNORE INTO self_billing_agreements (user_id, version, accepted_at, ip) VALUES (?, ?, ?, ?)`);
   for (const u of field) {
     if (u.position === 'trainee' && u.startDate >= recent) continue;
     const day = u.startDate > addDays(ctx.today, -45) ? u.startDate : addDays(ctx.today, -45 + rng.int(0, 4));
-    insertAgreement.run(u.id, SELF_BILLING_AGREEMENT_VERSION, at(day, rng.int(9, 20), rng.int(0, 59)).toISOString(), '192.168.1.' + rng.int(20, 200));
+    const agreedMoment = at(day, rng.int(9, 20), rng.int(0, 59));
+    insertAgreement.run(u.id, SELF_BILLING_AGREEMENT_VERSION, agreedMoment.toISOString(), '192.168.1.' + rng.int(20, 200));
     acceptedAgreement.add(u.id);
+    agreedAt.set(u.id, agreedMoment.getTime());
   }
 
-  // ── invoices: the field people's runs of the last six completed weeks, and every older unpaid run (failed transfers:
-  //    they still owe money, so the first job tick would otherwise invoice them today), issued the Monday after each week ──
+  // ── invoices: the field people's runs of the last six completed weeks, issued the Monday after each week, and every
+  //    older unpaid run (failed transfers: they still owe money, so the first job tick would otherwise invoice them
+  //    today), invoiced when self-billing started: the first of those Mondays, at 06:30–06:59 (before that morning's) ──
   const firstWeek = addDays(mondayOf(ctx.today), -42);
+  const startedDay = addDays(firstWeek, 7);
   const runs = db.prepare(
     `SELECT p.id, p.user_id AS userId, p.week_start AS weekStart, p.week_end AS weekEnd, p.due_date AS dueDate, p.status,
             p.paid_date AS paidDate, p.sales, p.days_worked AS daysWorked
@@ -217,8 +260,9 @@ function seedInvoices(db: Db, ctx: SeedContext): void {
 
   for (const r of runs) {
     if (!fieldIds.has(r.userId)) continue;
-    const issueDay = addDays(r.weekEnd, 1); // Monday after the week
-    const issuedAt = at(issueDay, 7, rng.int(0, 40));
+    const older = r.weekStart < firstWeek; // a failed transfer from before self-billing started
+    const issueDay = older ? startedDay : addDays(r.weekEnd, 1); // Monday after the week
+    const issuedAt = older ? at(issueDay, 6, rng.int(30, 59)) : at(issueDay, 7, rng.int(0, 40));
     if (issuedAt.getTime() > now.getTime()) continue;
     const id = issueInvoiceForRun(db, r.id, issuedAt);
     if (id === null) continue;
@@ -232,6 +276,8 @@ function seedInvoices(db: Db, ctx: SeedContext): void {
       return new Date(Math.max(issuedAt.getTime() + 3_600_000, Math.min(t, cap))).toISOString();
     };
     const acceptedAt = () => daytime(2);
+    /** Accepted at `when` only if the person had accepted the agreement by then (the server's rule), else null. */
+    const agreedBy = (when: string): boolean => (agreedAt.get(r.userId) ?? Infinity) < Date.parse(when);
     const ip = () => `10.0.${rng.int(0, 9)}.${rng.int(2, 250)}`;
 
     if (disputeRuns.has(r.id)) {
@@ -253,12 +299,18 @@ function seedInvoices(db: Db, ctx: SeedContext): void {
     if (open) {
       // last week: payday this Friday. Jordan (the demo rep) still has his to accept; Amelia has accepted hers.
       if (r.userId === jordan?.id || !agreed) continue;
-      if (r.userId === amelia?.id || rng.chance(0.45)) accept.run(acceptedAt(), ip(), id);
+      if (r.userId === amelia?.id || rng.chance(0.45)) {
+        const when = acceptedAt();
+        if (agreedBy(when)) accept.run(when, ip(), id);
+      }
       continue;
     }
-    // earlier weeks: accepted, or deemed accepted (not disputed by the deadline)
-    if (agreed && rng.chance(0.72)) accept.run(acceptedAt(), ip(), id);
-    else deem.run(id);
+    // earlier weeks: accepted (after the agreement), or deemed accepted (not disputed by the deadline)
+    if (agreed && rng.chance(0.72)) {
+      const when = acceptedAt();
+      if (agreedBy(when)) accept.run(when, ip(), id);
+      else deem.run(id);
+    } else deem.run(id);
   }
 }
 
@@ -280,6 +332,9 @@ export const extension: DbExtension = {
       addColumnIfMissing(db, 'invoices', 'paid_override_reason', 'TEXT'),
       addColumnIfMissing(db, 'invoices', 'paid_override_by', 'INTEGER'),
       addColumnIfMissing(db, 'invoices', 'paid_override_at', 'TEXT'),
+      // every version of a voided invoice (a database whose invoice_voids predates it)
+      addColumnIfMissing(db, 'invoice_voids', 'versions_json', 'TEXT'),
+      upgradeVoidTrigger(db),
     ].filter((name): name is string => name !== null);
   },
   seed: seedInvoices,

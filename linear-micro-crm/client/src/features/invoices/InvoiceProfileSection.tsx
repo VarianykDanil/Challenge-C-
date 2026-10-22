@@ -35,7 +35,7 @@ export function InvoiceProfileSection({ user, className }: InvoiceProfileSection
           <p className="text-xs text-muted">
             {accepted
               ? `Accepted the self-billing agreement (version ${p.agreement?.version}) on ${formatDate(accepted)}.`
-              : `${user.firstName} has not accepted the self-billing agreement yet: their invoices still count as accepted at 12:00 the day before payday unless disputed, but they cannot accept one themselves until they do.`}
+              : `${user.firstName} has not accepted the self-billing agreement yet: their invoices still count as accepted at the deadline (12:00 the day before payday, or 24 hours after a late one) unless disputed, but they cannot accept one themselves until they do.`}
           </p>
         </div>
       )}
