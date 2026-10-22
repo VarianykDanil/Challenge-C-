@@ -289,7 +289,7 @@ export function venueShifts(db: Db, today: string, key: string): ShiftRow[] {
     return all<ShiftRow>(
       db,
       `SELECT g.event_id AS eventId, g.user_id AS userId, g.date, g.stops, g.table_count AS "table", g.presentations, g.closes, g.taps, g.sales,
-              u.first_name || ' ' || u.last_name AS userName, u.avatar_color AS avatarColor, u.team_id AS teamId
+              TRIM(u.first_name || ' ' || u.last_name) AS userName, u.avatar_color AS avatarColor, u.team_id AS teamId
        FROM gauge_entries g JOIN users u ON u.id = g.user_id
        WHERE g.event_id IN (${placeholders(ids.length)})
        ORDER BY g.date DESC, g.id DESC`,

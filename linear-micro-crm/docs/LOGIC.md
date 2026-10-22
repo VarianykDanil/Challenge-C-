@@ -2172,8 +2172,8 @@ Pay you can check (base or commission, cancellations from the clients' statement
 #### Database extensions (`server/src/db/extensions/`)
 
 `index.ts` (foundation) runs, in this fixed order: learning, pitches, pin, audit, checkins (1.2), then **pay (P1),
-invoices (P2), statements (P3), videos (P5), client (P6), recruitment (P7), venues (P8)**. P4 adds none; P9 owns the
-1.2 `audit.ts`. The rules of `types.ts` stand (CREATE TABLE IF NOT EXISTS, `addColumnIfMissing`, data steps guarded with
+invoices (P2), statements (P3), videos (P5), client (P6), recruitment (P7), venues (P8)**, and from 1.3.1
+**sapiens** (§16.10). P4 adds none; P9 owns the 1.2 `audit.ts`. The rules of `types.ts` stand (CREATE TABLE IF NOT EXISTS, `addColumnIfMissing`, data steps guarded with
 meta flags and skipped on an empty database, INSERT OR IGNORE, report only real changes, rows both databases need in
 both `upgrade` and `seed`, `ctx.rng(salt)`, never gauge rows or payroll runs from an extension). 1.3 adds:
 
@@ -3293,3 +3293,91 @@ requests per burst, 10 at a time; median of 3 runs on the same machine, the foun
 
 Writes and reads are unchanged within noise. The new rows cost about 0.1 ms per request; a flood never writes more than
 the failure budget and the per-person report limit allow. Retention is unchanged (two years, `purgeAuditLog`).
+
+### 16.10 Release 1.3.1: the Sapiens team's demo logins, and adding people
+
+#### Team Sapiens and seven blank accounts
+
+`server/src/db/seed-data.ts` `DEMO_TEAMS` (Sapiens, `#7C3AED`, a colour none of the four demo teams has) and
+`DEMO_TEAM_ACCOUNTS`: Theo (LM-0101, leads the team), Daniel (LM-0102), Ridwan (LM-0103), Jamie (LM-0104) — role
+`leader`, position `team_leader` — and Olivia (LM-0105), Owens (LM-0106), Yasmin (LM-0107) — role `rep`, position
+`trainee`. Email `<first name>@linear-mcr.co.uk`, `last_name ''`, active, start date = the business date, city
+Manchester, no phone, the default pay plan for the position, no PIN, avatar colour from the palette by employee number.
+First names only: the repository is public.
+
+One function, `lib/demoTeams.ts addDemoTeams(db, today)`, writes them for both paths:
+
+- **Fresh demo seed** (`db/seed.ts`): at the very end of `seed()`, after every extension seed and the `seeded_at` /
+  `seed_today` meta rows, inside the seed transaction, with no random draws — so no extension seed sees them and the
+  r2/r3 contracts hold (core tables identical with and without extension seeds; the first restart reports nothing). It
+  then sets the step's flag `ext:sapiens:accounts`. `seed(db, today, { demoTeams: false })` (tests only) is the 1.3.0
+  demo database. `stats.users` and `stats.teams` count them.
+- **Existing demo database** (`db/extensions/sapiens.ts`, appended last to the registry, no `seed`): `upgrade` runs the
+  step once — only when the flag is not set, the database is a **demo database** (`isDemoDatabase`: meta `seeded_at`
+  **and** `seed_today`, both written only by the demo seed; the route-test fixture writes only `seeded_at`), and the core
+  rows it needs exist (users and pay plans; on a fresh install the upgrade runs before the seed, on empty tables, so it
+  skips **without** setting the flag). It runs in a transaction, sets the flag, and reports `sapiens:team.sapiens` only
+  when it inserted something. A database the seed did not create never gains them and gets no flag.
+
+`addDemoTeams` reuses a team of that name in any case (a "Sapiens" Matt made by hand, left as it is) and adds only the
+accounts missing **by email** (case-insensitive); an account whose fixed employee ID is taken gets the next number above
+both the IDs in use and the demo's own (LM-0108 and up). A team with no leader gets Theo when Theo is on it. Nothing else
+is written: no gauges, events, pay runs, adjustments, invoices, agreements, learning progress, video views, check-ins,
+bookings or audit rows (`sapiens.test.ts` checks every column that refers to a person).
+
+**The marker.** meta `seed_demo_teams` = JSON `[{ teamId, accounts: [{ id, employeeId, email }] }]`: only the accounts
+the seed or the step inserted (never a person matched by email). `GET /auth/demo-accounts` lists a demo team only from
+it (like the demo client's `seed_demo_clients`), and each account only while its id, employee ID and email still match,
+it is staff and not `left` — after the four demo accounts and under the same conditions (`LM_DEMO_ACCOUNTS=0` hides it).
+
+#### Names without a surname (`shared/src/logic/people.ts`)
+
+- `personName(p)` → "Amelia Hart", "Theo": first and last name trimmed, empty parts left out — never a trailing or double
+  space. The server's sentences and labels use it, and every SQL name is `TRIM(first_name || ' ' || last_name)`. The
+  client's `fullName` is the same function.
+- `personInitials` → "AH", "T" (the first name alone); the Avatar takes initials from the name the same way.
+- `firstNameWithInitial` → "Olivia K."; just "Olivia" without a surname (the roll call and the event page's **Log for**
+  chips, which add the initial only when two people share a first name).
+- `personSortKey` / server `lib/people.ts personOrderSql`: surname, then first name, the first name standing in for a
+  missing surname, case-insensitive (`GET /users`, the Team cards).
+- `PATCH /users/:id` accepts `lastName: ''` only while the last name is already empty; the admin form asks for a last name
+  only when the person has one (or is new).
+
+#### Who may add people (`addPersonRefusal(actor, body)`)
+
+Checked in this order, first refusal wins; `null` = allowed. Empty values (`undefined`, `null`, `''`) are not attempts.
+
+1. Administrator → always `null` (as before 1.3.1).
+2. Not an administrator, recruiter or leader → `403` "Only administrators, recruiters and leaders can add people."
+3. `role` other than `rep` → `403` "Only an administrator can make someone a leader, recruiter or administrator. You can
+   add representatives."
+4. `position` other than `trainee` / `field_rep` (`FIELD_ADD_POSITIONS`) → `403` "You can add trainees and field
+   representatives. Ask an administrator to add anyone else."
+5. any `payPlanId` → `403` "Only an administrator can choose a pay plan. New people get the standard plan for their
+   position."
+6. `status` other than `active` → `403` "New people start as active. Only an administrator can set another status."
+7. any `avatarColor` → `403` "Only an administrator can choose an avatar colour."
+8. any `employeeId` → `403` "Employee IDs are given automatically. Only an administrator can choose one."
+9. Leader: no team of their own → `403` "You are not on a team yet, so you cannot add people. Ask an administrator to add
+   them."; a `teamId` that is not theirs (including `null`) → `403` "You can add people to your own team (Sapiens) only."
+   A missing `teamId` means their own.
+10. Recruiter: no `teamId` → `400` "Choose a team for them."
+
+The route then validates as before (`400`), checks duplicates (`409`), gives the default plan for the position and the
+next employee ID, inserts, and answers `201` with the employee ID filled in this once plus `signInInstructions`
+(`staffSignInInstructions({ firstName, email, employeeId, teamName, signInUrl, pinRequired })`: a greeting, the team,
+"1. Open <address>." or "Open the Linear Hub sign-in page", "2. Enter your email (…) and your employee ID: LM-0108.", a
+third PIN step only while the office requires a PIN for everyone, and "Keep your employee ID to yourself"). Every later
+read redacts the ID as before (`lib/scope.ts redactUser`). The 1.2 audit spec records the caller as the actor; `POST
+/users` counts towards the per-person write limit.
+
+#### Client
+
+- Sign-in page: under the four demo buttons, a disclosure **Sapiens team (7)** ("New accounts: everything works, nothing
+  logged yet"); open, one row per person (avatar, name, position badge; 44 px), one tap signs in.
+- **Team → Add person**: administrators keep the full form (`UserFormModal`; the employee ID may now be left blank);
+  recruiters and leaders get `features/team/AddPersonModal.tsx` — first and last name, email, phone (optional), position
+  (Trainee / Field Representative), team (a leader's own, read-only; a recruiter chooses) and start date — then the
+  **Sign-in details** step with the name, team, email, employee ID and **Copy instructions** (`lib/clipboard.ts
+  copyText`: the Clipboard API, or the textarea fallback on plain http; if both fail, the text is selected for copying by
+  hand). Leaders see the button only when they have a team.

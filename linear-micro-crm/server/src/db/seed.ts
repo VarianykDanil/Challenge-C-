@@ -28,6 +28,7 @@ import { seedExtensions } from './extensions/index.ts';
 import { extensionRng } from './extensions/types.ts';
 import { Rng } from '../lib/prng.ts';
 import { writeDemoClientMarkers } from '../lib/client.ts';
+import { addDemoTeams, DEMO_TEAMS_DONE_KEY } from '../lib/demoTeams.ts';
 import { weekPayFor } from '../lib/pay.ts';
 import { computeWeek, DAY_RATE_KEY, payCalcContext, RULE_FROM_KEY } from '../lib/payWeek.ts';
 import { carryForwardCorrections, insertRun, runFiguresOf, runIsDue } from './maintenance.ts';
@@ -104,6 +105,11 @@ export interface SeedOptions {
    * `extensionSeeds` is false.
    */
   onlyExtensions?: readonly string[];
+  /**
+   * Release 1.3.1: false leaves out the blank demo teams (team Sapiens and its seven accounts, default true) — the demo
+   * database as 1.3.0 seeded it, so sapiens.test.ts can prove an existing demo database gains them on start-up.
+   */
+  demoTeams?: boolean;
 }
 
 export function seed(db: Db, today: string = D.todayISO(), options: SeedOptions = {}): SeedStats {
@@ -746,7 +752,7 @@ export function seed(db: Db, today: string = D.todayISO(), options: SeedOptions 
     const monthName = MONTH_NAMES[Number(monthStart.slice(5, 7)) - 1]!;
     const monthBoard = db
       .prepare(
-        `SELECT u.first_name AS firstName, u.first_name || ' ' || u.last_name AS name, SUM(g.sales) AS sales, SUM(g.stops) AS stops
+        `SELECT u.first_name AS firstName, TRIM(u.first_name || ' ' || u.last_name) AS name, SUM(g.sales) AS sales, SUM(g.stops) AS stops
          FROM gauge_entries g JOIN users u ON u.id = g.user_id WHERE g.date BETWEEN ? AND ?
          GROUP BY u.id ORDER BY sales DESC, stops ASC, name ASC`,
       )
@@ -844,6 +850,17 @@ export function seed(db: Db, today: string = D.todayISO(), options: SeedOptions 
     }, options.onlyExtensions);
     run(db, `INSERT INTO meta (key, value) VALUES ('seeded_at', ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value`, [nowIso]);
     run(db, `INSERT INTO meta (key, value) VALUES ('seed_today', ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value`, [today]);
+
+    // ── Release 1.3.1: the blank demo teams (team Sapiens, seven accounts), at the very end ──
+    // After every extension seed, so none of them sees these people: no gauges, pay, invoices, learning, check-ins,
+    // bookings or audit rows — only the team, the seven users (their marker in meta) and the step's done flag, the
+    // same rows an existing demo database gains on start-up (db/extensions/sapiens.ts). No random draws.
+    if (options.demoTeams !== false) {
+      const added = addDemoTeams(db, today);
+      stats.users += added.inserted.length;
+      stats.teams += added.teamsCreated;
+      run(db, `INSERT INTO meta (key, value) VALUES (?, '1') ON CONFLICT(key) DO UPDATE SET value = excluded.value`, [DEMO_TEAMS_DONE_KEY]);
+    }
   });
 
   return stats;

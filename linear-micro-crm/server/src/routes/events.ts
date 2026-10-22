@@ -1,6 +1,6 @@
 import { Router } from 'express';
 import { z } from 'zod';
-import { EVENT_MAX_TARGET_SALES, funnelRatios, type EventForecastResponse, type SalesEventWithMeta, type UserWithTeam } from '@lm/shared';
+import { EVENT_MAX_TARGET_SALES, funnelRatios, personName, type EventForecastResponse, type SalesEventWithMeta, type UserWithTeam } from '@lm/shared';
 import { get, run, type Db } from '../db/connection.ts';
 import { Where, getEvent, listEvents, listGauges } from '../db/queries.ts';
 import { addDays, nowHHMM, todayISO } from '../lib/dates.ts';
@@ -65,7 +65,7 @@ function withAims<T extends SalesEventWithMeta>(db: Db, events: T[], today: stri
   if (!events.length || !smartEnabled()) return events;
   const mine = events.filter((e) => e.bookings?.me && (e.status === 'scheduled' || e.status === 'live') && e.date >= today);
   if (!mine.length) return events;
-  const person = { userId: me.id, userName: `${me.firstName} ${me.lastName}`, avatarColor: me.avatarColor, teamId: me.teamId };
+  const person = { userId: me.id, userName: personName(me), avatarColor: me.avatarColor, teamId: me.teamId };
   const plans = eventPlans(db, mine.map((event) => ({ event, people: [person] })), me, today, eventHeadcounts(db, events, today));
   return events.map((e) => {
     const plan = plans.get(e.id)?.[0];

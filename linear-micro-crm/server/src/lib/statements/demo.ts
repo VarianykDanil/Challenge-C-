@@ -51,7 +51,7 @@ interface Logged {
 function loggedFor(db: Db, campaignId: number, from: string, to: string): Logged[] {
   return all<Logged>(
     db,
-    `SELECT g.user_id AS userId, u.role, u.first_name || ' ' || u.last_name AS name, u.first_name AS firstName, u.last_name AS lastName,
+    `SELECT g.user_id AS userId, u.role, TRIM(u.first_name || ' ' || u.last_name) AS name, u.first_name AS firstName, u.last_name AS lastName,
             g.date, SUM(g.sales) AS sales
        FROM gauge_entries g JOIN events e ON e.id = g.event_id JOIN users u ON u.id = g.user_id
       WHERE e.campaign_id = ? AND g.date BETWEEN ? AND ? AND u.role NOT IN ('client', 'admin')

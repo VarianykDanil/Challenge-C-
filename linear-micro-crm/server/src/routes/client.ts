@@ -28,6 +28,7 @@ import {
   type ClientPortal,
   type ClientPostInput,
   type UserWithTeam,
+  personName,
 } from '@lm/shared';
 import { get, run, transaction, type Db } from '../db/connection.ts';
 import { clientCampaignIdOf } from '../lib/client.ts';
@@ -70,7 +71,7 @@ export function clientRouter(db: Db): Router {
     if (!campaign) throw notFound('Campaign');
     const body: ClientPortal = {
       campaign,
-      me: { id: me.id, name: `${me.firstName} ${me.lastName}`, email: me.email },
+      me: { id: me.id, name: personName(me), email: me.email },
       posts: listClientPostsForCampaign(db, campaignId),
     };
     res.json(body);

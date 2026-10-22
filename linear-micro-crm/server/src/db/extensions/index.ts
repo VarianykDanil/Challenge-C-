@@ -4,6 +4,7 @@
  * each `seed` at the end of a fresh demo seed. The contract is in ./types.ts.
  * Release 1.3 (r3-foundation) appends, in package order: pay (P1), invoices (P2), statements (P3), videos (P5),
  * client (P6), recruitment (P7), venues (P8). P4 (PDF) and P9 (audit; it owns ./audit.ts) add no extension file.
+ * Release 1.3.1 appends sapiens (team Sapiens' blank demo accounts on an existing demo database; no seed).
  */
 import type { Db } from '../connection.ts';
 import { extension as audit } from './audit.ts';
@@ -15,6 +16,7 @@ import { extension as pay } from './pay.ts';
 import { extension as pin } from './pin.ts';
 import { extension as pitches } from './pitches.ts';
 import { extension as recruitment } from './recruitment.ts';
+import { extension as sapiens } from './sapiens.ts';
 import { extension as statements } from './statements.ts';
 import { extension as venues } from './venues.ts';
 import { extension as videos } from './videos.ts';
@@ -27,6 +29,8 @@ export const EXTENSIONS: readonly DbExtension[] = [
   learning, pitches, pin, audit, checkins,
   // Release 1.3
   pay, invoices, statements, videos, client, recruitment, venues,
+  // Release 1.3.1
+  sapiens,
 ];
 
 /**

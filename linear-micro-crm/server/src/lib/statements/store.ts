@@ -146,7 +146,7 @@ const STATEMENT_SELECT = `
          s.source, s.message_id AS messageId, s.received_at AS receivedAt, s.file_path AS filePath, s.file_name AS fileName,
          s.file_sha256 AS fileSha256, s.period_start AS periodStart, s.period_end AS periodEnd, s.status, s.error,
          s.applied_at AS appliedAt, s.applied_by AS appliedBy,
-         CASE WHEN a.id IS NULL THEN NULL ELSE a.first_name || ' ' || a.last_name END AS appliedByName,
+         CASE WHEN a.id IS NULL THEN NULL ELSE TRIM(a.first_name || ' ' || a.last_name) END AS appliedByName,
          s.table_json AS tableJson, s.mapping_json AS mappingJson, s.mapping_source AS mappingSource, s.layout,
          s.effect_json AS effectJson, s.sender, s.subject, s.superseded_by AS supersededBy, s.sender_verified AS senderVerified
     FROM statements s
@@ -173,7 +173,7 @@ interface RowDb {
 const ROW_SELECT = `
   SELECT r.id, r.statement_id AS statementId, r.raw, r.fundraiser_ref AS fundraiserRef, r.name, r.period_start AS periodStart,
          r.period_end AS periodEnd, r.sale_date AS saleDate, r.confirmed, r.cancelled, r.amount, r.user_id AS userId,
-         CASE WHEN u.id IS NULL THEN NULL ELSE u.first_name || ' ' || u.last_name END AS userName, r.match
+         CASE WHEN u.id IS NULL THEN NULL ELSE TRIM(u.first_name || ' ' || u.last_name) END AS userName, r.match
     FROM statement_rows r
     LEFT JOIN users u ON u.id = r.user_id`;
 
@@ -668,7 +668,7 @@ export function statementPlan(db: Db, st: StatementDb, rows: readonly RowDb[]): 
   const names = new Map<number, string>();
   for (const g of all<{ userId: number; date: string; sales: number; name: string }>(
     db,
-    `SELECT g.user_id AS userId, g.date, SUM(g.sales) AS sales, u.first_name || ' ' || u.last_name AS name
+    `SELECT g.user_id AS userId, g.date, SUM(g.sales) AS sales, TRIM(u.first_name || ' ' || u.last_name) AS name
        FROM gauge_entries g JOIN events e ON e.id = g.event_id JOIN users u ON u.id = g.user_id
       WHERE e.campaign_id = ? AND g.date BETWEEN ? AND ? AND u.role <> 'client'
       GROUP BY g.user_id, g.date`,
@@ -769,7 +769,7 @@ export function statementPlan(db: Db, st: StatementDb, rows: readonly RowDb[]): 
   const dropped: StatementDropped[] = [];
   const droppedIds = [...replacedWeeks.keys()].filter((id) => !byPerson.has(id));
   if (droppedIds.length) {
-    const who = new Map(all<{ id: number; name: string }>(db, `SELECT id, first_name || ' ' || last_name AS name FROM users WHERE id IN (${placeholders(droppedIds.length)})`, droppedIds).map((u) => [u.id, u.name]));
+    const who = new Map(all<{ id: number; name: string }>(db, `SELECT id, TRIM(first_name || ' ' || last_name) AS name FROM users WHERE id IN (${placeholders(droppedIds.length)})`, droppedIds).map((u) => [u.id, u.name]));
     for (const userId of droppedIds.sort((a, b) => a - b)) {
       if (!who.has(userId)) continue; // a person deleted since
       const before = replacedWeeks.get(userId)!;
@@ -892,7 +892,7 @@ export function silentDays(db: Db, st: StatementDb, rows: readonly RowDb[]): Sil
   const found = new Map<number, { name: string; logged: number; weeks: Set<string> }>();
   for (const g of all<{ userId: number; date: string; sales: number; name: string }>(
     db,
-    `SELECT g.user_id AS userId, g.date, SUM(g.sales) AS sales, u.first_name || ' ' || u.last_name AS name
+    `SELECT g.user_id AS userId, g.date, SUM(g.sales) AS sales, TRIM(u.first_name || ' ' || u.last_name) AS name
        FROM gauge_entries g JOIN events e ON e.id = g.event_id JOIN users u ON u.id = g.user_id
       WHERE e.campaign_id = ? AND g.date BETWEEN ? AND ? AND g.user_id IN (${placeholders(ids.length)})
       GROUP BY g.user_id, g.date HAVING SUM(g.sales) > 0`,
@@ -989,7 +989,7 @@ const SUMMARY_SELECT = `
          s.received_at AS receivedAt, s.file_name AS fileName, s.period_start AS periodStart, s.period_end AS periodEnd, s.status,
          COALESCE(r.n, 0) AS rowCount, COALESCE(r.matched, 0) AS matchedCount, COALESCE(r.unmatched, 0) AS unmatchedCount,
          s.error, s.applied_at AS appliedAt, s.applied_by AS appliedBy,
-         CASE WHEN a.id IS NULL THEN NULL ELSE a.first_name || ' ' || a.last_name END AS appliedByName, s.sender,
+         CASE WHEN a.id IS NULL THEN NULL ELSE TRIM(a.first_name || ' ' || a.last_name) END AS appliedByName, s.sender,
          s.sender_verified AS senderVerified, s.superseded_by AS supersededBy
     FROM statements s
     LEFT JOIN campaigns c ON c.id = s.campaign_id
@@ -1096,7 +1096,7 @@ function appliedPeople(db: Db, statementId: number): StatementPersonSummary[] {
   const byPerson = new Map<number, StatementPersonSummary>();
   for (const a of all<{ userId: number; userName: string; weekStart: string; logged: number; confirmed: number; weekConfirmed: number }>(
     db,
-    `SELECT a.user_id AS userId, u.first_name || ' ' || u.last_name AS userName, a.week_start AS weekStart, a.logged, a.confirmed, a.week_confirmed AS weekConfirmed
+    `SELECT a.user_id AS userId, TRIM(u.first_name || ' ' || u.last_name) AS userName, a.week_start AS weekStart, a.logged, a.confirmed, a.week_confirmed AS weekConfirmed
        FROM statement_allocations a JOIN users u ON u.id = a.user_id WHERE a.statement_id = ? ORDER BY a.user_id, a.week_start`,
     [statementId],
   )) {

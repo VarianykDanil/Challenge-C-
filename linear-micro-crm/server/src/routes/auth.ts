@@ -1,15 +1,16 @@
 import { Router, type Request, type Response } from 'express';
 import { z } from 'zod';
 import {
-  PIN_PROBLEM_MESSAGES, SESSION_IDLE_HOURS_MAX, SESSION_IDLE_HOURS_MIN, pinProblem,
-  type LoginPinChallenge, type LoginPinDetails, type LoginPinReason, type LoginPinRequired, type Role, type TwoFactorChallenge,
-  type UserWithTeam,
+  PIN_PROBLEM_MESSAGES, POSITION_LABELS, SESSION_IDLE_HOURS_MAX, SESSION_IDLE_HOURS_MIN, personName, pinProblem,
+  type DemoTeamAccounts, type LoginPinChallenge, type LoginPinDetails, type LoginPinReason, type LoginPinRequired, type Role,
+  type TwoFactorChallenge, type UserWithTeam,
 } from '@lm/shared';
 import { all, get, run, transaction, type Db } from '../db/connection.ts';
 import { USER_SELECT } from '../db/queries.ts';
 import { HttpError, badRequest, conflict, notFound, unauthorized } from '../lib/errors.ts';
 import { FailureLimiter } from '../lib/limiter.ts';
 import { clientCampaignIdOf, clientSafeUser, demoClientMarkers, isClientUser, isDemoClientAccount, matchesDemoClient } from '../lib/client.ts';
+import { demoTeamMarkers } from '../lib/demoTeams.ts';
 import {
   accountFlags, clearPin, clearPinFailures, clientPinRequired, countPinAttempt, hashPin, isPinLocked, pinAttemptsLeft, pinHashNeedsUpgrade,
   pinLockedMessage, pinRow, pinStatusFor, readSecuritySettings, resetPinAndSignOut, savePinHash, upgradePinHash, verifyPin,
@@ -440,7 +441,7 @@ export function authRouter(db: Db): Router {
     for (const d of DEMO) {
       const u = rows.find((r) => r.employeeId.toUpperCase() === d.employeeId);
       if (!u || u.status === 'left' || u.role !== d.role) return res.json({ accounts: [] });
-      accounts.push({ label: `${u.firstName} ${u.lastName} (${d.label})`, role: u.role, email: u.email, employeeId: u.employeeId });
+      accounts.push({ label: `${personName(u)} (${d.label})`, role: u.role, email: u.email, employeeId: u.employeeId });
     }
     // Release 1.3 (r3-foundation): the seeded demo client portal account(s), apart from the four staff accounts (which
     // keep their shape and order). Only the accounts the demo seed itself recorded (meta `seed_demo_clients`: same id,
@@ -453,9 +454,41 @@ export function authRouter(db: Db): Router {
       markers.map((m) => m.id),
     )
       .filter((u) => u.status !== 'left' && !u.pinSet && markers.some((m) => matchesDemoClient(m, u)))
-      .map((u) => ({ label: `${u.firstName} ${u.lastName} (Client)`, role: u.role, email: u.email, employeeId: u.employeeId }));
-    res.json(clientAccounts.length ? { accounts, clientAccounts } : { accounts });
+      .map((u) => ({ label: `${personName(u)} (Client)`, role: u.role, email: u.email, employeeId: u.employeeId }));
+    const demoTeams = listDemoTeams();
+    res.json({ accounts, ...(clientAccounts.length ? { clientAccounts } : {}), ...(demoTeams.length ? { demoTeams } : {}) });
   });
+
+  /**
+   * Release 1.3.1: the blank demo teams' one-click sign-ins (team Sapiens), after the four and the client. Only the
+   * accounts the demo seed or its start-up step recorded (meta `seed_demo_teams`, lib/demoTeams.ts) whose id, employee
+   * ID and email still match, staff, not deactivated — never matched by email or ID alone, so an account Matt has
+   * given a real email, or someone made by hand, is never offered here. In the marker's order (LM-0101 first). One
+   * query for the people, one for the teams.
+   */
+  function listDemoTeams(): DemoTeamAccounts[] {
+    const markers = demoTeamMarkers(db).filter((m) => m.accounts.length > 0);
+    const ids = markers.flatMap((m) => m.accounts.map((a) => a.id));
+    if (!ids.length) return [];
+    const people = new Map(
+      all<UserWithTeam>(db, `${USER_SELECT} WHERE u.id IN (${ids.map(() => '?').join(', ')}) AND u.role <> 'client'`, ids).map((u) => [u.id, u]),
+    );
+    const teams = new Map(
+      all<{ id: number; name: string; color: string }>(db, `SELECT id, name, color FROM teams WHERE id IN (${markers.map(() => '?').join(', ')})`, markers.map((m) => m.teamId))
+        .map((t) => [t.id, t]),
+    );
+    return markers.flatMap((m): DemoTeamAccounts[] => {
+      const team = teams.get(m.teamId);
+      if (!team) return [];
+      const items = m.accounts.flatMap((a) => {
+        const u = people.get(a.id);
+        if (!u || u.status === 'left' || u.employeeId.toLowerCase() !== a.employeeId.toLowerCase() || u.email.toLowerCase() !== a.email.toLowerCase()) return [];
+        const name = personName(u);
+        return [{ label: `${name} (${POSITION_LABELS[u.position]})`, name, role: u.role, position: u.position, email: u.email, employeeId: u.employeeId }];
+      });
+      return items.length ? [{ name: team.name, color: team.color, accounts: items }] : [];
+    });
+  }
 
   return router;
 }

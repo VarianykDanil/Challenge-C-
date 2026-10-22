@@ -331,7 +331,24 @@ Sign in with the email and employee ID (matching is case-insensitive). On a fres
 | recruiter | Priya Shah (Recruiter) | priya.shah@linear-mcr.co.uk | LM-0003 |
 | rep | Jordan Lee (Field Rep) | jordan.lee@linear-mcr.co.uk | LM-0010 |
 
-Sample teams: Northern Lights, Deansgate, Spinningfields, Ancoats. Sample campaigns: Breast Cancer Now (fundraising, private sites), Children's Hospice North (fundraising, events), Volt Energy (B2B), FibreCity Broadband (residential).
+**The Sapiens team (1.3.1)** — seven blank accounts: everything works, nothing is logged yet (no gauges, events, pay or
+learning). First names only until an administrator adds surnames (**Team → the person → Edit profile**). On the sign-in
+page they are under **Sapiens team (7)**; an existing demo database gains them once on its next start (`npm run latest`).
+
+| Role | Name | Email | Employee ID |
+|---|---|---|---|
+| leader | Theo (Team Leader, leads Sapiens) | theo@linear-mcr.co.uk | LM-0101 |
+| leader | Daniel (Team Leader) | daniel@linear-mcr.co.uk | LM-0102 |
+| leader | Ridwan (Team Leader) | ridwan@linear-mcr.co.uk | LM-0103 |
+| leader | Jamie (Team Leader) | jamie@linear-mcr.co.uk | LM-0104 |
+| rep | Olivia (Trainee) | olivia@linear-mcr.co.uk | LM-0105 |
+| rep | Owens (Trainee) | owens@linear-mcr.co.uk | LM-0106 |
+| rep | Yasmin (Trainee) | yasmin@linear-mcr.co.uk | LM-0107 |
+
+Recruiters and leaders can add people too (**Team → Add person**: trainees and field representatives; a leader to their
+own team), and get the new person's sign-in details to send on.
+
+Sample teams: Northern Lights, Deansgate, Spinningfields, Ancoats and Sapiens. Sample campaigns: Breast Cancer Now (fundraising, private sites), Children's Hospice North (fundraising, events), Volt Energy (B2B), FibreCity Broadband (residential).
 
 ---
 
@@ -410,7 +427,7 @@ linear-micro-crm/
 - [`docs/ROADMAP.md`](docs/ROADMAP.md) — what comes next
 - [`docs/OWNER_NOTES_1.3.md`](docs/OWNER_NOTES_1.3.md) — what the owner needs to set up or decide for 1.3 (Gmail app password, company details, client accounts, videos)
 - [`docs/DEPLOY.md`](docs/DEPLOY.md) — putting Linear Hub online (HTTPS, backups off the server, a go-live checklist)
-- [`CHANGELOG.md`](CHANGELOG.md) — what changed in each release (1.3.0: pay, invoices, statements, clients; 1.2.0: learning, field and office; 1.1.0: the smart release)
+- [`CHANGELOG.md`](CHANGELOG.md) — what changed in each release (1.3.1: the Sapiens demo logins, leaders and recruiters add people; 1.3.0: pay, invoices, statements, clients; 1.2.0: learning, field and office; 1.1.0: the smart release)
 - [`docs/API.md`](docs/API.md) — the API contract and implementation notes
 - [`docs/LOGIC.md`](docs/LOGIC.md) and [`docs/DESIGN.md`](docs/DESIGN.md) — the maths (section 14: the smart release, backups and what loads when; section 15: release 1.2; section 16: release 1.3) and the design system
 - [`docs/LOAD_TEST.md`](docs/LOAD_TEST.md) — the load and robustness report (§10: 1.1 against 1.0 on the same machine)

@@ -37,7 +37,7 @@ interface Row {
 
 const COLUMNS = `p.id, p.kind, p.title, p.status, p.rate_rep AS rateRep, p.rate_payout AS ratePayout, p.effective_from AS effectiveFrom,
   p.created_at AS createdAt, p.campaign_id AS campaignId, c.code AS campaignCode, c.name AS campaignName,
-  a.first_name || ' ' || a.last_name AS authorName`;
+  TRIM(a.first_name || ' ' || a.last_name) AS authorName`;
 const FROM = `FROM client_posts p JOIN campaigns c ON c.id = p.campaign_id JOIN users a ON a.id = p.author_id`;
 
 const quoted = (s: string) => `“${s}”`;

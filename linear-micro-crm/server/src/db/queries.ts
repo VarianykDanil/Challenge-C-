@@ -42,7 +42,7 @@ export function listTeams(db: Db): Team[] {
     db,
     `SELECT t.id, t.name, t.leader_id AS leaderId, t.color,
             (SELECT COUNT(*) FROM users m WHERE m.team_id = t.id AND m.status = 'active') AS memberCount,
-            (SELECT l.first_name || ' ' || l.last_name FROM users l WHERE l.id = t.leader_id) AS leaderName
+            (SELECT TRIM(l.first_name || ' ' || l.last_name) FROM users l WHERE l.id = t.leader_id) AS leaderName
      FROM teams t ORDER BY t.id`,
   );
 }
@@ -120,7 +120,7 @@ export const GAUGE_SELECT = `
   SELECT g.id, g.event_id AS eventId, g.user_id AS userId, g.date, g.stops, g.table_count AS "table", g.presentations,
          g.closes, g.taps, g.sales, g.checked_in_at AS checkedInAt, ${CHECK_IN_ON_BEHALF_SQL} AS checkInOnBehalf,
          g.notes, g.submitted_at AS submittedAt,
-         u.first_name || ' ' || u.last_name AS userName, u.position AS userPosition, u.avatar_color AS userAvatarColor,
+         TRIM(u.first_name || ' ' || u.last_name) AS userName, u.position AS userPosition, u.avatar_color AS userAvatarColor,
          u.team_id AS teamId, t.name AS teamName,
          e.name AS eventName, e.start_time AS eventStartTime, e.date AS eventDate, e.campaign_id AS campaignId,
          c.name AS campaignName, c.color AS campaignColor
@@ -165,7 +165,7 @@ export const PAYROLL_SELECT = `
          p.gross, p.due_date AS dueDate, p.paid_date AS paidDate, p.status, p.reference, p.adjusted_at AS adjustedAt,
          p.paid_as AS paidAs, p.sales_logged AS salesLogged, p.sales_confirmed AS salesConfirmed,
          p.sales_cancelled AS salesCancelled, p.adjustments_total AS adjustmentsTotal,
-         u.first_name || ' ' || u.last_name AS userName, u.employee_id AS employeeId, u.position, t.name AS teamName
+         TRIM(u.first_name || ' ' || u.last_name) AS userName, u.employee_id AS employeeId, u.position, t.name AS teamName
   FROM payroll_runs p
   JOIN users u ON u.id = p.user_id
   LEFT JOIN teams t ON t.id = u.team_id`;
@@ -207,7 +207,7 @@ export const CANDIDATE_SELECT = `
          c.position_applied AS positionApplied, c.applied_at AS appliedAt, c.stage_updated_at AS stageUpdatedAt,
          c.owner_id AS ownerId, c.referred_by_id AS referredById, c.rating, c.notes, c.next_action AS nextAction,
          c.next_action_at AS nextActionAt, c.hired_user_id AS hiredUserId, c.date_of_birth AS dateOfBirth,
-         o.first_name || ' ' || o.last_name AS ownerName, r.first_name || ' ' || r.last_name AS referredByName
+         TRIM(o.first_name || ' ' || o.last_name) AS ownerName, TRIM(r.first_name || ' ' || r.last_name) AS referredByName
   FROM candidates c
   LEFT JOIN users o ON o.id = c.owner_id
   LEFT JOIN users r ON r.id = c.referred_by_id`;
@@ -234,7 +234,7 @@ export function getCandidate(db: Db, id: number): CandidateWithMeta | undefined 
 
 export const STAGE_CHANGE_SELECT = `
   SELECT s.id, s.candidate_id AS candidateId, s.from_stage AS fromStage, s.to_stage AS toStage, s.changed_at AS changedAt,
-         s.changed_by_id AS changedById, u.first_name || ' ' || u.last_name AS changedByName, s.note
+         s.changed_by_id AS changedById, TRIM(u.first_name || ' ' || u.last_name) AS changedByName, s.note
   FROM stage_changes s LEFT JOIN users u ON u.id = s.changed_by_id`;
 
 export function listStageChanges(db: Db, candidateId: number): StageChange[] {
@@ -243,7 +243,7 @@ export function listStageChanges(db: Db, candidateId: number): StageChange[] {
 
 export const INTERVIEW_SELECT = `
   SELECT i.id, i.candidate_id AS candidateId, i.type, i.scheduled_at AS scheduledAt, i.interviewer_id AS interviewerId,
-         u.first_name || ' ' || u.last_name AS interviewerName, i.outcome, i.notes
+         TRIM(u.first_name || ' ' || u.last_name) AS interviewerName, i.outcome, i.notes
   FROM interviews i LEFT JOIN users u ON u.id = i.interviewer_id`;
 
 export function listInterviews(db: Db, where: string, params: Param[]): Interview[] {
@@ -257,7 +257,7 @@ export function getInterview(db: Db, id: number): Interview | undefined {
 // ── Announcements ───────────────────────────────────────────────────────────
 
 export const ANNOUNCEMENT_SELECT = `
-  SELECT a.id, a.title, a.body, a.author_id AS authorId, u.first_name || ' ' || u.last_name AS authorName,
+  SELECT a.id, a.title, a.body, a.author_id AS authorId, TRIM(u.first_name || ' ' || u.last_name) AS authorName,
          a.created_at AS createdAt, a.pinned,
          fc.id AS fromCampaignId, fc.code AS fromCampaignCode, fc.name AS fromCampaignName, fc.color AS fromCampaignColor
   FROM announcements a JOIN users u ON u.id = a.author_id

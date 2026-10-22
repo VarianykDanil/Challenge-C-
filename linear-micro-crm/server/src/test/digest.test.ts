@@ -161,8 +161,8 @@ test('LM_SMART=0 → the empty digest: title only, no bullets, empty text', asyn
   srv.resetCache();
 });
 
-test('release close-out: GET /api/health reports version 1.3.0', async () => {
+test('release close-out: GET /api/health reports version 1.3.1', async () => {
   const r = await srv.anon().get('/health');
   assert.equal(r.status, 200);
-  assert.equal(r.json.version, '1.3.0');
+  assert.equal(r.json.version, '1.3.1');
 });

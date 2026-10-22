@@ -47,7 +47,7 @@ const CODE_RE = /^[A-Za-z0-9]{2,6}$/;
 const PITCH_SELECT = `
   SELECT p.id, p.campaign_id AS campaignId, c.code AS campaignCode, c.name AS campaignName, c.color AS campaignColor,
          p.title, p.body, p.facts, p.updated_by AS updatedBy,
-         CASE WHEN u.id IS NULL THEN NULL ELSE u.first_name || ' ' || u.last_name END AS updatedByName,
+         CASE WHEN u.id IS NULL THEN NULL ELSE TRIM(u.first_name || ' ' || u.last_name) END AS updatedByName,
          p.updated_at AS updatedAt
     FROM campaign_pitches p
     JOIN campaigns c ON c.id = p.campaign_id

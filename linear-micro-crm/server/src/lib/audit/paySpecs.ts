@@ -27,7 +27,7 @@ const signed = (n: number) => (n < 0 ? `−${auditMoney(-n)}` : auditMoney(n));
 /** The person's name for a summary. */
 function personName(db: Db, userId: number | null): string {
   if (!userId) return 'Someone';
-  const u = get<{ name: string }>(db, `SELECT first_name || ' ' || last_name AS name FROM users WHERE id = ?`, [userId]);
+  const u = get<{ name: string }>(db, `SELECT TRIM(first_name || ' ' || last_name) AS name FROM users WHERE id = ?`, [userId]);
   return u?.name ?? 'Someone';
 }
 

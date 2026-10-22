@@ -2,7 +2,7 @@ import { useMemo, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import { ArrowLeft, Ban, CalendarDays, CheckCircle2, Clock, MapPin, Pencil, PlusCircle, Trash2, Users } from 'lucide-react';
 import type { GaugeEntryWithMeta, UserWithTeam } from '@lm/shared';
-import { funnelRatios } from '@lm/shared';
+import { firstNameWithInitial, funnelRatios } from '@lm/shared';
 import { Avatar, Badge, Button, Card, CardHeader, PageHeader, Skeleton, useToast } from '@/components/ui';
 import { FunnelChart } from '@/components/charts';
 import { useDeleteEvent, useDeleteGauge, useEvent, useUpdateEvent, useUsers } from '@/api/hooks';
@@ -305,7 +305,7 @@ function NotLoggedYet({ loading, people, teamSize, onLog }: NotLoggedYetProps) {
               className="inline-flex min-h-10 items-center gap-2 rounded-full border border-border bg-surface py-1 pl-1 pr-3 text-sm font-medium text-fg shadow-sm transition hover:border-border-strong hover:bg-surface-2 focus:outline-none focus-visible:ring-2 focus-visible:ring-ring"
             >
               <Avatar name={fullName(u)} color={u.avatarColor} size="sm" />
-              <span>Log for {people.some((o) => o.id !== u.id && o.firstName === u.firstName) ? `${u.firstName} ${u.lastName.slice(0, 1)}.` : u.firstName}</span>
+              <span>Log for {people.some((o) => o.id !== u.id && o.firstName === u.firstName) ? firstNameWithInitial(u) : u.firstName}</span>
             </button>
           </li>
         ))}

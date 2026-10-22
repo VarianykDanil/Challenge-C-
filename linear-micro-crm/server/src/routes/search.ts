@@ -39,6 +39,7 @@ import {
   type SearchResponse,
   type SearchResult,
   type UserWithTeam,
+  personName,
 } from '@lm/shared';
 import { all, placeholders, type Db, type Param } from '../db/connection.ts';
 import { todayISO } from '../lib/dates.ts';
@@ -68,12 +69,12 @@ export function searchPeople(db: Db, me: UserWithTeam, tokens: string[], q: stri
   const admin = me.role === 'admin';
   const words = wordClauses(tokens);
   // Employee IDs are searchable for admins only (otherwise `q` would be a guessing oracle for a credential).
-  const hay = `lower(u.first_name || ' ' || u.last_name || ' ' || substr(u.email, 1, instr(u.email, '@') - 1) || ' ' || COALESCE(t.name, '') || ' ' || COALESCE(u.city, '')${admin ? ` || ' ' || u.employee_id` : ''})`;
+  const hay = `lower(TRIM(u.first_name || ' ' || u.last_name) || ' ' || substr(u.email, 1, instr(u.email, '@') - 1) || ' ' || COALESCE(t.name, '') || ' ' || COALESCE(u.city, '')${admin ? ` || ' ' || u.employee_id` : ''})`;
   const rows = all<PersonRow>(
     db,
     `SELECT *, ${rankSql('title')} AS rank FROM (
        SELECT u.id, u.first_name AS firstName, u.last_name AS lastName, u.position, t.name AS teamName, u.status,
-              u.avatar_color AS avatarColor, ${hay} AS hay, lower(u.first_name || ' ' || u.last_name) AS title
+              u.avatar_color AS avatarColor, ${hay} AS hay, lower(TRIM(u.first_name || ' ' || u.last_name)) AS title
        FROM users u LEFT JOIN teams t ON t.id = u.team_id
        WHERE u.role <> 'client'${admin ? '' : ` AND u.status <> 'left'`}
      ) WHERE ${words.sql}
@@ -84,7 +85,7 @@ export function searchPeople(db: Db, me: UserWithTeam, tokens: string[], q: stri
   return rows.map((r) => ({
     kind: 'person',
     id: r.id,
-    title: `${r.firstName} ${r.lastName}`,
+    title: personName(r),
     subtitle: [POSITION_LABELS[r.position] ?? r.position, r.teamName, r.status === 'on_leave' ? 'On leave' : r.status === 'left' ? 'Left' : null].filter(Boolean).join(' · '),
     href: `/team/${r.id}`,
     color: r.avatarColor,
@@ -127,8 +128,8 @@ export function searchCandidates(db: Db, tokens: string[], q: string): SearchRes
     `SELECT *, ${rankSql('title')} AS rank FROM (
        SELECT c.id, c.first_name AS firstName, c.last_name AS lastName, c.stage, c.position_applied AS positionApplied, c.city,
               c.stage_updated_at AS stageUpdatedAt,
-              lower(c.first_name || ' ' || c.last_name || ' ' || substr(c.email, 1, instr(c.email, '@') - 1) || ' ' || COALESCE(c.city, '')) AS hay,
-              lower(c.first_name || ' ' || c.last_name) AS title
+              lower(TRIM(c.first_name || ' ' || c.last_name) || ' ' || substr(c.email, 1, instr(c.email, '@') - 1) || ' ' || COALESCE(c.city, '')) AS hay,
+              lower(TRIM(c.first_name || ' ' || c.last_name)) AS title
        FROM candidates c
      ) WHERE ${words.sql}
      ORDER BY rank, CASE WHEN stage IN (${placeholders(TERMINAL_STAGES.length)}) THEN 1 ELSE 0 END, stageUpdatedAt DESC, id
@@ -138,7 +139,7 @@ export function searchCandidates(db: Db, tokens: string[], q: string): SearchRes
   return rows.map((r) => ({
     kind: 'candidate',
     id: r.id,
-    title: `${r.firstName} ${r.lastName}`,
+    title: personName(r),
     subtitle: [STAGE_LABELS[r.stage] ?? r.stage, POSITION_LABELS[r.positionApplied] ?? null, r.city].filter(Boolean).join(' · '),
     href: `/recruitment/${r.id}`,
     color: null,

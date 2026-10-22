@@ -23,9 +23,9 @@ export const CLIENT_POSTS_LIST_MAX = 200;
 
 const POST_COLUMNS = `
   p.id, p.campaign_id AS campaignId, c.code AS campaignCode, c.name AS campaignName, p.author_id AS authorId,
-  a.first_name || ' ' || a.last_name AS authorName, p.kind, p.title, p.body, p.rate_rep AS rateRep, p.rate_payout AS ratePayout,
+  TRIM(a.first_name || ' ' || a.last_name) AS authorName, p.kind, p.title, p.body, p.rate_rep AS rateRep, p.rate_payout AS ratePayout,
   p.effective_from AS effectiveFrom, p.requested_from AS requestedFrom, p.status, p.decided_by AS decidedBy,
-  d.first_name || ' ' || d.last_name AS decidedByName, p.decided_at AS decidedAt, p.decision_note AS decisionNote,
+  TRIM(d.first_name || ' ' || d.last_name) AS decidedByName, p.decided_at AS decidedAt, p.decision_note AS decisionNote,
   p.announcement_id AS announcementId, p.created_at AS createdAt`;
 
 const POST_FROM = `

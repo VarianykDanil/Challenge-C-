@@ -79,7 +79,7 @@ const RECRUITMENT_ROLES = new Set(['admin', 'leader', 'recruiter']);
 function payRunAccess(db: Db, me: UserWithTeam, runId: number): { label: string } | { refused: 'forbidden' | 'not_found' } {
   const run = get<{ userId: number; teamId: number | null; name: string; weekStart: string }>(
     db,
-    `SELECT p.user_id AS userId, u.team_id AS teamId, u.first_name || ' ' || u.last_name AS name, p.week_start AS weekStart
+    `SELECT p.user_id AS userId, u.team_id AS teamId, TRIM(u.first_name || ' ' || u.last_name) AS name, p.week_start AS weekStart
      FROM payroll_runs p JOIN users u ON u.id = p.user_id WHERE p.id = ?`,
     [runId],
   );
@@ -98,7 +98,7 @@ export function openedRecord(db: Db, me: UserWithTeam, entity: AuditEntity | nul
   if (entityId === null) return { refused: 'not_found' };
   if (entity === 'candidate') {
     if (!RECRUITMENT_ROLES.has(me.role)) return { refused: 'forbidden' };
-    const c = get<{ name: string }>(db, `SELECT first_name || ' ' || last_name AS name FROM candidates WHERE id = ?`, [entityId]);
+    const c = get<{ name: string }>(db, `SELECT TRIM(first_name || ' ' || last_name) AS name FROM candidates WHERE id = ?`, [entityId]);
     return c ? { label: c.name } : { refused: 'not_found' };
   }
   if (entity === 'payroll_run') return payRunAccess(db, me, entityId);

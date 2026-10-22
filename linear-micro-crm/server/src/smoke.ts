@@ -192,11 +192,15 @@ async function main(): Promise<void> {
     eq(r.json.accounts.length, 4, 'four accounts');
     eq(r.json.accounts.map((a: Json) => a.role).join(','), 'admin,leader,recruiter,rep', 'roles');
     eq(r.json.accounts[0].email, 'danil@linear-mcr.co.uk', 'admin email');
+    // Release 1.3.1: the Sapiens team's seven blank demo sign-ins, after the four
+    eq(r.json.demoTeams?.[0]?.name, 'Sapiens', 'Sapiens group');
+    eq(r.json.demoTeams[0].accounts.map((a: Json) => a.employeeId).join(','), 'LM-0101,LM-0102,LM-0103,LM-0104,LM-0105,LM-0106,LM-0107', 'the seven, in order');
     process.env.LM_DEMO_ACCOUNTS = '0';
     try {
       const off = await anon.get('/auth/demo-accounts');
       status(off, 200, 'demo off');
       eq(off.json.accounts.length, 0, 'LM_DEMO_ACCOUNTS=0 hides the accounts');
+      eq(off.json.demoTeams, undefined, 'and the Sapiens group');
     } finally {
       delete process.env.LM_DEMO_ACCOUNTS;
     }
@@ -532,8 +536,16 @@ async function main(): Promise<void> {
     ok((await admin.get(`/users/16/performance?${range}`)).json.recentEntries.some((e: Json) => e.checkedInAt !== null), 'admin sees everything');
     return `Jordan 12w: ${perf.json.totals.sales} sales over ${perf.json.days} days`;
   });
-  await check('POST/PATCH /users (admin only, 409 on duplicates)', async () => {
+  await check('POST/PATCH /users (reps never; leaders add to their own team; PATCH admin only; 409 on duplicates)', async () => {
     status(await rep.post('/users', {}), 403, 'rep forbidden');
+    // Release 1.3.1: a leader adds a trainee to their own team; the employee ID shows once, then is hidden again
+    const added = await leader.post('/users', { firstName: 'Smoke', lastName: 'Trainee', email: 'smoke.trainee@linear-mcr.co.uk', position: 'trainee' });
+    status(added, 201, 'leader adds a trainee');
+    eq(added.json.teamName, 'Northern Lights', "the leader's own team");
+    ok(/^LM-\d{4}$/.test(added.json.employeeId), 'employee ID in the answer');
+    eq((await leader.get(`/users/${added.json.id}`)).json.employeeId, '', 'hidden on every later read');
+    status(await leader.post('/users', { firstName: 'Smoke', lastName: 'Other', email: 'smoke.other@linear-mcr.co.uk', position: 'trainee', teamId: 2 }), 403, 'not another team');
+    status(await leader.patch(`/users/${added.json.id}`, { city: 'Bury' }), 403, 'PATCH stays admin only');
     const body = {
       employeeId: 'LM-0900', email: 'test.user@linear-mcr.co.uk', firstName: 'Test', lastName: 'User', role: 'rep', position: 'trainee',
       teamId: 2, startDate: today, status: 'active', phone: null, city: 'Manchester',
@@ -599,10 +611,14 @@ async function main(): Promise<void> {
   await check('GET /teams', async () => {
     const r = await rep.get('/teams');
     status(r, 200, 'teams');
-    eq(r.json.length, 4, 'four teams');
+    // Release 1.3.1: the four demo teams and Sapiens (seven blank accounts, Theo leads)
+    eq(r.json.length, 5, 'four teams and Sapiens');
     const nl = r.json.find((t: Json) => t.name === 'Northern Lights');
     eq(nl.leaderName, 'Amelia Hart', 'leader name');
     ok(nl.memberCount >= 5, 'member count');
+    const sapiens = r.json.find((t: Json) => t.name === 'Sapiens');
+    eq(sapiens?.leaderName, 'Theo', 'Sapiens leader, no trailing space');
+    eq(sapiens?.memberCount, 7, 'seven Sapiens accounts');
   });
 
   // ── campaigns ──

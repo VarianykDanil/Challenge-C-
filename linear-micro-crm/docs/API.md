@@ -54,7 +54,7 @@ unless the requester is an `admin` or the row is the requester themselves. `GET 
 - `POST /auth/logout` → `204`.
 - `GET /auth/me` → `AuthResponse` (`user.twoFactorEnabled` says whether two-step verification is on).
 - When the account has two-step verification on, `POST /auth/login` answers with a `TwoFactorChallenge` instead and no cookie; see *Two-step verification* at the end of this document for `POST /auth/login/2fa` and the `/auth/2fa*` settings endpoints.
-- `GET /auth/demo-accounts` → `{ accounts: { label: string; role: Role; email: string; employeeId: string }[] }` for the demo "quick sign-in" buttons. Returns the four **seeded** demo accounts (LM-0001/0002/0003/0010, in role order admin, leader, recruiter, rep) only when all four exist with those roles and none has left; otherwise, or when the server runs with `LM_DEMO_ACCOUNTS=0`, `{ accounts: [] }`. There is no "one user per role" fallback: a non-demo database never publishes a login. Clients hide the buttons when the list is empty.
+- `GET /auth/demo-accounts` → `{ accounts: { label: string; role: Role; email: string; employeeId: string }[] }` for the demo "quick sign-in" buttons. Returns the four **seeded** demo accounts (LM-0001/0002/0003/0010, in role order admin, leader, recruiter, rep) only when all four exist with those roles and none has left; otherwise, or when the server runs with `LM_DEMO_ACCOUNTS=0`, `{ accounts: [] }`. There is no "one user per role" fallback: a non-demo database never publishes a login. Clients hide the buttons when the list is empty. Release 1.3 adds `clientAccounts?` (the seeded demo client) and 1.3.1 `demoTeams?: DemoTeamAccounts[]` (team Sapiens' seven blank accounts; see [1.3.1](#131-endpoints)).
 
 ## Dashboard
 - `GET /me/dashboard?range=week|month|quarter` → `Dashboard` (default `week`). `team` is null if the user has no team. `company` is non-null only for `admin` and `leader`. `upcomingEvents` = next 5 events for the user's team (admin: whole company) from today. `announcements` = latest 5, pinned first; `olderAnnouncements` (release 1.2, optional) = how many there are beyond those five (`GET /announcements?offset=5` lists them). `previous` is the comparison window behind `personal.deltas` and leaderboard `movement`: the **same to-date span of the previous period** (week Mon 12 – Thu 15 Oct → Mon 5 – Thu 8 Oct; month 1–15 Oct → 1–15 Sep; quarter 1–15 Oct → 1–15 Jul). `company.payrollOnTimeWindow` says which window `company.payrollOnTimeRate` describes: `'range'` (settled runs due in the range) or `'last12Weeks'` (nothing was due in the range yet, so the runs due in the last 12 weeks up to today were used). `personal.rank`/`rankOutOf` are **team-scoped for reps** (the same population as their `GET /leaderboard`) and company-wide for leaders and admins.
@@ -63,7 +63,7 @@ unless the requester is an `admin` or the row is the requester themselves. `GET 
 - `GET /users?teamId&role&status&q` → `UserWithTeam[]` (default status=active; `q` matches name/email, and employeeId for admins only). `employeeId` is `''` except for admins and the caller's own row.
 - `GET /users/:id` → `UserWithTeam` (same `employeeId` rule).
 - `GET /users/:id/performance?from&to` → `{ user: UserWithTeam; totals: GaugeTotals; ratios: FunnelRatios; days: number; salesPerDay: number; trend: TrendPoint[]; byCampaign: GaugeSummaryRow[]; recentEntries: GaugeEntryWithMeta[]; punctualityRate: number | null }` (same `employeeId` rule on `user`). Readable by every signed-in user; `recentEntries[].checkedInAt` and `.notes` are `null` unless the requester is an admin, the person themselves or a leader of that person's team.
-- `POST /users` (admin) body: `Omit<User,'id'>` minus `avatarColor` optional → `UserWithTeam` (201).
+- `POST /users` (admin, recruiter, leader) body: `Omit<User,'id'>` minus `avatarColor` optional → `UserWithTeam` (201). Release 1.3.1: recruiters and leaders may add field people, `employeeId` is optional for everyone, and the answer is an `AddPersonResult` — see [1.3.1 endpoints](#131-endpoints).
 - `PATCH /users/:id` (admin) partial `User` → `UserWithTeam`. Setting `status: 'left'` deletes every session of that user at once; an admin cannot set their own status to `left` (`400`).
 - `POST /users/:id/2fa/reset` (admin) → `204`. Switches that person's two-step verification off without a code (lost device) and signs them out everywhere; `400` for the admin's own account (use `POST /auth/2fa/disable`). See *Two-step verification*.
 - `GET /teams` → `Team[]` (includes `memberCount`, `leaderName`).
@@ -1772,6 +1772,66 @@ recruiter, rep (their own included) → 403. Registered before `/audit/:entity/:
 - **The payroll export** (`GET /finance/payroll/export`, Xero / Sage CSV; its own route writes the row) is kind
   `export` — classified in P9's code, neither file edited.
 
+## 1.3.1 endpoints
+
+The Sapiens team's demo logins, and recruiters and leaders can add people. Types in `shared/src/types/people.ts`, rules
+in `shared/src/logic/people.ts` (`addPersonRefusal`, `staffSignInInstructions`, `personName`).
+
+### Adding people: `POST /users`
+
+| Caller | May add | Team |
+| --- | --- | --- |
+| admin | as before: any role, position, team (or none), pay plan, status, avatar colour, employee ID | any, or `null` |
+| recruiter | role `rep` only, position `trainee` or `field_rep` | any team; `teamId` required (`400 "Choose a team for them."`) |
+| leader (Team Leader or Crew Leader) | role `rep` only, position `trainee` or `field_rep` | their own team (the default); another team or `null` → `403 "You can add people to your own team (Sapiens) only."`; a leader with no team → `403` |
+| rep, client | nobody: `403` | |
+| signed out | `401` | |
+
+Body (`createBody`): `firstName`, `lastName` (still required for a new person: `400 "Enter their last name"`), `email`,
+`position`, `teamId?`, `startDate?` (default business today), `phone?`, `city?`; admin only: `role` (required for an
+admin), `payPlanId?` (default: the plan for the position), `status?`, `avatarColor?`, `employeeId?`. Optional for every
+caller: `signInUrl` (an `http(s)` address, at most 300 characters; the sign-in page as the caller opened it — it goes
+into the instructions in the answer and is never stored).
+
+- **Refused, never ignored.** A recruiter or leader who sends `role` other than `rep`, a `position` other than
+  `trainee` / `field_rep`, any `payPlanId`, a `status` other than `active`, an `avatarColor` or an `employeeId` gets
+  `403 { error, details: [{ path, message }] }` with a plain sentence (e.g. "Only an administrator can choose a pay plan.
+  New people get the standard plan for their position."), checked before anything else; nothing is written. Empty
+  values (`null`, `''`) are not attempts.
+- **Employee ID.** Missing → the next free `LM-` number (`lib/people.ts nextEmployeeId`). `409` for a used employee ID or
+  email (case-insensitive), as before.
+- **201 → `AddPersonResult`** = `UserWithTeam` + `signInInstructions?: string`. The new person's `employeeId` is filled
+  in **this once**, for a recruiter or leader too, so they can pass on the sign-in details; every later read
+  (`GET /users`, `/users/:id`, `/users/:id/performance`, payslips) blanks it for anyone but an administrator and the
+  person, as before. `signInInstructions` is plain text: hello, the team, "Open `<signInUrl>`" (or "the Linear Hub
+  sign-in page"), the email and employee ID, and — only while **Require a PIN for everyone** is on — the first-time PIN
+  step.
+- **Audit**: the 1.2 spec (`entity user`, action `POST /users`) records the caller as the actor; summary "Added Sam
+  Smith: Representative, Trainee, Sapiens". The snapshot holds the employee ID (the audit trail is admin only); the
+  instructions are never stored.
+- **Write limit**: `POST /users` (and below it) counts towards the per-person limit of 60 writes a minute
+  (`middleware/writeLimit.ts`), `429` with the sentence after that.
+- `PATCH /users/:id` and `POST /users/:id/2fa/reset` stay admin only. Release 1.3.1: `lastName: ''` is accepted only
+  while the person's last name is already empty (the Sapiens accounts); clearing a surname → `400 "Enter their last
+  name"`.
+- `GET /users` sorts by surname, then first name, with the first name standing in for a missing surname (Theo sorts
+  among the T surnames).
+
+### Demo teams on the sign-in page: `GET /auth/demo-accounts`
+
+`{ accounts, clientAccounts?, demoTeams? }`. `demoTeams: { name, color, accounts: DemoAccountItem[] }[]` — each item
+`{ label: "Theo (Team Leader)", name: "Theo", role, position, email, employeeId }`, in employee-ID order. Listed only:
+
+- when the four demo accounts are listed (same conditions; `LM_DEMO_ACCOUNTS=0` → `{ accounts: [] }`);
+- for the accounts the demo seed or its start-up step **recorded** (meta `seed_demo_teams`: team id and each account's
+  id, employee ID and email) whose id, employee ID and email still match, that are staff and not `left`. Never matched by
+  email or ID pattern alone: an account Matt gives a real email, or anyone made by hand, is never offered here.
+
+### Names without a surname
+
+Every sentence or label the server builds from a person's name uses `personName` (or `TRIM(first_name || ' ' ||
+last_name)` in SQL): "Theo", never "Theo " or a double space. `leaderName` on `GET /teams` is "Theo".
+
 ## Seed & demo accounts
 The server seeds `server/data/linear.sqlite` on first start (or `npm run seed` to reset) with deterministic
 sample data for the last 26 weeks. Demo logins (email / employee ID):
@@ -1783,7 +1843,24 @@ sample data for the last 26 weeks. Demo logins (email / employee ID):
 | recruiter | Priya Shah (Recruiter) | priya.shah@linear-mcr.co.uk | LM-0003 |
 | rep | Jordan Lee (Field Rep) | jordan.lee@linear-mcr.co.uk | LM-0010 |
 
-Teams: Northern Lights, Deansgate, Spinningfields, Ancoats. Campaigns: Breast Cancer Now (fundraising, private sites),
+Release 1.3.1: team **Sapiens** (Theo leads it) with seven blank accounts — no gauges, events, pay, invoices,
+agreements, learning, check-ins, bookings or audit rows — first names only (`last_name ''`), active, started on the
+business date of the seed, Manchester, the default plan for the position, no PIN:
+
+| Role | Name | Email | Employee ID |
+|---|---|---|---|
+| leader | Theo (Team Leader, leads Sapiens) | theo@linear-mcr.co.uk | LM-0101 |
+| leader | Daniel (Team Leader) | daniel@linear-mcr.co.uk | LM-0102 |
+| leader | Ridwan (Team Leader) | ridwan@linear-mcr.co.uk | LM-0103 |
+| leader | Jamie (Team Leader) | jamie@linear-mcr.co.uk | LM-0104 |
+| rep | Olivia (Trainee) | olivia@linear-mcr.co.uk | LM-0105 |
+| rep | Owens (Trainee) | owens@linear-mcr.co.uk | LM-0106 |
+| rep | Yasmin (Trainee) | yasmin@linear-mcr.co.uk | LM-0107 |
+
+A fresh seed inserts them at its very end, after every extension seed; an existing demo database gains them once on
+start-up (`db/extensions/sapiens.ts`, docs/LOGIC.md §16.10). The next person added gets LM-0108.
+
+Teams: Northern Lights, Deansgate, Spinningfields, Ancoats (and Sapiens). Campaigns: Breast Cancer Now (fundraising, private sites),
 Children's Hospice North (fundraising, events), Volt Energy (B2B), FibreCity Broadband (residential).
 
 Priya has the position `recruiter` (a `Position` value added for office staff) on the **Office recruiter plan**: £95/day

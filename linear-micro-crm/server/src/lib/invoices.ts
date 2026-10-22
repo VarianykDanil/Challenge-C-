@@ -147,14 +147,14 @@ const INVOICE_SELECT = `
          i.total, i.lines_json AS linesJson, i.supplier_json AS supplierJson, i.customer_json AS customerJson,
          i.accepted_at AS acceptedAt, i.disputed_at AS disputedAt, i.dispute_reason AS disputeReason,
          i.dispute_lines AS disputeLines, i.resolved_at AS resolvedAt, i.resolved_by AS resolvedBy,
-         rb.first_name || ' ' || rb.last_name AS resolvedByName, i.resolution_note AS resolutionNote,
+         TRIM(rb.first_name || ' ' || rb.last_name) AS resolvedByName, i.resolution_note AS resolutionNote,
          i.resolution_action AS resolutionAction, i.deem_at AS deemAt, i.run_fingerprint AS runFingerprint,
          ${RUN_FINGERPRINT_SQL} AS currentFingerprint,
          i.paid_override_reason AS paidOverrideReason, i.paid_override_by AS paidOverrideBy,
-         ob.first_name || ' ' || ob.last_name AS paidOverrideByName, i.paid_override_at AS paidOverrideAt,
+         TRIM(ob.first_name || ' ' || ob.last_name) AS paidOverrideByName, i.paid_override_at AS paidOverrideAt,
          p.week_start AS weekStart, p.week_end AS weekEnd, p.due_date AS dueDate, p.status AS runStatus,
          p.paid_date AS paidDate, p.gross AS runGross, p.sales_logged AS salesLogged, p.sales_confirmed AS salesConfirmed,
-         p.sales, u.first_name || ' ' || u.last_name AS userName, u.team_id AS userTeamId, t.name AS teamName
+         p.sales, TRIM(u.first_name || ' ' || u.last_name) AS userName, u.team_id AS userTeamId, t.name AS teamName
   FROM invoices i
   JOIN payroll_runs p ON p.id = i.payroll_run_id
   JOIN users u ON u.id = i.user_id
@@ -291,7 +291,7 @@ const writeMeta = (db: Db, key: string, value: string): void => {
 
 /** The owner's name: the default authorised signatory until the admin sets one. */
 function ownerName(db: Db): string {
-  return get<{ name: string }>(db, `SELECT first_name || ' ' || last_name AS name FROM users WHERE position = 'owner' AND role = 'admin' ORDER BY id LIMIT 1`)?.name ?? '';
+  return get<{ name: string }>(db, `SELECT TRIM(first_name || ' ' || last_name) AS name FROM users WHERE position = 'owner' AND role = 'admin' ORDER BY id LIMIT 1`)?.name ?? '';
 }
 
 /** Settings → Company with defaults: the brand's legal name and address, the owner as signatory. */
@@ -385,7 +385,7 @@ interface ProfileRow {
 }
 
 const PROFILE_SELECT = `
-  SELECT id AS userId, first_name || ' ' || last_name AS name, role, address_line1 AS addressLine1, address_line2 AS addressLine2,
+  SELECT id AS userId, TRIM(first_name || ' ' || last_name) AS name, role, address_line1 AS addressLine1, address_line2 AS addressLine2,
          address_town AS addressTown, postcode, utr, vat_number AS vatNumber
   FROM users`;
 

@@ -47,6 +47,7 @@ import {
   type TeamLearningRow,
   type UserStatus,
   type UserWithTeam,
+  personName,
 } from '@lm/shared';
 import { all, get, placeholders, run, type Db } from '../db/connection.ts';
 import { addDays, mondayOf, nowISO, todayISO } from '../lib/dates.ts';
@@ -70,7 +71,7 @@ interface Person {
 const PERSON_SELECT = `SELECT u.id, u.first_name AS firstName, u.last_name AS lastName, u.role, u.position, u.team_id AS teamId,
   t.name AS teamName, u.status, u.avatar_color AS avatarColor FROM users u LEFT JOIN teams t ON t.id = u.team_id`;
 
-const nameOf = (p: { firstName: string; lastName: string }) => `${p.firstName} ${p.lastName}`;
+const nameOf = (p: { firstName: string; lastName: string }) => personName(p);
 
 interface ProgressRow {
   lessonKey: string;
@@ -87,7 +88,7 @@ interface ProgressRow {
 
 const PROGRESS_SELECT = `SELECT p.lesson_key AS lessonKey, p.learned_at AS learnedAt, p.quiz_score AS quizScore, p.quiz_total AS quizTotal,
   p.quiz_passed_at AS quizPassedAt, p.teachback_text AS teachbackText, p.teachback_at AS teachbackAt, p.taught_signed_off_by AS taughtSignedOffBy,
-  CASE WHEN s.id IS NULL THEN NULL ELSE s.first_name || ' ' || s.last_name END AS taughtSignedOffByName,
+  CASE WHEN s.id IS NULL THEN NULL ELSE TRIM(s.first_name || ' ' || s.last_name) END AS taughtSignedOffByName,
   p.taught_signed_off_at AS taughtSignedOffAt
   FROM learning_progress p LEFT JOIN users s ON s.id = p.taught_signed_off_by`;
 

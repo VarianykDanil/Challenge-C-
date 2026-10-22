@@ -316,7 +316,7 @@ function takeFailureBudget(db: Db, budget: FailureBudget, source: string | null,
     if (fromAccount >= FAILED_ROWS_PER_ACCOUNT) return null;
     budget.perAccount.record(key, now);
     if (fromAccount + 1 < FAILED_ROWS_PER_ACCOUNT) return { pause: null };
-    const name = get<{ name: string }>(db, `SELECT first_name || ' ' || last_name AS name FROM users WHERE id = ?`, [accountId])?.name;
+    const name = get<{ name: string }>(db, `SELECT TRIM(first_name || ' ' || last_name) AS name FROM users WHERE id = ?`, [accountId])?.name;
     const whose = name ? `${name}'s account` : 'one account';
     return { pause: { accountId, summary: `Stopped recording failed sign-ins on ${whose} after ${FAILED_ROWS_PER_ACCOUNT} in ${minutes} minutes${again}` } };
   }

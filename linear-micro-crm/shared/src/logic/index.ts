@@ -45,6 +45,9 @@
  *  - clientPortal      client post labels, access codes                                  (P6)
  *  - recruitmentPlus   candidate age, Under 18, timeline                                 (P7)
  *  - venues            venue key, event plan maths                                       (P8)
+ *
+ * Release 1.3.1:
+ *  - people            names without a surname, who may add people, sign-in instructions
  */
 export * from './gauges.ts';
 export * from './finance.ts';
@@ -83,3 +86,5 @@ export * from './videos.ts';
 export * from './clientPortal.ts';
 export * from './recruitmentPlus.ts';
 export * from './venues.ts';
+// Release 1.3.1
+export * from './people.ts';

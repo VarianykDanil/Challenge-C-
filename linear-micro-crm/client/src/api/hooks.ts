@@ -2,6 +2,7 @@
 import { useCallback } from 'react';
 import { useInfiniteQuery, useMutation, useQuery, useQueryClient, type UseQueryOptions } from '@tanstack/react-query';
 import type {
+  AddPersonResult,
   AttentionFeed,
   Announcement,
   BackupStatus,
@@ -10,6 +11,8 @@ import type {
   CandidateSource,
   CandidateStage,
   CandidateWithMeta,
+  DemoTeamAccounts,
+  FieldAddPosition,
   Dashboard,
   DashboardRange,
   EventForecastResponse,
@@ -52,7 +55,7 @@ import { useAuth } from '@/auth/AuthProvider';
 
 // ───────────────────────────── Response shapes not in shared/types ─────────────────────────────
 
-export interface DemoAccount { label: string; role: Role; email: string; employeeId: string }
+export interface DemoAccount { label: string; role: Role; email: string; employeeId: string; name?: string; position?: Position }
 
 export interface UserPerformance {
   user: UserWithTeam;
@@ -159,7 +162,12 @@ const num = (v: number | null | undefined): number | undefined => (v == null ? u
 
 export function useDemoAccounts() {
   // Release 1.3: `clientAccounts` — the seeded demo client portal account(s), apart from the four staff accounts (P6 shows them).
-  return useQuery({ queryKey: keys.demoAccounts, queryFn: () => api<{ accounts: DemoAccount[]; clientAccounts?: DemoAccount[] }>('/auth/demo-accounts'), staleTime: Infinity });
+  // Release 1.3.1: `demoTeams` — the blank demo teams' sign-ins (team Sapiens), shown under the four.
+  return useQuery({
+    queryKey: keys.demoAccounts,
+    queryFn: () => api<{ accounts: DemoAccount[]; clientAccounts?: DemoAccount[]; demoTeams?: DemoTeamAccounts[] }>('/auth/demo-accounts'),
+    staleTime: Infinity,
+  });
 }
 /** Alias used by the Designer's Login page (`pickDemoAccounts()`); it is the same query hook. */
 export const pickDemoAccounts = useDemoAccounts;
@@ -332,10 +340,27 @@ export function useUserPerformance(id: number | null | undefined, range: RangePa
   });
 }
 
+/**
+ * Release 1.3.1: what a recruiter or a leader sends (POST /users) — field people only, the role, plan, status, colour
+ * and employee ID are the office's (a leader's team is their own). `signInUrl` goes into the sign-in instructions.
+ */
+export interface FieldPersonInput {
+  firstName: string;
+  lastName: string;
+  email: string;
+  phone?: string | null;
+  position: FieldAddPosition;
+  teamId?: number;
+  startDate: string;
+  signInUrl?: string;
+}
+
+/** POST /users. The answer carries the new person's employee ID this once and `signInInstructions` (AddPersonResult). */
 export function useCreateUser() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: (input: UserInput) => api<UserWithTeam>('/users', { method: 'POST', json: input }),
+    mutationFn: (input: (Omit<UserInput, 'employeeId'> & { employeeId?: string; signInUrl?: string }) | FieldPersonInput) =>
+      api<AddPersonResult>('/users', { method: 'POST', json: input }),
     onSuccess: () => {
       void qc.invalidateQueries({ queryKey: ['users'] });
       void qc.invalidateQueries({ queryKey: ['teams'] });

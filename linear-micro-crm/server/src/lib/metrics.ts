@@ -126,7 +126,7 @@ function fetchRows(db: Db, from: string, to: string, teamId: number | null | und
   if (teamId) where.add('u.team_id = ?', teamId);
   const rows = all<RankRow>(
     db,
-    `SELECT u.id AS userId, u.first_name || ' ' || u.last_name AS userName, u.position, u.avatar_color AS avatarColor,
+    `SELECT u.id AS userId, TRIM(u.first_name || ' ' || u.last_name) AS userName, u.position, u.avatar_color AS avatarColor,
             u.team_id AS teamId, t.name AS teamName, t.color AS teamColor,
             SUM(g.sales) AS sales, SUM(g.stops) AS stops, COUNT(DISTINCT g.date) AS days
      ${GAUGE_FROM} ${where} GROUP BY u.id`,
@@ -168,7 +168,7 @@ export type SummaryGroup = 'user' | 'team' | 'campaign' | 'day' | 'week';
 
 export function summaryRows(db: Db, groupBy: SummaryGroup, where: Where): GaugeSummaryRow[] {
   const keyExpr: Record<SummaryGroup, { key: string; label: string; color: string; group: string; order: string }> = {
-    user: { key: 'u.id', label: `u.first_name || ' ' || u.last_name`, color: 'u.avatar_color', group: 'u.id', order: 'sales DESC, label ASC' },
+    user: { key: 'u.id', label: `TRIM(u.first_name || ' ' || u.last_name)`, color: 'u.avatar_color', group: 'u.id', order: 'sales DESC, label ASC' },
     team: { key: `COALESCE(u.team_id, 0)`, label: `COALESCE(t.name, 'No team')`, color: 't.color', group: 'u.team_id', order: 'sales DESC, label ASC' },
     campaign: { key: 'c.id', label: 'c.name', color: 'c.color', group: 'c.id', order: 'sales DESC, label ASC' },
     day: { key: 'g.date', label: 'g.date', color: 'NULL', group: 'g.date', order: 'key ASC' },

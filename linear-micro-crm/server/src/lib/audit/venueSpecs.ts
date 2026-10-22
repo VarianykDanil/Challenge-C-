@@ -9,7 +9,7 @@
  * the event's name and day and who is booked (names, sorted) — no PINs, codes or secrets are anywhere near it. A save
  * that changes nothing (the same list, booking twice, coming off when not booked) writes no row.
  */
-import { auditDayLabel, type UserWithTeam } from '@lm/shared';
+import { auditDayLabel, personName, type UserWithTeam } from '@lm/shared';
 import { all, get, type Db } from '../../db/connection.ts';
 import type { AuditCall, AuditDone, AuditDraft, AuditRouteSpec } from '../auditSpecs.ts';
 
@@ -35,7 +35,7 @@ export function rosterSnapshot(db: Db, eventId: number | null): RosterSnap | nul
     if (!ev) return null;
     const people = all<{ id: number; name: string }>(
       db,
-      `SELECT u.id, u.first_name || ' ' || u.last_name AS name FROM event_roster r JOIN users u ON u.id = r.user_id
+      `SELECT u.id, TRIM(u.first_name || ' ' || u.last_name) AS name FROM event_roster r JOIN users u ON u.id = r.user_id
        WHERE r.event_id = ? ORDER BY u.first_name COLLATE NOCASE, u.last_name COLLATE NOCASE, u.id`,
       [eventId],
     );
@@ -58,7 +58,7 @@ function names(list: readonly string[], max = 3): string {
 }
 
 const nameOf = (s: RosterSnap, id: number) => s.booked[s.ids.indexOf(id)] ?? 'Someone';
-const meName = (me: UserWithTeam | null) => (me ? `${me.firstName} ${me.lastName}` : 'Someone');
+const meName = (me: UserWithTeam | null) => (me ? personName(me) : 'Someone');
 
 /** Who joined and who left between two snapshots (by id). */
 function changes(before: RosterSnap | null, after: RosterSnap): { added: string[]; removed: string[] } {

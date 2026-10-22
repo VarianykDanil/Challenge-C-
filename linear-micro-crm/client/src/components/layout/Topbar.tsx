@@ -3,7 +3,7 @@ import { useEffect, useRef, useState, type ReactNode, type RefObject } from 'rea
 import { Link, useLocation, useNavigate } from 'react-router-dom';
 import { BellOff, ChevronDown, ChevronRight, Circle, Globe, Info, LogOut, Menu as MenuIcon, Moon, Search, Settings, Sun, SunMoon } from 'lucide-react';
 import clsx from 'clsx';
-import { BRAND, POSITION_LABELS, ROLE_LABELS, type UserWithTeam } from '@lm/shared';
+import { BRAND, POSITION_LABELS, ROLE_LABELS, personName, type UserWithTeam } from '@lm/shared';
 import { Avatar } from '../ui/Avatar';
 import { Badge } from '../ui/Badge';
 import { Dropdown } from '../ui/Dropdown';
@@ -43,7 +43,7 @@ export function Topbar({ user, items, onLogout, onOpenMenu, menuButtonRef, title
   const navigate = useNavigate();
   const { theme, setTheme } = useTheme();
   const current = matchNavItem(items, pathname);
-  const fullName = `${user.firstName} ${user.lastName}`;
+  const fullName = personName(user);
   // Quick gauges (nav item with variant 'action', GAUGE_ROLES only): one tap from the topbar below lg, where the
   // sidebar is a drawer — phones, and iPads held upright. Not shown on the page itself.
   const quick = items.find((i) => i.variant === 'action');

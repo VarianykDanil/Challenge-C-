@@ -60,7 +60,7 @@ createSchema(db); // the PIN columns, exactly as the next start of the server wo
 
 const person = get<{ id: number; name: string; email: string }>(
   db,
-  `SELECT id, first_name || ' ' || last_name AS name, email FROM users WHERE lower(email) = lower(?)`,
+  `SELECT id, TRIM(first_name || ' ' || last_name) AS name, email FROM users WHERE lower(email) = lower(?)`,
   [email],
 );
 if (!person) {

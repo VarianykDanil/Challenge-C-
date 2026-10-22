@@ -1,7 +1,7 @@
 // Owned by Marketing & Content. Product story and facts for the About page and README.
 import type { Role } from '@lm/shared';
 
-export const APP_VERSION = '1.3.0';
+export const APP_VERSION = '1.3.1';
 
 export interface StackItem { name: string; detail: string }
 export interface RoleSummary { role: Role; title: string; description: string }
@@ -23,7 +23,7 @@ export const ABOUT = {
 
   whoItsFor: [
     { role: 'rep', title: 'Field representatives', description: 'Log the day in under a minute, see ratios against the benchmarks, check pay and punctuality.' },
-    { role: 'leader', title: 'Team and crew leaders', description: 'Create events, log for the team, see who needs coaching on which stage, and track the team’s week.' },
+    { role: 'leader', title: 'Team and crew leaders', description: 'Create events, log for the team, add new trainees to it, see who needs coaching on which stage, and track the team’s week.' },
     { role: 'recruiter', title: 'Recruiters', description: 'Run the pipeline from application to observation day to hire, with overdue actions surfaced and a rep account created the moment someone is hired.' },
     { role: 'admin', title: 'The office', description: 'People, campaign payouts, payroll runs, expenses and company finance in one view — and the only place employee IDs are shown.' },
   ] satisfies RoleSummary[],
