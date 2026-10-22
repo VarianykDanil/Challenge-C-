@@ -1,7 +1,8 @@
 // Release 1.3 — the PDF API's types — OWNED BY P4 pdf-everywhere (laid down by r3-foundation; STABLE: P2's invoice,
 // P7's candidate profile and interview sheet, P8's venue report and P9's audit view build on them).
+// Relative imports only: render.ts (and so this file) is also loaded by the server's Node test.
 import type { PdfOrientation } from '@lm/shared';
-import type { CsvColumn } from '@/lib/csv';
+import type { CsvColumn } from '../csv';
 
 export type { PdfOrientation } from '@lm/shared';
 
@@ -22,6 +23,10 @@ export interface TablePdfOptions<T extends object> {
   filename: string;
   /** 'auto' (default): portrait up to six columns, landscape above (shared pdfOrientationFor). */
   orientation?: PdfOrientation | 'auto';
+  /** Release 1.3 (P4): printed after the generated time, "… by Danil Varianyk". */
+  generatedBy?: string | null;
+  /** Release 1.3 (P4): the clock for "Generated …" (default: the device's now). */
+  now?: Date;
 }
 
 /** An address block: the supplier (the person) or the customer (Linear MCR Limited) on an invoice. */
@@ -42,8 +47,11 @@ export interface PdfLineColumn {
   width?: number;
 }
 
-/** One cell value per column key; `muted` rows are drawn in the lighter colour (e.g. "not paid" lines). */
-export type PdfLineRow = Record<string, string> & { muted?: boolean };
+/**
+ * One cell value per column key; `muted` rows are drawn in the lighter colour (e.g. "not paid" lines).
+ * (P4: written as one index signature so a literal with `muted: true` type-checks; the cells are strings.)
+ */
+export type PdfLineRow = { [key: string]: string | boolean | undefined; muted?: boolean };
 
 export interface PdfSignature {
   /** e.g. "For Linear MCR Limited", "Accepted by the supplier". */
@@ -57,7 +65,11 @@ export interface PdfSignature {
 
 /** pdfDocument(): building blocks for page PDFs (P2's invoice; P7, P8, P9 pages). Calls chain; nothing is drawn twice. */
 export interface PdfDoc {
-  header(opts: { title: string; subtitle?: string; meta?: [label: string, value: string][] }): PdfDoc;
+  /**
+   * The brand band (mark, "Linear Hub", "Linear MCR Limited" and the generated time), the title, the subtitle, `meta`
+   * pairs on the right (e.g. ["Invoice", "LM-SB-2026-000123"]) and `filters` lines under the subtitle.
+   */
+  header(opts: { title: string; subtitle?: string; meta?: [label: string, value: string][]; filters?: string[] }): PdfDoc;
   addressBlocks(left: PdfAddress, right: PdfAddress): PdfDoc;
   heading(text: string): PdfDoc;
   paragraph(text: string, opts?: { muted?: boolean; size?: number }): PdfDoc;
@@ -68,13 +80,25 @@ export interface PdfDoc {
   signatureBlock(left: PdfSignature, right?: PdfSignature): PdfDoc;
   /** Printed at the bottom of every page with "Page x of y". */
   footer(text: string): PdfDoc;
-  /** Downloads the file. */
+  /** Release 1.3 (P4): vertical space in mm (default 4). */
+  space(mm?: number): PdfDoc;
+  /** Release 1.3 (P4): start a new page (the running header and the footer are added to it). */
+  pageBreak(): PdfDoc;
+  /** Release 1.3 (P4): start a new page unless `mm` of space is left on this one (keep a heading with its table). */
+  needs(mm: number): PdfDoc;
+  /** Downloads the file. The running headers and "Page x of y" footers are drawn once, on the first save or blob. */
   save(filename: string): void;
   blob(): Blob;
+  /** Release 1.3 (P4): the file's bytes (tests, uploads). */
+  bytes(): Uint8Array;
 }
 
 export interface PdfDocumentOptions {
   orientation?: PdfOrientation;
-  /** The PDF's document title (metadata). */
+  /** The PDF's document title (metadata), also printed in the running header of pages 2 onwards. */
   title?: string;
+  /** Release 1.3 (P4): who made it, for "Generated … by Danil Varianyk" (default: no name). */
+  generatedBy?: string | null;
+  /** Release 1.3 (P4): the clock for "Generated …" (default: the device's now). */
+  now?: Date;
 }

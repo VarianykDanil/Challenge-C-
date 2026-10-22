@@ -5,8 +5,12 @@
 //  - Dates as `YYYY-MM-DD`, timestamps as `YYYY-MM-DD HH:mm` (local time).
 //  - Money as a plain number with two decimals (`1234.50`), ratios as percent strings (`12.3%`).
 //  - Booleans as Yes / No, unknown as `—`.
+// Release 1.3 — OWNED BY P4 pdf-everywhere: the same columns feed the PDF export (lib/pdf). A column may say how its
+// PDF cell is written (`kind`); without it the formatter tells (csvMoney → money, csvDate → date, csvDateTime → date
+// and time, csvPct → percent, csvDecimal → number) or a plain number value does. This file stays importable from Node
+// (relative imports only), so the server's PDF test can run the real column code.
 import { format, isValid, parseISO } from 'date-fns';
-import { BRAND } from '@lm/shared';
+import { BRAND, asciiFold, type PdfCellKind } from '@lm/shared';
 
 export interface CsvColumn<T = Record<string, unknown>> {
   /** Property read from the row (`row[key]`). Purely derived columns may use any unique key and ignore the value. */
@@ -14,6 +18,8 @@ export interface CsvColumn<T = Record<string, unknown>> {
   header: string;
   /** Turn the raw value (and/or the row) into the exact cell text. Defaults to `csvCell`. */
   format?: (value: unknown, row: T) => string;
+  /** Release 1.3 (P4): how the PDF writes this column (default: from the formatter or the value, see csvColumnKind). */
+  kind?: PdfCellKind;
 }
 
 const BOM = '﻿';
@@ -54,15 +60,18 @@ export function csvCell(value: unknown): string {
 
 /** Build the whole file (BOM + header row + one line per row). */
 export function toCsv<T extends object>(rows: T[], columns: CsvColumn<T>[]): string {
-  const read = (row: T, key: string): unknown => (row as Record<string, unknown>)[key];
   const header = columns.map((c) => csvEscape(c.header)).join(',');
-  const lines = rows.map((row) => columns.map((c) => csvEscape(c.format ? c.format(read(row, c.key), row) : csvCell(read(row, c.key)))).join(','));
+  const lines = rows.map((row) => columns.map((c) => csvEscape(csvCellText(row, c))).join(','));
   return `${BOM}${[header, ...lines].join(EOL)}${EOL}`;
 }
 
 /** Trigger a browser download of `csv` as `filename` (Blob → object URL → anchor click, URL revoked after). */
 export function downloadCsv(filename: string, csv: string): void {
-  const blob = new Blob([csv], { type: 'text/csv;charset=utf-8' });
+  downloadBlob(filename, new Blob([csv], { type: 'text/csv;charset=utf-8' }));
+}
+
+/** Release 1.3 (P4): download any file the page built (the CSV above, the PDFs of lib/pdf) the same way. */
+export function downloadBlob(filename: string, blob: Blob): void {
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
   a.href = url;
@@ -78,37 +87,61 @@ export function downloadCsv(filename: string, csv: string): void {
 
 // ───────────────────────────── Cell formatters ─────────────────────────────
 
+/** Release 1.3 (P4): what each formatter writes, so the PDF can write it the way the screen does. */
+const FORMATTER_KINDS = new WeakMap<object, PdfCellKind>();
+function kindOf<F extends object>(fn: F, kind: PdfCellKind): F {
+  FORMATTER_KINDS.set(fn, kind);
+  return fn;
+}
+
 /** `YYYY-MM-DD` from a date string, ISO timestamp (local calendar date) or Date; '' when empty/invalid. */
-export function csvDate(value: unknown): string {
+export const csvDate = kindOf(function csvDate(value: unknown): string {
   if (value instanceof Date) return isValid(value) ? format(value, 'yyyy-MM-dd') : '';
   if (typeof value !== 'string' || !value) return '';
   if (ISO_DATE.test(value)) return value;
   const d = parseISO(value);
   return isValid(d) ? format(d, 'yyyy-MM-dd') : '';
-}
+}, 'date');
 
 /** `YYYY-MM-DD HH:mm` (local time) from an ISO timestamp; '' when empty/invalid. */
-export function csvDateTime(value: unknown): string {
+export const csvDateTime = kindOf(function csvDateTime(value: unknown): string {
   if (typeof value !== 'string' || !value) return '';
   const d = parseISO(value);
   return isValid(d) ? format(d, 'yyyy-MM-dd HH:mm') : '';
-}
+}, 'datetime');
 
 /** Money as a plain number with two decimals and no symbol or thousands separators, e.g. `1234.50`. */
-export function csvMoney(value: unknown): string {
+export const csvMoney = kindOf(function csvMoney(value: unknown): string {
   if (typeof value !== 'number' || !Number.isFinite(value)) return '';
   const s = value.toFixed(2);
   return s === '-0.00' ? '0.00' : s;
-}
+}, 'money');
 
 /** A 0..1 ratio as a percent string with `digits` decimals, e.g. `12.3%`; '' when not finite. */
 export function csvPct(digits = 1): (value: unknown) => string {
-  return (value) => (typeof value === 'number' && Number.isFinite(value) ? `${(value * 100).toFixed(digits)}%` : '');
+  return kindOf((value: unknown) => (typeof value === 'number' && Number.isFinite(value) ? `${(value * 100).toFixed(digits)}%` : ''), 'percent');
 }
 
 /** A number with a fixed number of decimals; '' when not finite (e.g. stops-per-sale with no sales). */
 export function csvDecimal(digits = 1): (value: unknown) => string {
-  return (value) => (typeof value === 'number' && Number.isFinite(value) ? value.toFixed(digits) : '');
+  return kindOf((value: unknown) => (typeof value === 'number' && Number.isFinite(value) ? value.toFixed(digits) : ''), 'number');
+}
+
+/**
+ * Release 1.3 (P4): how the PDF writes a column — its own `kind`, else what its formatter writes (csvMoney, csvDate,
+ * csvDateTime, csvPct, csvDecimal), else 'number' for a column of plain numbers without a formatter, else 'text'
+ * (which still writes bare ISO dates and CSV timestamps as dates). `sample` is the column's first non-empty raw value.
+ */
+export function csvColumnKind<T>(column: CsvColumn<T>, sample?: unknown): PdfCellKind {
+  if (column.kind) return column.kind;
+  if (column.format) return FORMATTER_KINDS.get(column.format) ?? 'text';
+  return typeof sample === 'number' ? 'number' : 'text';
+}
+
+/** Release 1.3 (P4): the text one cell holds in the CSV (before quoting) — the PDF starts from exactly this. */
+export function csvCellText<T extends object>(row: T, column: CsvColumn<T>): string {
+  const value = (row as Record<string, unknown>)[column.key];
+  return column.format ? column.format(value, row) : csvCell(value);
 }
 
 /** Yes / No / — for a boolean that may be unknown (null). */
@@ -123,8 +156,12 @@ export function csvLabel<K extends string>(labels: Record<K, string>): (value: u
 
 // ───────────────────────────── File names & ordering ─────────────────────────────
 
+/**
+ * A file-name piece in lower-case ASCII. Release 1.3 (P4): spelled with the shared ASCII fold first, so "Łukasz",
+ * "Straße" and "Иван" become "lukasz", "strasse" and "ivan" instead of losing their letters.
+ */
 const slugify = (s: string): string =>
-  s.normalize('NFKD').replace(/[̀-ͯ]/g, '').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '');
+  asciiFold(s).toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '');
 
 const PREFIX = slugify(BRAND.product); // "linear-hub"
 

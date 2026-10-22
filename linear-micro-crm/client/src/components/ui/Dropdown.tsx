@@ -34,6 +34,11 @@ export interface DropdownProps {
   /** Controlled open state (optional). */
   open?: boolean;
   onOpenChange?: (open: boolean) => void;
+  /**
+   * Release 1.3 (P4): open above the toast stack (z-[90] instead of z-[70]). For menus that can sit near the foot of
+   * the window, where the toasts are: the Export menus. Default off, so every other menu stays as it was.
+   */
+  aboveToasts?: boolean;
 }
 
 type TriggerProps = {
@@ -51,7 +56,7 @@ const stop = (e: SyntheticEvent) => e.stopPropagation();
  * Escape and outside clicks close, focus returns to the trigger; Tab closes and moves on from the
  * trigger. Rendered in a portal so it escapes `overflow` containers and sticky bars.
  */
-export function Dropdown({ trigger, items, header, align = 'end', side = 'bottom', width = 224, className, open: openProp, onOpenChange }: DropdownProps) {
+export function Dropdown({ trigger, items, header, align = 'end', side = 'bottom', width = 224, className, open: openProp, onOpenChange, aboveToasts = false }: DropdownProps) {
   const id = useId();
   const [openState, setOpenState] = useState(false);
   const open = openProp ?? openState;
@@ -197,7 +202,10 @@ export function Dropdown({ trigger, items, header, align = 'end', side = 'bottom
           onClick={stop}
           onMouseDown={stop}
           style={{ top: pos?.top ?? 0, left: pos?.left ?? 0, width, visibility: pos ? 'visible' : 'hidden' }}
-          className="scrollbar-thin fixed z-[70] max-h-[calc(100dvh-1rem)] animate-scale-in overflow-y-auto overscroll-contain rounded-xl border border-border bg-surface p-1 text-sm shadow-pop outline-none"
+          className={clsx(
+            'scrollbar-thin fixed max-h-[calc(100dvh-1rem)] animate-scale-in overflow-y-auto overscroll-contain rounded-xl border border-border bg-surface p-1 text-sm shadow-pop outline-none',
+            aboveToasts ? 'z-[90]' : 'z-[70]',
+          )}
         >
           {header && <div className="border-b border-border px-3 py-2.5">{header}</div>}
           {items.map((it, i) => (
