@@ -18,6 +18,7 @@ import type { ClientAuditEventInput, LearningVideo } from '@lm/shared';
 import { buildTablePdf, createPdfDoc, prepareTable, tableFontSize, type PdfEngine } from '../../../client/src/lib/pdf/render.ts';
 import { csvDate, csvDateTime, csvFilename, csvLabel, csvMoney, csvPct, type CsvColumn } from '../../../client/src/lib/csv.ts';
 import { ownRequiredVideos, teamRequiredVideos, videoRequiredOf, type TeamVideoView } from '../../../client/src/features/pdf/progressVideos.ts';
+import { auditCoverageLine, auditPdfWho } from '../../../client/src/features/pdf/auditPdfText.ts';
 import { startTestServer, type TestServer } from './helpers.ts';
 
 const engine: PdfEngine = { JsPDF: jsPDF, autoTable };
@@ -379,6 +380,141 @@ test('the printed PDF never starts a cell with a hidden formula: zero-width char
     .totals([{ label: 'Total', value: '​-1+cmd|x' }]);
   const pt = parsePdf(page.bytes()).text.flat();
   for (const s of [`'@SUM(A1:A9)`, `'+cmd|x`, `'-1+cmd|x`]) assert.ok(pt.includes(s), `shows ${JSON.stringify(s)}`);
+});
+
+// ───────────────────────────── Fix round (r3 I3): every drawn line is guarded ─────────────────────────────
+
+/**
+ * An independent check on what a page shows: a drawn line (one text-show operator) that a spreadsheet would run as a
+ * formula if it were copied out — "=" or "@" first (after any spaces), or "+" / "-" followed by more than a plain
+ * number, money or a phone number (those keep their sign).
+ */
+const runsAsFormula = (line: string) => {
+  const t = line.replace(/^[\s\xa0]+/, '');
+  return /^[=@]/.test(t) || (/^[+-]/.test(t) && !/^[+-][£$€]?[\d\s(),.%:/-]*$/.test(t));
+};
+function formulaLines(pdf: ParsedPdf): string[] {
+  return pdf.text.flat().filter(runsAsFormula);
+}
+
+/** Text a person typed (notes, answers, names, addresses): a harmless first line, then a formula on the next one. */
+const EVIL = [
+  'Call back Monday\n=HYPERLINK("http://evil.example","Open CV")',
+  "Worked at Tesco\n+cmd|' /C calc'!A0",
+  'Fine\n@SUM(1+1)*cmd|x',
+  'Shift notes\r\n-2+3+cmd|x',
+  'Line\r\u200b=1+1',
+  'Tab\n\t=cmd|x',
+];
+const FIRST = ['=HYPERLINK("http://evil.example","x")', '+cmd|calc', '@SUM(A1:A9)', '-1+cmd|x', '\u2212 2+cmd|x', '\uff1dSUM(A1)', '  =1+1'];
+/** Many short formulas in a row: wherever the text wraps, the next line starts with one. */
+const WRAPS = Array.from({ length: 40 }, () => '=1+1').join(' ');
+
+test('every page block guards every line it draws: multi-line text, later lines, wrapped lines', () => {
+  const doc = createPdfDoc(engine, { title: '=HYPERLINK("http://evil.example","title")', now: NOW })
+    .header({
+      title: FIRST[0]!,
+      subtitle: EVIL[0]!,
+      meta: [[FIRST[1]!, EVIL[1]!], ['Ref', FIRST[2]!]],
+      filters: [FIRST[3]!, EVIL[2]!],
+    })
+    .addressBlocks(
+      { heading: FIRST[4]!, name: EVIL[3]!, lines: [FIRST[5]!, EVIL[4]!], extra: [EVIL[5]!] },
+      { heading: 'Customer', name: FIRST[6]!, lines: [EVIL[0]!], extra: [FIRST[0]!] },
+    )
+    .heading(FIRST[1]!)
+    .heading(EVIL[1]!)
+    .paragraph(FIRST[2]!)
+    .paragraph(EVIL[2]!)
+    .paragraph(WRAPS)
+    .keyValues([[FIRST[3]!, EVIL[3]!], [EVIL[4]!, FIRST[4]!], ['Long', WRAPS]])
+    .lineTable(
+      [{ key: 'a', header: FIRST[5]!, width: 1 }, { key: 'b', header: 'Answer', width: 1 }, { key: 'c', header: 'Amount', align: 'right', width: 1 }],
+      [
+        { a: EVIL[5]!, b: EVIL[0]!, c: '-£20.00' },
+        { a: FIRST[6]!, b: WRAPS, c: EVIL[1]! },
+      ],
+    )
+    .table<{ x: string; y: string }>([{ key: 'x', header: FIRST[0]! }, { key: 'y', header: 'Y' }], [{ x: EVIL[2]!, y: WRAPS }, { x: FIRST[1]!, y: EVIL[3]! }])
+    .totals([{ label: FIRST[2]!, value: EVIL[4]! }, { label: EVIL[5]!, value: FIRST[3]!, strong: true }])
+    .signatureBlock({ label: FIRST[4]!, name: EVIL[0]!, note: EVIL[1]! }, { label: EVIL[2]!, name: FIRST[5]!, note: WRAPS })
+    .pageBreak()
+    .paragraph('Page two, under the running header.')
+    .footer(FIRST[6]!);
+  const pdf = parsePdf(doc.bytes());
+  assert.ok(pdf.pages >= 2);
+  assert.deepEqual(formulaLines(pdf), [], 'no drawn line runs as a formula');
+  const all = pdf.text.flat();
+  // the guard is an apostrophe in front, as the CSV does; the text is otherwise kept
+  for (const s of [
+    `'=HYPERLINK("http://evil.example","Open CV")`,
+    "'+cmd|' /C calc'!A0",
+    "'@SUM(1+1)*cmd|x",
+    "'-2+3+cmd|x",
+    "'=1+1",
+    `'=HYPERLINK("http://evil.example","x")`,
+    "'-1+cmd|x",
+    "'=SUM(A1)",
+    'Call back Monday',
+    '-£20.00',
+  ]) {
+    assert.ok(all.some((t) => t === s || t.startsWith(s)), `shows ${JSON.stringify(s)}`);
+  }
+  // the wrapped runs: several lines, every one of them guarded
+  assert.ok(all.filter((t) => t.startsWith("'=1+1 =1+1")).length >= 4, 'wrapped continuation lines carry the apostrophe');
+});
+
+test('a table PDF guards every line too: title, subtitle, filters, headers, multi-line and wrapped cells, totals', () => {
+  const cols: CsvColumn<Record<string, string>>[] = [
+    { key: 'a', header: FIRST[0]! },
+    { key: 'b', header: 'Notes' },
+    { key: 'c', header: 'Next action' },
+  ];
+  const rows = [
+    { a: 'Jordan Lee', b: EVIL[0]!, c: EVIL[1]! },
+    { a: EVIL[2]!, b: WRAPS, c: EVIL[3]! },
+    { a: EVIL[4]!, b: EVIL[5]!, c: FIRST[4]! },
+  ];
+  const doc = buildTablePdf(engine, {
+    title: FIRST[1]!,
+    subtitle: EVIL[2]!,
+    filters: [FIRST[2]!, EVIL[3]!],
+    columns: cols,
+    rows,
+    totals: { b: EVIL[4]!, c: FIRST[3]! },
+    filename: 'linear-hub-candidates-open-2026-10-22.csv',
+    now: NOW,
+  });
+  const pdf = parsePdf(doc.bytes());
+  assert.deepEqual(formulaLines(pdf), [], 'no drawn line runs as a formula');
+  const all = pdf.text.flat();
+  // (the narrow column wraps "+cmd|' /C calc'!A0" after "/C")
+  for (const s of [`'=HYPERLINK("http://evil.example","Open CV")`, "'+cmd|' /C", "'@SUM(1+1)*cmd|x", "'-2+3+cmd|x", "' =cmd|x", "'+cmd|calc"]) {
+    assert.ok(all.some((t) => t === s || t.startsWith(s)), `shows ${JSON.stringify(s)}`);
+  }
+  assert.ok(all.filter((t) => t.startsWith("'=1+1")).length >= 3, 'the wrapped cell: every line guarded');
+  // a right-aligned guarded cell still ends at the column's right edge (the apostrophe is measured, not overhanging)
+  assert.ok(all.includes('Call back Monday'));
+});
+
+test('audit PDF: who a row names, as the Audit page says it; how much of the trail the file holds', () => {
+  type Who = Parameters<typeof auditPdfWho>[0];
+  const row = (r: Partial<Who>): Who => ({ userName: null, kind: 'change', action: 'PATCH /users/:id', after: null, ...r }) as Who;
+  assert.equal(auditPdfWho(row({ userName: 'Danil Varianyk' })), 'Danil Varianyk');
+  // a failed try on the sign-in page is filed under the account, but whoever typed it may not be that person
+  assert.equal(auditPdfWho(row({ userName: 'Jordan Lee', kind: 'sign_in', action: 'POST /auth/login', after: { reason: 'wrong_employee_id' } })), "Attempt on Jordan Lee's account");
+  assert.equal(auditPdfWho(row({ kind: 'sign_in', action: 'POST /auth/login', after: { reason: 'unknown_email' } })), 'Unknown person');
+  // a wrong current PIN in Settings is the signed-in person's own; an automatic step names Linear Hub
+  assert.equal(auditPdfWho(row({ userName: 'Jordan Lee', kind: 'sign_in', action: 'POST /auth/pin/change', after: { reason: 'wrong_current_pin' } })), 'Jordan Lee');
+  assert.equal(auditPdfWho(row({ kind: 'automatic', action: 'SYSTEM statement-fetched' })), 'Linear Hub');
+  // coverage: everything (no line), the newest of many, the page on screen of a known total, and — without the
+  // total — the page on screen, saying more may match
+  assert.equal(auditCoverageLine(12, 12, false), null);
+  assert.equal(auditCoverageLine(2000, 3400, true), 'The newest 2,000 of 3,400 matching entries');
+  assert.equal(auditCoverageLine(50, 1234, false), 'The 50 entries on screen, of 1,234 that match');
+  assert.equal(auditCoverageLine(50, undefined, false), 'The 50 entries on screen (more may match the filters)');
+  assert.equal(auditCoverageLine(1, undefined, false), 'The 1 entry on screen (more may match the filters)');
+  assert.equal(auditCoverageLine(0, undefined, false), null);
 });
 
 test('Cyrillic and Greek names print in Latin letters, not "?"', () => {

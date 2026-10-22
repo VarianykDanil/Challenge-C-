@@ -23,6 +23,15 @@ a 5xx, 408, 429 (P9's 60 a minute), or 401 (the session ended) — waits on the 
 | Audit → Download PDF | `{ kind: 'export', format: 'pdf', what: 'audit-trail', rows: <entries>, filename }` |
 | Learning → Progress → Download PDF | `{ kind: 'export', format: 'pdf', what: 'learning-progress', rows: <lessons>, filename }` |
 
+Release 1.3 fix round (I3): `reportExportEvent(event, ownerId?)` in the same file takes a whole
+`ClientAuditEventInput` (so a PDF of ONE record can name it: `entity`, `entityId`) and uses the same outbox when
+`ownerId` (the signed-in person's id) is given; without it, it is sent once, like `reportAuditEvent`.
+**For the lead (one line each, outside P4's files):** P2's `features/invoices/invoicePdf.ts` (PDF) and
+`features/finance/PayslipModal.tsx` (print), P7's `features/recruitment/pdf.ts` (profile, interview sheet) and P8's
+`features/venues/venueReport.ts` still call `reportAuditEvent`, so those PDFs made without signal are not recorded;
+switching each to `reportExportEvent({ …same event… }, user.id)` gives them the outbox (the caller needs the signed-in
+person's id).
+
 `what` is the page's `auditWhat` prop, else the CSV file name's section (shared `exportWhatFor`): e.g.
 `gauges-by-team-deansgate`, `leaderboard-week-sales`, `payslips` — lower case, hyphens, at most 80 characters.
 `server/src/test/pdf-export.test.ts` sends exactly these bodies: 204 for admin, leader, recruiter and rep; 403
@@ -77,7 +86,13 @@ the PDF and the audit name. While nothing is on screen the button is disabled wi
   set in the button's own filter bar (`report.ts` `screenFiltersNear`): drop-downs with an "all" choice that are set
   ("Team: Northern Lights", "Position: Field Representative", "Source: Indeed", "Owner: Priya Shah") and search boxes
   with words in them ("Search: “Zed”"). That covers Team, Recruitment's list and Gauges with no call-site change. A
-  page whose filters are not beside its button (or not drop-downs / search boxes) should pass `pdfFilters`.
+  page whose filters are not beside its button (or not drop-downs / search boxes) passes them in words.
+- Release 1.3 fix round (I3): `pdfScreenFilters?: string[]` — the filters set on screen, in words, used instead of
+  what is read beside the button and printed the same way (with the file name's lines, a line with the same label
+  giving way to it, the date range last). `pdfFilters` still replaces every filter line. Two call sites pass it (the
+  only call-site changes, outside P4's files): Recruitment's board **Hired** column (`pages/Recruitment.tsx`: "Source:
+  Indeed", "Owner: Priya Shah", "Search: “…”" from the same state its query uses) and a rep's **Leaderboard**
+  (`pages/Leaderboard.tsx`: "Team: Northern Lights", shown on screen as a badge, not a picker).
 - The menu opens above the toast stack (`Dropdown aboveToasts`, see below), so a toast never covers CSV / PDF.
 - Each mounted button sends any export reports that waited on this device for its signed-in person.
 
@@ -94,7 +109,11 @@ toast covered the items and took the click.
   Who, What happened, Record, Changes) under P9's filter lines. New optional props: `total` (GET /audit `total`) and
   `query` (the view's GET /audit query without `limit` / `offset`). With both, the PDF holds every matching entry,
   newest first, up to 2,000 (read 200 at a time, the server's most), and says "The newest 2,000 of 2,550 matching
-  entries" when capped; without them it is the page on screen, as before. **P9 / the lead: wire it in
+  entries" when capped; without them it is the page on screen and says so ("The 50 entries on screen (more may match
+  the filters)", fix round I3). The Who column names a row as the Audit page does (`features/pdf/auditPdfText.ts`
+  `auditPdfWho`, from the shared rules behind `kinds.tsx` `auditActorName`): "Attempt on Jordan Lee's account" for a
+  failed try on the sign-in page, "Unknown person" for an email nobody has, "Linear Hub" for an automatic step.
+  **P9 / the lead: wire it in
   `pages/Audit.tsx`:** `total={total}` and `query={{ userId, entity: entity || undefined, entityId, from: from ||
   undefined, to: to || undefined, q: q || undefined, kind: kind || undefined }}` (on the foundation's page:
   `signIns: signIns ? undefined : 0` instead of `kind`).
@@ -109,17 +128,18 @@ toast covered the items and took the click.
 ### Shared: `shared/src/logic/exportFormat.ts`
 
 `PDF_PORTRAIT_MAX_COLUMNS`, `PdfOrientation`, `pdfOrientationFor` (as laid down) plus `PdfCellKind`,
-`PDF_WINANSI_EXTRAS`, `toPdfText`, `pdfSafeText`, `pdfInfoText`, `pdfMoney`, `pdfNumber`, `pdfDate`, `pdfDateShort`,
+`PDF_WINANSI_EXTRAS`, `toPdfText`, `pdfSafeText` (per line since fix round I3), `pdfGuardLine` (I3: the guard for a
+line exactly as drawn), `pdfInfoText`, `pdfMoney`, `pdfNumber`, `pdfDate`, `pdfDateShort`,
 `pdfDateTime`, `pdfDateRange`, `pdfPageLabel`, `pdfCellText`, `isNumericCell`, `isNumericColumn`, `parseExportFilename`,
 `pdfFilenameFor`, `exportWhatFor`, `pdfHeadingFor` (now also takes `screenFilters`), `pdfGeneratedLine`, and
 `asciiFold` (re-exported from the new `shared/src/logic/textFold.ts`, which holds the fold and transliteration tables
-so the main chunk, which names every CSV file, does not pull in the rest). Unit tests: `exportFormat.test.ts` (19).
+so the main chunk, which names every CSV file, does not pull in the rest). Unit tests: `exportFormat.test.ts` (22).
 
 ### For the packages that draw page PDFs (P2, P7, P8)
 
 ```ts
 import { PDF_EXPORTS_READY, pdfDocument, exportTablePdf } from '@/lib/pdf';
-import { reportExport } from '@/features/pdf/report';
+import { reportExport, reportExportEvent } from '@/features/pdf/report';
 
 const doc = await pdfDocument({ title: `Self-billed invoice ${inv.number}`, generatedBy: fullName(me) });
 doc.header({ title: 'Self-billed invoice', subtitle: weekLabel, meta: [['Invoice', inv.number], ['Due', due]] })
@@ -130,6 +150,8 @@ doc.header({ title: 'Self-billed invoice', subtitle: weekLabel, meta: [['Invoice
   .footer(`Linear MCR Limited · Self-billed invoice ${inv.number}`)
   .save(`linear-hub-invoice-${inv.number}.pdf`);
 reportExport('pdf', filename, lines.length, 'invoice');
+// or, naming the one record the PDF is of (I3):
+reportExportEvent({ kind: 'export', format: 'pdf', what: `invoice ${inv.number}`, filename, entity: 'invoice', entityId: inv.id }, me.id);
 ```
 
 P8's venue report: `exportTablePdf({ title, subtitle, filters, columns, rows, totals, filename })`, or a
@@ -141,7 +163,8 @@ text ("£1,234.50"); in `table`/`exportTablePdf` use the CSV formatters (or `kin
 - **Where it runs.** On the device, in the browser. jsPDF 4.2.1 and jspdf-autotable 5.0.8 (exact versions in
   `client/package.json`) live in their own chunk (`engine-*.js`, about 430 kB, 140 kB gzipped), loaded on the first PDF
   and from then on reused; opening an Export menu starts the download early. The main chunk grew by 2.5 kB in all
-  (472.19 → 474.72 kB; the review fixes add 1.96 kB, the transliteration tables file names use), under the 5 kB limit. jsPDF's optional `html()` helpers (html2canvas, DOMPurify, canvg) are emitted as chunks but
+  (472.19 → 474.72 kB; the review fixes add 1.96 kB, the transliteration tables file names use), under the 5 kB limit.
+  The fix round I3 leaves the merged main chunk as it was (481.86 kB at 094570e and after; the engine chunk +0.06 kB). jsPDF's optional `html()` helpers (html2canvas, DOMPurify, canvg) are emitted as chunks but
   never loaded.
 - **Page.** A4, millimetres. Tables up to six columns portrait, seven or more landscape (`pdfOrientationFor`). Margins
   14 mm portrait, 12 mm landscape. Page 1: the brand band (the violet mark, "Linear Hub", and on the right "Linear MCR
@@ -183,18 +206,37 @@ text ("£1,234.50"); in `table`/`exportTablePdf` use the CSV formatters (or `kin
   "+44 7700 900123" keep their sign), so a table copied out of the PDF into a spreadsheet cannot run a formula. The
   guard looks at the text **as printed** (after `toPdfText`, and again with leading spaces taken off), so a zero-width
   space, word joiner, BOM or soft hyphen in front, a minus sign "−" or hyphen "‐" (printed "-") or a full-width "＝"
-  cannot carry a formula past it. Every PDF block uses it: table cells, `lineTable`, `keyValues`, `totals`.
+  cannot carry a formula past it. **Per line (fix round I3):** a PDF prints a multi-line text as separate lines, and a
+  line copied out of the PDF becomes a cell of its own, so every line is guarded, not only the first ("Call back
+  Monday" then "'=HYPERLINK(…)" on the next line; CR, CR LF and LF all count; a tab in front of a typed line too). And
+  the guard runs once more on every line **as drawn** (`pdfGuardLine` in `render.ts` `write()` and in the table's
+  `willDrawCell`), so a line the wrapping starts — a long note or cell whose continuation begins with "=" — is
+  guarded as well. Every text every block draws goes through it: the header (title, subtitle, filters, meta labels
+  and values), address blocks (heading, name, lines, extra), headings, paragraphs, key values (labels and values),
+  line tables and tables (headers and cells), totals (labels and values), signature blocks (label, name, note), the
+  footer and the running header. `server/src/test/pdf-export.test.ts` builds a document with every block (and a table
+  PDF) full of such text and checks that no text-show operator in the file starts a formula. A guarded line can stand
+  out of its box by the apostrophe's width (about 0.6 mm), as the line was measured before.
 - **Audit PDF**: with `total` and `query` from the page, every entry that matches its filters (newest first, up to
   2,000: about 55 A4 pages, made in about a second), read 200 at a time; an entry pushed to the next page by new
-  activity while they are read is printed once. Without them, the entries on screen (50). Columns: When (local time),
-  Who ("Linear Hub" for automatic steps), What happened, Record ("Pay run #123"), Changes (shared `auditChangeText`,
-  up to four fields). The audit report's `rows` is the number of entries in the file.
+  activity while they are read is printed once. Without them, the entries on screen (50), with the line "The 50
+  entries on screen (more may match the filters)". Columns: When (local time), Who (as the Audit page names it:
+  "Attempt on Jordan Lee's account", "Unknown person", "Linear Hub" for automatic steps), What happened, Record ("Pay
+  run #123"), Changes (shared `auditChangeText`, up to four fields). The audit report's `rows` is the number of
+  entries in the file.
 - **Exports made without signal** (`report.ts`): the report waits in `localStorage` under
   `lm-export-reports:<userId>` (at most 100, oldest dropped first) and is sent, oldest first and one at a time, when
   the window says it is online again, when `api/client.ts` announces an answer after a failed request, after the
-  next export that gets through, and when a page with an export button opens. Before sending it checks `GET
-  /auth/me`: only that person's session sends their reports (someone else signed in on the same phone sends nothing).
-  The audit row is stamped when the report arrives; the file name keeps the day the file was made.
+  next export that gets through, and whenever a page with an export button opens (every page, also after signing
+  back in; fix round I3 — before, only the first one per page load). Before sending it checks `GET /auth/me`: only
+  that person's session sends their reports (someone else signed in on the same phone sends nothing). **Several tabs
+  (I3):** one tab sends at a time (Web Locks, lock name `lm-export-reports:<userId>`; the others wait, then find the
+  queue empty) and each report is taken off the queue before it is sent (put back at the front if it has to wait), so
+  a report is sent once however many tabs are open — measured: 3 offline exports with two tabs open, 3 POSTs (it was
+  6). Where a browser has no Web Locks (Safari before 15.4) the tabs start after a random 0.1–1 s, so one tab's claim
+  reaches the other first; that is very likely, not certain, to send once. A report claimed by a tab that is closed
+  mid-request is lost. The audit row is stamped when the report arrives (the route keeps no other time); the file
+  name keeps the day the file was made.
 - **Progress PDF**: read through the same React Query keys the page uses (cache first), so the server's scoping is
   unchanged (a leader can download only their own team's people, as on screen). The checklist (lesson, learned,
   self-check score, teach-back sent, signed off by whom; lessons not started in grey), "Next level: …" with each
@@ -207,7 +249,9 @@ text ("£1,234.50"); in `table`/`exportTablePdf` use the CSV formatters (or `kin
   every page, totals once, "Page x of y", running headers, formula guard, folded characters, no 16-bit strings, the
   invoice blocks (P2), page flow, `needs()`, identical bytes on a second save; the review fixes (a title with ’ and
   – in the footer and in the document properties, hidden formulas in table cells and page blocks, Cyrillic and Greek
-  names, file names, the required-video counts with P5's response shapes); plus the audit-event route contract.
+  names, file names, the required-video counts with P5's response shapes); the fix round I3 (every block and a table
+  PDF with multi-line, later-line and wrapped formulas: no drawn line starts one; the audit PDF's Who wording and
+  coverage line); plus the audit-event route contract.
 
 ## User guide
 
@@ -219,14 +263,16 @@ text ("£1,234.50"); in `table`/`exportTablePdf` use the CSV formatters (or `kin
   shows just the download icon.
 - **Audit → Download PDF**: every entry that matches the filters, newest first (up to 2,000) — who did what and when,
   the record and what changed. (Until the Audit page passes its filters to the button, it is the 50 entries on
-  screen.)
+  screen, and the PDF says so under the title.)
 - **Learning → Progress → Download PDF** (your own, or a person's from My team / Everyone): the COD pack checklist,
   what the next level needs, and the required videos.
 - The first PDF of a visit takes a second or two while the PDF maker downloads (about 140 kB over the network); after
   that PDFs are instant. Offline, the CSV still works, and so does the PDF once the PDF maker has loaded on that
   visit; otherwise the PDF asks you to connect.
-- Every download — CSV or PDF — is recorded in the audit trail with what, how many rows and the file name, including
-  downloads made without signal: they are recorded when the phone is back online.
+- Every download — CSV or PDF — is recorded in the audit trail with what, how many rows and the file name. Downloads
+  from **Export ▾**, **Audit → Download PDF** and **Learning → Progress → Download PDF** made without signal are
+  recorded when the phone is back online (with several tabs open, once). An invoice, candidate profile, interview
+  sheet or venue report PDF made without signal is not recorded yet.
 
 ## Owner notes
 
@@ -241,7 +287,12 @@ text ("£1,234.50"); in `table`/`exportTablePdf` use the CSV formatters (or `kin
   longer period) — once the Audit page passes its filters to the button (a one-line change for P9 / the lead, in API
   above); until then it is the 50 entries on screen.
 - Downloads made without signal are recorded when the phone is back online (stamped then; the file name keeps the
-  day). If someone clears the browser's data first, or more than 100 wait, the oldest are lost.
+  day). If someone clears the browser's data first, or more than 100 wait, the oldest are lost. Invoice, candidate,
+  interview-sheet and venue-report PDFs made without signal are not recorded until those pages use the waiting
+  queue (a one-line change each, listed under API for the lead).
+- A PDF never prints a line that a spreadsheet would run as a formula: any line (also the second line of a note, or a
+  line the page wrapping starts) beginning with = + - or @ and more than a number gets an apostrophe in front, as
+  the CSV does.
 - The Xero / Sage **Export for payroll** file is unchanged (an import file for payroll software, so no PDF).
 - Decision for the owner (optional): the PDF tables use the same columns as the CSVs. If a printed version should
   leave out a column (e.g. the payroll Reference), tell us which and we'll trim the PDF only.

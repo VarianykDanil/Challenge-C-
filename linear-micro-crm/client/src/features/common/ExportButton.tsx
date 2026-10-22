@@ -4,7 +4,8 @@
 // Release 1.3 — OWNED BY P4 pdf-everywhere. The PDF comes from lib/pdf exportTablePdf (jsPDF loads in its own chunk on
 // the first PDF, and starts loading when the menu opens); its title comes from the file name, its subtitle from the
 // page heading and its filter lines from the file name and the filters set on screen beside the button (shared
-// pdfHeadingFor, features/pdf/report.ts screenFiltersNear) unless `pdfTitle` / `pdfFilters` say better. Every export is
+// pdfHeadingFor, features/pdf/report.ts screenFiltersNear; `pdfScreenFilters` when the filters are not beside the
+// button) unless `pdfTitle` / `pdfFilters` say better. Every export is
 // reported to the audit trail (POST /audit/events; a report made without signal waits on the device and is sent when
 // the signal is back). The menu opens above the toast stack, so a toast never covers its items.
 // `pdf={false}`, or PDF_EXPORTS_READY false, leaves the single CSV button. The props are the contract: every call site
@@ -48,6 +49,13 @@ export interface ExportButtonProps<T extends object> {
    * dates) plus the drop-downs and search box set in the button's own filter bar (report.ts screenFiltersNear).
    */
   pdfFilters?: string[];
+  /**
+   * Release 1.3 fix round (I3): the filters set on screen, in words ("Source: Indeed", "Team: Deansgate"), for a
+   * button that sits away from its filter bar (a board column) or a view whose scope is not a control (a rep's own
+   * team). Used instead of what is read beside the button, and printed the same way: with what the file name says
+   * (a line with the same label gives way to it) and the date range last. Ignored when `pdfFilters` is given.
+   */
+  pdfScreenFilters?: string[];
   /** Release 1.3 (P4): a totals row for the PDF, keyed by column key (formatted). */
   pdfTotals?: Partial<Record<string, string>>;
   /** Release 1.3 (P9): what the audit trail calls this export, e.g. "gauges-by-team" (default: from `filename`). */
@@ -80,6 +88,7 @@ export function ExportButton<T extends object>({
   pdf = true,
   pdfTitle,
   pdfFilters,
+  pdfScreenFilters,
   pdfTotals,
   auditWhat,
 }: ExportButtonProps<T>) {
@@ -117,7 +126,7 @@ export function ExportButton<T extends object>({
         filename,
         pageHeading: pageHeadingNear(anchor.current),
         today: toISODate(new Date()),
-        screenFilters: screenFiltersNear(anchor.current),
+        screenFilters: pdfScreenFilters ?? screenFiltersNear(anchor.current),
       });
       const subtitle = pdfTitle ? (heading.subtitle && heading.subtitle !== pdfTitle ? heading.subtitle : undefined) : heading.subtitle;
       await exportTablePdf({

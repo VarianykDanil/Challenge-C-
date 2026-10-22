@@ -126,19 +126,44 @@ const INERT_NUMBERISH = /^[+\-]?[£$€]?[\d\s(),.%:/\-]*\d[\d\s(),.%:/\-]*$/;
 
 /** Text a spreadsheet would run as a formula: a formula character first, and more than a plain number after it. */
 const looksLikeFormula = (t: string) => FORMULA_START.test(t) && !INERT_NUMBERISH.test(t);
+/** Spaces in front of a line (the printed text keeps a no-break space as byte 0xA0). */
+const LEADING_SPACE = /^[\s\xa0]+/;
+
+/** One printed line that would run as a formula, as it stands or with the spaces in front taken off. */
+const lineLooksLikeFormula = (line: string) => looksLikeFormula(line) || looksLikeFormula(line.replace(LEADING_SPACE, ''));
 
 /**
- * A cell's text, safe and drawable: toPdfText first, then a value a spreadsheet would run as a formula
- * ("=HYPERLINK(…)", "+cmd|…", "@SUM(…)", "-2+3+cmd|…") gets an apostrophe in front, exactly as the CSV does.
- * The guard looks at the text as PRINTED (and with leading spaces taken off), so a zero-width character, a BOM or a
- * soft hyphen in front, a minus sign "−" or a full-width "＝" cannot carry a formula past it. Numbers, money and phone
- * numbers keep their sign, whichever minus they were written with.
+ * Release 1.3 fix round (I3): the guard for text exactly as it is DRAWN — already WinAnsi text (toPdfText), e.g. a
+ * line the renderer wrapped, a table cell's continuation line, a heading split to fit. Every line ("\n") that a
+ * spreadsheet would run as a formula once copied out of the PDF gets an apostrophe in front, as the CSV does; a line
+ * that already starts with one is left as it is, so the guard can run twice. lib/pdf/render.ts runs it on every line
+ * it draws, which also covers the lines its own wrapping makes.
+ */
+export function pdfGuardLine(printed: string): string {
+  const text = String(printed ?? '');
+  if (!text.includes('\n')) return lineLooksLikeFormula(text) ? `'${text}` : text;
+  return text
+    .split('\n')
+    .map((line) => (lineLooksLikeFormula(line) ? `'${line}` : line))
+    .join('\n');
+}
+
+/**
+ * A cell's text, safe and drawable: toPdfText first, then EVERY LINE a spreadsheet would run as a formula
+ * ("=HYPERLINK(…)", "+cmd|…", "@SUM(…)", "-2+3+cmd|…") gets an apostrophe in front, exactly as the CSV does for a cell
+ * — a note's second line is a line of its own once printed. The guard looks at each line as PRINTED (and with leading
+ * spaces taken off), so a zero-width character, a BOM or a soft hyphen in front, a minus sign "−" or a full-width "＝"
+ * cannot carry a formula past it, and as typed (a tab in front). Numbers, money and phone numbers keep their sign,
+ * whichever minus they were written with.
  */
 export function pdfSafeText(text: string): string {
   const raw = String(text ?? '');
   const printed = toPdfText(raw);
-  const guard = looksLikeFormula(raw) || looksLikeFormula(printed) || looksLikeFormula(printed.replace(/^[\s\u00a0]+/, ''));
-  return guard ? `'${printed}` : printed;
+  const lines = printed.split('\n');
+  // toPdfText turns CR LF, CR and LF into "\n" and makes no other line break, so the typed lines line up with these
+  const typed = raw.split(/\r\n?|\n/);
+  const aligned = typed.length === lines.length;
+  return lines.map((line, i) => (lineLooksLikeFormula(line) || (aligned && looksLikeFormula(typed[i]!)) ? `'${line}` : line)).join('\n');
 }
 
 // ───────────────────────────── Numbers, money and dates as on screen ─────────────────────────────

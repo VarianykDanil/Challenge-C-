@@ -5,11 +5,14 @@
 // Every matching entry, not just the page on screen: when the page passes its GET /audit query and the total, the
 // entries are read page by page (AUDIT_PDF_PAGE at a time, the server's most) up to AUDIT_PDF_MAX_ENTRIES, newest
 // first; an entry that moves to the next page while they are read (new activity arrives on top) is printed once.
+// Without them it is the page on screen, and the file says so (auditPdfText.ts auditCoverageLine).
 import { AUDIT_ENTITY_LABELS, auditChangeText, type AuditEntryDetail, type AuditPage } from '@lm/shared';
 import { api, qs } from '@/api/client';
 import { csvDateTime, type CsvColumn } from '@/lib/csv';
-import { formatNumber } from '@/lib/format';
 import { exportTablePdf } from '@/lib/pdf';
+import { auditCoverageLine, auditPdfWho } from './auditPdfText';
+
+export { auditCoverageLine, auditPdfWho } from './auditPdfText';
 
 /** The most entries one audit PDF holds (about 60 A4 pages). */
 export const AUDIT_PDF_MAX_ENTRIES = 2000;
@@ -21,7 +24,7 @@ export type AuditQuery = Record<string, string | number | boolean | null | undef
 /** The columns of the audit PDF (also what a CSV of the trail would hold). */
 export const AUDIT_PDF_COLUMNS: CsvColumn<AuditEntryDetail>[] = [
   { key: 'at', header: 'When', format: csvDateTime },
-  { key: 'userName', header: 'Who', format: (v) => (typeof v === 'string' && v ? v : 'Linear Hub') },
+  { key: 'userName', header: 'Who', format: (_, r) => auditPdfWho(r) },
   { key: 'summary', header: 'What happened' },
   { key: 'entity', header: 'Record', format: (_, r) => (r.entity ? `${AUDIT_ENTITY_LABELS[r.entity] ?? r.entity}${r.entityId ? ` #${r.entityId}` : ''}` : '—') },
   { key: 'diff', header: 'Changes', format: (_, r) => auditChangeText(r.diff ?? [], { max: 4 }) || '—' },
@@ -43,14 +46,6 @@ export async function fetchAuditEntries(query: AuditQuery, max = AUDIT_PDF_MAX_E
     if (page.rows.length < AUDIT_PDF_PAGE || offset + AUDIT_PDF_PAGE >= total) break;
   }
   return { entries, total };
-}
-
-/** The line that says how much of the trail the PDF holds, when that is not simply everything that matches. */
-export function auditCoverageLine(printed: number, total: number | undefined, allPages: boolean): string | null {
-  if (total === undefined || total <= printed) return null;
-  return allPages
-    ? `The newest ${formatNumber(printed)} of ${formatNumber(total)} matching entries`
-    : `The ${formatNumber(printed)} entries on screen, of ${formatNumber(total)} that match`;
 }
 
 export interface AuditPdfOptions {

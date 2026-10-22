@@ -104,7 +104,14 @@ export function LeaderboardPage() {
           ) : (
             <Select aria-label="Team" value={teamId} onChange={(e) => setTeamId(e.target.value)} placeholder="All teams" options={(teams.data ?? []).map((t) => ({ value: String(t.id), label: t.name }))} size="sm" className="w-full lg:w-56" />
           )}
-          <ExportButton filename={csvFilename(`leaderboard-${period}-${metric}`)} rows={sortRows(rows, (r) => r.rank)} columns={CSV_COLUMNS} disabled={q.isLoading} />
+          <ExportButton
+            filename={csvFilename(`leaderboard-${period}-${metric}`)}
+            rows={sortRows(rows, (r) => r.rank)}
+            columns={CSV_COLUMNS}
+            disabled={q.isLoading}
+            // a rep's board is their own team (a badge, not a picker): the PDF says so
+            pdfScreenFilters={me.role === 'rep' && me.teamName ? [`Team: ${me.teamName}`] : undefined}
+          />
         </div>
       </div>
 

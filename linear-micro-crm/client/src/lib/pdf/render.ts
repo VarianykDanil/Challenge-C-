@@ -7,8 +7,11 @@
 //    a slim running header on every later page, and "Linear Hub · <title>" with "Page x of y" at the foot of every page.
 //  - Tables repeat their header row on every page and print the totals row once, at the end.
 //  - Every string goes through the shared toPdfText / pdfSafeText (WinAnsi text the built-in Helvetica can draw; a
-//    cell a spreadsheet would run as a formula gets an apostrophe), and table cells through pdfCellText (money, dates,
-//    counts as on screen).
+//    line a spreadsheet would run as a formula gets an apostrophe), and table cells through pdfCellText (money, dates,
+//    counts as on screen). Release 1.3 fix round (I3): the guard is per LINE — every line of a multi-line text, and
+//    every line as finally drawn (write() and the table's willDrawCell run pdfGuardLine), so a line the wrapping makes
+//    is guarded too. Nothing this file draws starts with a formula (server/src/test/pdf-export.test.ts checks every
+//    block).
 // It is handed jsPDF and jspdf-autotable (engine.ts in the browser, in their own lazy chunk; the server's Node test
 // imports them itself), so this file has no DOM work at import time and only relative imports with extensions.
 import type { jsPDF } from 'jspdf';
@@ -20,6 +23,7 @@ import {
   pdfCellText,
   pdfFilenameFor,
   pdfGeneratedLine,
+  pdfGuardLine,
   pdfInfoText,
   pdfOrientationFor,
   pdfPageLabel,
@@ -87,7 +91,7 @@ export function prepareTable<T extends object>(columns: CsvColumn<T>[], rows: T[
     const k = kinds[i];
     return k === 'money' || k === 'number' || k === 'percent' || isNumericColumn(body.map((r) => r[i] ?? '')) ? 'right' : 'left';
   });
-  const head = columns.map((c) => toPdfText(c.header));
+  const head = columns.map((c) => pdfSafeText(c.header));
   const foot = totals
     ? columns.map((c, i) => {
         const v = totals[c.key];
@@ -173,8 +177,10 @@ function makeDoc(engine: PdfEngine, opts: PdfDocumentOptions): { api: PdfDoc; in
       y = TOP2;
     }
   };
+  // Every line this file draws goes through here (or through the table's willDrawCell below): the guard runs on the
+  // line as drawn, so a line the wrapping started (a continuation that begins with "=") is guarded too.
   const write = (text: string, x: number, at: number, o: { align?: 'left' | 'right' | 'center' } = {}) => {
-    doc.text(text, x, at, { baseline: 'top', align: o.align ?? 'left' });
+    doc.text(pdfGuardLine(text), x, at, { baseline: 'top', align: o.align ?? 'left' });
   };
 
   const drawMark = (x: number, top: number, size: number) => {
@@ -284,6 +290,11 @@ function makeDoc(engine: PdfEngine, opts: PdfDocumentOptions): { api: PdfDoc; in
         d.cell.styles.halign = t.align[d.column.index] ?? 'left';
         if (d.section === 'body' && o.muted?.[d.row.index]) d.cell.styles.textColor = MUTED;
       },
+      // the cell's lines as they will be drawn (after the table wrapped them to the column): each one guarded, before
+      // a right-aligned cell is measured, so it still ends at the column's edge
+      willDrawCell: (d: CellHookData) => {
+        d.cell.text = d.cell.text.map(pdfGuardLine);
+      },
     });
     const last = (doc as unknown as { lastAutoTable?: { finalY?: number } }).lastAutoTable;
     y = (last?.finalY ?? y) + 5;
@@ -299,24 +310,24 @@ function makeDoc(engine: PdfEngine, opts: PdfDocumentOptions): { api: PdfDoc; in
       write(toPdfText(BRAND.legalName), W - M, top + 0.6, { align: 'right' });
       write(generated, W - M, top + 4.2, { align: 'right' });
       y = top + 13;
-      const metaRows = (meta ?? []).map(([l, v]) => [toPdfText(l), toPdfText(v)] as const);
+      const metaRows = (meta ?? []).map(([l, v]) => [pdfSafeText(l), pdfSafeText(v)] as const);
       const metaW = metaRows.length ? 74 : 0;
       const leftW = CW - (metaW ? metaW + 8 : 0);
       let ly = y;
       font(17, 'bold', INK);
-      for (const line of split(toPdfText(heading), leftW)) {
+      for (const line of split(pdfSafeText(heading), leftW)) {
         write(line, M, ly);
         ly += lh(17);
       }
       if (subtitle) {
         ly += 0.6;
         font(10.5, 'normal', MUTED);
-        for (const line of split(toPdfText(subtitle), leftW)) {
+        for (const line of split(pdfSafeText(subtitle), leftW)) {
           write(line, M, ly);
           ly += lh(10.5);
         }
       }
-      const lines = (filters ?? []).map((f) => toPdfText(f)).filter(Boolean);
+      const lines = (filters ?? []).map((f) => pdfSafeText(f)).filter(Boolean);
       if (lines.length) {
         ly += 0.8;
         font(8.5, 'normal', MUTED);
@@ -347,7 +358,7 @@ function makeDoc(engine: PdfEngine, opts: PdfDocumentOptions): { api: PdfDoc; in
         let by = y;
         const put = (text: string, size: number, style: 'normal' | 'bold', color: Rgb) => {
           font(size, style, color);
-          for (const line of split(toPdfText(text), colW)) {
+          for (const line of split(pdfSafeText(text), colW)) {
             if (draw) write(line, x, by);
             by += lh(size);
           }
@@ -369,7 +380,7 @@ function makeDoc(engine: PdfEngine, opts: PdfDocumentOptions): { api: PdfDoc; in
       room(lh(12) + 30); // keep a heading with the first lines (or rows) under it
       y += 1.5;
       font(12, 'bold', INK);
-      for (const line of split(toPdfText(text), CW)) {
+      for (const line of split(pdfSafeText(text), CW)) {
         write(line, M, y);
         y += lh(12);
       }
@@ -381,7 +392,7 @@ function makeDoc(engine: PdfEngine, opts: PdfDocumentOptions): { api: PdfDoc; in
       if (finalised) return api;
       const size = o.size ?? 9.5;
       font(size, 'normal', o.muted ? MUTED : INK);
-      for (const line of split(toPdfText(text), CW)) {
+      for (const line of split(pdfSafeText(text), CW)) {
         room(lh(size));
         font(size, 'normal', o.muted ? MUTED : INK);
         write(line, M, y);
@@ -396,7 +407,7 @@ function makeDoc(engine: PdfEngine, opts: PdfDocumentOptions): { api: PdfDoc; in
       const labelW = Math.min(62, CW * 0.36);
       for (const [label, value] of rows) {
         font(9, 'normal', MUTED);
-        const ll = split(toPdfText(label), labelW - 4);
+        const ll = split(pdfSafeText(label), labelW - 4);
         font(9.5, 'bold', INK);
         const vl = split(pdfSafeText(value), CW - labelW);
         const h = Math.max(ll.length * lh(9), vl.length * lh(9.5), lh(9.5)) + 1.4;
@@ -416,7 +427,7 @@ function makeDoc(engine: PdfEngine, opts: PdfDocumentOptions): { api: PdfDoc; in
       const total = columns.reduce((s, c) => s + (c.width ?? 1), 0) || 1;
       drawTable(
         {
-          head: columns.map((c) => toPdfText(c.header)),
+          head: columns.map((c) => pdfSafeText(c.header)),
           body: rows.map((r) => columns.map((c) => {
             const v = c.key === 'muted' ? undefined : r[c.key];
             return typeof v === 'string' ? pdfSafeText(v) : '';
@@ -447,7 +458,7 @@ function makeDoc(engine: PdfEngine, opts: PdfDocumentOptions): { api: PdfDoc; in
           y += 1.8;
         }
         font(size, r.strong ? 'bold' : 'normal', r.strong ? INK : MUTED);
-        write(split(toPdfText(r.label), bw - 34)[0] ?? '', x0, y);
+        write(split(pdfSafeText(r.label), bw - 34)[0] ?? '', x0, y);
         font(size, 'bold', INK);
         write(pdfSafeText(r.value), W - M, y, { align: 'right' });
         y += lh(size) + 1.4;
@@ -463,7 +474,7 @@ function makeDoc(engine: PdfEngine, opts: PdfDocumentOptions): { api: PdfDoc; in
       const block = (s: PdfSignature, x: number, draw: boolean): number => {
         let by = y;
         font(8, 'normal', MUTED);
-        if (draw) write(split(toPdfText(s.label), colW)[0] ?? '', x, by);
+        if (draw) write(split(pdfSafeText(s.label), colW)[0] ?? '', x, by);
         by += lh(8) + 1;
         if (draw && s.imageDataUrl && DATA_IMAGE.test(s.imageDataUrl)) {
           try {
@@ -479,13 +490,13 @@ function makeDoc(engine: PdfEngine, opts: PdfDocumentOptions): { api: PdfDoc; in
         if (draw) rule(by, MUTED, 0.3, x, x + colW);
         by += 1.8;
         font(9.5, 'bold', INK);
-        for (const line of split(toPdfText(s.name), colW)) {
+        for (const line of split(pdfSafeText(s.name), colW)) {
           if (draw) write(line, x, by);
           by += lh(9.5);
         }
         if (s.note) {
           font(8, 'normal', MUTED);
-          for (const line of split(toPdfText(s.note), colW)) {
+          for (const line of split(pdfSafeText(s.note), colW)) {
             if (draw) write(line, x, by);
             by += lh(8);
           }
@@ -501,7 +512,7 @@ function makeDoc(engine: PdfEngine, opts: PdfDocumentOptions): { api: PdfDoc; in
     },
 
     footer(text: string) {
-      footerText = toPdfText(text);
+      footerText = pdfSafeText(text);
       return api;
     },
 

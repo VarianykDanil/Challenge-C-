@@ -60,6 +60,14 @@ export function RecruitmentPage() {
   // Hired candidates leave the open pipeline, so the board's Hired column is fed separately: hires made within the selected range.
   const hiredQuery = useCandidates({ stage: 'hired', source, ownerId: ownerId ? Number(ownerId) : undefined, q: search.trim() || undefined }, { enabled: view === 'board' });
   const hiredInRange = useMemo(() => (hiredQuery.data ?? []).filter((c) => { const d = c.stageUpdatedAt.slice(0, 10); return d >= range.from && d <= range.to; }).sort((a, b) => b.stageUpdatedAt.localeCompare(a.stageUpdatedAt)), [hiredQuery.data, range.from, range.to]);
+  // The Hired column's Export sits away from the filter bar, so its PDF is told the filters in words (as the list
+  // view's PDF reads them beside its button): the column is filtered by source, owner and search too.
+  const ownerPicked = ownerId ? (owners.data ?? []).find((u) => String(u.id) === ownerId) : undefined;
+  const hiredPdfFilters = [
+    ...(source ? [`Source: ${SOURCE_LABELS[source]}`] : []),
+    ...(ownerPicked ? [`Owner: ${fullName(ownerPicked)}`] : []),
+    ...(search.trim() ? [`Search: “${search.trim()}”`] : []),
+  ];
 
   const byStage = useMemo(() => {
     const m = new Map<string, CandidateWithMeta[]>();
@@ -225,7 +233,7 @@ export function RecruitmentPage() {
                     <h3 id={`col-${stage}`} className="text-xs font-semibold uppercase tracking-wide text-muted">{STAGE_LABELS[stage]}</h3>
                     <span className="flex items-center gap-1.5">
                       <span className="rounded-full bg-surface px-1.5 py-0.5 text-[11px] tabular-nums text-fg">{loading ? '…' : isHired ? `${items.length} hired` : items.length}</span>
-                      {isHired && <ExportButton size="icon-xs" label="Export hired candidates" filename={csvFilename('hired', range)} rows={items} columns={candidateCsvColumns} disabled={loading} />}
+                      {isHired && <ExportButton size="icon-xs" label="Export hired candidates" filename={csvFilename('hired', range)} rows={items} columns={candidateCsvColumns} disabled={loading} pdfScreenFilters={hiredPdfFilters} />}
                     </span>
                   </div>
                   {isHired && <p className="mb-1 px-1 text-[11px] normal-case text-muted">Hired {formatDateShort(range.from)} – {formatDateShort(range.to)}</p>}

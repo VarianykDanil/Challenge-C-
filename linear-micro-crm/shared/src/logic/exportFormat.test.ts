@@ -21,6 +21,7 @@ import {
   pdfMoney,
   pdfNumber,
   pdfOrientationFor,
+  pdfGuardLine,
   pdfPageLabel,
   pdfSafeText,
   toPdfText,
@@ -271,4 +272,71 @@ test('PDF headings take the filters on screen, which win over what the file name
     pdfHeadingFor({ filename: 'linear-hub-campaigns-active-2026-10-22.csv', pageHeading: 'Campaigns', today, screenFilters: ['Status: Active', ' '] }),
     { title: 'Campaigns', filters: ['Status: Active'] },
   );
+});
+
+// ───────────────────────────── Fix round (r3 I3): every printed line is guarded ─────────────────────────────
+
+/**
+ * An independent check: a printed line a spreadsheet would run — "=" or "@" first (after any spaces), or "+" / "-"
+ * followed by more than a plain number, money or a phone number.
+ */
+const runsAsFormula = (line: string) => {
+  const t = line.replace(/^[\s\xa0]+/, '');
+  return /^[=@]/.test(t) || (/^[+-]/.test(t) && !/^[+-][£$€]?[\d\s(),.%:/-]*$/.test(t));
+};
+
+test('formula guard: every line of a multi-line text is guarded, not only the first', () => {
+  // the reviewer's cases: a note with a second line, a CV line, an answer, a cell starting with a line break
+  assert.equal(pdfSafeText('Call back Monday\n=HYPERLINK("http://evil.example","Open CV")'), `Call back Monday\n'=HYPERLINK("http://evil.example","Open CV")`);
+  assert.equal(pdfSafeText("Worked at Tesco\n+cmd|' /C calc'!A0"), "Worked at Tesco\n'+cmd|' /C calc'!A0");
+  assert.equal(pdfSafeText('Fine\n@SUM(1+1)*cmd|x'), "Fine\n'@SUM(1+1)*cmd|x");
+  assert.equal(pdfSafeText('\n=1+1'), "\n'=1+1", 'the apostrophe goes on the line it guards');
+  // CR, CR LF, a tab, spaces, invisible and look-alike characters at the start of a later line
+  assert.equal(pdfSafeText('a\r=1+1'), "a\n'=1+1");
+  assert.equal(pdfSafeText('a\r\n-2+3+cmd|x'), "a\n'-2+3+cmd|x");
+  assert.equal(pdfSafeText('a\n\tcmd|x'), "a\n' cmd|x");
+  assert.equal(pdfSafeText('a\n   =1+1'), "a\n'   =1+1");
+  assert.equal(pdfSafeText('a\n\u200b=1+1'), "a\n'=1+1");
+  assert.equal(pdfSafeText('a\n\u2212 2+cmd|x'), "a\n'- 2+cmd|x");
+  assert.equal(pdfSafeText('a\n\uff1dSUM(A1)'), "a\n'=SUM(A1)");
+  // both lines, and the first line still guarded as before
+  assert.equal(pdfSafeText('=1+1\n=2+2'), "'=1+1\n'=2+2");
+  // numbers, money and phone numbers on a later line keep their sign; ordinary lines are untouched
+  assert.equal(pdfSafeText('Bonus\n-£12.50'), 'Bonus\n-£12.50');
+  assert.equal(pdfSafeText('Mobile\n+44 7700 900123'), 'Mobile\n+44 7700 900123');
+  assert.equal(pdfSafeText('Line one\nLine two'), 'Line one\nLine two');
+  assert.equal(pdfSafeText('a = b\nc + d'), 'a = b\nc + d');
+  // table cells (pdfCellText) go through the same guard
+  assert.equal(pdfCellText('Call back\n=HYPERLINK("x")'), `Call back\n'=HYPERLINK("x")`);
+  assert.equal(pdfCellText('Note\n+cmd|x', 'money'), "Note\n'+cmd|x");
+});
+
+test('formula guard: no printed line of any text starts a formula, whatever is in front of it', () => {
+  const leads = ['', '\u200b', '\u2060', '\ufeff', '\xad', ' ', '\xa0', '\u2003', '\u3000', '\t'];
+  const signs = ['=', '+', '-', '@', '\u2212', '\u2010', '\uff1d', '\uff0b', '\uff20', '\ufe62'];
+  const breaks = ['\n', '\r', '\r\n'];
+  for (const lead of leads) {
+    for (const sign of signs) {
+      for (const br of breaks) {
+        const raw = `First line${br}${lead}${sign}cmd|' /C calc'!A0${br}${lead}${sign}HYPERLINK("http://evil.example")`;
+        const lines = pdfSafeText(raw).split('\n');
+        assert.equal(lines.length, 3, JSON.stringify(raw));
+        for (const line of lines) assert.ok(!runsAsFormula(line), `${JSON.stringify(raw)} prints ${JSON.stringify(line)}`);
+      }
+    }
+  }
+});
+
+test('pdfGuardLine: a line as drawn (already WinAnsi text, e.g. a wrapped continuation) gets the same guard', () => {
+  assert.equal(pdfGuardLine('=HYPERLINK("http://evil.example","x")'), `'=HYPERLINK("http://evil.example","x")`);
+  assert.equal(pdfGuardLine('  +cmd|x'), "'  +cmd|x");
+  assert.equal(pdfGuardLine('\xa0@SUM(A1)'), "'\xa0@SUM(A1)");
+  assert.equal(pdfGuardLine("'=already guarded"), "'=already guarded", 'idempotent');
+  assert.equal(pdfGuardLine(pdfGuardLine('=1+1')), "'=1+1");
+  assert.equal(pdfGuardLine('-£20.00'), '-£20.00');
+  assert.equal(pdfGuardLine('Page 1 of 3'), 'Page 1 of 3');
+  assert.equal(pdfGuardLine('\x96 en dash first'), '\x96 en dash first', 'an en dash is not a minus to a spreadsheet');
+  assert.equal(pdfGuardLine(''), '');
+  // a multi-line string as one call: each line
+  assert.equal(pdfGuardLine('ok\n=1+1'), "ok\n'=1+1");
 });

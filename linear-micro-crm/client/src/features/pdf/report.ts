@@ -6,17 +6,28 @@
 // error, too many at once, the session ended) waits on the device, one localStorage key per person
 // ('lm-export-reports:<userId>', at most EXPORT_REPORT_QUEUE_LIMIT, oldest dropped first), and is sent again — oldest
 // first, one at a time — when the signal is back (the window 'online' event, or api/client.ts announcing an answer
-// after a failed request), after the next export that gets through, and when a page with an export button opens.
-// Only the signed-in person's own reports are ever sent from their session. A report Linear Hub refuses outright
-// (400, 403: it would be refused again) is dropped. Before sending what waits, it checks with GET /auth/me that the
-// session is still that person's. The audit row is stamped when the report arrives; the file name keeps the day the
-// file was made.
+// after a failed request), after the next export that gets through, and whenever a page with an export button opens
+// (also after signing back in). One tab sends at a time (Web Locks, where the browser has them) and each report is
+// taken off the queue before it is sent (put back if it has to wait), so with two tabs open a report is still sent
+// once. Only the signed-in person's own reports are ever sent from their session. A report Linear Hub refuses
+// outright (400, 403: it would be refused again) is dropped. Before sending what waits, it checks with GET /auth/me
+// that the session is still that person's. The audit row is stamped when the report arrives; the file name keeps the
+// day the file was made. reportExportEvent takes a whole event (a one-record PDF names its record) with the same outbox.
 import { exportWhatFor, type AuditExportFormat, type AuthResponse, type ClientAuditEventInput } from '@lm/shared';
 import { ApiError, NETWORK_EVENT, api, isNetworkError, type NetworkEventDetail } from '@/api/client';
 
 /** POST /audit/events { kind: 'export', format, what, rows, filename } — never blocks or fails the download. */
 export function reportExport(format: AuditExportFormat, filename: string, rows: number, what?: string, ownerId?: number | null): void {
-  const event: ClientAuditEventInput = { kind: 'export', format, what: what?.trim() || exportWhatFor(filename), rows, filename };
+  reportExportEvent({ kind: 'export', format, what: what?.trim() || exportWhatFor(filename), rows, filename }, ownerId);
+}
+
+/**
+ * Release 1.3 fix round (I3): any export event (POST /audit/events, kind 'export'), with the outbox — for a page PDF
+ * of ONE record that names it (`entity`, `entityId`: an invoice PDF or print, a candidate profile, an interview
+ * sheet), which reportExport cannot carry. With `ownerId` (the signed-in person's id) a report Linear Hub could not
+ * take waits on the device like any other; without it, it is sent once, as api/auditEvents.ts reportAuditEvent does.
+ */
+export function reportExportEvent(event: ClientAuditEventInput, ownerId?: number | null): void {
   void deliver(event, ownerId ?? null);
 }
 
@@ -31,6 +42,21 @@ interface QueuedReport {
   event: ClientAuditEventInput;
   /** When it was kept on the device (the device's clock, ISO). */
   queuedAt: string;
+  /** Release 1.3 fix round (I3): which report this is (reports kept before it have none). */
+  id?: string;
+}
+
+/** A report's identity in the queue: its id, else (an older report) when it was kept and its file name. */
+const sameReport = (a: QueuedReport, b: QueuedReport) =>
+  a.id || b.id ? a.id === b.id : a.queuedAt === b.queuedAt && a.event.filename === b.event.filename;
+
+function newReportId(): string {
+  try {
+    if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') return crypto.randomUUID();
+  } catch {
+    // not a secure context: fall through
+  }
+  return `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
 }
 
 type Outcome = 'sent' | 'keep' | 'drop';
@@ -85,7 +111,49 @@ function writeQueue(ownerId: number, items: QueuedReport[]): void {
 }
 
 function enqueue(ownerId: number, event: ClientAuditEventInput): void {
-  writeQueue(ownerId, [...readQueue(ownerId), { event, queuedAt: new Date().toISOString() }]);
+  writeQueue(ownerId, [...readQueue(ownerId), { event, queuedAt: new Date().toISOString(), id: newReportId() }]);
+}
+
+/** Take the oldest waiting report off the queue before it is sent, so another tab cannot send it too. */
+function claimNext(ownerId: number): QueuedReport | null {
+  const queue = readQueue(ownerId);
+  const next = queue.shift();
+  if (!next) return null;
+  writeQueue(ownerId, queue);
+  return next;
+}
+
+/** A claimed report that has to wait again goes back to the front of the queue. */
+function putBack(ownerId: number, item: QueuedReport): void {
+  const queue = readQueue(ownerId).filter((q) => !sameReport(q, item));
+  writeQueue(ownerId, [item, ...queue]);
+}
+
+type LockManagerLike = { request: <T>(name: string, callback: () => Promise<T>) => Promise<T> };
+
+/**
+ * Run `send` while this person's outbox is locked in every tab of the browser (Web Locks: one tab sends, the others
+ * wait and then find the queue empty), or straight away where the browser has no locks. Either way each report is
+ * taken off the queue before it is sent, so two tabs never send the same one.
+ */
+async function withOutboxLock<T>(ownerId: number, run: () => Promise<T>): Promise<T> {
+  const locks = typeof navigator !== 'undefined' ? (navigator as { locks?: LockManagerLike }).locks : undefined;
+  if (!locks || typeof locks.request !== 'function') {
+    // no locks (Safari before 15.4): tabs woken by the same 'online' event start at different moments, so the
+    // queue one tab has claimed from has reached the other before it reads (a tab's storage reaches the others late)
+    await new Promise((resolve) => setTimeout(resolve, 100 + Math.random() * 900));
+    return run();
+  }
+  let started = false;
+  try {
+    return await locks.request(exportReportKey(ownerId), () => {
+      started = true;
+      return run();
+    });
+  } catch (e) {
+    if (started) throw e;
+    return run(); // the lock itself was refused (a sandboxed frame): send without it
+  }
 }
 
 async function deliver(event: ClientAuditEventInput, ownerId: number | null): Promise<void> {
@@ -97,30 +165,31 @@ async function deliver(event: ClientAuditEventInput, ownerId: number | null): Pr
 
 let inflight: Promise<number> | null = null;
 
-/** Send the person's waiting reports, oldest first; stops at the first one that has to wait again. Single-flight. */
+/**
+ * Send the person's waiting reports, oldest first; stops at the first one that has to wait again. Single-flight in
+ * this tab, and one tab at a time (withOutboxLock); each report is claimed (taken off the queue) before it is sent and
+ * put back if it has to wait, so a report open in two tabs is sent once.
+ */
 export function replayExportReports(ownerId: number): Promise<number> {
   if (inflight) return inflight;
-  inflight = (async () => {
+  inflight = withOutboxLock(ownerId, async () => {
     let sent = 0;
     if (!readQueue(ownerId).length) return sent;
     // only from the person's own session: someone else may have signed in on this device since
     const me = await api<AuthResponse>('/auth/me').catch(() => null);
     if (me?.user.id !== ownerId) return sent;
     for (;;) {
-      const queue = readQueue(ownerId);
-      const next = queue[0];
+      const next = claimNext(ownerId);
       if (!next) break;
       const outcome = await send(next.event);
-      if (outcome === 'keep') break;
-      // drop exactly the item sent (another tab may have added more meanwhile)
-      const now = readQueue(ownerId);
-      const at = now.findIndex((q) => q.queuedAt === next.queuedAt && q.event.filename === next.event.filename);
-      if (at >= 0) now.splice(at, 1);
-      writeQueue(ownerId, now);
+      if (outcome === 'keep') {
+        putBack(ownerId, next);
+        break;
+      }
       if (outcome === 'sent') sent++;
     }
     return sent;
-  })().finally(() => {
+  }).finally(() => {
     inflight = null;
   });
   return inflight;
@@ -141,8 +210,9 @@ const onNetwork = (e: Event) => {
 };
 
 /**
- * Called by every export button with the signed-in person: sends what waits for them now, and again whenever the
- * signal comes back. Cheap when nothing waits (one localStorage read).
+ * Called by every export button when it appears, with the signed-in person: sends what waits for them now — on every
+ * page with an export button that opens, and after signing back in — and again whenever the signal comes back. Cheap
+ * when nothing waits (one localStorage read); the buttons of one page share a single send.
  */
 export function armExportReports(ownerId: number | null | undefined): void {
   if (ownerId == null || typeof window === 'undefined') return;
@@ -150,10 +220,8 @@ export function armExportReports(ownerId: number | null | undefined): void {
     window.addEventListener('online', onOnline);
     window.addEventListener(NETWORK_EVENT, onNetwork);
   }
-  if (armedFor !== ownerId) {
-    armedFor = ownerId;
-    if (readQueue(ownerId).length) void replayExportReports(ownerId);
-  }
+  armedFor = ownerId;
+  if (readQueue(ownerId).length) void replayExportReports(ownerId);
 }
 
 // ───────────────────────────── The page around the button ─────────────────────────────
