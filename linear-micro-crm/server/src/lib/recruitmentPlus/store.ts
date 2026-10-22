@@ -169,12 +169,22 @@ interface AnswerRow {
   updatedAt: string | null;
   updatedById: number | null;
   updatedByName: string | null;
+  /** `<user id>:<device id>` of the save that last wrote the row (null: written without a device id). */
+  writer: string | null;
+  /** That save's number from its device. */
+  writerVersion: number | null;
 }
 
 const ANSWER_SELECT = `
   SELECT a.id, a.interview_id AS interviewId, a.question_id AS questionId, a.question_text AS questionText, a.sort, a.answer, a.score,
-         a.updated_at AS updatedAt, a.updated_by AS updatedById, u.first_name || ' ' || u.last_name AS updatedByName
+         a.updated_at AS updatedAt, a.updated_by AS updatedById, u.first_name || ' ' || u.last_name AS updatedByName,
+         a.device AS writer, a.device_version AS writerVersion
   FROM interview_answers a LEFT JOIN users u ON u.id = a.updated_by`;
+
+/** What is stored in interview_answers.device: the person and their device, so one person can never pass for another. */
+const writerKey = (by: number, device: string) => `${by}:${device}`;
+/** The device part of a stored writer (what the sheet page compares with its own id). */
+const deviceOf = (writer: string | null): string | null => (writer ? writer.slice(writer.indexOf(':') + 1) : null);
 
 function answersOf(db: Db, interviewIds: number[]): AnswerRow[] {
   if (!interviewIds.length) return [];
@@ -183,7 +193,7 @@ function answersOf(db: Db, interviewIds: number[]): AnswerRow[] {
 
 const toAnswer = (r: AnswerRow): InterviewAnswer => ({
   interviewId: r.interviewId, questionId: r.questionId, questionText: r.questionText, answer: r.answer, score: r.score, updatedAt: r.updatedAt,
-  id: r.id, sort: r.sort, updatedById: r.updatedById, updatedByName: r.updatedByName,
+  id: r.id, sort: r.sort, updatedById: r.updatedById, updatedByName: r.updatedByName, device: deviceOf(r.writer),
 });
 
 /** The bank's draft for an interview with nothing saved: active questions of its type for every position or the candidate's. */
@@ -245,6 +255,12 @@ const sameValue = (a: { answer: string; score: number | null }, b: { answer: str
  *    devices: an item equal to its base is left alone (the stored, newer words stand); a changed one is written only
  *    while the stored row still equals the base. Otherwise it is a conflict, and if there is any, nothing is written.
  *    An item already equal to the stored row is never a conflict (the same save arriving twice).
+ *  - `device` + `version` make a device's own saves idempotent: when the stored row was last written by the same
+ *    person from the same device, the base is not checked. A later save from it (higher version) is written — it was
+ *    built from newer words on that screen while the earlier save was on its way (a tab closed or reloaded mid-save) —
+ *    and an older or repeated one (lower or equal version, arriving late) leaves the row as it is. Rows written are
+ *    stamped with the device and version (blank rows of a first save too, so a late older save never fills them), and
+ *    so is a row a save finds already holding its words (that is not a change: no author, time or audit row).
  *  - Only rows whose answer or score changed are written, with who and when; an identical save writes nothing.
  * Throws 400 for an unknown bank question, a question twice, a question of their own without words, or a sheet left
  * with no question or more than INTERVIEW_SHEET_MAX_QUESTIONS.
@@ -271,8 +287,13 @@ export function saveInterviewAnswers(db: Db, interviewId: number, inputs: readon
       questionId: input.questionId, text, answer: input.answer.trim(), score: input.score ?? null, index,
       base: input.base ? { answer: input.base.answer.trim(), score: input.base.score ?? null } : null,
       removed: input.removed === true,
+      writer: input.device ? writerKey(by, input.device) : null,
+      version: input.device && input.version !== undefined ? input.version : null,
     };
   });
+  /** The stored row was last written by this person from this device: newer (true), older or the same save (false). */
+  const ownSave = (row: AnswerRow, w: (typeof wanted)[number]): boolean | null =>
+    w.writer !== null && w.version !== null && row.writer === w.writer && row.writerVersion !== null ? w.version > row.writerVersion : null;
 
   return transaction(db, () => {
     const stored = answersOf(db, [interviewId]);
@@ -282,26 +303,33 @@ export function saveInterviewAnswers(db: Db, interviewId: number, inputs: readon
     const numberOf = new Map(stored.map((r, i) => [r.id, i + 1]));
     const conflicts: SheetSaveConflict[] = [];
     const conflict = (row: AnswerRow) => conflicts.push({ questionId: row.questionId, questionText: row.questionText, number: numberOf.get(row.id)!, byName: row.updatedByName });
-    const updates: { row: AnswerRow; answer: string; score: number | null }[] = [];
+    const updates: { row: AnswerRow; answer: string; score: number | null; writer: string | null; version: number | null }[] = [];
     const deletes: AnswerRow[] = [];
     const inserts: typeof wanted = [];
+    const stamps: { row: AnswerRow; writer: string; version: number | null }[] = [];
 
     for (const w of wanted) {
       const row = w.questionId !== null ? byQuestion.get(w.questionId) : byText.get(w.text.toLowerCase());
+      const own = row ? ownSave(row, w) : null;
       if (w.removed) {
-        if (!row) continue;
-        if (w.base && !sameValue(row, w.base)) conflict(row);
+        if (!row || own === false) continue; // gone already, or this device wrote it again since
+        if (own === null && w.base && !sameValue(row, w.base)) conflict(row);
         else deletes.push(row);
         continue;
       }
       if (row) {
-        if (sameValue(row, w)) continue;
-        if (w.base && sameValue(w.base, w)) continue; // not changed on this device: the stored, newer words stand
-        if (w.base && !sameValue(w.base, row)) {
+        if (sameValue(row, w)) {
+          // Already so: noted as this device's latest save, so a late older one cannot change it back.
+          if (own !== false && w.writer !== null && (row.writer !== w.writer || row.writerVersion !== w.version)) stamps.push({ row, writer: w.writer, version: w.version });
+          continue;
+        }
+        if (own === false) continue; // this device's own newer save is stored: a late older one changes nothing
+        if (own === null && w.base && sameValue(w.base, w)) continue; // not changed on this device: the stored, newer words stand
+        if (own === null && w.base && !sameValue(w.base, row)) {
           conflict(row);
           continue;
         }
-        updates.push({ row, answer: w.answer, score: w.score });
+        updates.push({ row, answer: w.answer, score: w.score, writer: w.writer, version: w.version });
         continue;
       }
       // A bank question the saved sheet does not hold, sent unchanged (an older draft, or one taken off elsewhere).
@@ -314,7 +342,10 @@ export function saveInterviewAnswers(db: Db, interviewId: number, inputs: readon
     if (total < 1) throw badRequest('A sheet keeps at least one question');
     if (total > INTERVIEW_SHEET_MAX_QUESTIONS) throw badRequest(`A sheet holds at most ${INTERVIEW_SHEET_MAX_QUESTIONS} questions`);
 
-    for (const u of updates) run(db, `UPDATE interview_answers SET answer = ?, score = ?, updated_at = ?, updated_by = ? WHERE id = ?`, [u.answer, u.score, at, by, u.row.id]);
+    for (const u of updates) {
+      run(db, `UPDATE interview_answers SET answer = ?, score = ?, updated_at = ?, updated_by = ?, device = ?, device_version = ? WHERE id = ?`, [u.answer, u.score, at, by, u.writer, u.version, u.row.id]);
+    }
+    for (const t of stamps) run(db, `UPDATE interview_answers SET device = ?, device_version = ? WHERE id = ?`, [t.writer, t.version, t.row.id]);
     for (const r of deletes) run(db, `DELETE FROM interview_answers WHERE id = ?`, [r.id]);
     let nextSort = stored.reduce((m, r) => Math.max(m, r.sort), -1) + 1;
     for (const w of inserts) {
@@ -322,8 +353,8 @@ export function saveInterviewAnswers(db: Db, interviewId: number, inputs: readon
       const blank = w.answer === '' && w.score === null;
       run(
         db,
-        `INSERT INTO interview_answers (interview_id, question_id, question_text, sort, answer, score, updated_at, updated_by) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-        [interviewId, w.questionId, questionText, fresh ? w.index : nextSort++, w.answer, w.score, blank ? null : at, blank ? null : by],
+        `INSERT INTO interview_answers (interview_id, question_id, question_text, sort, answer, score, updated_at, updated_by, device, device_version) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        [interviewId, w.questionId, questionText, fresh ? w.index : nextSort++, w.answer, w.score, blank ? null : at, blank ? null : by, w.writer, w.version],
       );
     }
     return { changed: updates.length + deletes.length + inserts.length > 0, conflicts: [] };

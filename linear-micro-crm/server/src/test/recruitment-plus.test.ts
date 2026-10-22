@@ -555,6 +555,113 @@ test('taking a question off needs `removed: true`; a question answered on anothe
   assert.equal(own.json.answers.at(-1).questionText, 'Anything you would like to ask us?');
 });
 
+// ─────────────── one device's own saves never clash with each other (re-review major) ───────────────
+
+const storedRow = (id: number, questionId: number) =>
+  get<{ answer: string; score: number | null; device: string | null; version: number | null }>(
+    srv.db,
+    `SELECT answer, score, device, device_version AS version FROM interview_answers WHERE interview_id = ? AND question_id = ?`,
+    [id, questionId],
+  );
+
+test('one device, two overlapping saves: the second (still on the old base) is written, not refused as another device\'s change', async () => {
+  const c = await newCandidate();
+  const iv = await newInterview(c.id, { type: 'phone' });
+  const qs = (await sheetOf(iv.id)).answers as Json[];
+  const tab = 'tab-7f3a9c2e41d84b06';
+  const row = (i: number, answer: string, extra: Record<string, unknown> = {}) => ({ questionId: qs[i]!.questionId, questionText: qs[i]!.questionText, answer, score: null, base: BLANK, ...extra });
+  // Save 1 (the first save: every question) goes; the interviewer adds to question 1 and writes question 2 while it is on its way.
+  const one = await recruiter.put(`/recruitment/interviews/${iv.id}/answers`, qs.map((_, i) => row(i, i === 0 ? 'First part' : '', { device: tab, version: 1 })));
+  assert.equal(one.status, 200, JSON.stringify(one.json));
+  assert.equal(one.json.answers[0].device, tab, 'the sheet says which device last wrote each answer');
+  // Save 2 (the tab closing) was built before save 1 came back: question 1's base is still the blank it started from.
+  const two = await recruiter.put(`/recruitment/interviews/${iv.id}/answers`, [
+    row(0, 'First part and the rest typed while saving', { device: tab, version: 2 }),
+    row(1, 'Second question written while saving', { device: tab, version: 2 }),
+  ]);
+  assert.equal(two.status, 200, JSON.stringify(two.json));
+  assert.deepEqual(storedAnswers(iv.id).slice(0, 2).map((x) => x.answer), ['First part and the rest typed while saving', 'Second question written while saving']);
+  assert.deepEqual({ ...storedRow(iv.id, qs[0]!.questionId) }, { answer: 'First part and the rest typed while saving', score: null, device: `${fx().users.recruiter}:${tab}`, version: 2 }, 'stored with who and which device');
+  // The same save arriving twice changes nothing.
+  assert.equal((await recruiter.put(`/recruitment/interviews/${iv.id}/answers`, [row(0, 'First part and the rest typed while saving', { device: tab, version: 2 })])).status, 200);
+});
+
+test('one device\'s saves arriving out of order: the older one never writes over the newer words', async () => {
+  const c = await newCandidate();
+  const iv = await newInterview(c.id, { type: 'phone' });
+  const qs = (await sheetOf(iv.id)).answers as Json[];
+  const tab = 'tab-0b1c2d3e4f5a6b7c';
+  const row = (i: number, answer: string, version: number, extra: Record<string, unknown> = {}) => ({ questionId: qs[i]!.questionId, questionText: qs[i]!.questionText, answer, score: null, base: BLANK, device: tab, version, ...extra });
+  await recruiter.put(`/recruitment/interviews/${iv.id}/answers`, qs.map((_, i) => row(i, '', 1)));
+  // Save 3 lands before save 2 (two connections on a hotspot): it holds the newer words for question 1.
+  assert.equal((await recruiter.put(`/recruitment/interviews/${iv.id}/answers`, [row(0, 'Newer words', 3), row(2, 'Q3 from save 3', 3)])).status, 200);
+  const late = await recruiter.put(`/recruitment/interviews/${iv.id}/answers`, [row(0, 'Older words', 2), row(1, 'Q2 only in save 2', 2)]);
+  assert.equal(late.status, 200, JSON.stringify(late.json));
+  assert.deepEqual(storedAnswers(iv.id).slice(0, 3).map((x) => x.answer), ['Newer words', 'Q2 only in save 2', 'Q3 from save 3'], 'the older save adds what only it holds, and nothing else');
+  // An older save that takes a question off does not take off one the newer save wrote.
+  const off = await recruiter.put(`/recruitment/interviews/${iv.id}/answers`, [row(2, '', 2, { removed: true })]);
+  assert.equal(off.status, 200);
+  assert.equal(storedRow(iv.id, qs[2]!.questionId)?.answer, 'Q3 from save 3');
+  // Typed into question 4 (save 4), then rubbed out (save 5, which finds it blank already and notes that): save 4
+  // arriving late leaves it blank, with no author.
+  assert.equal((await recruiter.put(`/recruitment/interviews/${iv.id}/answers`, [row(3, '', 5)])).status, 200);
+  assert.deepEqual({ ...storedRow(iv.id, qs[3]!.questionId) }, { answer: '', score: null, device: `${fx().users.recruiter}:${tab}`, version: 5 });
+  assert.equal((await recruiter.put(`/recruitment/interviews/${iv.id}/answers`, [row(3, 'Typed, then rubbed out', 4)])).status, 200);
+  assert.equal(storedRow(iv.id, qs[3]!.questionId)?.answer, '');
+  assert.equal(get<{ by: number | null }>(srv.db, `SELECT updated_by AS by FROM interview_answers WHERE interview_id = ? AND question_id = ?`, [iv.id, qs[3]!.questionId])!.by, null);
+});
+
+test('another device (or another person) in between still clashes, whatever the device ids say', async () => {
+  const c = await newCandidate();
+  const iv = await newInterview(c.id, { type: 'phone' });
+  const qs = (await sheetOf(iv.id)).answers as Json[];
+  const laptop = 'tab-laptop-1111aaaa';
+  const phone = 'tab-phone-2222bbbb';
+  const row = (i: number, answer: string, device: string, version: number, base = BLANK) => ({ questionId: qs[i]!.questionId, questionText: qs[i]!.questionText, answer, score: null, base, device, version });
+  await recruiter.put(`/recruitment/interviews/${iv.id}/answers`, qs.map((_, i) => row(i, i === 0 ? 'Laptop: first words' : '', laptop, 1)));
+  // Priya's phone (another tab) saw the laptop's words and changed them.
+  assert.equal((await recruiter.put(`/recruitment/interviews/${iv.id}/answers`, [row(0, 'Phone: rewritten', phone, 1, { answer: 'Laptop: first words', score: null })])).status, 200);
+  // The laptop's next save still starts from the blank: the phone's words are another device's change → 409.
+  const clash = await recruiter.put(`/recruitment/interviews/${iv.id}/answers`, [row(0, 'Laptop: first words and more', laptop, 2)]);
+  assert.equal(clash.status, 409, JSON.stringify(clash.json));
+  assert.equal(clash.json.details.sheet.answers[0].device, phone);
+  assert.equal(storedRow(iv.id, qs[0]!.questionId)?.answer, 'Phone: rewritten');
+  // Another person sending the device id of the tab that last wrote a question is not that device: still 409.
+  const leaderTry = await leader.put(`/recruitment/interviews/${iv.id}/answers`, [row(0, 'Lee: over the top', phone, 9)]);
+  assert.equal(leaderTry.status, 409, JSON.stringify(leaderTry.json));
+  assert.equal(storedRow(iv.id, qs[0]!.questionId)?.answer, 'Phone: rewritten');
+  // A save without a device id keeps the 1.3 rules (base only).
+  assert.equal((await recruiter.put(`/recruitment/interviews/${iv.id}/answers`, [{ questionId: qs[1]!.questionId, answer: 'No device', score: null, base: BLANK }])).status, 200);
+  assert.deepEqual({ ...storedRow(iv.id, qs[1]!.questionId) }, { answer: 'No device', score: null, device: null, version: null });
+});
+
+test('the device id and save number are checked: short plain ids and whole numbers only, both or neither', async () => {
+  const c = await newCandidate();
+  const iv = await newInterview(c.id, { type: 'phone' });
+  const qs = (await sheetOf(iv.id)).answers as Json[];
+  const put = (extra: Record<string, unknown>) => recruiter.put(`/recruitment/interviews/${iv.id}/answers`, [{ questionId: qs[0]!.questionId, answer: 'x', score: null, base: BLANK, ...extra }]);
+  for (const bad of [{ device: 'a b' }, { device: 'x'.repeat(65), version: 1 }, { device: 'tab-ok-123456', version: 0 }, { device: 'tab-ok-123456', version: 1.5 }, { device: 'tab-ok-123456' }, { version: 3 }, { device: 'short', version: 1 }]) {
+    const r = await put(bad);
+    assert.equal(r.status, 400, `${JSON.stringify(bad)} → ${r.status}`);
+  }
+  assert.equal(Number(get<{ n: number }>(srv.db, `SELECT COUNT(*) AS n FROM interview_answers WHERE interview_id = ?`, [iv.id])!.n), 0);
+  assert.equal((await put({ device: 'tab-ok-123456', version: 1 })).status, 200);
+});
+
+test('upgrade: a 1.3 database made before the device columns gets them, its answers kept', async () => {
+  const { DatabaseSync } = await import('node:sqlite');
+  const db = new DatabaseSync(':memory:');
+  db.exec(`CREATE TABLE candidates (id INTEGER PRIMARY KEY, first_name TEXT); CREATE TABLE users (id INTEGER PRIMARY KEY);
+    CREATE TABLE interview_answers (id INTEGER PRIMARY KEY AUTOINCREMENT, interview_id INTEGER NOT NULL, question_id INTEGER, question_text TEXT NOT NULL, sort INTEGER NOT NULL DEFAULT 0, answer TEXT NOT NULL DEFAULT '', score INTEGER, updated_at TEXT, updated_by INTEGER);
+    INSERT INTO interview_answers (interview_id, question_id, question_text, answer) VALUES (1, 1, 'Why us?', 'Kept');
+    CREATE TABLE meta (key TEXT PRIMARY KEY, value TEXT);`);
+  db.exec(recruitment.sql);
+  const reported = recruitment.upgrade(db as never);
+  assert.ok(reported.includes('interview_answers.device') && reported.includes('interview_answers.device_version'), JSON.stringify(reported));
+  assert.deepEqual({ ...(db.prepare(`SELECT answer, device, device_version AS v FROM interview_answers`).get() as object) }, { answer: 'Kept', device: null, v: null });
+  assert.deepEqual(recruitment.upgrade(db as never).filter((x) => x.startsWith('interview_answers')), [], 'the second start adds nothing');
+});
+
 // ───────────────────────────── smaller review fixes ─────────────────────────────
 
 test('the question bank refuses a question that is already in the list (same type and position, ignoring case and spaces)', async () => {

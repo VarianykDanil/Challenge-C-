@@ -17,8 +17,9 @@
  *  - PUT  /recruitment/questions/order  InterviewQuestionOrderInput → InterviewQuestion[] of that type (admin, recruiter)
  *  - GET  /recruitment/interviews/:id/sheet                    → InterviewSheet (questions as asked + answers)
  *  - PUT  /recruitment/interviews/:id/answers  InterviewAnswerInput[] → InterviewSheet (autosave: the questions this device
- *    changed, each with the answer and score it started from; 409 InterviewSheetConflictDetails when another device
- *    changed the same question first)
+ *    changed, each with the answer and score it started from, and the tab's device id and save number, so its own
+ *    earlier save is never a conflict; 409 InterviewSheetConflictDetails when another device changed the same question
+ *    first)
  * The question text is copied into interview_answers the first time anything is saved on a sheet (until then the
  * sheet shows the bank's active questions), so later edits to the bank never change a past interview. Plain, lawful
  * questions only (no age, health, family or religion questions).
@@ -84,6 +85,11 @@ export interface InterviewAnswer {
   sort?: number;
   updatedById?: number | null;
   updatedByName?: string | null;
+  /**
+   * The device (a browser tab's made-up id, sent with its saves) whose save last wrote this row; null when written
+   * without one. The sheet page knows its own saves by it, so it never takes them for another device's change.
+   */
+  device?: string | null;
 }
 
 /** An answer and its score: what a device saw stored, or what it is saving. */
@@ -107,7 +113,20 @@ export interface InterviewAnswerInput {
   base?: InterviewAnswerValue;
   /** Take this question off the sheet ("Not asked"). Questions left out of a save are never taken off. */
   removed?: boolean;
+  /**
+   * The sending device: an id the browser tab makes up once (8–64 letters, digits, `-` or `_`), with `version`, the
+   * tab's save number (1, 2, 3 … rising with each save). Both or neither. A question last written by the same person
+   * from the same device is that device's own earlier save: a later save (higher version) writes over it whatever its
+   * base says — it was built from the newer words on that screen, before the earlier save came back — and an older one
+   * (lower or equal version, arriving late) leaves it as it is. Another device's or another person's change is still
+   * checked against the base (409).
+   */
+  device?: string;
+  version?: number;
 }
+
+/** What a device id looks like (PUT /recruitment/interviews/:id/answers `device`). */
+export const SHEET_DEVICE_PATTERN = /^[A-Za-z0-9_-]{8,64}$/;
 
 /** 409 from PUT /recruitment/interviews/:id/answers (`details`): the questions another device changed first. */
 export interface InterviewSheetConflictDetails {

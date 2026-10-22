@@ -15,7 +15,8 @@
  *  GET   /recruitment/interviews/:id/sheet                    → InterviewSheet
  *  PUT   /recruitment/interviews/:id/answers  InterviewAnswerInput[] → InterviewSheet (autosave: what this device changed,
  *        each with its `base`; `removed: true` takes a question off; 409 { conflicts, sheet } when another device changed
- *        the same question first — nothing is written then)
+ *        the same question first — nothing is written then; `device` + `version`: the tab's id and save number, so its
+ *        own earlier save, still on its way when the next one was built, is never taken for another device's change)
  * POST and PATCH /questions answer 409 when the words are already in that interview type's list for the same position
  * (or every position), ignoring case and spaces.
  * Types: shared/src/types/recruitmentPlus.ts. Rules: lib/recruitmentPlus/store.ts. Audit specs: lib/audit/recruitmentSpecs.ts.
@@ -29,6 +30,7 @@ import {
   INTERVIEW_TYPE_NAMES,
   INTERVIEW_TYPE_ORDER,
   POSITIONS,
+  SHEET_DEVICE_PATTERN,
   normaliseQuestionText,
   sheetConflictMessage,
   type InterviewSheetConflictDetails,
@@ -86,7 +88,10 @@ const answerBody = z
       /** The stored answer and score this device started from. */
       base: z.object({ answer: answerText, score }).optional(),
       removed: z.boolean().optional(),
-    }),
+      /** The sending browser tab's made-up id and its save number: its own earlier saves are never a conflict. */
+      device: z.string().regex(SHEET_DEVICE_PATTERN, 'A device id is 8 to 64 letters, digits, - or _').optional(),
+      version: z.number().int().positive().max(2_147_483_647).optional(),
+    }).refine((a) => (a.device === undefined) === (a.version === undefined), 'Send a device id and its save number together'),
   )
   .min(1, 'Send at least one question')
   .max(INTERVIEW_SHEET_MAX_QUESTIONS, `A sheet holds at most ${INTERVIEW_SHEET_MAX_QUESTIONS} questions`);

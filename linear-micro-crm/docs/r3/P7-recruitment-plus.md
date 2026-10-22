@@ -20,7 +20,7 @@ Every route is for the recruitment roles only (admin, leader, recruiter; reps 40
 | `PATCH /recruitment/questions/:id` | any of the above | `InterviewQuestion` (moving it to another type puts it at the end there); a save of the same values changes nothing; the same 409 when the new words, type or position clash with another question |
 | `PUT /recruitment/questions/order` | `{ interviewType, ids }` — every question of that type, once each, in the new order | `InterviewQuestion[]` of that type |
 | `GET /recruitment/interviews/:id/sheet` | — | `InterviewSheet { interview (+ candidateName), answers, saved, candidate { id, name, stage, positionApplied, dateOfBirth }, summary, changes }`; a read never writes |
-| `PUT /recruitment/interviews/:id/answers` | `InterviewAnswerInput[]` (1–30 items) — the first save sends every question on screen, in order; later saves only **what this device changed**: `{ questionId (a bank question) or null (a question of their own), questionText (required for their own; for a bank question, the words on screen), answer (≤ 4,000 characters), score? (1–5 or null), base? { answer, score } (what this device started from), removed? (true: take the question off) }` | `InterviewSheet`; **409** `{ error: "Question 3 was changed by Rhys Morgan on another device. Choose which answer to keep.", details: InterviewSheetConflictDetails { conflicts: [{ questionId, questionText }], sheet } }` when another device changed (or answered) the same question since this one saw it — nothing is written then; 400 for an unknown bank question, a question twice, their own question without words, an empty list, a bad score, a long answer, or a sheet left with no question or more than 30 |
+| `PUT /recruitment/interviews/:id/answers` | `InterviewAnswerInput[]` (1–30 items) — the first save sends every question on screen, in order; later saves only **what this device changed**: `{ questionId (a bank question) or null (a question of their own), questionText (required for their own; for a bank question, the words on screen), answer (≤ 4,000 characters), score? (1–5 or null), base? { answer, score } (what this device started from), removed? (true: take the question off), device? + version? (both or neither: the sending browser tab's made-up id, 8–64 letters, digits, `-` or `_`, and its save number, a whole number rising with each save) }` | `InterviewSheet` (each stored answer also says `device`: the tab whose save last wrote it, or null); **409** `{ error: "Question 3 was changed by Rhys Morgan on another device. Choose which answer to keep.", details: InterviewSheetConflictDetails { conflicts: [{ questionId, questionText }], sheet } }` when another device changed (or answered) the same question since this one saw it — nothing is written then; 400 for an unknown bank question, a question twice, their own question without words, an empty list, a bad score, a long answer, or a sheet left with no question or more than 30 |
 
 Changes to the 1.0 routes (`routes/recruitment.ts`, P7's in 1.3):
 
@@ -83,11 +83,25 @@ question whose answer equals its base is left as it is (another device's newer w
 only while the stored row still equals its base, else it is a **conflict** and nothing in that save is written (409
 with the latest sheet); an answer already equal to the stored one is never a conflict (the same save arriving twice).
 Taking off a question another device has answered is a conflict too. New questions go at the end; the order of stored
-ones never changes. Only rows whose answer or score changed are written, with who and when; each answer shows who last
+ones never changes. **A device's own saves never clash with each other** (the 1.3 re-review found the last save, sent
+as the tab closes or reloads while an earlier one was still on its way, refused as "another device's" change and lost):
+each save carries the tab's device id (`SHEET_DEVICE`, made once per page load with `crypto.getRandomValues`, which works
+over plain http on the office network) and its save number, and every row written is stamped with
+`interview_answers.device` = `<user id>:<device id>` and `device_version`. When the stored row was last written by the
+same person from the same device the base is not checked: a later save (higher number) is written, an older or repeated
+one arriving late leaves the row as it is (it never writes back older words, and never takes off a question the newer
+save wrote); a save that finds a row already holding its words notes its number on it without counting as a change.
+Another device's or another person's change is checked against the base as before (a device id sent by someone else is
+not theirs: the user id is part of the stamp). Only rows whose answer or score changed are written, with who and when; each answer shows who last
 changed it. The page's side (`mergeSheetRows`, pure, tested): after every save, 409 and refetch it takes in other
 devices' words for questions it has not touched, keeps whatever is being typed, and flags a question both devices
 changed with the other version, until the interviewer picks **Keep mine** (sent with theirs as the base) or **Use
-theirs**; every other question keeps saving meanwhile.
+theirs**; every other question keeps saving meanwhile. A stored row stamped with one of the page's own device ids (or
+equal to what the save it answers sent) is the page's own save: what is typed is kept and the base moves on, never a
+conflict (typed, sent, then rubbed out: the box stays empty and the next save sends that). While a question is in
+conflict the line under its box reads "Not saved yet" (the box holds this device's words; the conflict panel says who
+wrote the other version, and when). `sheetSavePayload` stamps the device id and save number on every item, and also
+sends a question changed since the save still on its way even when it is back to its base.
 `sheetSummary`: questions, answered (a written answer), scored (a 1–5 score), and the mean score to one decimal place,
 half up (hand-computed tests: 13 / 3 → 4.3, 15 / 4 → 3.75 → 3.8).
 
@@ -96,8 +110,18 @@ or taking off a question, when the page is hidden (a phone put away) and when it
 order, through a queue outside React (`features/recruitment/sheetSaveQueue.ts`); each builds its payload when it runs
 from the page's latest rows, so a change made while one is in flight is sent straight after it — also when the page has
 been left in the meantime (the 1.3 review found the later answers lost then: TanStack Query skips a `mutate()` call's
-own callbacks once the component has gone). Closing the tab sends what is left at once with `keepalive`. A save that
-fails after the page was left says so in a toast. "Saving…", "Saved 10:42" (or "Last saved Tue 20 Oct, 13:44"), "Not
+own callbacks once the component has gone). Closing or reloading the tab sends what is left at once with `keepalive`
+(the server knows the earlier save still on its way as this tab's own). **What is not saved is kept in the tab**
+(`features/recruitment/sheetDrafts.ts`, in memory and in sessionStorage, for the same person only): as the page is left,
+and as the tab closes or reloads, the page's rows (words still on their way, questions taken off, questions in conflict
+with both versions) and its device ids; opening the sheet again in that tab — straight back after leaving it, or after
+a reload — starts from them, merged with the server's sheet, instead of a cached copy from before the last save, and
+saves them again (harmless: the server takes its own save as no change). A page left with a question in conflict says
+so in a toast that names it ("Your answer to question 3 was not saved: Amelia Hart changed it on another device. Open
+the sheet to choose which to keep."); opening it again shows the conflict, with **Keep mine** / **Use theirs**. A save
+that fails after the page was left says so in a toast, and the words are kept the same way. The draft is dropped once
+everything is saved, when a newer sheet page takes it over, and when the page comes back from the browser's page
+cache. "Saving…", "Saved 10:42" (or "Last saved Tue 20 Oct, 13:44"), "Not
 saved: … Try again", or the conflict line. A refetch (an outcome saved, a reschedule) never overwrites what is being
 typed. The pacing keeps the audit trail to about one row per answer, not one per keystroke.
 
@@ -116,8 +140,11 @@ only turned off, so past sheets keep their link; the same words twice in one lis
 safety" is fine — family, religion, nationality or race, sexual orientation or gender, trade union membership) with a
 warning under the field; it never blocks. It leaves the agency's own clients and causes alone ("Children's Hospice
 North", "a children's charity"), matches whole words where a longer word means something else ("faith", not
-"faithful"; "how old are you", not "how old is your car"), and flags "first language" and "mother tongue". Every default
-question passes it (tested, with the review's fixtures).
+"faithful"; "how old are you", not "how old is your car"), and flags "first language" and "mother tongue". The
+re-review added a baby or babies, a spouse or civil partner, "your partner" / "have (got) a partner" / "live with a
+partner" (not "partner charities" or "partnership"), the year someone left school, college or university or graduated,
+and "your second language" / "English isn't your first language". Every default question passes it (tested, with both
+reviews' fixtures).
 
 **Demo data** (the extension's seed, its own random stream, fresh databases only; on core tables it changes only
 `candidates.date_of_birth`): a date of birth for about 85% of candidates (two open applicants are 17, one turning 18 in a
@@ -160,7 +187,10 @@ fixed, so changes in Settings never alter an interview that has happened.
 
 The same sheet can be open on two devices: each saves only what it changed, so one never wipes the other's answers. If
 both change the same question, the second sees "Rhys Morgan changed this on another device" with their answer under
-yours: tap **Keep mine** or **Use theirs**. Nothing else on the sheet waits for that choice.
+yours ("Not saved yet" under your box): tap **Keep mine** or **Use theirs**. Nothing else on the sheet waits for that
+choice. If you leave the sheet before choosing, a message names the question; your words are kept on this device and
+the choice is waiting when you open the sheet again. Closing, reloading or leaving the sheet while it is still saving
+(a slow hotspot) loses nothing: what you typed is saved, and opening the sheet again shows it.
 
 **A candidate's page** now shows the date of birth and age in the profile (the pencil edits it) with an **Under 18**
 warning when it applies, every interview with **Reschedule** and **Sheet**, **Questions and answers** (each saved
@@ -202,5 +232,13 @@ health, family, religion, where someone is from or another protected characteris
   **Recruitment: interview questions** so both words are on screen.
 - **For the lead: PUT /answers changed shape during the review fixes** (P7's own route, unreleased): questions left out
   of a save are no longer taken off (`removed: true` does it), each item may carry `base`, and a clash answers 409. No
-  other package calls it. The main chunk grows by 0.57 kB
+  other package calls it. The re-review fix adds optional `device` + `version` per item and `device` on each answer
+  (additive), and two columns, `interview_answers.device` and `device_version` (in the CREATE TABLE, and
+  `addColumnIfMissing` for a database made by an earlier 1.3 build: its start-up line then reads "Upgraded schema:
+  added recruitment:interview_answers.device, recruitment:interview_answers.device_version" once; a 1.2 database gets
+  them with the new table and reports nothing extra).
+- **For the lead: one test-harness line outside P7** (`server/src/test/helpers.ts`, `server.keepAliveTimeout = 0` on
+  the test server): `r3-contracts` "anonymous → 401" failed with "fetch failed" (ECONNRESET) in 3 of 4 runs on the
+  merged code, because the test before it blocks the shared event loop for about 5 s (a full seed) and the server's
+  5 s keep-alive timer closed an idle socket as fetch reused it. With the line, 5 of 5 runs pass. The main chunk grows by 0.57 kB
   (472.19 → 472.76 kB) only for the preload map of the new lazy chunks; no P7 code is in it.

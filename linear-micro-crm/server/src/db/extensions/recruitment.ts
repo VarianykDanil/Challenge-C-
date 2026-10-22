@@ -12,6 +12,9 @@
  *      · `seed`, on a fresh demo database.
  *  - interview_answers: the questions AS ASKED (question_text copied when the sheet is first saved) with the
  *    interviewer's written answer and an optional 1–5 score; later edits to the bank never change a past interview.
+ *    `device` / `device_version`: the browser tab ("device") whose save last wrote the row, as `<user id>:<tab id>`,
+ *    and that save's number, so a tab's own earlier save is never taken for another device's change (added after the
+ *    first 1.3 builds: addColumnIfMissing for a database they made).
  *  - interview_changes: bookings, interviewer reassignments, reschedules, changes of type and outcomes (field, from,
  *    to, who, when), written by P7's POST / PATCH /recruitment/interviews. "Who handled each stage" is
  *    stage_changes.changed_by_id (already recorded).
@@ -54,7 +57,9 @@ CREATE TABLE IF NOT EXISTS interview_answers (
   answer TEXT NOT NULL DEFAULT '',
   score INTEGER,
   updated_at TEXT,
-  updated_by INTEGER
+  updated_by INTEGER,
+  device TEXT,
+  device_version INTEGER
 );
 CREATE INDEX IF NOT EXISTS idx_interview_answers_interview ON interview_answers(interview_id, sort);
 
@@ -285,7 +290,11 @@ export const extension: DbExtension = {
   name: 'recruitment',
   sql: SQL,
   upgrade(db) {
-    const columns = [addColumnIfMissing(db, 'candidates', 'date_of_birth', 'TEXT')].filter((name): name is string => name !== null);
+    const columns = [
+      addColumnIfMissing(db, 'candidates', 'date_of_birth', 'TEXT'),
+      addColumnIfMissing(db, 'interview_answers', 'device', 'TEXT'),
+      addColumnIfMissing(db, 'interview_answers', 'device_version', 'INTEGER'),
+    ].filter((name): name is string => name !== null);
     upgradeDefaultQuestions(db);
     return columns;
   },

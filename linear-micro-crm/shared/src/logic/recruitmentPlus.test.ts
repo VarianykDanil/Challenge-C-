@@ -24,6 +24,7 @@ import {
   scheduleRange,
   sheetConflictMessage,
   sheetEditRows,
+  sheetLeftConflictMessage,
   sheetQuestionKey,
   sheetSavePayload,
   sheetSummary,
@@ -209,6 +210,26 @@ test('questionTopicWarning: no false alarms on the agency\'s own clients and ord
   assert.equal(questionTopicWarning('Do you pray during the day?'), 'religion');
 });
 
+test('questionTopicWarning: pregnancy, a partner, school-leaving year and a second language are flagged (re-review)', () => {
+  assert.equal(questionTopicWarning('Are you planning to have a baby?'), 'family');
+  assert.equal(questionTopicWarning('Any babies on the way?'), 'family');
+  assert.equal(questionTopicWarning('Do you have a partner?'), 'family');
+  assert.equal(questionTopicWarning('Does your partner mind weekend work?'), 'family');
+  assert.equal(questionTopicWarning('Do you live with a partner?'), 'family');
+  assert.equal(questionTopicWarning('What does your spouse do?'), 'family');
+  assert.equal(questionTopicWarning('What year did you leave school?'), 'age');
+  assert.equal(questionTopicWarning('When did you finish college?'), 'age');
+  assert.equal(questionTopicWarning('What is your graduation year?'), 'age');
+  assert.equal(questionTopicWarning('Is English your second language?'), 'nationality or race');
+  assert.equal(questionTopicWarning("English isn't your first language, is it?"), 'nationality or race');
+  // Not about anyone's family, age or origin.
+  assert.equal(questionTopicWarning('What do you know about our partner charities?'), null);
+  assert.equal(questionTopicWarning('How would you work in partnership with a venue manager?'), null);
+  assert.equal(questionTopicWarning('Tell me about a partner you worked with on a project.'), null);
+  assert.equal(questionTopicWarning('When did you leave your last job, and why?'), null);
+  assert.equal(questionTopicWarning('Do you speak any other languages that would help on the street?'), null);
+});
+
 test('scheduleRange: today, this week and next week (Monday to Sunday)', () => {
   assert.deepEqual(scheduleRange('today', '2026-10-22'), { from: '2026-10-22', to: '2026-10-22' });
   assert.deepEqual(scheduleRange('this_week', '2026-10-22'), { from: '2026-10-19', to: '2026-10-25' });
@@ -291,6 +312,62 @@ test('mergeSheetRows: takes in other devices\' words where nothing was typed her
   assert.equal(merged[3]!.conflict!.byName, 'Rhys Morgan');
   // Merging the same answer again changes nothing (a refetch after the save).
   assert.deepEqual(mergeSheetRows(merged, server).map((r) => [r.key, r.answer, r.base.answer, r.conflict?.answer ?? null]), view.map((v) => [v[0], v[1], v[3], v[4]]));
+});
+
+test('sheetSavePayload: the device id and save number on every item; a question changed since the save on its way goes, even back to its base', () => {
+  const rows = sheetEditRows({ answers: [stored(1, 'Q one', ''), stored(2, 'Q two', ''), stored(3, 'Q three', '')] });
+  rows[0]!.answer = 'First part and the rest';
+  // Question 2 was typed ("Typed"), went in the save on its way, then rubbed out: back to its base, but it must go.
+  const inFlight = new Map([['q1', { answer: 'First part', score: null }], ['q2', { answer: 'Typed', score: null }]]);
+  const out = sheetSavePayload(rows, [rows[2]!], true, { inFlight, from: { device: 'tab-abc12345', version: 2 } });
+  assert.deepEqual(out, [
+    { questionId: 1, questionText: 'Q one', answer: 'First part and the rest', score: null, base: { answer: '', score: null }, device: 'tab-abc12345', version: 2 },
+    { questionId: 2, questionText: 'Q two', answer: '', score: null, base: { answer: '', score: null }, device: 'tab-abc12345', version: 2 },
+    { questionId: 3, questionText: 'Q three', answer: '', score: null, base: { answer: '', score: null }, removed: true, device: 'tab-abc12345', version: 2 },
+  ]);
+  rows[1]!.answer = 'Typed';
+  rows[0]!.answer = 'First part';
+  rows[0]!.base = { answer: 'First part', score: null };
+  rows[1]!.base = { answer: 'Typed', score: null };
+  assert.deepEqual(sheetSavePayload(rows, [], true, { inFlight }), [], 'in step with what is on its way: nothing more to send');
+});
+
+test('mergeSheetRows: a row this tab wrote (its device id) is never another device\'s change: typing since is kept, base moves on', () => {
+  const mine = (questionId: number, text: string, answer: string, device: string | null) => ({ ...stored(questionId, text, answer, null, 'Priya Shah'), device });
+  // The sheet was opened again in this tab while the last save was still on its way: question 2 shows what was typed
+  // before, plus more; then that save lands (stamped with this tab's id).
+  const local = sheetEditRows({ answers: [stored(1, 'Q one', ''), stored(2, 'Q two', ''), stored(3, 'Q three', '')] });
+  local[1]!.answer = 'Started on Q2, and finished the thought';
+  local[2]!.answer = 'Mine on Q3';
+  const server = { saved: true, answers: [mine(1, 'Q one', '', 'tab-mine-0001'), mine(2, 'Q two', 'Started on Q2', 'tab-mine-0001'), mine(3, 'Q three', 'Theirs on Q3', 'tab-other-0002')] };
+  const merged = mergeSheetRows(local, server, { own: new Set(['tab-mine-0001']) });
+  assert.deepEqual(merged.map((r) => [r.key, r.answer, r.base.answer, r.conflict?.answer ?? null]), [
+    ['q1', '', '', null],
+    ['q2', 'Started on Q2, and finished the thought', 'Started on Q2', null], // own save: no conflict, the next save goes on top
+    ['q3', 'Mine on Q3', '', 'Theirs on Q3'], // another tab: a real conflict
+  ]);
+  // Without knowing its own id, question 2 would be taken for another device's change.
+  assert.equal(mergeSheetRows(local, server).find((r) => r.key === 'q2')!.conflict?.answer, 'Started on Q2');
+  // Typed, sent, then rubbed out back to the old words: the stored own save does not come back into the box.
+  const rubbed = sheetEditRows({ answers: [stored(1, 'Q one', '')] });
+  const merged2 = mergeSheetRows(rubbed, { saved: true, answers: [mine(1, 'Q one', 'Typed', 'tab-mine-0001')] }, { own: new Set(['tab-mine-0001']) });
+  assert.deepEqual([merged2[0]!.answer, merged2[0]!.base.answer], ['', 'Typed']);
+});
+
+test('mergeSheetRows: a question in conflict keeps its own "last changed" line; the conflict says who wrote the other version (re-review)', () => {
+  const local = sheetEditRows({ answers: [stored(1, 'Q one', 'Old', null, 'Priya Shah')] });
+  local[0]!.answer = 'Priya, typed since';
+  const theirs = { ...stored(1, 'Q one', 'Amelia, from the phone', null, 'Amelia Hart'), updatedAt: '2026-10-22T10:05:00.000Z' };
+  const [row] = mergeSheetRows(local, { saved: true, answers: [theirs] });
+  assert.equal(row!.conflict?.byName, 'Amelia Hart');
+  assert.equal(row!.conflict?.at, '2026-10-22T10:05:00.000Z');
+  assert.equal(row!.updatedByName, 'Priya Shah', 'not "Last changed by Amelia Hart" under Priya\'s own words');
+});
+
+test('sheetLeftConflictMessage: one sentence naming the question (and who), for a page left with a conflict open', () => {
+  assert.equal(sheetLeftConflictMessage([{ number: 3, byName: 'Amelia Hart' }]), 'Your answer to question 3 was not saved: Amelia Hart changed it on another device. Open the sheet to choose which to keep.');
+  assert.equal(sheetLeftConflictMessage([{ number: 2, byName: null }]), 'Your answer to question 2 was not saved: someone changed it on another device. Open the sheet to choose which to keep.');
+  assert.equal(sheetLeftConflictMessage([{ number: 5, byName: 'A' }, { number: 2, byName: 'B' }]), 'Your answers to questions 2 and 5 were not saved: they were changed on another device. Open the sheet to choose which to keep.');
 });
 
 test('mergeSheetRows: questions another device took off go (unless typed into here); added and removed ones here are kept as they are', () => {

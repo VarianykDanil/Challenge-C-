@@ -11,6 +11,10 @@
 // both versions and the interviewer chooses (Keep mine / Use theirs); every other question keeps saving. After each
 // save and each refetch the page takes in what other devices wrote to questions it has not touched. Saves run one at a
 // time through features/recruitment/sheetSaveQueue.ts, outside React, so a save queued as the page is left still goes.
+// Each save carries this tab's device id and save number, so the server (and the merge here) never takes this tab's
+// own earlier save, still on its way, for another device's change. What is not saved as the page is left (words on
+// their way, a question in conflict) is kept in this tab (features/recruitment/sheetDrafts.ts) and comes back when the
+// sheet is opened again, here or after a reload.
 import { useCallback, useEffect, useId, useRef, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import { useQueryClient } from '@tanstack/react-query';
@@ -18,10 +22,12 @@ import { ArrowLeft, CalendarClock, FileDown, Info, Plus } from 'lucide-react';
 import type { InterviewSheet, InterviewSheetConflictDetails, SheetEditRow } from '@lm/shared';
 import {
   INTERVIEW_ANSWER_MAX, INTERVIEW_QUESTION_MAX, INTERVIEW_SHEET_MAX_QUESTIONS, POSITION_LABELS, ageOn, answerChangedLabel, businessWhenLabel, interviewChangeText,
-  mergeSheetRows, newSheetRow, normaliseQuestionText, sheetConflictMessage, sheetEditRows, sheetQuestionKey, sheetRowChanged, sheetSavePayload, sheetSummary,
+  mergeSheetRows, newSheetRow, normaliseQuestionText, sheetConflictMessage, sheetEditRows, sheetLeftConflictMessage, sheetQuestionKey, sheetRowChanged, sheetSavePayload,
+  sheetSummary,
 } from '@lm/shared';
 import { Avatar, Badge, Button, Card, CardHeader, Field, Input, PageHeader, Skeleton, Textarea, useToast } from '@/components/ui';
 import { ApiError } from '@/api/client';
+import { useAuth } from '@/auth/AuthProvider';
 import { putInterviewAnswers, recruitmentPlusKeys, storeSavedSheet, useInterviewSheet } from '@/api/recruitmentPlus';
 import { ErrorState, StageBadge, errorMessage } from '@/features/common';
 import { ErrorBoundary } from '@/features/common/ErrorBoundary';
@@ -31,7 +37,8 @@ import { QuestionTopicHint } from '@/features/recruitment/QuestionTopicHint';
 import { OutcomeSelect } from '@/features/recruitment/RecordOutcome';
 import { RescheduleInterviewModal } from '@/features/recruitment/RescheduleInterviewModal';
 import { PDF_EXPORTS_READY, downloadSheetPdf } from '@/features/recruitment/pdf';
-import { queueSheetSave } from '@/features/recruitment/sheetSaveQueue';
+import { claimSheetDraft, dropSheetDraft, keepSheetDraft, ownsSheetDraft, peekSheetDraft } from '@/features/recruitment/sheetDrafts';
+import { SHEET_DEVICE, nextSheetVersion, queueSheetSave } from '@/features/recruitment/sheetSaveQueue';
 import { COPY } from '@/content/copy';
 import { toISODate, todayISO } from '@/lib/dates';
 import { formatDateTime, formatRelative, formatTime } from '@/lib/format';
@@ -41,6 +48,8 @@ import { NotFoundPage } from './NotFound';
 
 /** Wait this long after the last keystroke before saving. */
 const TYPING_SAVE_MS = 2500;
+/** Words carried on from a page left unsaved go this soon after the sheet opens again. */
+const CARRIED_SAVE_MS = 800;
 
 type SaveState = 'idle' | 'pending' | 'saving' | 'saved' | 'error';
 
@@ -70,16 +79,32 @@ export function InterviewSheetPage() {
   return <SheetView key={q.data.interview.id} sheet={q.data} />;
 }
 
+/** The questions in conflict, numbered as on the sheet. */
+const conflictsOf = (rows: readonly SheetEditRow[]) => rows.flatMap((r, i) => (r.conflict ? [{ key: r.key, number: i + 1, byName: r.conflict.byName }] : []));
+
 function SheetView({ sheet }: { sheet: InterviewSheet }) {
   const toast = useToast();
   const qc = useQueryClient();
+  const { user } = useAuth();
+  const userId = user?.id ?? null;
   const iv = sheet.interview;
+  /** This page, for the draft it leaves (a page left earlier never writes over a newer page's). */
+  const [owner] = useState(() => Symbol(`sheet ${iv.id}`));
+  // What this tab left unsaved when the sheet was last open here (a save on its way, a question in conflict). Read
+  // once; the page takes it over on mount.
+  const [draft] = useState(() => peekSheetDraft(iv.id, userId));
+  /** Device ids whose saves are this page's own: this tab's, and those of the page it carries on from. */
+  const ownDevices = useRef<ReadonlySet<string>>(new Set([SHEET_DEVICE, ...(draft?.devices ?? [])]));
   // The rows are this page's own: what the server sends is merged in (other devices' words where nothing was typed
   // here), never written over typing.
-  const [rows, setRowsState] = useState<SheetEditRow[]>(() => sheetEditRows(sheet));
+  const [rows, setRowsState] = useState<SheetEditRow[]>(() =>
+    draft ? mergeSheetRows(draft.rows, sheet, { removed: new Set(draft.removed.map((r) => r.key)), own: ownDevices.current }) : sheetEditRows(sheet),
+  );
   const rowsRef = useRef(rows);
   /** Questions taken off here and not saved yet. */
-  const removedRef = useRef<SheetEditRow[]>([]);
+  const removedRef = useRef<SheetEditRow[]>(draft?.removed ?? []);
+  /** Conflicts already named in a toast after the page was left. */
+  const toldConflicts = useRef(new Set<string>());
   /** The questions are fixed on the server (something is saved). */
   const savedRef = useRef(sheet.saved);
   const lastSheet = useRef(sheet);
@@ -87,7 +112,7 @@ function SheetView({ sheet }: { sheet: InterviewSheet }) {
   const inFlightSent = useRef<ReadonlyMap<string, { answer: string; score: number | null }> | undefined>(undefined);
   const mounted = useRef(true);
   const [fixed, setFixed] = useState(sheet.saved);
-  const [state, setState] = useState<SaveState>(sheet.saved ? 'saved' : 'idle');
+  const [state, setState] = useState<SaveState>(() => (draft && rows.some((r) => !r.conflict && (r.added || sheetRowChanged(r))) ? 'pending' : sheet.saved ? 'saved' : 'idle'));
   const [savedAt, setSavedAt] = useState<string | null>(() => lastSaved(sheet));
   const [error, setError] = useState<string | null>(null);
   const [moving, setMoving] = useState(false);
@@ -105,9 +130,25 @@ function SheetView({ sheet }: { sheet: InterviewSheet }) {
   const absorb = useCallback((server: InterviewSheet, sent?: ReadonlyMap<string, { answer: string; score: number | null }>) => {
     lastSheet.current = server;
     savedRef.current = server.saved;
-    setRows(mergeSheetRows(rowsRef.current, server, { sent, removed: new Set(removedRef.current.map((r) => r.key)) }));
+    setRows(mergeSheetRows(rowsRef.current, server, { sent, removed: new Set(removedRef.current.map((r) => r.key)), own: ownDevices.current }));
     if (mounted.current) setFixed(server.saved);
   }, [setRows]);
+
+  /** Keeps what is not saved in this tab for the next time the sheet opens (or drops the draft when all is saved). */
+  const keepDraft = useCallback(() => {
+    if (userId === null) return;
+    // This tab's id first, then the pages it carried on from (the last few are plenty: older saves are long settled).
+    keepSheetDraft(iv.id, owner, { userId, rows: rowsRef.current, removed: removedRef.current, devices: [...ownDevices.current].slice(0, 8) });
+  }, [iv.id, owner, userId]);
+
+  /** After the page was left (no newer sheet page open here): keep the draft up to date, and name new conflicts. */
+  const afterLeft = useCallback(() => {
+    if (!ownsSheetDraft(iv.id, owner)) return;
+    keepDraft();
+    const fresh = conflictsOf(rowsRef.current).filter((c) => !toldConflicts.current.has(c.key));
+    for (const c of fresh) toldConflicts.current.add(c.key);
+    if (fresh.length) toast.error(sheetLeftConflictMessage(fresh));
+  }, [iv.id, keepDraft, owner, toast]);
 
   const settle = useCallback(() => {
     if (mounted.current) setState(pending() ? 'pending' : 'saved');
@@ -116,7 +157,8 @@ function SheetView({ sheet }: { sheet: InterviewSheet }) {
   /** One save: builds its payload now, from the latest rows. Runs through the queue (one at a time), or straight away as the tab closes. */
   const runSave = useCallback(async ({ keepalive = false }: { keepalive?: boolean } = {}) => {
     if (!pending()) return;
-    const payload = sheetSavePayload(rowsRef.current, removedRef.current, savedRef.current);
+    // A save still on its way (only as the tab closes: otherwise saves run one at a time) is what this one follows.
+    const payload = sheetSavePayload(rowsRef.current, removedRef.current, savedRef.current, { inFlight: inFlightSent.current, from: { device: SHEET_DEVICE, version: nextSheetVersion() } });
     if (!payload.length) return;
     const sent = new Map(payload.filter((p) => !p.removed).map((p) => [sheetQuestionKey(p.questionId, p.questionText ?? ''), { answer: p.answer, score: p.score ?? null }]));
     const sentRemoved = new Set(payload.filter((p) => p.removed).map((p) => sheetQuestionKey(p.questionId, p.questionText ?? '')));
@@ -133,6 +175,8 @@ function SheetView({ sheet }: { sheet: InterviewSheet }) {
       if (mounted.current) {
         setSavedAt(new Date().toISOString());
         setError(null);
+      } else {
+        afterLeft();
       }
     } catch (e) {
       if (e instanceof ApiError && e.status === 409 && isConflictDetails(e.details)) {
@@ -141,15 +185,18 @@ function SheetView({ sheet }: { sheet: InterviewSheet }) {
         removedRef.current = removedRef.current.filter((r) => !clashed.has(r.key));
         absorb(e.details.sheet, sent);
         storeSavedSheet(qc, e.details.sheet);
-        if (!mounted.current) toast.error('Some answers on the sheet were not saved', `${e.message} Open the sheet again to choose.`);
+        // Left already: the question in conflict is kept here (with both versions) for when the sheet opens again.
+        if (!mounted.current) afterLeft();
         // Nothing was written: the other questions go again straight away (the ones in conflict wait for the choice).
         if (pending()) void queueSheetSave(iv.id, () => runSaveRef.current());
       } else {
         if (mounted.current) {
           setError(errorMessage(e));
           setState('error');
-        } else {
-          toast.error('The interview sheet was not saved', errorMessage(e));
+        } else if (ownsSheetDraft(iv.id, owner)) {
+          // (A sheet page opened again since saves them itself.)
+          keepDraft();
+          toast.error('The interview sheet was not saved', `${errorMessage(e).replace(/\.$/, '')}. Your words are kept on this device: open the sheet again to save them.`);
         }
         return;
       }
@@ -157,7 +204,7 @@ function SheetView({ sheet }: { sheet: InterviewSheet }) {
       inFlightSent.current = undefined;
     }
     settle();
-  }, [absorb, iv.id, pending, qc, settle, toast]);
+  }, [absorb, afterLeft, iv.id, keepDraft, owner, pending, qc, settle, toast]);
   const runSaveRef = useRef(runSave);
   runSaveRef.current = runSave;
 
@@ -180,29 +227,45 @@ function SheetView({ sheet }: { sheet: InterviewSheet }) {
     if (sheet !== lastSheet.current) absorb(sheet, inFlightSent.current);
   }, [sheet, absorb]);
 
-  // Putting the phone away saves what is there; closing the tab sends it at once (keepalive), even with a save on its
-  // way (the server takes an answer it already holds as no change); leaving the page queues it after any save on its way.
+  // Putting the phone away saves what is there; closing or reloading the tab sends it at once (keepalive), even with a
+  // save on its way (the server knows this tab's own earlier save by its device id: no conflict), and keeps it in this
+  // tab for a reload; leaving the page queues it after any save on its way, and keeps what is not saved (a question in
+  // conflict, named in a toast) for when the sheet opens again.
   useEffect(() => {
     mounted.current = true;
+    claimSheetDraft(iv.id, owner);
+    if (pending()) later(CARRIED_SAVE_MS); // words carried on from the page left before
     const onHide = () => {
       if (document.visibilityState === 'hidden') flush();
     };
     const onPageHide = () => {
       if (timer.current !== null) window.clearTimeout(timer.current);
       timer.current = null;
+      keepDraft();
       if (pending()) void runSaveRef.current({ keepalive: true });
+    };
+    // Back from the browser's page cache: this page carries on, so the draft it left for a reload must not linger.
+    const onPageShow = (e: PageTransitionEvent) => {
+      if (e.persisted && ownsSheetDraft(iv.id, owner)) dropSheetDraft(iv.id);
     };
     document.addEventListener('visibilitychange', onHide);
     window.addEventListener('pagehide', onPageHide);
+    window.addEventListener('pageshow', onPageShow);
     return () => {
       mounted.current = false;
       document.removeEventListener('visibilitychange', onHide);
       window.removeEventListener('pagehide', onPageHide);
+      window.removeEventListener('pageshow', onPageShow);
       if (timer.current !== null) window.clearTimeout(timer.current);
       timer.current = null;
+      keepDraft();
+      const open = conflictsOf(rowsRef.current);
+      for (const c of open) toldConflicts.current.add(c.key);
+      // A tick later, so a development double mount (which mounts straight back) says nothing.
+      if (open.length) window.setTimeout(() => mounted.current || toast.error(sheetLeftConflictMessage(open)), 0);
       if (pending()) void queueSheetSave(iv.id, () => runSaveRef.current());
     };
-  }, [flush, iv.id, pending]);
+  }, [flush, iv.id, keepDraft, later, owner, pending, toast]);
 
   const change = (next: SheetEditRow[], ms: number) => {
     setRows(next);
@@ -242,7 +305,7 @@ function SheetView({ sheet }: { sheet: InterviewSheet }) {
 
   const summary = sheetSummary(rows);
   const age = sheet.candidate.dateOfBirth ? ageOn(sheet.candidate.dateOfBirth, todayISO()) : null;
-  const conflicts = rows.flatMap((r, i) => (r.conflict ? [{ number: i + 1, byName: r.conflict.byName }] : []));
+  const conflicts = conflictsOf(rows);
 
   return (
     <>
@@ -392,7 +455,8 @@ function QuestionCard({ row, index, canRemove, onAnswer, onScore, onBlur, onRemo
   onUseTheirs: () => void;
 }) {
   const uid = useId();
-  const changed = answerChangedLabel(row, todayISO());
+  // In conflict, the box holds this device's words, not saved yet: not "Last changed by" whoever wrote the other version.
+  const changed = row.conflict ? 'Not saved yet' : answerChangedLabel(row, todayISO());
   return (
     <li>
       <Card>

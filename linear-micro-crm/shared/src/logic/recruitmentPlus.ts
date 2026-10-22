@@ -336,11 +336,11 @@ export function questionTopicWarning(text: string): string | null {
     // The agency's own clients and causes are not questions about anyone's family: Children's Hospice North, a children's charity.
     .replace(/\bchildren'?s'? (hospice|charit(y|ies)|cause)/g, ' ');
   const checks: [RegExp, string][] = [
-    [/\b(how old (are|were|will) you|your age|age are you|date of birth|year (were you|you were) born|when were you born|retire)/, 'age'],
+    [/\b(how old (are|were|will) you|your age|age are you|date of birth|year (were you|you were) born|when were you born|retire|(year|when) (did |have )?you (leave|left|finish|finished|graduate|graduated)( from)? (school|college|sixth form|uni|university)|graduat(e|ion) year|year (did )?you graduate)/, 'age'],
     [/\bhealth\b(?!\s*(and|&)\s*safety)|\b(disab|illness|medical|medication|sick (days|leave|record)|mental health|injur)/, 'health'],
-    [/\b(pregnan|maternity|paternity|children|kids|childcare|married|marital|husband|wife|family plans|start a family)/, 'family'],
+    [/\b(pregnan|maternity|paternity|children|kids|childcare|bab(y|ies)\b|married|marital|husband|wife|spouse|civil partner|family plans|start a family)|\b(your partner|(have|got|live with) a partner)\b/, 'family'],
     [/\b(religio|church|mosque|synagogue|temple|pray(s|ed|ing|er|ers)?\b|faiths?\b)/, 'religion'],
-    [/\b(where are you (really )?from|nationality|native (language|speaker)|first language|mother tongue|accent|ethnic|race\b)/, 'nationality or race'],
+    [/\b(where are you (really )?from|nationality|native (language|speaker)|first language|your second language|english (is not|isn't) your|mother tongue|accent|ethnic|race\b)/, 'nationality or race'],
     [/\b(sexual|sexuality|gay|lesbian|transgender|gender identity|boyfriend|girlfriend)/, 'sexual orientation or gender'],
     [/\b(trade union|union member)/, 'trade union membership'],
   ];
@@ -354,6 +354,9 @@ export function questionTopicWarning(text: string): string | null {
 // The server leaves a question whose answer equals its base as it is (another device's newer words stand) and writes a
 // changed one only while the stored row still equals the base — else 409, and the page shows both versions. After each
 // save (and each refetch) the page takes in what other devices wrote to questions it has not touched.
+// Each save also carries the tab's device id and save number, and the server stamps the rows it writes with them: a
+// question this device wrote last is never a conflict for it (its own save still on its way when the next one was
+// built, as a tab closes or reloads mid-save), on the server or in mergeSheetRows.
 
 /** How the page and the server match a question: a bank question by its id, a question of the interviewer's own by its words. */
 export function sheetQuestionKey(questionId: number | null, questionText: string): string {
@@ -411,19 +414,34 @@ export function newSheetRow(questionText: string): SheetEditRow {
 /** Changed on this device since it last saw the stored row. */
 export const sheetRowChanged = (r: SheetEditRow): boolean => !sameAnswer(r, r.base);
 
+/** Who sends a save: the tab's device id and this save's number (rising with each save from the tab). */
+export interface SheetSaveFrom {
+  device: string;
+  version: number;
+}
+
 /**
  * What the next save sends. Until the sheet is saved anywhere (`saved` false) every question goes, so the first save
  * fixes the questions; after that only the questions changed or added here and the ones taken off here. A question in
  * conflict waits for the interviewer's choice.
+ * `inFlight`: what the save still on its way sent, by key; a question changed since then goes too, even when it is back
+ * to its base (typed, sent, then rubbed out). `from`: stamped on every item (device id and save number).
  */
-export function sheetSavePayload(rows: readonly SheetEditRow[], removed: readonly SheetEditRow[], saved: boolean): InterviewAnswerInput[] {
+export function sheetSavePayload(
+  rows: readonly SheetEditRow[],
+  removed: readonly SheetEditRow[],
+  saved: boolean,
+  opts: { inFlight?: ReadonlyMap<string, InterviewAnswerValue>; from?: SheetSaveFrom } = {},
+): InterviewAnswerInput[] {
   const out: InterviewAnswerInput[] = [];
+  const from = opts.from ? { device: opts.from.device, version: opts.from.version } : {};
   for (const r of rows) {
     if (r.conflict) continue;
-    if (saved && !r.added && !sheetRowChanged(r)) continue;
-    out.push({ questionId: r.questionId, questionText: r.questionText, answer: r.answer, score: r.score, base: r.base });
+    const sent = opts.inFlight?.get(r.key);
+    if (saved && !r.added && !sheetRowChanged(r) && !(sent && !sameAnswer(sent, r))) continue;
+    out.push({ questionId: r.questionId, questionText: r.questionText, answer: r.answer, score: r.score, base: r.base, ...from });
   }
-  for (const r of removed) out.push({ questionId: r.questionId, questionText: r.questionText, answer: '', score: null, base: r.base, removed: true });
+  for (const r of removed) out.push({ questionId: r.questionId, questionText: r.questionText, answer: '', score: null, base: r.base, removed: true, ...from });
   return out;
 }
 
@@ -432,17 +450,19 @@ export function sheetSavePayload(rows: readonly SheetEditRow[], removed: readonl
  * questions this device holds that the server does not (added here, or typed into after another device took them off,
  * so nothing typed is lost). Per question:
  *  - the same as stored → in step (base = stored);
+ *  - what is stored is this device's own save (what the save this answers sent, or a row stamped with one of `own`,
+ *    this tab's device ids) → kept, base = stored (typed more since, or rubbed out back to the old words);
  *  - stored still equals the base → only this device changed it: kept;
  *  - not changed here → another device's words are taken in;
- *  - this device's last save is what is stored → kept, base = stored (typed more since);
- *  - else both changed it → kept, with the other device's version as `conflict`.
+ *  - else both changed it → kept, with the other device's version as `conflict` (the row keeps its own "last changed"
+ *    details: the box holds this device's words; the conflict says who wrote the other version, and when).
  * `sent`: what the save that this answers sent, by key. `removed`: questions taken off here and not saved yet.
  * While nothing is stored anywhere (a draft) the rows are kept if anything was changed here, else the bank's draft now.
  */
 export function mergeSheetRows(
   local: readonly SheetEditRow[],
   server: { answers: readonly InterviewAnswer[]; saved: boolean },
-  opts: { sent?: ReadonlyMap<string, InterviewAnswerValue>; removed?: ReadonlySet<string> } = {},
+  opts: { sent?: ReadonlyMap<string, InterviewAnswerValue>; removed?: ReadonlySet<string>; own?: ReadonlySet<string> } = {},
 ): SheetEditRow[] {
   if (!server.saved) {
     const touched = local.some((r) => r.added || sheetRowChanged(r)) || (opts.removed?.size ?? 0) > 0;
@@ -463,11 +483,12 @@ export function mergeSheetRows(
     const stored = { answer: a.answer, score: a.score ?? null };
     const meta = { questionText: a.questionText, stored: true, added: false, updatedAt: a.updatedAt, updatedByName: a.updatedByName ?? null };
     const sent = opts.sent?.get(key);
+    const ownSave = (sent !== undefined && sameAnswer(sent, stored)) || (a.device != null && (opts.own?.has(a.device) ?? false));
     if (sameAnswer(r, stored)) out.push({ ...r, ...meta, base: stored, conflict: null });
+    else if (ownSave) out.push({ ...r, ...meta, base: stored, conflict: null });
     else if (sameAnswer(r.base, stored)) out.push({ ...r, ...meta, conflict: null });
     else if (!sheetRowChanged(r)) out.push({ ...r, ...meta, ...stored, base: stored, conflict: null });
-    else if (sent && sameAnswer(sent, stored)) out.push({ ...r, ...meta, base: stored, conflict: null });
-    else out.push({ ...r, ...meta, conflict: { ...stored, byName: a.updatedByName ?? null, at: a.updatedAt } });
+    else out.push({ ...r, questionText: a.questionText, stored: true, added: false, conflict: { ...stored, byName: a.updatedByName ?? null, at: a.updatedAt } });
   }
   for (const r of local) {
     if (theirs.has(r.key)) continue;
@@ -491,6 +512,21 @@ export function sheetConflictMessage(conflicts: readonly { number: number; byNam
   const numbers = conflicts.map((c) => c.number).sort((a, b) => a - b);
   const list = `${numbers.slice(0, -1).join(', ')} and ${numbers.at(-1)}`;
   return `Questions ${list} were changed on another device. Choose which answers to keep.`;
+}
+
+/**
+ * The page was left with questions in conflict (their words are kept on this device until the sheet is opened again):
+ * "Your answer to question 3 was not saved: Amelia Hart changed it on another device. Open the sheet to choose which
+ * to keep."
+ */
+export function sheetLeftConflictMessage(conflicts: readonly { number: number; byName: string | null }[]): string {
+  const sorted = [...conflicts].sort((a, b) => a.number - b.number);
+  if (sorted.length === 1) {
+    const c = sorted[0]!;
+    return `Your answer to question ${c.number} was not saved: ${c.byName ?? 'someone'} changed it on another device. Open the sheet to choose which to keep.`;
+  }
+  const numbers = sorted.map((c) => c.number);
+  return `Your answers to questions ${numbers.slice(0, -1).join(', ')} and ${numbers.at(-1)} were not saved: they were changed on another device. Open the sheet to choose which to keep.`;
 }
 
 // ───────────────────────────── the schedule ─────────────────────────────
