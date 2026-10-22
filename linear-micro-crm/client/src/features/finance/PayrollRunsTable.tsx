@@ -1,5 +1,6 @@
 import { useEffect, useRef } from 'react';
 import type { PayrollRunWithUser } from '@lm/shared';
+import { paySignedMoney } from '@lm/shared';
 import { Avatar, Badge, Button, DataTable, Tooltip, type Column } from '@/components/ui';
 import { OnTimeBadge, PayrollStatusBadge, StopRowEvents } from '@/features/common';
 import { ErrorBoundary } from '@/features/common/ErrorBoundary';
@@ -8,6 +9,8 @@ import { InvoiceStatusBadge } from '@/features/invoices/InvoiceStatusBadge';
 import { todayISO } from '@/lib/dates';
 import { formatDate, formatDateTime, formatGBP, formatNumber, formatRangeLabel } from '@/lib/format';
 import { runAdjustedAt, warningFlags } from './PayslipModal';
+// Release 1.3 (P1): the base-or-commission rule
+import { PAID_AS_LABELS, paidAmount } from '@/features/pay/payCopy';
 
 /** Row selection for bulk "Mark paid" (admin Runs to pay). Rows that cannot be selected show a disabled box. */
 export interface PayrollRunSelection {
@@ -103,11 +106,42 @@ export function PayrollRunsTable({ rows, loading, showUser, onRowClick, onMarkPa
       key: 'sales',
       header: salesHeader,
       align: 'right',
-      render: (r) => (mixed && r.position === 'recruiter' ? <span className="whitespace-nowrap">{formatNumber(r.sales)}<span className="ml-1 text-xs text-muted">hire{r.sales === 1 ? '' : 's'}</span></span> : formatNumber(r.sales)),
+      render: (r) => (
+        <span className="whitespace-nowrap">
+          {mixed && r.position === 'recruiter' ? <>{formatNumber(r.sales)}<span className="ml-1 text-xs text-muted">hire{r.sales === 1 ? '' : 's'}</span></> : formatNumber(r.sales)}
+          {/* Release 1.3 (P1): subs a client's statement cancelled */}
+          {(r.salesCancelled ?? 0) > 0 && <span className="block text-xs text-warning">{formatNumber(r.salesCancelled!)} cancelled</span>}
+        </span>
+      ),
       sortValue: (r) => r.sales,
     },
-    { key: 'commission', header: 'Commission', align: 'right', render: (r) => <span className="tabular-nums">{formatGBP(r.commission, { cents: true })}</span>, sortValue: (r) => r.commission },
-    { key: 'gross', header: 'Gross', align: 'right', render: (r) => <span className="font-semibold tabular-nums text-fg">{formatGBP(r.gross, { cents: true })}</span>, sortValue: (r) => r.gross },
+    // Release 1.3 (P1): which of base or commission the week paid (the 1.2 runs paid both, by the plan)
+    {
+      key: 'paidAs',
+      header: 'Paid as',
+      render: (r) => (
+        <span className="whitespace-nowrap">
+          {r.paidAs ? <Badge tone={r.paidAs === 'commission' ? 'success' : 'primary'} size="sm">{PAID_AS_LABELS[r.paidAs]}</Badge> : <span className="text-xs text-muted">Plan</span>}
+          <span className="block text-xs tabular-nums text-muted">{formatGBP(paidAmount(r), { cents: true })}</span>
+        </span>
+      ),
+      sortValue: (r) => `${r.paidAs ?? 'plan'}${String(Math.round(paidAmount(r) * 100)).padStart(9, '0')}`,
+    },
+    {
+      key: 'gross',
+      header: 'Gross',
+      align: 'right',
+      render: (r) => {
+        const extras = [r.bonus > 0 ? `incl. ${formatGBP(r.bonus, { cents: true })} bonus` : null, (r.adjustmentsTotal ?? 0) !== 0 ? `incl. ${paySignedMoney(r.adjustmentsTotal!)} corrections` : null, r.deductions > 0 ? `after ${formatGBP(r.deductions, { cents: true })} deductions` : null].filter(Boolean);
+        return (
+          <span className="whitespace-nowrap">
+            <span className={`font-semibold tabular-nums ${r.gross < 0 ? 'text-danger' : 'text-fg'}`}>{formatGBP(r.gross, { cents: true })}</span>
+            {extras.map((x) => <span key={x} className="block text-xs text-muted">{x}</span>)}
+          </span>
+        );
+      },
+      sortValue: (r) => r.gross,
+    },
     { key: 'due', header: 'Due', render: (r) => <span className="whitespace-nowrap">{formatDate(r.dueDate)}</span>, sortValue: (r) => r.dueDate },
     {
       key: 'status',

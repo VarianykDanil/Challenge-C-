@@ -424,9 +424,10 @@ async function main(): Promise<void> {
     eq(r.json.user.payPlanName, 'Office recruiter plan', 'office recruiter plan');
     const fm = await recruiter.get('/finance/me?weeks=6');
     status(fm, 200, 'finance/me');
-    ok(fm.json.runs.length > 0 && fm.json.runs.every((p: Json) => p.daysWorked === 5 && p.basePay === 475 && p.commission === 0), 'Mon–Fri × £95, no commission');
-    ok(fm.json.runs.every((p: Json) => p.bonus === (p.sales >= 2 ? 100 : 0)), 'bonus £100 in weeks with ≥ 2 hires ("sales" = hires)');
-    return `${fm.json.runs.filter((p: Json) => p.bonus > 0).length} bonus week(s) of ${fm.json.runs.length}`;
+    // Release 1.3 (P1): Mon–Fri at the £63.50 day rate; no gauges, so no commission and the base applies
+    ok(fm.json.runs.length > 0 && fm.json.runs.every((p: Json) => p.daysWorked === 5 && p.basePay === 317.5 && p.commission === 0 && p.paidAs === 'base'), 'Mon–Fri × £63.50, paid the base');
+    ok(fm.json.runs.every((p: Json) => p.bonus === 0 && p.overrides === 0), 'no automatic bonus on hires and no overrides from 1.3 ("sales" = hires)');
+    return `${fm.json.runs.length} runs, ${fm.json.runs.reduce((a: number, p: Json) => a + p.sales, 0)} hires`;
   });
   await check('Seed realism: venues, B2B weekdays, one site per person per day, offers ≤ 21d, interviews, palette, live timing', async () => {
     eq(get<Json>(db, `SELECT COUNT(*) AS n FROM (SELECT date, venue FROM events WHERE status <> 'cancelled' GROUP BY date, venue HAVING COUNT(*) > 1)`)!.n, 0, 'no two crews at one venue on the same day');
@@ -978,11 +979,13 @@ async function main(): Promise<void> {
 
   // ── payroll materialisation & next pay (direct calls against the same database) ──
   const lastCompletedMonday = addDays(monday, -7);
-  const RUN_COLUMNS = `user_id AS userId, days_worked AS daysWorked, sales, team_sales AS teamSales, due_date AS dueDate, status, reference`;
+  const RUN_COLUMNS = `user_id AS userId, days_worked AS daysWorked, sales, team_sales AS teamSales, due_date AS dueDate, status, reference,
+    paid_as AS paidAs, sales_logged AS salesLogged, sales_confirmed AS salesConfirmed, sales_cancelled AS salesCancelled, adjustments_total AS adjustmentsTotal`;
   await check('materialisePayrollRuns rebuilds a completed week by the seed rules (via GET /finance/payroll guard)', async () => {
     const seeded = all<Json>(db, `SELECT ${RUN_COLUMNS}, gross + deductions AS gross FROM payroll_runs WHERE week_start = ? ORDER BY user_id`, [lastCompletedMonday]);
     ok(seeded.length > 20, 'seed has runs for the last completed week');
-    ok(seeded.some((r: Json) => r.teamSales > 0), 'includes leaders with overrides');
+    ok(seeded.every((r: Json) => r.teamSales === 0 && (r.paidAs === 'base' || r.paidAs === 'commission')), 'every run by the 1.3 rule: paid as base or commission, no overrides');
+    ok(seeded.some((r: Json) => r.paidAs === 'commission') && seeded.some((r: Json) => r.paidAs === 'base'), 'both base and commission weeks');
     run(db, `DELETE FROM payroll_runs WHERE week_start = ?`, [lastCompletedMonday]);
     const early = materialisePayrollRuns(db, addDays(lastCompletedMonday, 6));
     eq(early.created + early.updated + early.deleted, 0, 'nothing is created while the week is still in progress');
@@ -991,7 +994,7 @@ async function main(): Promise<void> {
     eq(r.json.length, seeded.length, 'GET /finance/payroll materialised the missing week');
     ok(r.json.every((p: Json) => p.status === 'pending' && p.paidDate === null), 'new runs are pending');
     const rebuilt = all<Json>(db, `SELECT ${RUN_COLUMNS}, gross FROM payroll_runs WHERE week_start = ? ORDER BY user_id`, [lastCompletedMonday]);
-    eq(JSON.stringify(rebuilt), JSON.stringify(seeded), 'same users, days, sales, team sales, gross (before deductions), due date, status and reference');
+    eq(JSON.stringify(rebuilt), JSON.stringify(seeded), 'same users, days, sales, team sales, gross (before deductions), due date, status, reference, paid as, subs and corrections');
     const again = materialisePayrollRuns(db);
     eq(JSON.stringify(again), JSON.stringify({ created: 0, updated: 0, deleted: 0 }), 'idempotent (the last two weeks recompute to the same figures)');
     return `${rebuilt.length} runs for w/c ${lastCompletedMonday}`;
@@ -1104,10 +1107,14 @@ async function main(): Promise<void> {
     const wholeWeek = (await admin.get(`/finance/summary?from=${twelveWeeksAgo}&to=${addDays(twelveWeeksAgo, 6)}`)).json.weeks[0];
     eq(firstWeek.revenue, wholeWeek.revenue, 'a straddled week reports its full revenue, not a partial slice');
     eq(firstWeek.payroll, wholeWeek.payroll, 'and its full payroll');
-    // byCampaign commission is the pay-plan commission reps actually earn → equals payroll commission for complete weeks
+    // Release 1.3 (P1): byCampaign commission is the subs at each campaign's rep rate in effect on the day (a fresh seed
+    // pays every week by the 1.3 rule) — checked against the rate history read here, row by row
     const commission = snapped.json.byCampaign.reduce((a: number, c: Json) => a + c.commission, 0);
-    const paidCommission = (await admin.get(`/finance/payroll?from=${twelveWeeksAgo}&to=${lastSunday}`)).json.reduce((a: number, p: Json) => a + p.commission, 0);
-    ok(Math.abs(commission - paidCommission) < 0.01, `byCampaign commission ${commission} = payroll commission ${paidCommission}`);
+    const rateRows = all<Json>(db, `SELECT campaign_id AS c, rep_rate AS rate, effective_from AS f FROM campaign_rates ORDER BY effective_from, id`);
+    const rateOn = (c: number, d: string) => [...rateRows].reverse().find((r: Json) => r.c === c && r.f <= d)?.rate ?? rateRows.find((r: Json) => r.c === c)?.rate ?? 0;
+    const reference = all<Json>(db, `SELECT g.date AS d, e.campaign_id AS c, g.sales AS s FROM gauge_entries g JOIN events e ON e.id = g.event_id WHERE g.date BETWEEN ? AND ?`, [twelveWeeksAgo, lastSunday])
+      .reduce((a: number, g: Json) => a + g.s * rateOn(g.c, g.d), 0);
+    ok(Math.abs(commission - reference) < 0.01, `byCampaign commission ${commission} = subs × the rate in effect each day ${round2(reference)}`);
     ok(snapped.json.byCampaign.every((c: Json) => Math.abs(c.margin - (c.revenue - c.commission)) < 0.01), 'margin = revenue − commission');
     return `12w revenue £${r.json.totals.revenue}, profit £${r.json.totals.profit}, on-time ${r.json.payroll.onTimeRate}, this week est. £${current.payroll}`;
   });
@@ -1146,7 +1153,7 @@ async function main(): Promise<void> {
   // ── payroll follows gauge changes ──
   let syncEventId = 0;
   const syncDate = addDays(lastCompletedMonday, 2);
-  await check('Gauge writes recompute the week\'s unpaid runs (owner + leader override) in the same transaction; a complete week without a run gets one', async () => {
+  await check('Gauge writes recompute the week\'s unpaid runs (1.3 rule, no overrides) in the same transaction; a complete week without a run gets one', async () => {
     const ev = await admin.post('/events', { campaignId: 1, teamId: 1, name: 'Smoke late entry', venue: 'Smoke Hall', city: 'Manchester', type: 'retail', date: syncDate, startTime: '10:00', endTime: '18:00', targetSales: 5, notes: null });
     status(ev, 201, 'event in the last completed week');
     eq(ev.json.status, 'completed', 'completed');
@@ -1165,8 +1172,9 @@ async function main(): Promise<void> {
     ok(jordanAfter.gross > jordanBefore.gross, 'pay went up');
     eq(jordanAfter.status, 'pending', 'still pending');
     const ameliaAfter = runOf(2);
-    const override = get<Json>(db, `SELECT pp.override_per_team_sale AS o FROM users u JOIN pay_plans pp ON pp.id = u.pay_plan_id WHERE u.id = 2`)!.o;
-    eq(round2(ameliaAfter.overrides - ameliaBefore.overrides), round2(3 * override), `leader override follows the team's sales (+3 × £${override})`);
+    // Release 1.3 (P1): no automatic leader overrides — the team's sales do not move the leader's run
+    eq(ameliaAfter.overrides, 0, 'no override from 1.3');
+    eq(ameliaAfter.gross, ameliaBefore.gross, 'the team\'s sales do not move the leader\'s pay');
     const slip = await admin.get(`/finance/payroll/${jordanBefore.id}`);
     eq(slip.json.entries.reduce((a: number, e: Json) => a + e.sales, 0), jordanAfter.sales, 'payslip entries add up to the run');
     const summary = await admin.get(`/finance/summary?from=${lastCompletedMonday}&to=${addDays(lastCompletedMonday, 6)}`);
@@ -1179,7 +1187,7 @@ async function main(): Promise<void> {
     status(g, 201, 'admin logs the starter');
     const created = runOf(starter.json.id);
     ok(created && created.status === 'pending', 'pending run created for the complete week');
-    eq(created.gross, 80 + 2 * 25, 'trainee plan: £80/day + £25/sale');
+    eq(created.gross, 63.5, '1 day × £63.50 beats 2 subs × £20 (BCN): paid the base');
     ok(/^PAY-\d{6}-LM-0930$/.test(get<Json>(db, `SELECT reference FROM payroll_runs WHERE id = ?`, [created.id])!.reference), 'reference');
     status(await admin.del(`/gauges/${g.json.id}`), 204, 'entry removed');
     eq(runOf(starter.json.id), undefined, 'run removed with its only entry');

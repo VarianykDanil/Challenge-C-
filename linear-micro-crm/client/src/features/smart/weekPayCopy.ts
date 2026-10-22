@@ -1,7 +1,8 @@
 // Wording for this week's pay estimate — OWNED BY p3-money-forecast-payroll-checks.
 // Used by the dashboard WeekPayStrip and the Finance → My pay "This week so far" card, so both say the same thing.
 // Copy rules (LOGIC.md §14.0): always "estimate" or "about" plus a range; British English; specific numbers; kind.
-import type { PayForecast } from '@lm/shared';
+import type { PayForecast, PayForecastRule, PayForecastWithRule } from '@lm/shared';
+import { bonusLikelihoodFor, payMoney } from '@lm/shared';
 import { formatDecimal, formatGBP, formatNumber } from '@/lib/format';
 
 const plural = (n: number, one: string, many = `${one}s`) => `${formatNumber(n)} ${n === 1 ? one : many}`;
@@ -88,11 +89,56 @@ export function bonusLineShort(f: PayForecast): string | null {
 /** "your 2.1 sales a day over the last 8 weeks, for the 2 team event days left" (the method, for the tooltip). */
 export function forecastMethod(f: PayForecast): string {
   const days = f.remainingDays === 0 ? 'with no team event days left this week' : `for the ${plural(f.remainingDays, 'team event day')} left`;
+  const rule = forecastRule(f);
+  const rate = rule && rule.ratePerSub > 0 ? ` at about ${payMoney(rule.ratePerSub)} a sub` : '';
   if (f.basis.weeks === 0) {
     const worked = f.basis.workedDays === 0 ? 'no worked days' : `only ${plural(f.basis.workedDays, 'worked day')}`;
     return `${worked} in the last 8 weeks, so not enough history for a range yet: what you have logged plus base pay ${days}`;
   }
-  return `your ${formatDecimal(f.basis.salesPerDay)} sales a day over the last ${plural(f.basis.weeks, 'week')}, ${days}`;
+  return `your ${formatDecimal(f.basis.salesPerDay)} sales a day over the last ${plural(f.basis.weeks, 'week')}${rate}, ${days}`;
+}
+
+// ── Release 1.3 (P1 pay-rule): base or commission ──
+
+/** The 1.3 rule block of the estimate (weeks from the rule date), or null for a week paid by the old pay plan. */
+export function forecastRule(f: PayForecast): PayForecastRule | null {
+  return (f as PayForecastWithRule).rule ?? null;
+}
+
+const RULE_LIKELIHOOD = { likely: 'likely', possible: 'possible', unlikely: 'a stretch' } as const;
+const subs = (n: number) => plural(n, 'sub');
+
+/**
+ * One line about which of base or commission this week is heading for (1.3 weeks), or null:
+ *  ahead     "Commission £495.00 is ahead of your £317.50 base, so it is the one paid"
+ *  in reach  "5 more subs and commission beats your £317.50 base — about 120 stops (possible)"
+ *  no days   "The base applies: £254.00 for 4 days — no team event days left this week"
+ *  far       "On course for the base: £317.50 for 5 days"
+ */
+export function ruleLine(f: PayForecast): string | null {
+  const r = forecastRule(f);
+  if (!r) return null;
+  const base = payMoney(r.baseLikely);
+  if (r.subsToBeatBase === 0 && r.commissionSoFar > 0 && r.commissionSoFar >= r.baseLikely) return `Commission ${payMoney(r.commissionSoFar)} is ahead of your ${base} base, so it is the one paid`;
+  if (r.ratePerSub <= 0 || r.baseLikely <= 0) return null;
+  if (f.remainingDays === 0) return `The base applies: ${base} for ${plural(r.projectedDays, 'day')} — no team event days left this week`;
+  const chance = bonusLikelihoodFor(r.beatBaseProbability);
+  if (chance === 'unlikely') return `On course for the base: ${base} for ${plural(r.projectedDays, 'day')}`;
+  const stops = r.stopsToBeatBase != null ? ` — about ${plural(r.stopsToBeatBase, 'stop')}` : '';
+  return `${r.subsToBeatBase === 1 ? 'One more sub' : `${formatNumber(r.subsToBeatBase)} more subs`} and commission beats your ${base} base${stops} (${RULE_LIKELIHOOD[chance]})`;
+}
+
+/** The phone version of ruleLine (one line at 360 px; "~" stands for "about"). */
+export function ruleLineShort(f: PayForecast): string | null {
+  const r = forecastRule(f);
+  if (!r) return null;
+  if (r.subsToBeatBase === 0 && r.commissionSoFar > 0 && r.commissionSoFar >= r.baseLikely) return `Commission ahead of base · ${formatGBP(r.commissionSoFar)}`;
+  if (r.ratePerSub <= 0 || r.baseLikely <= 0) return null;
+  if (f.remainingDays === 0) return `Base ${formatGBP(r.baseLikely)} for ${plural(r.projectedDays, 'day')}`;
+  const chance = bonusLikelihoodFor(r.beatBaseProbability);
+  if (chance === 'unlikely') return `On course for the base · ${formatGBP(r.baseLikely)}`;
+  const stops = r.stopsToBeatBase != null ? ` · ~${plural(r.stopsToBeatBase, 'stop')}` : '';
+  return `Beat the base: ${subs(r.subsToBeatBase)} more${stops} (${RULE_LIKELIHOOD[chance]})`;
 }
 
 export const FORECAST_LABEL = "Estimate — Friday's payslip is the official figure";

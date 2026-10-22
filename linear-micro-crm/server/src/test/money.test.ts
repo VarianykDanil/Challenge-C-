@@ -86,18 +86,23 @@ test('GET /finance/me (rep): a labelled estimate with low ≤ likely ≤ high an
   assert.equal(f.payday, '2026-10-23');
   assert.ok(f.low <= f.likely && f.likely <= f.high);
   assert.equal(f.bonusGap, Math.max(0, f.bonusThreshold - f.soFar.sales));
-  // so far: 3 days and 11 sales = 3 × £60 + 11 × £45
-  assert.deepEqual(f.soFar, { days: 3, sales: 11, gross: 675 });
+  // Release 1.3 (P1): the fixture never wrote PAY_RULE_FROM, so it is this week's Monday: this week is paid by the
+  // base-or-commission rule at the campaign's rate (FXC £45 a sub, no rate history), the weeks before by the plan.
+  // so far: 3 days and 11 subs → base 3 × £63.50 = £190.50, commission 11 × £45 = £495 → the commission
+  assert.deepEqual(f.soFar, { days: 3, sales: 11, gross: 495 });
   // today's live event (nothing logged yet) and Friday's scheduled one
   assert.equal(f.remainingDays, 2);
   // history: 28 days at 2 and 4 at 10 → λ = 3, p10 = 2, p90 = 9.2
   assert.deepEqual(f.basis, { weeks: 8, workedDays: 32, salesPerDay: 3 });
   assert.deepEqual(f.sales, { low: 15, likely: 17, high: 30 });
-  assert.deepEqual([f.low, f.likely, f.high], [1050, 1140, 1725]);
-  assert.equal(f.bonusGap, 1);
-  assert.equal(f.bonusLikelihood, 'likely');
-  assert.ok(Math.abs(f.bonusProbability - (1 - Math.exp(-6))) < 1e-9);
-  assert.equal(f.stopsForBonus, 17, '96 sales from 1600 stops → 6% → 17 stops a sale');
+  // commission 495 + (15 | 17 | 30 − 11) × £45 against a base of 5 × £63.50 = £317.50
+  assert.deepEqual([f.low, f.likely, f.high], [675, 765, 1350]);
+  // no automatic bonus from 1.3: the rule block says the commission already beats the base
+  assert.deepEqual([f.bonusThreshold, f.bonusGap, f.bonusLikelihood, f.stopsForBonus], [0, 0, 'none', null]);
+  assert.deepEqual(
+    { ...f.rule, beatBaseProbability: f.rule.beatBaseProbability },
+    { dayRate: 63.5, projectedDays: 5, baseLikely: 317.5, commissionSoFar: 495, commissionLikely: 765, paidAsLikely: 'commission', ratePerSub: 45, subsToBeatBase: 0, stopsToBeatBase: null, beatBaseProbability: 1, extras: 0 },
+  );
   // the official figure is untouched, and nothing was written
   assert.equal(me.json.nextPayAmount, (await withSmart('0', () => rep.get('/finance/me'))).json.nextPayAmount);
   assert.deepEqual(rowCounts(srv.db), before, 'the forecast writes no payroll run and no gauge row');
@@ -111,14 +116,17 @@ test('/me/insights carries the same forecast as /finance/me', async () => {
 
 test('leaders: overrides projected from the team rate; recruiters and admins have no forecast', async () => {
   const l = (await leader.get('/finance/me')).json.forecast;
-  // Lee logs nothing himself: 2 team event days left at £80, team sales 11 so far + 2 days × 3 a day = 17 at £5
+  // Lee logs nothing himself: 2 team event days left at the £63.50 day rate; no overrides from 1.3 (decision 2)
   assert.equal(l.soFar.days, 0);
   assert.equal(l.basis.weeks, 0, 'no own history → no range');
-  assert.equal(l.likely, 2 * 80 + 17 * 5);
+  assert.equal(l.likely, 2 * 63.5);
   assert.equal(l.low, l.likely);
   assert.equal(l.high, l.likely);
-  assert.equal(l.bonusGap, 12);
+  assert.equal(l.bonusGap, 0);
   assert.equal(l.stopsForBonus, null);
+  assert.equal(l.rule.paidAsLikely, 'base');
+  assert.equal(l.rule.subsToBeatBase, 3, '£127 base / £45 a sub → 3 subs');
+  assert.equal(l.rule.beatBaseProbability, 0, 'no own history to draw on');
   assert.equal((await recruiter.get('/finance/me')).json.forecast, null);
   assert.equal((await admin.get('/finance/me')).json.forecast, null);
   srv.resetCache();
@@ -141,9 +149,11 @@ test('logging today removes today from the days left', async () => {
     const f = (await rep.get('/finance/me')).json.forecast;
     assert.equal(f.remainingDays, 1);
     assert.deepEqual([f.soFar.days, f.soFar.sales], [4, 13]);
-    assert.equal(f.bonusLikelihood, 'reached');
-    assert.equal(f.bonusProbability, 1);
-    assert.equal(f.bonusGap, 0);
+    // 13 × £45 = £585 beats 4 × £63.50 = £254
+    assert.equal(f.soFar.gross, 585);
+    assert.equal(f.bonusLikelihood, 'none');
+    assert.equal(f.rule.paidAsLikely, 'commission');
+    assert.equal(f.rule.beatBaseProbability, 1);
   } finally {
     srv.db.prepare('DELETE FROM gauge_entries WHERE id = ?').run(id);
   }

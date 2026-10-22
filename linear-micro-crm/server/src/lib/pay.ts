@@ -1,37 +1,34 @@
 /**
  * Pay rules shared by the dashboard, /finance/me, the finance summary and payroll materialisation — built on the
- * shared payroll maths (`estimateWeekPay`) and the same week rules the seed uses.
+ * shared payroll maths and the same week rules the seed uses. Release 1.3 (P1 pay-rule): weeks starting on or after
+ * PAY_RULE_FROM are paid by the base-or-commission rule (lib/payWeek.ts → shared calculateWeekPay); earlier weeks keep
+ * the 1.2 pay plan maths. Both read the same gauges, statement confirmations, bonuses and adjustments.
  */
-import { estimateWeekPay, nextPayday, type PayrollBreakdown, type Role } from '@lm/shared';
-import { all, get, type Db } from '../db/connection.ts';
-import { getPayPlan, listPayroll } from '../db/queries.ts';
-import { addDays, diffDays, eachMonday, mondayOf, sundayOf, todayISO } from './dates.ts';
+import { nextPayday, type PayrollBreakdown } from '@lm/shared';
+import { all, type Db } from '../db/connection.ts';
+import { listPayroll } from '../db/queries.ts';
+import { eachMonday, mondayOf, sundayOf, todayISO } from './dates.ts';
+import { computeWeek, payCalcContext, type ComputedWeek, type PayCalcContext, type PayUser } from './payWeek.ts';
 
-export interface PayUser {
-  id: number;
-  teamId: number | null;
-  payPlanId: number;
-  role: Role;
-  startDate: string;
-}
+export { RECRUITER_HIRES_SQL, type PayUser } from './payWeek.ts';
 
 export interface WeekPay {
   daysWorked: number;
-  /** gauge sales — or, for recruiters, the hires (candidates they own moved to `hired`) closed in the week */
+  /** gauge sales (subs logged) — or, for recruiters, the hires (candidates they own moved to `hired`) closed in the week */
   sales: number;
   teamSales: number;
+  /** Gross after the stored deductions only when `deductions` was passed (as syncPayrollRun does). */
   pay: PayrollBreakdown;
+  /** Release 1.3 (P1): the rule the week is paid by, and its full calculation (lines, per campaign, paid as). */
+  rule: ComputedWeek['rule'];
+  week: ComputedWeek;
 }
 
-/** Hires closed in a Mon–Sun week by the recruiter who owns the candidate: params (ownerId, monday, sunday). */
-export const RECRUITER_HIRES_SQL = `
-  SELECT COUNT(DISTINCT s.candidate_id) AS n FROM stage_changes s JOIN candidates c ON c.id = s.candidate_id
-  WHERE s.to_stage = 'hired' AND c.owner_id = ? AND substr(s.changed_at, 1, 10) BETWEEN ? AND ?`;
-
 /**
- * People who can earn in the Mon–Sun week starting `monday`: started by that Sunday and either still active or with
- * gauges recorded that week (so a leaver's final week is still paid). Optionally limited to one team. Release 1.3:
- * never a client portal account (role 'client').
+ * People who can earn in the Mon–Sun week starting `monday`: started by that Sunday and either still active, or with
+ * gauges recorded that week (so a leaver's final week is still paid), or with a correction or bonus landing on that
+ * week (1.3: money owed after a statement still reaches a leaver). Optionally limited to one team. Release 1.3: never a
+ * client portal account (role 'client').
  */
 export function payableUsers(db: Db, monday: string, teamId: number | null = null): (PayUser & { employeeId: string })[] {
   const sunday = sundayOf(monday);
@@ -40,75 +37,50 @@ export function payableUsers(db: Db, monday: string, teamId: number | null = nul
     `SELECT u.id, u.employee_id AS employeeId, u.team_id AS teamId, u.pay_plan_id AS payPlanId, u.role, u.start_date AS startDate
      FROM users u
      WHERE u.start_date <= ? AND u.role <> 'client'
-       AND (u.status = 'active' OR EXISTS (SELECT 1 FROM gauge_entries g WHERE g.user_id = u.id AND g.date BETWEEN ? AND ?))
+       AND (u.status = 'active'
+            OR EXISTS (SELECT 1 FROM gauge_entries g WHERE g.user_id = u.id AND g.date BETWEEN ? AND ?)
+            OR EXISTS (SELECT 1 FROM pay_adjustments a WHERE a.user_id = u.id AND a.target_week_start = ?))
        ${teamId ? 'AND u.team_id = ?' : ''}
      ORDER BY u.id`,
-    teamId ? [sunday, monday, sunday, teamId] : [sunday, monday, sunday],
+    teamId ? [sunday, monday, sunday, monday, teamId] : [sunday, monday, sunday, monday],
   );
+}
+
+export interface WeekPayOptions {
+  /** Settings and plans cached across many weeks. */
+  ctx?: PayCalcContext;
+  /** The run's stored deductions (syncPayrollRun): taken off `pay.gross`. */
+  deductions?: number;
 }
 
 /**
  * Pay for one person for the Mon–Sun week starting `monday`, by the rules the seed uses:
  *  - daysWorked = distinct gauge dates, sales = sum of gauge sales;
- *  - recruiters are office based: Mon–Fri base, clamped to their start date and (for the week in progress) to today,
- *    and their `sales` figure is the number of hires they closed (the recruiter plan pays a bonus on hires);
- *  - leaders' overrides come from their team's sales excluding their own;
- *  - the owner / assistant owner (no team) earn overrides on other reps' sales at the events they attended.
+ *  - recruiters are office based: Mon–Fri, clamped to their start date and (for the week in progress) to today, and
+ *    their `sales` figure is the number of hires they closed;
+ *  - from PAY_RULE_FROM (1.3): the day rate × days or the commission at the campaign rates, whichever is higher, plus
+ *    Matt's bonuses and the corrections landing on the week; a salaried plan (no day rate, no commission) is not paid;
+ *  - before it (1.2): the plan — base, commission, the bonus at its threshold (a recruiter's counts hires), leaders'
+ *    overrides on their team's sales excluding their own, no-team seniors' overrides on other reps' sales at the events
+ *    they attended.
  * Returns null when there is nothing to pay.
  */
-export function weekPayFor(db: Db, user: PayUser, monday: string, today = todayISO()): WeekPay | null {
-  const plan = getPayPlan(db, user.payPlanId);
-  if (!plan) return null;
-  const sunday = sundayOf(monday);
-  const own = get<{ days: number; sales: number }>(
-    db,
-    `SELECT COUNT(DISTINCT date) AS days, COALESCE(SUM(sales), 0) AS sales FROM gauge_entries WHERE user_id = ? AND date BETWEEN ? AND ?`,
-    [user.id, monday, sunday],
-  )!;
-  let daysWorked = Number(own.days);
-  let sales = Number(own.sales);
-  if (user.role === 'recruiter') {
-    const first = user.startDate > monday ? user.startDate : monday;
-    const friday = addDays(monday, 4);
-    const last = friday < today ? friday : today;
-    daysWorked = Math.max(0, Math.min(5, diffDays(first, last) + 1));
-    // a recruiter's "sales" are the hires they closed that week: the recruiter plan's bonus threshold counts hires
-    sales = Number(get<{ n: number }>(db, RECRUITER_HIRES_SQL, [user.id, monday, sunday])!.n);
-  }
-  let teamSales = 0;
-  if (plan.overridePerTeamSale > 0) {
-    if (user.teamId !== null) {
-      teamSales = Number(
-        get<{ s: number }>(
-          db,
-          `SELECT COALESCE(SUM(g.sales), 0) AS s FROM gauge_entries g JOIN users u ON u.id = g.user_id WHERE u.team_id = ? AND g.user_id <> ? AND g.date BETWEEN ? AND ?`,
-          [user.teamId, user.id, monday, sunday],
-        )!.s,
-      );
-    } else {
-      teamSales = Number(
-        get<{ s: number }>(
-          db,
-          `SELECT COALESCE(SUM(o.sales), 0) AS s FROM gauge_entries o
-           WHERE o.user_id <> ? AND o.event_id IN (SELECT event_id FROM gauge_entries WHERE user_id = ? AND date BETWEEN ? AND ?)`,
-          [user.id, user.id, monday, sunday],
-        )!.s,
-      );
-    }
-  }
-  if (daysWorked === 0 && sales === 0 && teamSales === 0) return null;
-  return { daysWorked, sales, teamSales, pay: estimateWeekPay(plan, { daysWorked, sales, teamSales }) };
+export function weekPayFor(db: Db, user: PayUser, monday: string, today = todayISO(), opts: WeekPayOptions = {}): WeekPay | null {
+  const w = computeWeek(db, user, monday, today, { ctx: opts.ctx, deductions: opts.deductions });
+  if (!w || !w.hasWork) return null;
+  return { daysWorked: w.daysWorked, sales: w.sales, teamSales: w.teamSales, pay: w.pay, rule: w.rule, week: w };
 }
 
 /** Projected pay for the Mon–Sun week starting `monday`, from the gauges recorded so far (null when nothing to pay). */
-export function weekPayEstimate(db: Db, user: PayUser, monday: string, today = todayISO()): PayrollBreakdown | null {
-  return weekPayFor(db, user, monday, today)?.pay ?? null;
+export function weekPayEstimate(db: Db, user: PayUser, monday: string, today = todayISO(), ctx?: PayCalcContext): PayrollBreakdown | null {
+  return weekPayFor(db, user, monday, today, { ctx })?.pay ?? null;
 }
 
 /** Live estimate of the company's (or one team's) wage bill for a week that has no payroll runs yet. */
 export function estimateWeekPayroll(db: Db, monday: string, teamId: number | null = null, today = todayISO()): number {
+  const ctx = payCalcContext(db);
   let total = 0;
-  for (const u of payableUsers(db, monday, teamId)) total += weekPayEstimate(db, u, monday, today)?.gross ?? 0;
+  for (const u of payableUsers(db, monday, teamId)) total += weekPayEstimate(db, u, monday, today, ctx)?.gross ?? 0;
   return Math.round(total * 100) / 100;
 }
 
@@ -122,9 +94,10 @@ export function earningsForRange(db: Db, user: PayUser, from: string, to: string
   const runs = listPayroll(db, 'WHERE p.user_id = ? AND p.week_start >= ? AND p.week_start <= ?', [user.id, from, to]);
   let total = runs.reduce((acc, r) => acc + r.gross, 0);
   const covered = new Set(runs.map((r) => r.weekStart));
+  const ctx = payCalcContext(db);
   for (const monday of eachMonday(from, to)) {
     if (monday < from || covered.has(monday)) continue;
-    total += weekPayEstimate(db, user, monday)?.gross ?? 0;
+    total += weekPayEstimate(db, user, monday, todayISO(), ctx)?.gross ?? 0;
   }
   return Math.round(total * 100) / 100;
 }

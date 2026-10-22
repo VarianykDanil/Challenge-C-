@@ -7,8 +7,9 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
   BENCHMARK_RATIOS,
-  calculatePayroll,
+  PAY_DAY_RATE_DEFAULT,
   paydayForWeek,
+  round2,
   validateGaugeFunnel,
   type CandidateSource,
   type CandidateStage,
@@ -27,7 +28,9 @@ import { seedExtensions } from './extensions/index.ts';
 import { extensionRng } from './extensions/types.ts';
 import { Rng } from '../lib/prng.ts';
 import { writeDemoClientMarkers } from '../lib/client.ts';
-import { RECRUITER_HIRES_SQL } from '../lib/pay.ts';
+import { weekPayFor } from '../lib/pay.ts';
+import { computeWeek, DAY_RATE_KEY, payCalcContext, RULE_FROM_KEY } from '../lib/payWeek.ts';
+import { carryForwardCorrections, insertRun, runFiguresOf, runIsDue } from './maintenance.ts';
 import * as D from '../lib/dates.ts';
 import * as S from './seed-data.ts';
 
@@ -150,6 +153,19 @@ export function seed(db: Db, today: string = D.todayISO(), options: SeedOptions 
       campaigns.set(c.code, { ...c, id: r.lastInsertRowid });
     }
     stats.campaigns = campaigns.size;
+    // Release 1.3 (P1): each campaign's rate history (campaign_rates) — its earlier rep rate from the start date, then
+    // the rate it has today (a client's commission change Matt approved, or an office edit). Written with the payroll
+    // below, once the owner (who approved the changes) exists.
+    const rateRows: { campaignId: number; rep: number; payout: number; from: string; source: string; approved: boolean }[] = [];
+    for (const c of campaigns.values()) {
+      const change = S.CAMPAIGN_RATE_CHANGES.find((x) => x.code === c.code);
+      if (!change) {
+        rateRows.push({ campaignId: c.id, rep: c.repCommissionPerSale, payout: c.payoutPerSale, from: c.startDate, source: 'seed', approved: false });
+        continue;
+      }
+      rateRows.push({ campaignId: c.id, rep: change.fromRep, payout: c.payoutPerSale, from: c.startDate, source: 'seed', approved: false });
+      rateRows.push({ campaignId: c.id, rep: c.repCommissionPerSale, payout: c.payoutPerSale, from: D.addDays(thisMonday, -7 * change.weeksAgo + change.dow), source: change.source, approved: true });
+    }
 
     // ── Users ────────────────────────────────────────────────────────────────
     const users: SeededUser[] = [];
@@ -578,63 +594,101 @@ export function seed(db: Db, today: string = D.todayISO(), options: SeedOptions 
       }
     }
 
-    // ── Payroll ──────────────────────────────────────────────────────────────
-    const insertRun = db.prepare(
-      `INSERT INTO payroll_runs (user_id, week_start, week_end, days_worked, sales, team_sales, base_pay, commission, bonus, overrides, deductions, gross, due_date, paid_date, status, reference)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    // ── Payroll (Release 1.3, P1 pay-rule) ───────────────────────────────────
+    // A fresh demo seed pays every week of its history by the 1.3 rule (PAY_RULE_FROM = the first seeded Monday): the
+    // £63.50 day rate × days worked or the commission at the campaign rates, whichever is higher, plus Matt's bonuses
+    // and the corrections from the charities' statements. Every run is calculated by the code the live app uses
+    // (lib/pay.ts weekPayFor → lib/payWeek.ts), so materialisation finds nothing to change afterwards. The pay draws
+    // (status, paid date, deductions, cancellations) come from a random stream of their own.
+    const payRng = new Rng(20261021);
+    const putMeta = db.prepare(`INSERT INTO meta (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value`);
+    putMeta.run(RULE_FROM_KEY, firstMonday);
+    putMeta.run(DAY_RATE_KEY, String(PAY_DAY_RATE_DEFAULT));
+    const insertRate = db.prepare(
+      `INSERT INTO campaign_rates (campaign_id, rep_rate, payout_rate, effective_from, source, approved_by, client_post_id, created_at) VALUES (?, ?, ?, ?, ?, ?, NULL, ?)`,
+    );
+    for (const r of rateRows) {
+      // a change was approved a few days before it took effect; the first rows are the campaign's own rates
+      const createdAt = r.approved ? ts(D.addDays(r.from, -3), 11) : ts(r.from, 9);
+      insertRate.run(r.campaignId, r.rep, r.payout, r.from, r.source, r.approved ? danil.id : null, createdAt);
+    }
+    const ctx = payCalcContext(db);
+    const insertAdjustment = db.prepare(
+      `INSERT INTO pay_adjustments (user_id, target_week_start, source_week_start, kind, amount, note, campaign_id, statement_id, invoice_id, created_by, created_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, NULL, NULL, ?, ?)`,
     );
     const completedMondays: string[] = [];
     for (let monday = firstMonday; D.sundayOf(monday) < today; monday = D.addDays(monday, 7)) completedMondays.push(monday);
     const lastCompletedMonday = completedMondays[completedMondays.length - 1];
-    // recruiters are paid a bonus on hires, so their weekly "sales" figure is the hires they closed (same rule as lib/pay.ts)
-    const hiresInWeek = db.prepare(RECRUITER_HIRES_SQL);
+    const notAfterNow = (iso: string) => (iso > nowIso ? nowIso : iso);
+
+    // Matt's bonuses for top performers (decision 2: by hand, never automatic), every figure from the gauges above.
+    const topSeller = (from: string, to: string, teamId: number | null) =>
+      db.prepare(
+        `SELECT g.user_id AS userId, SUM(g.sales) AS sales FROM gauge_entries g JOIN users u ON u.id = g.user_id
+         WHERE g.date BETWEEN ? AND ? AND u.role <> 'client' ${teamId ? 'AND u.team_id = ?' : ''}
+         GROUP BY g.user_id ORDER BY sales DESC, g.user_id ASC LIMIT 1`,
+      ).get(...(teamId ? [from, to, teamId] : [from, to])) as { userId: number; sales: number } | undefined;
+    {
+      // the last few calendar months, oldest first; each bonus is paid with the week in which the next month starts
+      let nextStart = D.startOfMonth(today);
+      const months: { start: string; end: string; next: string }[] = [];
+      for (let i = 0; i < S.BONUS_SEEDS.monthlyTop.months; i++) {
+        const start = D.startOfMonth(D.addDays(nextStart, -1));
+        months.push({ start, end: D.addDays(nextStart, -1), next: nextStart });
+        nextStart = start;
+      }
+      for (const m of months.reverse()) {
+        if (m.start < firstMonday) continue;
+        const top = topSeller(m.start, m.end, null);
+        if (!top || Number(top.sales) <= 0) continue;
+        const month = MONTH_NAMES[Number(m.start.slice(5, 7)) - 1]!;
+        insertAdjustment.run(
+          top.userId, D.mondayOf(m.next), null, 'bonus', S.BONUS_SEEDS.monthlyTop.amount,
+          `Top seller in ${month}: ${Number(top.sales)} subs. Thank you!`, null, danil.id, notAfterNow(ts(m.next, 10)),
+        );
+      }
+    }
+    if (lastCompletedMonday) {
+      for (const t of S.TEAMS) {
+        const teamId = teamIds.get(t.name)!;
+        const top = topSeller(lastCompletedMonday, D.sundayOf(lastCompletedMonday), teamId);
+        if (!top || Number(top.sales) <= 0) continue;
+        insertAdjustment.run(
+          top.userId, lastCompletedMonday, null, 'bonus', S.BONUS_SEEDS.weeklyTeamTop.amount,
+          `Top of ${t.name} last week: ${Number(top.sales)} subs`, null, danil.id, notAfterNow(ts(thisMonday, 9)),
+        );
+      }
+    }
+
+    // The charities' statements (S.STATEMENT_SEEDS) and the runs, week by week.
+    const statementCampaigns = S.STATEMENT_SEEDS.map((s) => ({ ...s, id: campaigns.get(s.code)!.id }));
+    const weekSales = db.prepare(
+      `SELECT e.campaign_id AS campaignId, COALESCE(SUM(g.sales), 0) AS logged FROM gauge_entries g JOIN events e ON e.id = g.event_id
+       WHERE g.user_id = ? AND g.date BETWEEN ? AND ? GROUP BY e.campaign_id`,
+    );
+    const insertConfirmation = db.prepare(
+      `INSERT INTO sale_confirmations (user_id, campaign_id, week_start, confirmed, statement_id, confirmed_at) VALUES (?, ?, ?, ?, NULL, ?)`,
+    );
+    const hasAdjustmentFor = db.prepare(`SELECT 1 FROM pay_adjustments WHERE user_id = ? AND target_week_start = ?`);
 
     for (const monday of completedMondays) {
       const sunday = D.sundayOf(monday);
       const dueDate = paydayForWeek(monday); // Friday after the Mon–Sun pay week (shared rule)
-      const { year, week } = D.isoWeek(monday);
-      // team sales this week by team (for overrides)
-      const teamWeekSales = new Map<number, number>();
       for (const u of users) {
-        if (!u.teamId) continue;
-        const agg = userWeek.get(`${u.id}|${monday}`);
-        if (agg) teamWeekSales.set(u.teamId, (teamWeekSales.get(u.teamId) ?? 0) + agg.sales);
-      }
-      for (const u of users) {
-        if (!(u.startDate <= sunday && (!u.stoppedOn || u.stoppedOn > monday))) continue;
-        const plan = plans.get(u.position)!;
-        const agg = userWeek.get(`${u.id}|${monday}`);
-        let daysWorked = agg?.days.size ?? 0;
-        let sales = agg?.sales ?? 0;
-        if (u.role === 'recruiter') {
-          // office-based: paid Mon–Fri; "sales" = hires closed this week (the recruiter plan's bonus counts hires)
-          const firstDay = u.startDate > monday ? u.startDate : monday;
-          daysWorked = Math.max(0, Math.min(5, D.diffDays(firstDay, D.addDays(monday, 4)) + 1));
-          sales = Number((hiresInWeek.get(u.id, monday, sunday) as { n: number }).n);
-        }
-        let teamSales = 0;
-        if (plan.overridePerTeamSale > 0) {
-          if (u.teamId) teamSales = Math.max(0, (teamWeekSales.get(u.teamId) ?? 0) - sales);
-          else {
-            // owners without a team: override on the other reps' sales at the events they ran
-            for (const evId of attendedEvents.get(`${u.id}|${monday}`) ?? []) {
-              for (const [uid, s] of salesByEventUser(evId)) if (uid !== u.id) teamSales += s;
-            }
-          }
-        }
-        const deductions = rng.chance(0.08) ? rng.pick([12.5, 20, 35, 50]) : 0;
-        const pay = calculatePayroll(plan, { daysWorked, sales, teamSales, deductions });
-        if (pay.gross <= 0) continue;
+        if (u.startDate > sunday) continue;
+        const working = !u.stoppedOn || u.stoppedOn > monday;
+        if (!working && !hasAdjustmentFor.get(u.id, monday)) continue; // a leaver is paid only what is still owed
         let status: PayrollStatus = 'pending';
         let paidDate: string | null = null;
         if (monday !== lastCompletedMonday && dueDate < today) {
-          const r = rng.next();
+          const r = payRng.next();
           if (r < 0.88) {
             status = 'paid';
-            paidDate = D.addDays(dueDate, -rng.int(0, 2));
+            paidDate = D.addDays(dueDate, -payRng.int(0, 2));
           } else if (r < 0.97) {
             status = 'late';
-            paidDate = D.addDays(dueDate, rng.int(1, 6));
+            paidDate = D.addDays(dueDate, payRng.int(1, 6));
             if (paidDate > today) paidDate = today;
           } else if (r < 0.98) {
             status = 'failed';
@@ -643,12 +697,44 @@ export function seed(db: Db, today: string = D.todayISO(), options: SeedOptions 
             paidDate = dueDate;
           }
         }
-        const reference = `PAY-${year}${String(week).padStart(2, '0')}-${u.employeeId}`;
-        insertRun.run(
-          u.id, monday, sunday, daysWorked, sales, teamSales, pay.basePay, pay.commission, pay.bonus, pay.overrides, pay.deductions, pay.gross,
-          dueDate, paidDate, status, reference,
-        );
+        const deductions = payRng.chance(0.08) ? payRng.pick([12.5, 20, 35, 50]) : 0;
+        // Each charity's statement for the week: before the money went, the week is calculated with it; after, the run
+        // stays as paid and the difference goes on the next week.
+        const logged = new Map((weekSales.all(u.id, monday, sunday) as { campaignId: number; logged: number }[]).map((r) => [Number(r.campaignId), Number(r.logged)]));
+        const afterPayment: { campaignId: number; code: string; confirmed: number; at: string }[] = [];
+        for (const s of statementCampaigns) {
+          const n = logged.get(s.id) ?? 0;
+          if (n <= 0) continue;
+          const arrival = D.addDays(sunday, s.lagDays);
+          if (arrival > today) continue; // not received yet: "not yet confirmed by BCN"
+          const confirmed = n - payRng.binomial(n, s.cancelRate);
+          const at = notAfterNow(ts(arrival, 9, 30));
+          if (paidDate !== null && paidDate < arrival) afterPayment.push({ campaignId: s.id, code: s.code, confirmed, at });
+          else insertConfirmation.run(u.id, s.id, monday, confirmed, at);
+        }
+        const w = weekPayFor(db, u, monday, today, { ctx, deductions });
+        if (carryForwardCorrections(db, u.id, monday, w) || !runIsDue(w, deductions)) {
+          for (const c of afterPayment) insertConfirmation.run(u.id, c.campaignId, monday, c.confirmed, c.at);
+          continue;
+        }
+        insertRun(db, u, monday, runFiguresOf(w), { deductions, paidDate, status });
         stats.payrollRuns++;
+        for (const c of afterPayment) {
+          // live = as paid here: the run was inserted a moment ago from these very facts (the app itself corrects a paid
+          // week from the run's stored inputs, lib/paidWeek.ts, as gauges, rates or the day rate may change after payday)
+          const before = computeWeek(db, u, monday, today, { ctx, deductions })!;
+          insertConfirmation.run(u.id, c.campaignId, monday, c.confirmed, c.at);
+          const after = computeWeek(db, u, monday, today, { ctx, deductions })!;
+          const difference = round2(after.pay.gross - before.pay.gross);
+          if (difference === 0) continue; // e.g. the base still applied
+          const paidFor = before.result.perCampaign.find((p) => p.campaignId === c.campaignId)?.confirmed ?? 0;
+          const what = c.confirmed < paidFor ? `${paidFor - c.confirmed} cancelled by ${c.code}` : `${c.confirmed - paidFor} more confirmed by ${c.code}`;
+          // the next week is still unpaid when the statement arrives (its payday is three days later)
+          insertAdjustment.run(
+            u.id, D.addDays(monday, 7), monday, c.confirmed < paidFor ? 'cancellation' : 'statement', difference,
+            `${what}: paid for ${paidFor}, confirmed ${c.confirmed}`, c.campaignId, null, c.at,
+          );
+        }
       }
     }
 

@@ -159,3 +159,45 @@ test('low ≤ likely ≤ high and the sales range is ordered, for randomised fix
     assert.ok(Number.isFinite(f.low) && Number.isFinite(f.high));
   }
 });
+
+// ── Release 1.3 (P1): the base-or-commission rule for weeks from PAY_RULE_FROM ──
+
+test('1.3 rule: base likely — 3 days and 11 subs at £10 so far, 2 days left at λ = 2', () => {
+  const f = payForecastFrom(input({ rule: { dayRate: 63.5, commissionSoFar: 110, ratePerSub: 10 } }));
+  // 5 projected days → base £317.50; commission 110 + 4 × £10 = £150 → the base
+  assert.deepEqual([f.low, f.likely, f.high], [317.5, 317.5, 317.5]);
+  assert.equal(f.soFar.gross, 190.5, '3 × £63.50 beats £110 of commission');
+  assert.equal(f.bonusLikelihood, 'none', 'no automatic bonus from 1.3');
+  assert.deepEqual([f.bonusThreshold, f.bonusAmount, f.bonusGap, f.bonusProbability, f.stopsForBonus], [0, 0, 0, 0, null]);
+  assert.ok(f.rule);
+  assert.equal(f.rule.projectedDays, 5);
+  assert.equal(f.rule.baseLikely, 317.5);
+  assert.equal(f.rule.commissionLikely, 150);
+  assert.equal(f.rule.paidAsLikely, 'base');
+  assert.equal(f.rule.subsToBeatBase, 21, '(£317.50 − £110) / £10 = 20.75 → 21 subs');
+  assert.equal(f.rule.stopsToBeatBase, 525, '21 subs at 25 stops a sub');
+  assert.ok(f.rule.beatBaseProbability < 1e-6);
+});
+
+test('1.3 rule: commission likely, with a bonus already on the week', () => {
+  const f = payForecastFrom(input({ rule: { dayRate: 63.5, commissionSoFar: 275, ratePerSub: 25, extras: 50 } }));
+  // commission 275 + 4 × £25 = £375 > base £317.50 → £375 + £50 bonus
+  assert.equal(f.likely, 425);
+  assert.equal(f.soFar.gross, 325, '£275 commission beats 3 × £63.50, plus the £50 bonus');
+  assert.equal(f.rule!.paidAsLikely, 'commission');
+  assert.equal(f.rule!.subsToBeatBase, 2, '(£317.50 − £275) / £25 = 1.7 → 2');
+  assert.ok(Math.abs(f.rule!.beatBaseProbability - (1 - 5 * Math.exp(-4))) < 1e-12);
+  assert.equal(f.rule!.extras, 50);
+});
+
+test('1.3 rule: the commission has already beaten the base; no days left keeps the figure', () => {
+  const ahead = payForecastFrom(input({ rule: { dayRate: 63.5, commissionSoFar: 400, ratePerSub: 25 } }));
+  assert.equal(ahead.rule!.subsToBeatBase, 0);
+  assert.equal(ahead.rule!.beatBaseProbability, 1);
+  assert.equal(ahead.rule!.stopsToBeatBase, null);
+  const done = payForecastFrom(input({ remainingDays: 0, rule: { dayRate: 63.5, commissionSoFar: 110, ratePerSub: 10 } }));
+  assert.deepEqual([done.low, done.likely, done.high], [190.5, 190.5, 190.5]);
+  assert.equal(done.rule!.beatBaseProbability, 0);
+  const noRate = payForecastFrom(input({ rule: { dayRate: 63.5, commissionSoFar: 0, ratePerSub: 0 } }));
+  assert.deepEqual([noRate.rule!.subsToBeatBase, noRate.rule!.beatBaseProbability, noRate.likely], [0, 0, 317.5]);
+});

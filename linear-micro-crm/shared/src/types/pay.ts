@@ -26,7 +26,7 @@
  * `ext:pay:day_rate`.
  */
 import type { PayrollBreakdown } from '../logic/finance.ts';
-import type { PayrollStatus } from '../types.ts';
+import type { PayForecast, PayrollStatus } from '../types.ts';
 
 /** £63.50 a day for everyone (decision 2). The admin may change it in Settings → Pay (`ext:pay:day_rate`). */
 export const PAY_DAY_RATE_DEFAULT = 63.5;
@@ -44,6 +44,11 @@ export interface PayRuleSettings {
 
 export interface PayRuleSettingsInput {
   dayRate?: number;
+  /**
+   * P1: a new PAY_RULE_FROM (a Monday, not after this week's). Unpaid runs of the weeks it moves between the two rules
+   * are recalculated; paid runs never change.
+   */
+  ruleFrom?: string;
 }
 
 /** Where a campaign rate came from: the demo seed / upgrade, an admin edit, or a client's commission change Matt approved. */
@@ -120,6 +125,12 @@ export interface PayAdjustment {
   invoiceId?: number | null;
   createdBy: number | null;
   createdAt: string;
+  /** P1: the campaign's code ("BCN") when campaignId is set, and who added it (for the office's views). */
+  campaignCode?: string | null;
+  createdByName?: string | null;
+  /** P1 (GET /pay/adjustments): whose pay it is on, and whether that week is already paid (then it cannot be removed). */
+  userName?: string;
+  targetPaid?: boolean;
 }
 
 /** Per campaign inside a week: what was logged, what the client confirmed and what that pays. */
@@ -135,6 +146,8 @@ export interface WeekCampaignPay {
   cancelled: number;
   /** True once a statement confirmed this campaign's week ("not yet confirmed by BCN" otherwise). */
   statementConfirmed: boolean;
+  /** P1: false when the campaign's client sends no statements (never "not yet confirmed"); absent = it does. */
+  awaitsStatement?: boolean;
   /** £ per sub; when the rate changed mid-week this is the weighted figure and `lines` carry each rate. */
   rate: number;
   /** confirmed × rate (summed over the rate periods). */
@@ -171,7 +184,57 @@ export interface WeekPayBreakdown extends PayrollBreakdown {
   /** The stored run, when there is one (null for the week in progress). */
   runId: number | null;
   status: PayrollStatus | 'estimate';
+  // ── P1 additions (optional, so every reader of the contract keeps working) ──
+  /** Σ adjustment lines landing on this week (bonuses are in `bonus`). */
+  adjustmentsTotal?: number;
+  /** The person's name (for the office's views). */
+  userName?: string;
+  /** Payday of the week and, once paid, the day the money went. */
+  dueDate?: string;
+  paidDate?: string | null;
+  /**
+   * Corrections made AFTER this week was paid that come from it (e.g. a statement cancelled 2 subs): each one sits on a
+   * later unpaid week (`targetWeekStart`). The week's own figures stay as paid.
+   */
+  corrections?: PayAdjustment[];
+  /** True when the figures are the run as it was calculated (and, once paid, as it was paid), not a live recalculation. */
+  asCalculated?: boolean;
+  /** The person's pay plan pays no day rate and no commission (the owner's salaried plan): weekly pay does not apply. */
+  salaried?: boolean;
+  /** Campaign codes whose statement for this week has not arrived yet ("Not yet confirmed by BCN"), as of now. */
+  awaiting?: string[];
 }
+
+/**
+ * P1: this week's pay estimate under the 1.3 rule — added to the existing PayForecast (GET /finance/me `forecast`,
+ * GET /me/insights `personal.payForecast`) as `rule` for weeks from PAY_RULE_FROM. The plan bonus fields of PayForecast
+ * read 0 / 'none' then (no automatic bonus from 1.3); this says whether the base or the commission is likely to apply.
+ */
+export interface PayForecastRule {
+  dayRate: number;
+  /** Days so far plus the team event days left (≤ 7). */
+  projectedDays: number;
+  /** dayRate × projectedDays. */
+  baseLikely: number;
+  /** Commission from what is logged (or confirmed) so far this week. */
+  commissionSoFar: number;
+  /** commissionSoFar + the likely remaining subs × ratePerSub. */
+  commissionLikely: number;
+  paidAsLikely: PaidAs;
+  /** £ per sub assumed for the days left (the rates of the team's campaigns ahead, else this week's, else recent). */
+  ratePerSub: number;
+  /** More subs needed for the commission to reach the likely base (0 when it already has). */
+  subsToBeatBase: number;
+  /** Stops those subs take at the person's own rate; null with too little history. */
+  stopsToBeatBase: number | null;
+  /** Chance (0..1) of reaching subsToBeatBase in the days left (Poisson, as the 1.2 bonus estimate); 1 when reached. */
+  beatBaseProbability: number;
+  /** Bonuses and corrections already on this week (known amounts, included in low / likely / high). */
+  extras: number;
+}
+
+/** PayForecast with the P1 rule block (present for weeks from PAY_RULE_FROM). */
+export type PayForecastWithRule = PayForecast & { rule?: PayForecastRule };
 
 /** One confirmed figure for applyConfirmedSales (P3 builds these from a statement's matched rows). */
 export interface ConfirmedSalesRow {

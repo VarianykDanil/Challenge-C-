@@ -1,4 +1,5 @@
-// "This week (estimate)" pay strip — OWNED BY p3-money-forecast-payroll-checks.
+// "This week (estimate)" pay strip — OWNED BY p3-money-forecast-payroll-checks; release 1.3 (P1 pay-rule): the second line
+// says whether the base or the commission is likely to be paid (ruleLine) for weeks from the rule date.
 // Mounted directly under the dashboard KPI tiles for reps and leaders only, inside an ErrorBoundary. Hidden when the
 // forecast is null/undefined (recruiters, admins, LM_SMART=0, still loading). At most 2 lines at 360 px: the amount
 // line, then one bonus line. Phones get the same facts in tighter wording ("~" for "about"; the bonus line keeps the
@@ -10,7 +11,7 @@ import clsx from 'clsx';
 import type { PayForecast } from '@lm/shared';
 import { formatGBP } from '@/lib/format';
 import { actionHref } from '@/lib/useActionParam';
-import { FORECAST_LABEL, bonusLine, bonusLineShort, forecastHeadline, forecastMethod, forecastRangeNote, forecastRangeNoteShort } from './weekPayCopy';
+import { FORECAST_LABEL, bonusLine, bonusLineShort, forecastHeadline, forecastMethod, forecastRangeNote, forecastRangeNoteShort, forecastRule, ruleLine, ruleLineShort } from './weekPayCopy';
 
 export interface WeekPayStripProps {
   /** insights.personal.payForecast — undefined while /me/insights loads. */
@@ -22,9 +23,11 @@ export function WeekPayStrip({ forecast: f, className }: WeekPayStripProps) {
   if (!f) return null;
   const note = forecastRangeNote(f);
   const noteShort = forecastRangeNoteShort(f);
-  const bonus = bonusLine(f);
-  const bonusShort = bonusLineShort(f);
-  const reached = f.bonusLikelihood === 'reached';
+  // Release 1.3 (P1): weeks paid by the base-or-commission rule say which of the two is likely instead of a plan bonus
+  const rule = forecastRule(f);
+  const bonus = rule ? ruleLine(f) : bonusLine(f);
+  const bonusShort = rule ? ruleLineShort(f) : bonusLineShort(f);
+  const reached = rule ? rule.paidAsLikely === 'commission' && rule.subsToBeatBase === 0 : f.bonusLikelihood === 'reached';
   // The full sentences are the link's accessible name; on phones the visible lines use the short copy (2 lines max).
   const name = [forecastHeadline(f), bonus, `${FORECAST_LABEL}. Based on ${forecastMethod(f)}.`].filter(Boolean).join('. ').replace(/\.\. /g, '. ');
   return (

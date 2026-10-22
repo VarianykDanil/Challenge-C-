@@ -51,6 +51,7 @@ import { recruitmentSummary } from '../../routes/recruitment.ts';
 import { addDays, nowISO } from '../dates.ts';
 import { GAUGE_FROM, GAUGE_PAYOUT_SQL, rankedBoard, ratiosOf, totalsFor, type TotalsWithDays } from '../metrics.ts';
 import { weekPayFor } from '../pay.ts';
+import { isRuleWeek, payRuleSettings } from '../payWeek.ts';
 import { CHECKED_IN_AT_SQL, SHIFT_CHECK_IN_JOIN } from '../shiftCheckIns.ts';
 import { checkInList } from './checkIns.ts';
 import { smartEnabled } from './enabled.ts';
@@ -128,7 +129,9 @@ function repFacts(db: Db, me: UserWithTeam, w: Week, today: string): RepDigestFa
     if (estimate && estimate.pay.gross > 0) pay = { gross: estimate.pay.gross, payday: paydayForWeek(w.monday), status: 'estimate', paidDate: null };
   }
   const sales = run ? Number(run.sales) : totals.sales;
-  const bonus = plan && plan.bonusThreshold > 0 && plan.bonusAmount > 0
+  // Release 1.3 (P1): no automatic bonus from PAY_RULE_FROM (Matt adds bonuses by hand), so no bonus line for those weeks
+  const planBonus = !isRuleWeek(payRuleSettings(db), w.monday);
+  const bonus = planBonus && plan && plan.bonusThreshold > 0 && plan.bonusAmount > 0
     ? { threshold: plan.bonusThreshold, amount: plan.bonusAmount, sales, reached: run ? Number(run.bonus) > 0 : sales >= plan.bonusThreshold }
     : null;
 

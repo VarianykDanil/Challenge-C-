@@ -3,6 +3,7 @@ import type { CampaignFinance, Expense, FinanceWeek, PayrollRunWithUser, Positio
 import { EXPENSE_CATEGORY_LABELS, POSITION_LABELS } from '@lm/shared';
 import { csvDate, csvLabel, csvMoney, csvPct, csvYesNo, type CsvColumn } from '@/lib/csv';
 import { PAYROLL_STATUS_LABELS } from '@/lib/labels';
+import { PAID_AS_LABELS } from '@/features/pay/payCopy';
 
 /**
  * Payslip rows; `showUser` adds the person columns for team and company views. `position` is the single person's
@@ -25,10 +26,15 @@ export function payrollRunCsvColumns(showUser = false, position?: Position): Csv
   cols.push(
     { key: 'daysWorked', header: 'Days' },
     { key: 'sales', header: salesHeader },
+    // Release 1.3 (P1): the base-or-commission rule — which one the week paid, and the subs the clients confirmed
+    { key: 'paidAs', header: 'Paid as', format: (v) => (v === 'base' || v === 'commission' ? PAID_AS_LABELS[v] : 'Plan') },
+    { key: 'salesConfirmed', header: 'Subs confirmed', format: (v) => (typeof v === 'number' ? String(v) : '') },
+    { key: 'salesCancelled', header: 'Subs cancelled', format: (v) => (typeof v === 'number' ? String(v) : '') },
     { key: 'basePay', header: 'Base', format: csvMoney },
     { key: 'commission', header: 'Commission', format: csvMoney },
     { key: 'bonus', header: 'Bonus', format: csvMoney },
     { key: 'overrides', header: 'Overrides', format: csvMoney },
+    { key: 'adjustmentsTotal', header: 'Corrections', format: (v) => (typeof v === 'number' ? csvMoney(v) : '0.00') },
     { key: 'deductions', header: 'Deductions', format: csvMoney },
     { key: 'gross', header: 'Gross', format: csvMoney },
     { key: 'dueDate', header: 'Due', format: csvDate },
@@ -40,7 +46,7 @@ export function payrollRunCsvColumns(showUser = false, position?: Position): Csv
   return cols;
 }
 
-/** Company → "By campaign": sales, revenue, rep commission, margin and margin as a share of revenue. */
+/** Company → "By campaign": sales, revenue, commission at the campaign's rate, margin and margin as a share of revenue. */
 export const campaignFinanceCsvColumns: CsvColumn<CampaignFinance>[] = [
   { key: 'campaignName', header: 'Campaign' },
   { key: 'sales', header: 'Sales' },

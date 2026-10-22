@@ -4,6 +4,8 @@ import {
   avgDaysLate,
   marginAmount,
   onTimeRate,
+  payMoney,
+  payWeekLabel,
   payrollStatusFor,
   round2,
   type CampaignFinance,
@@ -22,6 +24,7 @@ import { badRequest, conflict, forbidden, notFound } from '../lib/errors.ts';
 import { GAUGE_COMMISSION_SQL, GAUGE_FROM, GAUGE_PAYOUT_SQL, MONDAY_SQL, mondayOfSql } from '../lib/metrics.ts';
 import { assertInvoicePayable, withInvoiceSummaries } from '../lib/invoices.ts';
 import { estimateWeekPayroll, nextPay } from '../lib/pay.ts';
+import { payRuleSettings, rateOnSql } from '../lib/payWeek.ts';
 import { redactPayroll } from '../lib/scope.ts';
 import { smartEnabled } from '../lib/smart/enabled.ts';
 import { weekPayForecast } from '../lib/smart/payForecast.ts';
@@ -161,6 +164,11 @@ export function financeRouter(db: Db): Router {
     if (date > today) throw badRequest('paidDate cannot be in the future');
     if (date < existing.weekEnd) throw badRequest(`paidDate cannot be before the pay week ends (${existing.weekEnd})`);
     const status = payrollStatusFor(existing.dueDate, date, today); // 'paid' or 'late'
+    // Release 1.3 (P1): corrections bigger than the week's pay leave a run below £0 — money is owed, not paid
+    if (existing.gross < 0) {
+      const first = existing.userName.split(' ')[0] ?? existing.userName;
+      throw conflict(`${first}'s pay for ${payWeekLabel(existing.weekStart)} comes to ${payMoney(existing.gross)}, below £0, so it cannot be marked paid. Add an adjustment to carry part of a correction to a later week first.`);
+    }
     // Release 1.3 (P2): Mark paid needs the self-billing invoice accepted or deemed accepted, else an admin override with
     // a reason (lib/invoices.ts; allows everything until P2 lands).
     assertInvoicePayable(db, existing, currentUser(req), req.body);
@@ -281,19 +289,21 @@ export function financeSummary(db: Db, from: string, to: string, teamId: number 
     { revenue: 0, payroll: 0, expenses: 0, profit: 0, sales: 0 },
   );
 
-  // Commission is what the reps actually earn on each campaign's sales — the pay-plan rate captured on each entry when
-  // it was logged (the same figure payroll used for that week), not the campaign's nominal rep_commission_per_sale
-  // rate card. Margin = revenue − that commission, in pounds.
+  // Commission is what the reps earn on each campaign's sales. Release 1.3 (P1): for pay weeks from PAY_RULE_FROM it is
+  // the sales at the campaign's rep rate in effect on each day (campaign_rates) — the commission value of the subs,
+  // whether that week paid the commission or the base; before it, the pay-plan rate captured on each entry when it
+  // was logged (the figure 1.2 payroll used). Margin = revenue − that commission, in pounds.
+  const ruleFrom = payRuleSettings(db).ruleFrom;
   const byCampaign = all<{ campaignId: number; campaignName: string; campaignColor: string; sales: number; revenue: number; commission: number }>(
     db,
     `SELECT c.id AS campaignId, c.name AS campaignName, c.color AS campaignColor,
             COALESCE(SUM(g.sales), 0) AS sales,
             COALESCE(SUM(g.sales * ${GAUGE_PAYOUT_SQL}), 0) AS revenue,
-            COALESCE(SUM(g.sales * ${GAUGE_COMMISSION_SQL}), 0) AS commission
+            COALESCE(SUM(g.sales * CASE WHEN ${MONDAY_SQL} >= ? THEN ${rateOnSql('e.campaign_id', 'g.date', 'c.rep_commission_per_sale')} ELSE ${GAUGE_COMMISSION_SQL} END), 0) AS commission
      ${GAUGE_FROM}
      JOIN pay_plans pp ON pp.id = u.pay_plan_id
      WHERE g.date BETWEEN ? AND ?${teamGauge} GROUP BY c.id ORDER BY revenue DESC`,
-    [wkFrom, wkTo, ...tp()],
+    [ruleFrom, wkFrom, wkTo, ...tp()],
   ).map<CampaignFinance>((r) => ({
     ...r,
     revenue: round2(Number(r.revenue)),

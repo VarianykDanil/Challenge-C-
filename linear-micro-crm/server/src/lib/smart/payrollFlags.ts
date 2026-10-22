@@ -11,6 +11,7 @@ import { payrollFlags, PAYROLL_FLAG_RULES, round2, type PayrollFlag, type Payrol
 import { all, placeholders, type Db, type Param } from '../../db/connection.ts';
 import { addDays } from '../dates.ts';
 import { weekPayFor, type PayUser } from '../pay.ts';
+import { isRuleWeek, payCalcContext } from '../payWeek.ts';
 import { smartEnabled } from './enabled.ts';
 
 export const MAX_FLAGGED_RUNS = 80;
@@ -115,6 +116,9 @@ export function payrollFlagsFor(db: Db, runs: readonly PayrollRunWithUser[], me:
     ).map((u) => [Number(u.id), u]),
   );
 
+  // Release 1.3 (P1): one settings / plans cache for the batch; weeks under the base-or-commission rule have no plan
+  // bonus (any bonus on them is Matt's, by hand), so bonus_single_day reads a threshold of 0 for them.
+  const ctx = payCalcContext(db);
   for (const r of batch) {
     const u = users.get(r.userId);
     const userDays = daysByUser.get(r.userId) ?? [];
@@ -125,7 +129,7 @@ export function payrollFlagsFor(db: Db, runs: readonly PayrollRunWithUser[], me:
     if (u && u.bonusThreshold !== null) {
       const payUser: PayUser = { id: u.id, teamId: u.teamId === null ? null : Number(u.teamId), payPlanId: Number(u.payPlanId), role: u.role, startDate: u.startDate };
       // The pay week has ended for every run (runs exist only for complete weeks), so pass its Sunday + 1 as "today".
-      const w = weekPayFor(db, payUser, r.weekStart, addDays(r.weekEnd, 1));
+      const w = weekPayFor(db, payUser, r.weekStart, addDays(r.weekEnd, 1), { ctx });
       recomputedGross = round2((w?.pay.gross ?? 0) - r.deductions);
     }
     out.set(
@@ -135,7 +139,7 @@ export function payrollFlagsFor(db: Db, runs: readonly PayrollRunWithUser[], me:
         priorGross: priorByRun.get(r.id) ?? [],
         trailingDailySales: trailing,
         weekDailySales: inWeek,
-        bonusThreshold: Number(u?.bonusThreshold ?? 0),
+        bonusThreshold: isRuleWeek(ctx.settings, r.weekStart) ? 0 : Number(u?.bonusThreshold ?? 0),
         recomputedGross,
         recruiter: (u?.role ?? null) === 'recruiter' || r.position === 'recruiter',
       }),

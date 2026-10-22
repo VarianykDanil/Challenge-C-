@@ -31,16 +31,63 @@ export interface PayPlanSeed {
   overridePerTeamSale: number;
 }
 
+/**
+ * Release 1.3 (P1 pay-rule): every plan pays the £63.50 day rate (decision 2: "Day rate £63.50 for everyone") and no
+ * automatic bonus or override; commission per sub comes from each campaign's rate (CAMPAIGNS / CAMPAIGN_RATE_CHANGES),
+ * so the plans' own commission per sale is 0. The owner's salaried plan pays neither a day rate nor commission, so it
+ * is not paid weekly (lib/payWeek.ts isSalariedPlan). Office recruiters keep Mon–Fri days; they log no sales, so they
+ * are paid the base.
+ */
 export const PAY_PLANS: PayPlanSeed[] = [
-  { name: 'Trainee plan', position: 'trainee', basePerDay: 80, commissionPerSale: 25, bonusThreshold: 10, bonusAmount: 50, overridePerTeamSale: 0 },
-  { name: 'Field rep plan', position: 'field_rep', basePerDay: 60, commissionPerSale: 45, bonusThreshold: 12, bonusAmount: 75, overridePerTeamSale: 0 },
-  { name: 'Team leader plan', position: 'team_leader', basePerDay: 70, commissionPerSale: 45, bonusThreshold: 12, bonusAmount: 100, overridePerTeamSale: 8 },
-  { name: 'Crew leader plan', position: 'crew_leader', basePerDay: 90, commissionPerSale: 45, bonusThreshold: 15, bonusAmount: 150, overridePerTeamSale: 12 },
-  { name: 'Assistant owner plan', position: 'assistant_owner', basePerDay: 120, commissionPerSale: 40, bonusThreshold: 0, bonusAmount: 0, overridePerTeamSale: 15 },
-  { name: 'Owner (salaried)', position: 'owner', basePerDay: 0, commissionPerSale: 0, bonusThreshold: 0, bonusAmount: 0, overridePerTeamSale: 20 },
-  // Office recruiter: Mon–Fri base, no sales commission; the bonus threshold counts HIRES closed in the week, not sales.
-  { name: 'Office recruiter plan', position: 'recruiter', basePerDay: 95, commissionPerSale: 0, bonusThreshold: 2, bonusAmount: 100, overridePerTeamSale: 0 },
+  { name: 'Trainee plan', position: 'trainee', basePerDay: 63.5, commissionPerSale: 0, bonusThreshold: 0, bonusAmount: 0, overridePerTeamSale: 0 },
+  { name: 'Field rep plan', position: 'field_rep', basePerDay: 63.5, commissionPerSale: 0, bonusThreshold: 0, bonusAmount: 0, overridePerTeamSale: 0 },
+  { name: 'Team leader plan', position: 'team_leader', basePerDay: 63.5, commissionPerSale: 0, bonusThreshold: 0, bonusAmount: 0, overridePerTeamSale: 0 },
+  { name: 'Crew leader plan', position: 'crew_leader', basePerDay: 63.5, commissionPerSale: 0, bonusThreshold: 0, bonusAmount: 0, overridePerTeamSale: 0 },
+  { name: 'Assistant owner plan', position: 'assistant_owner', basePerDay: 63.5, commissionPerSale: 0, bonusThreshold: 0, bonusAmount: 0, overridePerTeamSale: 0 },
+  { name: 'Owner (salaried)', position: 'owner', basePerDay: 0, commissionPerSale: 0, bonusThreshold: 0, bonusAmount: 0, overridePerTeamSale: 0 },
+  // Office recruiter: Mon–Fri at the day rate; no gauges, so no commission.
+  { name: 'Office recruiter plan', position: 'recruiter', basePerDay: 63.5, commissionPerSale: 0, bonusThreshold: 0, bonusAmount: 0, overridePerTeamSale: 0 },
 ];
+
+/**
+ * Release 1.3 (P1): earlier rep rates in each campaign's history (campaign_rates). The campaign's own rate (CAMPAIGNS
+ * repCommissionPerSale) took effect `weeksAgo` weeks before this Monday, on day `dow` (0 = Monday); before that the
+ * campaign paid `fromRep` a sub from its start date. Payouts do not change (revenue snapshots use today's payout).
+ */
+export interface CampaignRateChangeSeed {
+  code: string;
+  fromRep: number;
+  weeksAgo: number;
+  dow: number;
+  /** 'client': a commission change the client posted and Matt approved; 'admin': entered by the office. */
+  source: 'client' | 'admin';
+}
+
+export const CAMPAIGN_RATE_CHANGES: CampaignRateChangeSeed[] = [
+  // Breast Cancer Now raised its rate per sub from £18 to £20 on a Thursday six weeks ago (a mid-week change)
+  { code: 'BCN', fromRep: 18, weeksAgo: 6, dow: 3, source: 'client' },
+  { code: 'FCB', fromRep: 14, weeksAgo: 14, dow: 0, source: 'admin' },
+];
+
+/**
+ * Release 1.3 (P1): the charities' commission statements in the demo (sale_confirmations). Each campaign's statement
+ * for a pay week arrives `lagDays` after the week's Sunday: CHN two days later (before payday, so the week is corrected
+ * before it is paid), BCN nine days later (after payday, so cancellations go on the next week as corrections). Each
+ * logged sub is cancelled with probability `cancelRate`. P3's statements package may link its own demo statements to
+ * these rows (sale_confirmations.statement_id is NULL here).
+ */
+export const STATEMENT_SEEDS: { code: string; lagDays: number; cancelRate: number }[] = [
+  { code: 'CHN', lagDays: 2, cancelRate: 0.07 },
+  { code: 'BCN', lagDays: 9, cancelRate: 0.06 },
+];
+
+/** Release 1.3 (P1): Matt's manual bonuses in the demo (no automatic bonus from 1.3). */
+export const BONUS_SEEDS = {
+  /** The company's top seller of each of the last `months` calendar months, paid with the week the next month starts. */
+  monthlyTop: { amount: 50, months: 3 },
+  /** The top seller of each team in the last completed week, added this Monday to that (unpaid) week. */
+  weeklyTeamTop: { amount: 25 },
+} as const;
 
 export interface CampaignSeed {
   name: string;
@@ -58,25 +105,25 @@ export interface CampaignSeed {
 
 export const CAMPAIGNS: CampaignSeed[] = [
   {
-    name: 'Breast Cancer Now', code: 'BCN', sector: 'charity', type: 'fundraising', payoutPerSale: 120, repCommissionPerSale: 45,
+    name: 'Breast Cancer Now', code: 'BCN', sector: 'charity', type: 'fundraising', payoutPerSale: 120, repCommissionPerSale: 20,
     color: '#EC4899', startDate: '2024-03-04',
     description: 'Regular-giving sign-ups for Breast Cancer Now at private sites and shopping centres across the North West.',
     eventTypes: [['private_site', 60], ['retail', 40]],
   },
   {
-    name: "Children's Hospice North", code: 'CHN', sector: 'charity', type: 'fundraising', payoutPerSale: 110, repCommissionPerSale: 45,
+    name: "Children's Hospice North", code: 'CHN', sector: 'charity', type: 'fundraising', payoutPerSale: 110, repCommissionPerSale: 18,
     color: '#8B5CF6', startDate: '2024-09-02',
     description: 'Monthly donor acquisition for the regional children\'s hospice network at public events and venues.',
     eventTypes: [['event', 50], ['retail', 30], ['private_site', 20]],
   },
   {
-    name: 'Volt Energy', code: 'VLT', sector: 'energy', type: 'b2b', payoutPerSale: 150, repCommissionPerSale: 55,
+    name: 'Volt Energy', code: 'VLT', sector: 'energy', type: 'b2b', payoutPerSale: 150, repCommissionPerSale: 35,
     color: '#F59E0B', startDate: '2025-01-13',
     description: 'Business energy switching for SMEs — business parks and high streets across Greater Manchester.',
     eventTypes: [['b2b', 100]],
   },
   {
-    name: 'FibreCity Broadband', code: 'FCB', sector: 'broadband', type: 'b2c', payoutPerSale: 95, repCommissionPerSale: 40,
+    name: 'FibreCity Broadband', code: 'FCB', sector: 'broadband', type: 'b2c', payoutPerSale: 95, repCommissionPerSale: 15,
     color: '#06B6D4', startDate: '2025-06-02',
     description: 'Full-fibre broadband sign-ups in newly enabled residential patches, plus retail pop-ups.',
     eventTypes: [['residential', 60], ['retail', 40]],

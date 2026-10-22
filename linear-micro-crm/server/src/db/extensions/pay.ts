@@ -17,6 +17,8 @@
  *    new rule for all history) and `ext:pay:day_rate` (default 63.5) — written by P1.
  * Rules: ./types.ts. Paid runs never change; corrections go to the next unpaid week as adjustment lines.
  */
+import { mondayOf, nowISO, todayISO } from '../../lib/dates.ts';
+import type { Db } from '../connection.ts';
 import type { DbExtension } from './types.ts';
 import { addColumnIfMissing } from './types.ts';
 
@@ -61,7 +63,34 @@ CREATE TABLE IF NOT EXISTS sale_confirmations (
   PRIMARY KEY (user_id, campaign_id, week_start)
 );
 CREATE INDEX IF NOT EXISTS idx_sale_confirmations_week ON sale_confirmations(week_start);
+CREATE INDEX IF NOT EXISTS idx_pay_adjustments_source ON pay_adjustments(user_id, source_week_start);
 `;
+
+/** meta keys (lib/payWeek.ts reads them). */
+export const PAY_RULE_FROM_KEY = 'ext:pay:rule_from';
+export const PAY_DAY_RATE_KEY = 'ext:pay:day_rate';
+
+/**
+ * P1's data steps for an EXISTING database (each guarded; nothing on an empty one — the demo seed writes its own):
+ *  - PAY_RULE_FROM = the Monday of the week the upgrade first runs (`ext:pay:rule_from`), so every week already worked
+ *    keeps the 1.2 plan rules and the new rule starts with the week in progress;
+ *  - one 'seed' rate row per campaign that has none, from its current rep commission and payout per sale, effective
+ *    from its start date (so the history covers every sale it already has).
+ * Payroll runs are never touched here: the first week under the new rule has no run yet.
+ */
+function dataSteps(db: Db): string[] {
+  const changed: string[] = [];
+  if (!db.prepare(`SELECT 1 FROM users LIMIT 1`).get()) return changed; // a fresh install: the demo seed sets both
+  // A setting, recorded like an extension flag (not reported as a changed row): GET /pay/settings shows it.
+  db.prepare(`INSERT INTO meta (key, value) VALUES (?, ?) ON CONFLICT(key) DO NOTHING`).run(PAY_RULE_FROM_KEY, mondayOf(todayISO()));
+  const rates = db.prepare(
+    `INSERT INTO campaign_rates (campaign_id, rep_rate, payout_rate, effective_from, source, approved_by, client_post_id, created_at)
+     SELECT c.id, c.rep_commission_per_sale, c.payout_per_sale, c.start_date, 'seed', NULL, NULL, ?
+     FROM campaigns c WHERE NOT EXISTS (SELECT 1 FROM campaign_rates r WHERE r.campaign_id = c.id)`,
+  ).run(nowISO());
+  if (Number(rates.changes) > 0) changed.push('campaign_rates.seed');
+  return changed;
+}
 
 export const extension: DbExtension = {
   name: 'pay',
@@ -73,6 +102,9 @@ export const extension: DbExtension = {
       addColumnIfMissing(db, 'payroll_runs', 'sales_confirmed', 'INTEGER'),
       addColumnIfMissing(db, 'payroll_runs', 'sales_cancelled', 'INTEGER'),
       addColumnIfMissing(db, 'payroll_runs', 'adjustments_total', 'REAL'),
+      // P1: the week as it was calculated (lines, per campaign, paid as) — a paid run keeps it as paid
+      addColumnIfMissing(db, 'payroll_runs', 'breakdown_json', 'TEXT'),
+      ...dataSteps(db),
     ].filter((name): name is string => name !== null);
   },
 };

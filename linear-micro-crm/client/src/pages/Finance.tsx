@@ -3,8 +3,8 @@ import { useLocation } from 'react-router-dom';
 import { Check, ChevronDown, Info, Plus, Trash2, TriangleAlert } from 'lucide-react';
 import clsx from 'clsx';
 import type { Expense, PayForecast, PayrollRunWithUser } from '@lm/shared';
-import { EXPENSE_CATEGORY_LABELS } from '@lm/shared';
-import { Badge, Button, Card, CardHeader, DataTable, EmptyState, KpiTile, PageHeader, ProgressBar, Tabs, Tooltip, useToast, type Column } from '@/components/ui';
+import { EXPENSE_CATEGORY_LABELS, payMoney } from '@lm/shared';
+import { Badge, Button, Card, CardHeader, DataTable, EmptyState, KpiTile, Modal, PageHeader, ProgressBar, Skeleton, Tabs, Tooltip, useToast, type Column } from '@/components/ui';
 import { DonutChart, TrendChart } from '@/components/charts';
 import { useCampaigns, useDeleteExpense, useExpenses, useFinanceSummary, useMyFinance, usePayRun, usePayroll } from '@/api/hooks';
 import { useCurrentUser } from '@/auth/AuthProvider';
@@ -13,7 +13,12 @@ import { PayExportButton } from '@/features/office/PayExportButton';
 // Release 1.3 slot (P2): disputed self-billing invoices, at the top of Company.
 import { DisputesCard } from '@/features/invoices/DisputesCard';
 import { AddExpenseModal, FlaggedRunsList, LazyBulkPayBar, PayrollRunsTable, PayslipModal, campaignFinanceCsvColumns, expenseCsvColumns, financeWeekCsvColumns, payrollRunCsvColumns, payrollRunsRange, useBulkMarkPaid, warningFlags, type PayrollRunSelection } from '@/features/finance';
-import { FORECAST_LABEL, bonusLine, forecastMethod, forecastNoRangeReason, forecastRange } from '@/features/smart/weekPayCopy';
+import { FORECAST_LABEL, bonusLine, forecastMethod, forecastNoRangeReason, forecastRange, forecastRule, ruleLine } from '@/features/smart/weekPayCopy';
+// Release 1.3 (P1): the base-or-commission rule — the week's breakdown, bonuses and corrections
+import { AdjustmentsCard } from '@/features/pay/AdjustmentsCard';
+import { BreakdownBody } from '@/features/pay/PayBreakdown';
+import { commissionWeeks } from '@/features/pay/payCopy';
+import { usePayBreakdown } from '@/api/pay';
 import { csvFilename, sortRows } from '@/lib/csv';
 import { todayISO } from '@/lib/dates';
 import { formatDate, formatDateShort, formatDecimal, formatGBP, formatNumber, formatPct, formatRangeLabel, formatRelative } from '@/lib/format';
@@ -91,7 +96,7 @@ function MyPay({ onOpen }: { onOpen: (r: PayrollRunWithUser) => void }) {
         {!d ? <KpiSkeletons count={4} /> : (
           <>
             <KpiTile label="Earned · last 12 weeks" value={formatGBP(d.totals.gross)} tone="primary" hint={`${formatNumber(d.runs.length)} payslips`} />
-            <KpiTile label="Commission" value={formatGBP(d.totals.commission)} hint={d.totals.gross ? `${formatPct(d.totals.commission / d.totals.gross)} of gross` : undefined} />
+            <CommissionTile runs={d.runs} commission={d.totals.commission} gross={d.totals.gross} />
             <KpiTile label="Paid on time" value={d.totals.onTimeRate == null ? '—' : formatPct(d.totals.onTimeRate)} tone={d.totals.onTimeRate == null ? 'default' : d.totals.onTimeRate >= 0.95 ? 'success' : 'warning'} hint="of paid runs" />
             <KpiTile label="Next payday" {...nextPaydayTile(d.nextPayday, d.nextPayAmount, 'Nothing pending')} />
           </>
@@ -129,6 +134,10 @@ function ThisWeekSoFar({ f }: { f: PayForecast }) {
   const bonus = bonusLine(f);
   const showBonus = f.bonusLikelihood !== 'none' && f.bonusThreshold > 0;
   const method = `Based on ${forecastMethod(f)}. ${FORECAST_LABEL}.`;
+  // Release 1.3 (P1): weeks from the rule date — base or commission, and how close the commission is to the base
+  const rule = forecastRule(f);
+  const line = rule ? ruleLine(f) : null;
+  const [open, setOpen] = useState(false);
   return (
     <Card data-week-pay-card="">
       <CardHeader
@@ -175,8 +184,53 @@ function ThisWeekSoFar({ f }: { f: PayForecast }) {
           <p className={clsx('text-sm', f.bonusLikelihood === 'reached' ? 'font-medium text-success' : 'text-fg')}>{bonus}</p>
         </div>
       )}
-      <p className="mt-3 text-xs text-muted">{FORECAST_LABEL}.</p>
+      {rule && rule.baseLikely > 0 && (
+        <div className="mt-4 space-y-1.5" data-week-pay-rule="">
+          <ProgressBar
+            value={Math.min(rule.commissionSoFar, rule.baseLikely)}
+            max={rule.baseLikely}
+            size="sm"
+            tone={rule.commissionSoFar >= rule.baseLikely ? 'success' : 'primary'}
+            label={`Commission so far ${payMoney(rule.commissionSoFar)}, against a base of ${payMoney(rule.baseLikely)} if you work ${formatNumber(rule.projectedDays)} day${rule.projectedDays === 1 ? '' : 's'}`}
+          />
+          {line && <p className={clsx('text-sm', rule.commissionSoFar >= rule.baseLikely ? 'font-medium text-success' : 'text-fg')}>{line}</p>}
+        </div>
+      )}
+      <div className="mt-3 flex flex-wrap items-center justify-between gap-2">
+        <p className="text-xs text-muted">{FORECAST_LABEL}.</p>
+        {rule && <Button size="sm" variant="ghost" className="h-10 sm:h-8" onClick={() => setOpen(true)}>How this week is worked out</Button>}
+      </div>
+      {rule && <ThisWeekBreakdown open={open} onClose={() => setOpen(false)} weekStart={f.weekStart} />}
     </Card>
+  );
+}
+
+/** Release 1.3 (P1): the week in progress line by line (the same breakdown a run's payslip shows). */
+function ThisWeekBreakdown({ open, onClose, weekStart }: { open: boolean; onClose: () => void; weekStart: string }) {
+  const me = useCurrentUser();
+  const q = usePayBreakdown(me.id, weekStart, { enabled: open });
+  return (
+    <Modal open={open} onClose={onClose} title="This week so far" description={`Week ${formatRangeLabel(weekStart, sundayAfter(weekStart))} · an estimate until the week closes`} size="lg">
+      {q.data ? <BreakdownBody b={q.data} /> : q.isError ? <ErrorState error={q.error} onRetry={() => void q.refetch()} /> : (
+        <div className="space-y-2" aria-busy><Skeleton className="h-4 w-48" /><Skeleton className="h-20" /></div>
+      )}
+    </Modal>
+  );
+}
+
+/**
+ * Release 1.3 (P1): the commission tile. Weeks paid by the base-or-commission rule pay one or the other, so the tile
+ * counts the weeks the commission beat the base; with only 1.2 runs it keeps the commission total.
+ */
+function CommissionTile({ runs, commission, gross, team }: { runs: PayrollRunWithUser[]; commission: number; gross: number; team?: boolean }) {
+  const weeks = commissionWeeks(runs);
+  if (!weeks) return <KpiTile label="Commission" value={formatGBP(commission)} hint={!team && gross ? `${formatPct(commission / gross)} of gross` : undefined} />;
+  return (
+    <KpiTile
+      label={team ? 'Paid as commission' : 'Commission weeks'}
+      value={`${formatNumber(weeks.commission)} of ${formatNumber(weeks.rule)}`}
+      hint={`${formatGBP(commission)} · beat the base`}
+    />
   );
 }
 
@@ -201,7 +255,7 @@ function TeamPay({ teamId, onOpen }: { teamId: number; onOpen: (r: PayrollRunWit
             {q.isLoading ? <KpiSkeletons count={4} /> : (
               <>
                 <KpiTile label="Team payroll" value={formatGBP(totals.gross)} tone="primary" hint={`${formatNumber(rows.length)} runs`} />
-                <KpiTile label="Commission" value={formatGBP(totals.commission)} />
+                <CommissionTile runs={rows} commission={totals.commission} gross={totals.gross} team />
                 <KpiTile label="Awaiting payment" value={formatGBP(totals.pending)} tone={totals.pending > 0 ? 'warning' : 'default'} hint={totals.failed > 0 ? `incl. ${formatNumber(totals.failed)} failed transfer${totals.failed === 1 ? '' : 's'}` : 'pending and failed runs'} />
                 <KpiTile label="People paid" value={formatNumber(new Set(rows.map((r) => r.userId)).size)} />
               </>
@@ -390,7 +444,7 @@ function Company({ onOpen, scrollToRuns = false, onScrolled }: { onOpen: (r: Pay
             </Card>
           </div>
           <Card padded={false} className="min-w-0 overflow-hidden">
-            <div className="p-5 pb-3"><CardHeader title="By campaign" description="Sales, revenue, rep commission and margin" className="mb-0" actions={<ExportButton filename={csvFilename('finance-by-campaign', range)} rows={sortRows(s?.byCampaign ?? [], (r) => r.revenue, 'desc')} columns={campaignFinanceCsvColumns} disabled={!s} />} /></div>
+            <div className="p-5 pb-3"><CardHeader title="By campaign" description="Sales, revenue, commission at each campaign's rate per sub, and margin" className="mb-0" actions={<ExportButton filename={csvFilename('finance-by-campaign', range)} rows={sortRows(s?.byCampaign ?? [], (r) => r.revenue, 'desc')} columns={campaignFinanceCsvColumns} disabled={!s} />} /></div>
             <DataTable
               rows={s?.byCampaign ?? []}
               loading={!s}
@@ -518,6 +572,8 @@ function Company({ onOpen, scrollToRuns = false, onScrolled }: { onOpen: (r: Pay
           onClear={() => setSelected(new Set())}
         />
       </Card>
+      {/* Release 1.3 (P1): Matt's bonuses, manual lines and the statements' corrections on recent weeks */}
+      <ErrorBoundary name="pay-adjustments" fallback={null}><AdjustmentsCard /></ErrorBoundary>
       <ConfirmDialog
         open={confirmBulk}
         onClose={() => setConfirmBulk(false)}
