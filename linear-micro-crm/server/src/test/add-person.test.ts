@@ -161,9 +161,21 @@ test('a leader without a team cannot add people', async () => {
 });
 
 test('validation and duplicates: a last name is still required for new people; a used email is 409', async () => {
+  // the sentence is the answer's error itself (as on PATCH and in docs/API.md), with the field in details[]
   const noLast = await leader.post('/users', person({ lastName: '' }));
   assert.equal(noLast.status, 400);
-  assert.equal((await admin.post('/users', { ...person({ lastName: ' ' }), role: 'rep', teamId: fx().teams.a })).status, 400);
+  assert.equal(noLast.json.error, 'Enter their last name');
+  assert.deepEqual(noLast.json.details, [{ path: 'lastName', message: 'Enter their last name' }]);
+  const adminNoLast = await admin.post('/users', { ...person({ lastName: ' ' }), role: 'rep', teamId: fx().teams.a });
+  assert.equal(adminNoLast.status, 400);
+  assert.equal(adminNoLast.json.error, 'Enter their last name');
+  const recruiterNoLast = await recruiter.post('/users', { ...person(), lastName: undefined, teamId: fx().teams.b });
+  assert.equal(recruiterNoLast.status, 400, 'missing altogether');
+  assert.equal(recruiterNoLast.json.error, 'Enter their last name');
+  // another field's problem keeps the general answer, and a missing last name alongside it still names the field
+  const both = await leader.post('/users', person({ lastName: '', email: 'not-an-email' }));
+  assert.equal(both.status, 400);
+  assert.ok((both.json.details as { path: string }[]).some((d) => d.path === 'lastName'), JSON.stringify(both.json));
   const first = await leader.post('/users', person());
   assert.equal(first.status, 201);
   const dup = await leader.post('/users', { ...person(), email: first.json.email.toUpperCase() });

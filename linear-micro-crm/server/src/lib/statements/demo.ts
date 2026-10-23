@@ -26,6 +26,7 @@ import { formatStatementPeriod } from '@lm/shared';
 import { all, get, run, type Db } from '../../db/connection.ts';
 import type { SeedContext } from '../../db/extensions/types.ts';
 import { addDays, mondayOf } from '../dates.ts';
+import { personOrderSql } from '../people.ts';
 import { readStatementFile, saveStatementFile } from './files.ts';
 import { renderStatementPdf, type StatementPdfSpec } from './render.ts';
 import { NO_TABLE_MESSAGE, storeStatement, type ParsedPdf } from './store.ts';
@@ -56,7 +57,7 @@ function loggedFor(db: Db, campaignId: number, from: string, to: string): Logged
        FROM gauge_entries g JOIN events e ON e.id = g.event_id JOIN users u ON u.id = g.user_id
       WHERE e.campaign_id = ? AND g.date BETWEEN ? AND ? AND u.role NOT IN ('client', 'admin')
       GROUP BY g.user_id, g.date HAVING SUM(g.sales) > 0
-      ORDER BY g.date, u.last_name, u.first_name`,
+      ORDER BY g.date, ${personOrderSql('u')}`,
     [campaignId, from, to],
   );
 }

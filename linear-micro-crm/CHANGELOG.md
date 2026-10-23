@@ -32,20 +32,23 @@ The Sapiens team's demo sign-ins, and leaders and recruiters can add people. Det
   access code or email, never does.
 - **Team → Add person for recruiters and leaders.** Recruiters add trainees and field representatives to any team;
   Team Leaders and Crew Leaders to their own team. Afterwards **Sign-in details** shows the new person's employee ID —
-  the only time a recruiter or leader sees it — with instructions to copy and send. The role, pay plan, status, avatar
-  colour and employee ID stay the office's to set; trying to set them is refused with a sentence that says why.
+  the only time a recruiter or leader sees it — with instructions to copy and send; a tap beside it does not close it,
+  and an administrator can still find the ID on the Team page. The role, pay plan, status, avatar colour and employee ID
+  stay the office's to set; trying to set them is refused with a sentence that says why.
 
 ### Changed
 
 - `POST /users`: open to recruiters and leaders under those rules; `employeeId` is optional for everyone (the next free
-  ID is given); the answer adds `signInInstructions`. It counts towards the per-person limit of 60 writes a minute.
+  ID is given); the answer adds `signInInstructions`. A missing last name answers `400 "Enter their last name"`. It
+  counts towards the per-person limit of 60 writes a minute.
   `PATCH /users/:id` stays admin only and accepts an empty last name only while it is still empty.
 - `GET /auth/demo-accounts` adds `demoTeams` (additive). A `clientAccounts` item is labelled with its organisation
   ("Hannah Price (Breast Cancer Now)", was "Hannah Price (Client)") and adds `name`, `organisation` and `sector`.
 - `client/tsconfig.json` no longer sets the deprecated `baseUrl` (the `@/*` path is relative to the file), so editors stop
   warning about it.
 - Names without a surname read well everywhere: "Theo", never "Theo " in a sentence, a label, a CSV or the audit trail;
-  initials from the first name alone; the Team list sorts Theo among the T surnames.
+  initials from the first name alone; the Team list, Finance's payroll runs, the pay export, invoices, a campaign's
+  client accounts and "Read by" sort Theo among the T surnames.
 - The administrator's form is called **Add person** (was **Add member**), and its employee ID may be left blank.
 
 ## [1.3.0] - 2026-10-22

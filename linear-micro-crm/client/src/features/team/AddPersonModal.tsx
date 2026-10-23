@@ -3,13 +3,14 @@
 // shown read-only; a recruiter picks one) and start date. The server gives the employee ID and refuses anything else
 // (shared addPersonRefusal). After saving, the "Sign-in details" step shows the name, email and employee ID — the only
 // time a recruiter or leader sees that ID — and the instructions to copy and send, with the sign-in address as this
-// device opened it.
-import { useId, useRef, useState } from 'react';
-import { Copy, UserPlus } from 'lucide-react';
+// device opened it. That step closes only with Done, the X or Escape, never with a stray tap beside it.
+// Problems and the copy confirmation show inside the dialog, beside its buttons: a toast sits over a phone's footer.
+import { useEffect, useId, useRef, useState } from 'react';
+import { Check, Copy, UserPlus } from 'lucide-react';
 import { FIELD_ADD_POSITIONS, POSITION_LABELS, type AddPersonResult, type FieldAddPosition } from '@lm/shared';
 import { useCreateUser, useTeams } from '@/api/hooks';
 import { useCurrentUser } from '@/auth/AuthProvider';
-import { Button, Field, Input, Modal, Select, useToast } from '@/components/ui';
+import { Button, Field, Input, Modal, Select } from '@/components/ui';
 import { errorMessage } from '@/features/common/QueryStates';
 import { copyText } from '@/lib/clipboard';
 import { todayISO } from '@/lib/dates';
@@ -29,7 +30,6 @@ function AddPersonDialog({ onClose }: { onClose: () => void }) {
 
 function AddPersonForm({ onClose, onSaved }: { onClose: () => void; onSaved: (r: AddPersonResult) => void }) {
   const uid = useId();
-  const toast = useToast();
   const me = useCurrentUser();
   const teams = useTeams();
   const create = useCreateUser();
@@ -44,6 +44,9 @@ function AddPersonForm({ onClose, onSaved }: { onClose: () => void; onSaved: (r:
     startDate: todayISO(),
   });
   const [submitted, setSubmitted] = useState(false);
+  const [saveError, setSaveError] = useState<string | null>(null);
+  const saveErrorRef = useRef<HTMLParagraphElement>(null);
+  useEffect(() => { if (saveError) saveErrorRef.current?.scrollIntoView({ block: 'nearest' }); }, [saveError]);
   const set = (k: keyof typeof f) => (v: string) => setF((s) => ({ ...s, [k]: v }));
   const errors = {
     firstName: submitted && !f.firstName.trim() ? 'Enter their first name' : undefined,
@@ -58,6 +61,7 @@ function AddPersonForm({ onClose, onSaved }: { onClose: () => void; onSaved: (r:
   async function submit() {
     setSubmitted(true);
     if (!f.firstName.trim() || !f.lastName.trim() || !EMAIL_RE.test(f.email.trim()) || (!leader && !f.teamId) || !/^\d{4}-\d{2}-\d{2}$/.test(f.startDate)) return;
+    setSaveError(null);
     try {
       const saved = await create.mutateAsync({
         firstName: f.firstName.trim(),
@@ -71,7 +75,7 @@ function AddPersonForm({ onClose, onSaved }: { onClose: () => void; onSaved: (r:
       });
       onSaved(saved);
     } catch (err) {
-      toast.error('Could not add them', errorMessage(err));
+      setSaveError(errorMessage(err));
     }
   }
 
@@ -130,21 +134,31 @@ function AddPersonForm({ onClose, onSaved }: { onClose: () => void; onSaved: (r:
         <Field label="Start date" htmlFor={`${uid}-start`} error={errors.startDate}>
           <Input id={`${uid}-start`} type="date" value={f.startDate} onChange={(e) => set('startDate')(e.target.value)} invalid={!!errors.startDate} />
         </Field>
+        {saveError && (
+          <p ref={saveErrorRef} role="alert" className="rounded-lg border border-danger/30 bg-danger-soft p-3 text-sm text-danger sm:col-span-2" data-testid="add-person-error">
+            <span className="font-semibold">Could not add them.</span> {saveError}
+          </p>
+        )}
       </form>
     </Modal>
   );
 }
 
-/** "Sign-in details": shown once, straight after adding someone (the employee ID is hidden from non-admins afterwards). */
+/**
+ * "Sign-in details": shown once, straight after adding someone (the employee ID is hidden from non-admins afterwards),
+ * so a tap beside the dialog does not close it (`persistent`); Done, the X and Escape do. The copy is confirmed on the
+ * button and in a line under the instructions, not with a toast, which on a phone would cover Done.
+ */
 function SignInDetails({ person, onClose }: { person: AddPersonResult; onClose: () => void }) {
-  const toast = useToast();
   const textRef = useRef<HTMLPreElement>(null);
+  const [copied, setCopied] = useState<'no' | 'yes' | 'failed'>('no');
   const name = fullName(person);
+  const first = person.firstName.trim() || 'them';
   const instructions = person.signInInstructions ?? '';
 
   async function copy() {
     if (await copyText(instructions)) {
-      toast.success('Copied', `Paste it into a message to ${person.firstName.trim() || 'them'}.`);
+      setCopied('yes');
       return;
     }
     const el = textRef.current;
@@ -155,20 +169,29 @@ function SignInDetails({ person, onClose }: { person: AddPersonResult; onClose: 
       sel.removeAllRanges();
       sel.addRange(range);
     }
-    toast.error('Could not copy', 'The instructions are selected below — copy them from there.');
+    setCopied('failed');
   }
 
   return (
     <Modal
       open
       onClose={onClose}
+      persistent
       title="Sign-in details"
-      description={`${name} can sign in now. Send them these details: this is the only time their employee ID is shown here.`}
+      description={`${name} can sign in now. Send them these details: this is the only time you see their employee ID. If it gets lost, an administrator can find it on the Team page.`}
       size="md"
       footer={
         <>
           <Button variant="ghost" onClick={onClose}>Done</Button>
-          <Button onClick={() => void copy()} leftIcon={<Copy aria-hidden />} disabled={!instructions}>Copy instructions</Button>
+          <Button
+            onClick={() => void copy()}
+            leftIcon={copied === 'yes' ? <Check aria-hidden /> : <Copy aria-hidden />}
+            disabled={!instructions}
+            // the same width either way, so Done never moves under the pointer
+            className="sm:min-w-[11.5rem]"
+          >
+            {copied === 'yes' ? 'Copied' : 'Copy instructions'}
+          </Button>
         </>
       }
     >
@@ -199,6 +222,14 @@ function SignInDetails({ person, onClose }: { person: AddPersonResult; onClose: 
           {instructions}
         </pre>
       )}
+      <p
+        role="status"
+        className={copied === 'failed' ? 'mt-2 text-sm text-danger' : 'mt-2 text-sm text-muted'}
+        data-testid="sign-in-copy-status"
+      >
+        {copied === 'yes' && `Copied. Paste it into a message to ${first}.`}
+        {copied === 'failed' && 'Could not copy. The instructions are selected above: copy them from there.'}
+      </p>
     </Modal>
   );
 }

@@ -1787,11 +1787,13 @@ in `shared/src/logic/people.ts` (`addPersonRefusal`, `staffSignInInstructions`, 
 | rep, client | nobody: `403` | |
 | signed out | `401` | |
 
-Body (`createBody`): `firstName`, `lastName` (still required for a new person: `400 "Enter their last name"`), `email`,
-`position`, `teamId?`, `startDate?` (default business today), `phone?`, `city?`; admin only: `role` (required for an
-admin), `payPlanId?` (default: the plan for the position), `status?`, `avatarColor?`, `employeeId?`. Optional for every
-caller: `signInUrl` (an `http(s)` address, at most 300 characters; the sign-in page as the caller opened it — it goes
-into the instructions in the answer and is never stored).
+Body (`createBody`): `firstName`, `lastName` (still required for a new person: missing or blank →
+`400 { error: "Enter their last name", details: [{ path: "lastName", message: "Enter their last name" }] }`, for every
+caller; when other fields are wrong too, the usual `400 "Validation failed"` lists them all in `details`, the last name
+among them), `email`, `position`, `teamId?`, `startDate?` (default business today), `phone?`, `city?`; admin only:
+`role` (required for an admin), `payPlanId?` (default: the plan for the position), `status?`, `avatarColor?`,
+`employeeId?`. Optional for every caller: `signInUrl` (an `http(s)` address, at most 300 characters; the sign-in page as
+the caller opened it — it goes into the instructions in the answer and is never stored).
 
 - **Refused, never ignored.** A recruiter or leader who sends `role` other than `rep`, a `position` other than
   `trainee` / `field_rep`, any `payPlanId`, a `status` other than `active`, an `avatarColor` or an `employeeId` gets
@@ -1814,8 +1816,10 @@ into the instructions in the answer and is never stored).
 - `PATCH /users/:id` and `POST /users/:id/2fa/reset` stay admin only. Release 1.3.1: `lastName: ''` is accepted only
   while the person's last name is already empty (the Sapiens accounts); clearing a surname → `400 "Enter their last
   name"`.
-- `GET /users` sorts by surname, then first name, with the first name standing in for a missing surname (Theo sorts
-  among the T surnames).
+- Lists of people sort by surname, then first name, with the first name standing in for a missing surname (Theo sorts
+  among the T surnames), case-insensitively (`lib/people.ts personOrderSql`): `GET /users`, `GET /finance/payroll`
+  (within each week), the pay export (`GET /finance/payroll/export`), `GET /invoices` (within each week), a campaign's
+  client accounts and the readers on `GET /announcements/reads` (within the same read time).
 
 ### Demo teams on the sign-in page: `GET /auth/demo-accounts`
 

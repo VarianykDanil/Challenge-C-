@@ -35,6 +35,7 @@ import { ensurePayrollMaterialised } from '../db/maintenance.ts';
 import { Where, listPayroll } from '../db/queries.ts';
 import { recordAudit } from '../lib/audit.ts';
 import { dayOfWeek, formatWeek, todayISO } from '../lib/dates.ts';
+import { personOrderSql } from '../lib/people.ts';
 import { isoDate } from '../lib/validate.ts';
 import { currentUser, requireRole } from '../middleware/auth.ts';
 
@@ -44,11 +45,11 @@ const exportQuery = z.object({
   runs: z.enum(PAY_EXPORT_SCOPES as [PayExportScope, ...PayExportScope[]]).default('unpaid'),
 });
 
-/** The week's runs, unpaid (pending + failed) or all, by surname. One query. */
+/** The week's runs, unpaid (pending + failed) or all, by surname (or the first name when there is none). One query. */
 export function payExportRuns(db: Db, weekStart: string, scope: PayExportScope): PayrollRunWithUser[] {
   const where = new Where().add('p.week_start = ?', weekStart);
   if (scope === 'unpaid') where.add(`p.status IN ('pending', 'failed')`);
-  return listPayroll(db, `${where}`, where.params, 'u.last_name ASC, u.first_name ASC, p.id ASC');
+  return listPayroll(db, `${where}`, where.params, `${personOrderSql('u')}, p.id ASC`);
 }
 
 const GBP = new Intl.NumberFormat('en-GB', { style: 'currency', currency: 'GBP' });
