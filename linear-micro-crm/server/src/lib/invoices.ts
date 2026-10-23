@@ -76,6 +76,7 @@ import { appSecretFile } from './crypto.ts';
 import { businessNow, formatWeek, toBusinessISO } from './dates.ts';
 import { HttpError, badRequest, conflict, forbidden, notFound } from './errors.ts';
 import { weekPayBreakdown } from './payRule.ts';
+import { personOrderSql } from './people.ts';
 
 // ───────────────────────────── clocks and SQL pieces ─────────────────────────────
 
@@ -889,7 +890,7 @@ export function listInvoices(db: Db, me: UserWithTeam, q: { from: string; to: st
   }
   if (q.weekStart) where.push('p.week_start = ?'), params.push(q.weekStart);
   const local = businessLocal();
-  const select = () => all<InvoiceRow>(db, `${INVOICE_SELECT} WHERE ${where.join(' AND ')} ORDER BY p.week_start DESC, u.last_name, u.first_name`, params);
+  const select = () => all<InvoiceRow>(db, `${INVOICE_SELECT} WHERE ${where.join(' AND ')} ORDER BY p.week_start DESC, ${personOrderSql('u')}, i.id`, params);
   let rows = select();
   const stale = rows.filter(isStale);
   if (stale.length) {

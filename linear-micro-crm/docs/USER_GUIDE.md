@@ -1273,8 +1273,9 @@ Team Leaders and Crew Leaders can add a new trainee or field representative to t
 3. Choose **Add person**.
 4. **Sign-in details** opens: their name, team, email and **Employee ID**. Choose **Copy instructions** and paste them into
    a message to the new person — they say which address to open (the one your phone or laptop is using), and to enter the
-   email and the employee ID. This is the only time you see their employee ID: afterwards only administrators and the
-   person themselves can. Choose **Done**.
+   email and the employee ID. The button changes to **Copied** once they are on your clipboard. This is the only time
+   you see their employee ID: afterwards only administrators (on the **Team** page) and the person themselves can. A tap
+   beside the box does not close it; choose **Done** when you have sent them.
 
 They start as **Active**, on the standard pay plan for their position. Only an administrator can give someone another
 role or position, a pay plan, a status, an avatar colour or a chosen employee ID, put them on another team, or change
@@ -1334,7 +1335,7 @@ pipeline; a hire from the pipeline creates the account by itself).
 2. Fill in **First name**, **Last name**, **Email**, **Phone** (optional), **Position** (**Trainee** or **Field
    Representative**), **Team** (choose one) and **Start date**, then **Add person**.
 3. In **Sign-in details**, choose **Copy instructions** and send them to the new person. Their employee ID is shown only
-   this once; then **Done**.
+   this once (if it gets lost, an administrator can find it on the **Team** page); then **Done**.
 
 As for leaders, the role, pay plan, status, avatar colour and employee ID are the office's to set.
 

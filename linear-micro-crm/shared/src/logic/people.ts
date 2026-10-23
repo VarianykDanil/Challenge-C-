@@ -31,7 +31,7 @@ export function firstNameWithInitial(p: Named): string {
 /**
  * Sort people by surname, then first name; someone without a surname sorts by their first name in its place (so Theo
  * sits among the T surnames, not at the top). Lower-case, for `localeCompare`. The SQL lists use the same rule
- * (server lib/people.ts PERSON_ORDER).
+ * (server lib/people.ts personOrderSql: GET /users, Finance, the pay export, invoices, client accounts, "Read by").
  */
 export function personSortKey(p: Named): string {
   const first = p.firstName.trim().toLowerCase();

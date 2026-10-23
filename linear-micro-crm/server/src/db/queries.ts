@@ -20,6 +20,7 @@ import {
 } from '@lm/shared';
 import { all, get, type Db, type Param } from './connection.ts';
 import { nowISO } from '../lib/dates.ts';
+import { personOrderSql } from '../lib/people.ts';
 import { CHECK_IN_ON_BEHALF_SQL } from '../lib/shiftCheckIns.ts';
 
 // ── Users ───────────────────────────────────────────────────────────────────
@@ -182,7 +183,8 @@ export function mapPayroll(row: Omit<PayrollRunWithUser, 'onTime'>): PayrollRunW
   return out;
 }
 
-export function listPayroll(db: Db, where: string, params: Param[], orderBy = 'p.week_start DESC, u.last_name ASC'): PayrollRunWithUser[] {
+/** Newest week first, then by surname (a first name standing in for a missing one: lib/people.ts personOrderSql). */
+export function listPayroll(db: Db, where: string, params: Param[], orderBy = `p.week_start DESC, ${personOrderSql('u')}, p.id`): PayrollRunWithUser[] {
   return all<Omit<PayrollRunWithUser, 'onTime'>>(db, `${PAYROLL_SELECT} ${where} ORDER BY ${orderBy}`, params).map(mapPayroll);
 }
 

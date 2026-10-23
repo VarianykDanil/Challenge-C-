@@ -49,6 +49,7 @@ import { addDays, toBusinessISO } from '../lib/dates.ts';
 import { badRequest, forbidden, notFound } from '../lib/errors.ts';
 import { gaugeSummary } from '../lib/auditSpecs.ts';
 import { IDLE_SIGN_OUT_ACTION } from '../lib/audit/sessions.ts';
+import { personOrderSql } from '../lib/people.ts';
 import { canSeeEntryDetails } from '../lib/scope.ts';
 import { idParam, isoDate, offsetQuery, optionalIdQuery, optionalString } from '../lib/validate.ts';
 import { currentUser, requireRole } from '../middleware/auth.ts';
@@ -403,7 +404,7 @@ export function announcementReadsRouter(db: Db): Router {
       `SELECT r.announcement_id AS announcementId, r.user_id AS userId, TRIM(u.first_name || ' ' || u.last_name) AS name, r.read_at AS readAt
        FROM announcement_reads r JOIN users u ON u.id = r.user_id JOIN announcements a ON a.id = r.announcement_id
        WHERE r.announcement_id IN (${placeholders(annIds.length)}) AND u.status = 'active' AND u.role <> 'client' AND r.user_id <> a.author_id
-       ORDER BY r.read_at DESC, u.last_name, u.first_name`,
+       ORDER BY r.read_at DESC, ${personOrderSql('u')}`,
       annIds,
     );
     const byAnnouncement = new Map<number, { userId: number; name: string; readAt: string }[]>();

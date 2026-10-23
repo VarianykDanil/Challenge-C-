@@ -147,7 +147,18 @@ export function usersRouter(db: Db): Router {
     const fieldPerson = Object.fromEntries(
       Object.entries(raw).filter(([k, v]) => !(['role', 'payPlanId', 'status', 'avatarColor', 'employeeId'].includes(k) && (v === null || v === '' || (typeof v === 'string' && !v.trim())))),
     );
-    const body = createBody.parse(admin ? raw : { ...fieldPerson, teamId: raw.teamId ?? me.teamId ?? null });
+    const input = admin ? raw : { ...fieldPerson, teamId: raw.teamId ?? me.teamId ?? null };
+    const parsed = createBody.safeParse(input);
+    if (!parsed.success) {
+      // A missing last name, and nothing else wrong, answers with its own sentence (as PATCH does), not the general
+      // "Validation failed"; with other problems too, the general answer lists them all, the last name among them.
+      const lastNameOnly = parsed.error.issues.every((i) => i.path[0] === 'lastName');
+      if (lastNameOnly && (typeof input.lastName !== 'string' || !input.lastName.trim())) {
+        throw badRequest('Enter their last name', [{ path: 'lastName', message: 'Enter their last name' }]);
+      }
+      throw parsed.error;
+    }
+    const body = parsed.data;
     if (admin && !body.role) throw badRequest('Choose a role', [{ path: 'role', message: 'Choose a role' }]);
     const role = body.role ?? 'rep';
     if (body.employeeId && get(db, `SELECT 1 FROM users WHERE lower(employee_id) = lower(?)`, [body.employeeId])) throw conflict(`Employee ID ${body.employeeId} is already in use`);

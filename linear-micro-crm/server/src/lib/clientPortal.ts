@@ -17,6 +17,7 @@ import {
 } from '@lm/shared';
 import { all, get, type Db, type Param } from '../db/connection.ts';
 import { nowISO } from './dates.ts';
+import { personOrderSql } from './people.ts';
 
 /** The posts the client's history and the office's lists show at most (newest first). */
 export const CLIENT_POSTS_LIST_MAX = 200;
@@ -159,7 +160,7 @@ export function getClientAccount(db: Db, id: number): ClientAccount | undefined 
 
 /** A campaign's client accounts: active first, then by name. */
 export function listClientAccounts(db: Db, campaignId: number): ClientAccount[] {
-  return all<AccountRow>(db, `${ACCOUNT_SELECT} AND u.client_campaign_id = ? ORDER BY (u.status = 'left') ASC, u.last_name, u.first_name, u.id`, [campaignId]).map(mapAccount);
+  return all<AccountRow>(db, `${ACCOUNT_SELECT} AND u.client_campaign_id = ? ORDER BY (u.status = 'left') ASC, ${personOrderSql('u')}`, [campaignId]).map(mapAccount);
 }
 
 // ── the campaign's brief ──

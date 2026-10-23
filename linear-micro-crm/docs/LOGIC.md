@@ -3339,7 +3339,10 @@ it is staff and not `left` — after the four demo accounts and under the same c
 - `firstNameWithInitial` → "Olivia K."; just "Olivia" without a surname (the roll call and the event page's **Log for**
   chips, which add the initial only when two people share a first name).
 - `personSortKey` / server `lib/people.ts personOrderSql`: surname, then first name, the first name standing in for a
-  missing surname, case-insensitive (`GET /users`, the Team cards).
+  missing surname, case-insensitive, then id (`GET /users`, the Team cards; Finance's payroll runs and invoices within
+  each week, the pay export, a campaign's client accounts, "Read by" on announcements, the demo statements' order). Lists
+  that lead with the first name (rosters, roll calls, the audit's people) need nothing: an empty surname only breaks a
+  tie between two people with the same first name.
 - `PATCH /users/:id` accepts `lastName: ''` only while the last name is already empty; the admin form asks for a last name
   only when the person has one (or is new).
 
@@ -3381,3 +3384,7 @@ read redacts the ID as before (`lib/scope.ts redactUser`). The 1.2 audit spec re
   **Sign-in details** step with the name, team, email, employee ID and **Copy instructions** (`lib/clipboard.ts
   copyText`: the Clipboard API, or the textarea fallback on plain http; if both fail, the text is selected for copying by
   hand). Leaders see the button only when they have a team.
+- The **Sign-in details** step is `persistent`: a tap beside it (on a phone, above the bottom sheet) does not close it;
+  **Done**, the X and Escape do. It says an administrator can find the employee ID later on the Team page. The copy is
+  confirmed on the button (**Copied**, the same width) and in a status line under the instructions, and a failed save
+  shows its reason inside the form above the buttons — not as toasts, which on a phone sit over the dialog's footer.
