@@ -43,9 +43,11 @@
  *    columns only (the columns SCHEMA_SQL and the core column upgrades create), so such a seed passes.
  *  - The one core-row insert the plan asks for: client.ts (P6) may insert `announcements` rows AUTHORED BY a client
  *    account (ctx.clients) for its published demo posts; the contract tests leave those rows out of the hash.
- *  - Core demo rows the plan asks for are written by the CORE seed (db/seed.ts), never by an extension: the demo client
- *    account (foundation) and the 1.3 pay plans, payroll runs, bonuses and cancellations (P1, who owns db/seed.ts's pay
- *    sections and seed-data.ts PAY_PLANS in 1.3).
+ *  - Core demo rows the plan asks for are written by the CORE seed (db/seed.ts), never by an extension's `seed`: the demo
+ *    client account (foundation) and the 1.3 pay plans, payroll runs, bonuses and cancellations (P1, who owns
+ *    db/seed.ts's pay sections and seed-data.ts PAY_PLANS in 1.3). Two 1.3.1 `upgrade` steps add demo accounts to an
+ *    OLDER demo database with the seed's own functions (sapiens.ts: lib/demoTeams.ts addDemoTeams; client.ts:
+ *    lib/client.ts insertDemoClientAccounts), only while lib/demoTeams.ts demoStepAllowed says it is still the demo.
  */
 import type { EventStatus, EventType, Position, Role, UserStatus } from '@lm/shared';
 import type { Db } from '../connection.ts';

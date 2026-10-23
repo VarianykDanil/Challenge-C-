@@ -2185,7 +2185,9 @@ both `upgrade` and `seed`, `ctx.rng(salt)`, never gauge rows or payroll runs fro
 - Core demo rows are written by the core seed (`db/seed.ts`): the demo client account (foundation, inserted after every
   staff member without the core random stream, counted in `stats.users`, passed to extensions as `ctx.clients:
   SeedClientRef[]` — never in `ctx.users` — and recorded in meta `seed_demo_clients` with `writeDemoClientMarkers`) and
-  the 1.3 pay plans, runs, bonuses and cancellations (P1).
+  the 1.3 pay plans, runs, bonuses and cancellations (P1). From 1.3.1 an older demo database gains the same demo client
+  once from the client extension's `upgrade` (`ext:client:demo-account`: the same `insertDemoClientAccounts` and
+  marker, only while `demoStepAllowed` says it is still the demo; §16.10).
 
 | Extension (owner) | Tables | Columns on core tables | Meta |
 | --- | --- | --- | --- |
@@ -2965,7 +2967,8 @@ on an unpaid week is P1's: `applyConfirmedSales(…, { replacesStatementId })`.
 - **The client PIN rule** (`lib/pin.ts accountFlags`, body only, as the foundation contracted):
   `pinSetupRequired = !hasPin && (settings.requirePin || (role === 'client' && !demoClient))`. So an invited client's
   first sign-in (email + access code) lands on **Create your PIN** and the gate holds every other route until it is set;
-  every later sign-in asks for the PIN. The seeded demo client (recognised by the seed's marker) is exempt unless the
+  every later sign-in asks for the PIN. The seeded demo client (recognised by the marker the seed or the 1.3.1 step
+  writes) is exempt unless the
   admin requires a PIN for everyone. `pinStatusFor` reports `required: true` for client accounts, so neither Settings nor
   the portal offers **Remove**, and `POST /auth/pin/remove` refuses a client account (409 "A PIN is required for client
   accounts…"; a two-line check in the foundation's `routes/auth.ts`). Whole truth table in `client-portal-seed.test.ts`.
@@ -2981,9 +2984,9 @@ on an unpaid week is P1's: `applyConfirmedSales(…, { replacesStatementId })`.
   adjustment line is made), which is why the Approve dialog warns when the date is on or before `paidThrough`.
 - **Schema** (`db/extensions/client.ts`): `client_posts.requested_from`, `client_posts.posted_at` (the real-clock
   moment a portal post arrived; `NULL` for demo rows and posts from before this column, which therefore never count
-  towards the limits) — both also added to a database created at the foundation commit — and `client_post_reads`. No
-  data step for upgraded databases.
-- **Demo rows** (fresh seed only, no random stream): the campaign briefs and contacts of BCN, CHN, VLT and FCB
+  towards the limits) — both also added to a database created at the foundation commit — and `client_post_reads`. One
+  data step (1.3.1): the demo charity account on an older demo database (§16.10).
+- **Demo rows** (fresh seed, and from 1.3.1 once on an older demo database, §16.10; no random stream): the campaign briefs and contacts of BCN, CHN, VLT and FCB
   (columns this extension added); from Hannah Price (BCN) a declined payout change (24 days ago, "We agreed £120 per sub
   until the end of March…"), a published announcement (9 days ago) and update (3 days ago) with their Announcements
   rows, and a pending change to £22.00 per sub from the Monday after next (yesterday); for every client rate change in
@@ -3313,10 +3316,12 @@ One function, `lib/demoTeams.ts addDemoTeams(db, today)`, writes them for both p
   then sets the step's flag `ext:sapiens:accounts`. `seed(db, today, { demoTeams: false })` (tests only) is the 1.3.0
   demo database. `stats.users` and `stats.teams` count them.
 - **Existing demo database** (`db/extensions/sapiens.ts`, appended last to the registry, no `seed`): `upgrade` runs the
-  step once — only when the flag is not set, the database is a **demo database** (`isDemoDatabase`: meta `seeded_at`
-  **and** `seed_today`, both written only by the demo seed; the route-test fixture writes only `seeded_at`), and the core
-  rows it needs exist (users and pay plans; on a fresh install the upgrade runs before the seed, on empty tables, so it
-  skips **without** setting the flag). It runs in a transaction, sets the flag, and reports `sapiens:team.sapiens` only
+  step once — only when the flag is not set and `demoStepAllowed` answers **yes**: the database is a **demo database**
+  (`isDemoDatabase`: meta `seeded_at` **and** `seed_today`, both written only by the demo seed; the route-test fixture
+  writes only `seeded_at`), the core rows it needs exist (users and pay plans; on a fresh install the upgrade runs
+  before the seed, on empty tables, so it skips **without** setting the flag), the server is not run with
+  `LM_DEMO_ACCOUNTS=0` (also skipped without the flag) and the four seeded staff demo accounts are intact (otherwise the
+  database is in real use: the flag is set and nothing is added). It runs in a transaction, sets the flag, and reports `sapiens:team.sapiens` only
   when it inserted something. A database the seed did not create never gains them and gets no flag.
 
 `addDemoTeams` reuses a team of that name in any case (a "Sapiens" Matt made by hand, left as it is) and adds only the
@@ -3393,11 +3398,20 @@ read redacts the ID as before (`lib/scope.ts redactUser`). The 1.2 audit spec re
 
 The demo client account (Hannah Price, Breast Cancer Now, CL-0001; seed-data.ts `CLIENT_ACCOUNTS`) was made only by a
 fresh 1.3 seed, so a demo database first seeded by 1.1 or 1.2 showed nothing under the demo accounts. The client
-extension's `upgrade` now runs a one-off step (flag `ext:client:demo-account`), only when the flag is not set, no demo
-client marker (`seed_demo_clients`) exists, the database is a demo database (`isDemoDatabase`) and the core rows exist
-(users, pay plans, campaigns; skipped **without** the flag otherwise, as on a fresh install before its seed). In a
-transaction it sets the flag and then, unless someone already holds the access code or the email (a real contact is
-never turned into the demo one) or there is no BCN campaign:
+extension's `upgrade` now runs a one-off step (flag `ext:client:demo-account`) when the flag is not set and no demo
+client marker (`seed_demo_clients`) exists, gated by `lib/demoTeams.ts demoStepAllowed` — the same gate as the Sapiens
+step, because every Linear Hub database starts from the demo seed, so the seed's meta alone cannot tell a demo from a
+database in real use:
+
+- **later** (skip without the flag, ask again next start): the server runs with `LM_DEMO_ACCOUNTS=0`; the database is
+  not one the demo seed created (`isDemoDatabase`: meta `seeded_at` and `seed_today`); or users, pay plans or campaigns
+  are missing (a fresh install before its seed);
+- **never** (set the flag, add nothing): the four seeded staff demo accounts (`DEMO_STAFF`: LM-0001 admin, LM-0002
+  leader, LM-0003 recruiter, LM-0010 rep — the list `GET /auth/demo-accounts` uses) are not all there with those roles
+  and active or on leave (`demoStaffIntact`): a demo-born database in real use;
+- **yes**: in a transaction it sets the flag and then, unless someone already holds the access code or the email (a
+  real contact is never turned into the demo one), Breast Cancer Now already has a client account (its real portal
+  never gets demo posts beside its own), or there is no BCN campaign:
 
 - inserts her with `lib/client.ts insertDemoClientAccounts` — the same function the fresh seed now uses, so the row is
   identical (role and position `client`, no team, the owner's pay plan, no PIN, joined four weeks before this week's

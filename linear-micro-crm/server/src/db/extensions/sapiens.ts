@@ -3,15 +3,17 @@
  * `npm run latest`). A fresh demo seed adds them itself, at its very end (db/seed.ts → lib/demoTeams.ts addDemoTeams)
  * and marks this step done, so this extension has no seed.
  *
- * The one-off step (`ext:sapiens:accounts`): only on a database the demo seed created (meta `seeded_at` and
- * `seed_today`; lib/demoTeams.ts isDemoDatabase) — never on a real one, nor on the route-test fixture. On a fresh install
- * the upgrade runs before the seed, on empty tables: it then skips WITHOUT setting the flag. A "Sapiens" team someone
- * made by hand is reused (only the accounts missing by email are added). Reports `team.sapiens` only when it inserted
- * something, so the first restart after a fresh seed reports nothing.
+ * The one-off step (`ext:sapiens:accounts`): only while the database is still the demo (lib/demoTeams.ts
+ * demoStepAllowed): one the demo seed created (meta `seeded_at` and `seed_today`, so never the route-test fixture) whose
+ * four demo staff accounts are intact, on a server not run with LM_DEMO_ACCOUNTS=0. Every Linear Hub database starts from
+ * the demo seed, so a database in real use (its demo staff deactivated or changed) is done without gaining anyone. On a
+ * fresh install (the upgrade runs before the seed, on empty tables) and with LM_DEMO_ACCOUNTS=0 it skips WITHOUT the
+ * flag. A "Sapiens" team someone made by hand is reused (only the accounts missing by email are added). Reports
+ * `team.sapiens` only when it inserted something, so the first restart after a fresh seed reports nothing.
  */
-import { get, transaction } from '../connection.ts';
+import { transaction } from '../connection.ts';
 import { todayISO } from '../../lib/dates.ts';
-import { addDemoTeams, DEMO_TEAMS_DONE_KEY, isDemoDatabase } from '../../lib/demoTeams.ts';
+import { addDemoTeams, DEMO_TEAMS_DONE_KEY, demoStepAllowed } from '../../lib/demoTeams.ts';
 import { metaFlag, setMetaFlag, type DbExtension } from './types.ts';
 
 export const extension: DbExtension = {
@@ -19,9 +21,14 @@ export const extension: DbExtension = {
   sql: '',
   upgrade(db) {
     if (metaFlag(db, DEMO_TEAMS_DONE_KEY)) return [];
-    if (!isDemoDatabase(db)) return [];
-    // the core rows it needs (people and the pay plans) are missing: try again on the next start
-    if (!get(db, `SELECT 1 FROM users LIMIT 1`) || !get(db, `SELECT 1 FROM pay_plans LIMIT 1`)) return [];
+    // only while it is still the demo (lib/demoTeams.ts demoStepAllowed): LM_DEMO_ACCOUNTS=0, not a demo database, or
+    // core rows missing → ask again next start; the demo staff gone or changed (a database in real use) → done, nothing added
+    const allowed = demoStepAllowed(db);
+    if (allowed === 'later') return [];
+    if (allowed === 'never') {
+      setMetaFlag(db, DEMO_TEAMS_DONE_KEY);
+      return [];
+    }
     const r = transaction(db, () => {
       const added = addDemoTeams(db, todayISO());
       setMetaFlag(db, DEMO_TEAMS_DONE_KEY);

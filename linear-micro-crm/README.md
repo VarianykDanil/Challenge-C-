@@ -332,7 +332,8 @@ Sign in with the email and employee ID (matching is case-insensitive). On a fres
 | rep | Jordan Lee (Field Rep) | jordan.lee@linear-mcr.co.uk | LM-0010 |
 
 **The charity account** — the client portal as Breast Cancer Now sees it (no PIN on the demo). On the sign-in page it is
-under **Charity accounts**; a demo database first made before 1.3 gains it once on its next start.
+under **Charity accounts**; a demo database first made before 1.3 gains it once on its next start, while the four demo
+staff accounts are intact.
 
 | Role | Name | Email | Access code |
 |---|---|---|---|

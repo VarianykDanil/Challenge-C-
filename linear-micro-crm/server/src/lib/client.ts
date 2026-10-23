@@ -5,8 +5,9 @@
  * to the portal. P6 builds the accounts (invite, PIN, deactivate) on these helpers and may add functions here.
  *
  * The DEMO client account (db/seed.ts, from seed-data.ts CLIENT_ACCOUNTS) is recognised by a marker the core demo seed
- * writes (meta `seed_demo_clients`), never by its access code alone: an upgraded database has no marker, so a real
- * client is never treated as the demo one (listed on the sign-in page, or let in without a PIN).
+ * writes (meta `seed_demo_clients`), never by its access code alone. An upgraded database has no marker unless the 1.3.1
+ * start-up step (db/extensions/client.ts addDemoClientAccount) inserted the demo client on a database that is still the
+ * demo, so a real client is never treated as the demo one (listed on the sign-in page, or let in without a PIN).
  */
 import { formatClientAccessCode, type UserWithTeam } from '@lm/shared';
 import { get, run, type Db } from '../db/connection.ts';

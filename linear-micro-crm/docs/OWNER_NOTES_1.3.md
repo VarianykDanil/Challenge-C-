@@ -327,10 +327,13 @@ What Matt needs to know, set up or decide for each part of 1.3, collected from t
 - The demo client account is part of the demo data only: a **fresh** demo seed (`npm run seed`) creates it and records
   it as the demo account. It has no PIN so the demo sign-in works; P6 makes a PIN required for every other client
   account. It never appears in Team, the search palette, payroll, leaderboards or read receipts.
-- **An existing 1.2 database (yours) upgrades without the demo client**: no Hannah Price, and no client button on the
-  sign-in page. That is deliberate — the upgrade never adds a sign-in that needs no PIN to a database that may hold
-  real data. To see the demo client, start from a fresh demo seed (a copy, not your live data); or invite a real client
-  once P6 lands.
+- **Changed in 1.3.1: an existing demo database (yours) gains the demo client once** on its next start — Hannah Price,
+  Breast Cancer Now, CL-0001, no PIN, with her demo posts — so the sign-in page shows her under **Charity accounts**.
+  It happens only while the database is still the demo: the four demo staff accounts (LM-0001, LM-0002, LM-0003,
+  LM-0010) are all there with their roles and none has left, the server is not run with `LM_DEMO_ACCOUNTS=0`, and
+  Breast Cancer Now has no client account yet. (In 1.3.0 an upgraded database never gained her.) Before real people
+  use the database, deactivate the demo accounts, Hannah included (**Campaigns → Breast Cancer Now → Open page →
+  Client accounts → Turn off**): `LM_DEMO_ACCOUNTS=0` only hides their buttons, their details still sign in.
 - Client accounts sign in with their email and an access code, like staff use their employee ID. The first client you
   invite gets CL-0002: CL-0001 is kept for the demo account, so a real client never shares its code.
 - A client account sees only its own name, email, access code and campaign about itself: the pay plan its account is

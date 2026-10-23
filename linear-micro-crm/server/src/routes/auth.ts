@@ -10,7 +10,7 @@ import { USER_SELECT } from '../db/queries.ts';
 import { HttpError, badRequest, conflict, notFound, unauthorized } from '../lib/errors.ts';
 import { FailureLimiter } from '../lib/limiter.ts';
 import { clientCampaignIdOf, clientSafeUser, demoClientMarkers, isClientUser, isDemoClientAccount, matchesDemoClient } from '../lib/client.ts';
-import { demoTeamMarkers } from '../lib/demoTeams.ts';
+import { DEMO_STAFF, demoTeamMarkers } from '../lib/demoTeams.ts';
 import {
   accountFlags, clearPin, clearPinFailures, clientPinRequired, countPinAttempt, hashPin, isPinLocked, pinAttemptsLeft, pinHashNeedsUpgrade,
   pinLockedMessage, pinRow, pinStatusFor, readSecuritySettings, resetPinAndSignOut, savePinHash, upgradePinHash, verifyPin,
@@ -59,12 +59,8 @@ const disableBody = z.object(secondFactorFields).refine(needsOneFactor, ONE_FACT
 const loginTwoFactorBody = z.object({ challengeToken: z.string().trim().min(1, 'Challenge token is required').max(128), ...secondFactorFields }).refine(needsOneFactor, ONE_FACTOR_MESSAGE);
 
 /** The four demo accounts from docs/API.md, in role order. */
-const DEMO: { employeeId: string; role: Role; label: string }[] = [
-  { employeeId: 'LM-0001', role: 'admin', label: 'Owner' },
-  { employeeId: 'LM-0002', role: 'leader', label: 'Crew Leader' },
-  { employeeId: 'LM-0003', role: 'recruiter', label: 'Recruiter' },
-  { employeeId: 'LM-0010', role: 'rep', label: 'Field Rep' },
-];
+// The four seeded staff demo accounts (lib/demoTeams.ts DEMO_STAFF: the demo start-up steps check the same four).
+const DEMO = DEMO_STAFF;
 
 // ── login rate limit ──
 // Failed sign-ins are counted twice: per (source address, email) — 8 in 15 minutes locks that source for that email —

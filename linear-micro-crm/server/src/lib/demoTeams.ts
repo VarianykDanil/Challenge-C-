@@ -8,7 +8,8 @@
  * account's id, employee ID and email), never by their email or ID alone — the sign-in page lists only those, and only
  * while the id, ID and email still match (routes/auth.ts GET /auth/demo-accounts), like the demo client account.
  */
-import { get, run, type Db } from '../db/connection.ts';
+import type { Role } from '@lm/shared';
+import { all, get, run, type Db } from '../db/connection.ts';
 import { AVATAR_PALETTE, DEMO_TEAM_ACCOUNTS, DEMO_TEAMS, type DemoTeamAccountSeed, type DemoTeamSeed } from '../db/seed-data.ts';
 import { formatEmployeeId, maxEmployeeNumber } from './people.ts';
 
@@ -35,6 +36,44 @@ export interface DemoTeamMarker {
 export function isDemoDatabase(db: Db): boolean {
   const n = get<{ n: number }>(db, `SELECT COUNT(*) AS n FROM meta WHERE key IN ('seeded_at', 'seed_today') AND COALESCE(value, '') <> ''`);
   return Number(n?.n ?? 0) === 2;
+}
+
+/**
+ * The four seeded staff demo accounts (the sign-in page's one-click buttons). GET /auth/demo-accounts lists them, and the
+ * demo start-up steps run, only while all four are present with these roles and none has left (demoStaffIntact).
+ */
+export const DEMO_STAFF: readonly { employeeId: string; role: Role; label: string }[] = [
+  { employeeId: 'LM-0001', role: 'admin', label: 'Owner' },
+  { employeeId: 'LM-0002', role: 'leader', label: 'Crew Leader' },
+  { employeeId: 'LM-0003', role: 'recruiter', label: 'Recruiter' },
+  { employeeId: 'LM-0010', role: 'rep', label: 'Field Rep' },
+];
+
+/** True while the four seeded staff demo accounts are all there, with their demo roles, and none has left. */
+export function demoStaffIntact(db: Db): boolean {
+  const rows = all<{ employeeId: string; role: string; status: string }>(
+    db,
+    `SELECT upper(employee_id) AS employeeId, role, status FROM users WHERE upper(employee_id) IN (${DEMO_STAFF.map(() => '?').join(', ')})`,
+    DEMO_STAFF.map((d) => d.employeeId),
+  );
+  return DEMO_STAFF.every((d) => rows.some((r) => r.employeeId === d.employeeId && r.role === d.role && r.status !== 'left'));
+}
+
+/**
+ * Whether a one-off demo start-up step (the Sapiens accounts, the demo charity account) may add its accounts now:
+ * - 'later': not now, ask again on the next start — the server runs with LM_DEMO_ACCOUNTS=0 (the operator says real
+ *   people use it), the database is not one the demo seed created, or its core rows are not there yet (a fresh install
+ *   before its seed);
+ * - 'never': the database began as the demo but its demo staff are gone or changed — it is in real use now, so the step
+ *   is done without adding anything (the caller sets its flag);
+ * - 'yes': a demo database whose four demo staff are intact.
+ * Every Linear Hub database starts from the demo seed, so the seed's meta alone never decides this.
+ */
+export function demoStepAllowed(db: Db): 'yes' | 'later' | 'never' {
+  if (process.env.LM_DEMO_ACCOUNTS === '0') return 'later';
+  if (!isDemoDatabase(db)) return 'later';
+  if (!get(db, `SELECT 1 FROM users LIMIT 1`) || !get(db, `SELECT 1 FROM pay_plans LIMIT 1`)) return 'later';
+  return demoStaffIntact(db) ? 'yes' : 'never';
 }
 
 const isAccount = (a: unknown): a is DemoTeamAccountMarker =>

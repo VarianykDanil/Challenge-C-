@@ -348,6 +348,10 @@ Tick every line before real people use it.
 - [ ] **Proxy and cookies**: `TRUST_PROXY=1` and `COOKIE_SECURE=1`; `curl -sI https://hub.example.co.uk/api/health`
       shows `Strict-Transport-Security`.
 - [ ] **`LM_DEMO_ACCOUNTS=0`**: the sign-in page shows no demo accounts.
+- [ ] **Demo accounts turned off** if this database began as the demo (every Linear Hub database does): `LM_DEMO_ACCOUNTS=0`
+      only hides the buttons, the details still sign in. In **Team**, set the demo people you are not keeping to
+      **Left** (the four demo staff, team Sapiens' seven unless they are your real people); in **Campaigns → Breast
+      Cancer Now → Open page → Client accounts**, **Turn off** Hannah Price (CL-0001).
 - [ ] **`LM_APP_SECRET` set** (or the `app-secret` file in place) and saved in your password manager: two-step secrets
       and sign-in PINs depend on it. With `LM_APP_SECRET` the backups never hold the key; with the `app-secret` file
       the backups folder holds a copy, so nobody else can read that folder and it leaves the server only encrypted.

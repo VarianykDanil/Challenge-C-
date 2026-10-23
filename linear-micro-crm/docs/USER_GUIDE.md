@@ -42,8 +42,10 @@ is shown only on the demo database, like the other demo buttons; `LM_DEMO_ACCOUN
 Under the demo buttons, **Charity accounts** has a one-tap sign-in for **Hannah Price — Breast Cancer Now**, the demo
 charity's own account (CL-0001, hannah.price@breastcancernow.example, no PIN). It opens the client portal as the charity
 sees it: their updates and announcements, a commission change you declined and one waiting for you. A demo database
-first made before 1.3 gains this account, with those posts, the next time Linear Hub starts; nothing is added to a
-database with real people.
+first made before 1.3 gains this account, with those posts, the next time Linear Hub starts — but only while it is
+still the demo: the four demo staff accounts are all there and unchanged, and the server is not run with
+`LM_DEMO_ACCOUNTS=0`. Every Linear Hub database starts as the demo, so before real people use yours, deactivate the
+demo accounts (see the go-live checklist in [DEPLOY.md](DEPLOY.md)); `LM_DEMO_ACCOUNTS=0` only hides their buttons.
 
 ### Leaders and recruiters can add people
 

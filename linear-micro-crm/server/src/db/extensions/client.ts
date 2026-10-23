@@ -4,7 +4,8 @@
  *
  *  - users.client_campaign_id: the campaign a `client` account belongs to (NULL for staff). Read by the client guard
  *    (middleware/clientGuard.ts) and authenticate (req.user.clientCampaignId). The demo client account
- *    (Hannah Price, Breast Cancer Now, CL-0001) is inserted by the CORE demo seed (db/seed.ts), not here.
+ *    (Hannah Price, Breast Cancer Now, CL-0001) is inserted by the CORE demo seed (db/seed.ts), and on an older demo
+ *    database by the 1.3.1 step below — both through lib/client.ts insertDemoClientAccounts.
  *  - client_posts: what a client posted from the portal — kind 'update' | 'announcement' | 'commission', title, body,
  *    the proposed rates and effective date for a commission change, status 'published' | 'pending' | 'approved' |
  *    'declined' | 'unpublished', the decision (who, when, the note the client sees) and the Announcements row it
@@ -16,7 +17,7 @@
  *  - campaigns columns (the campaign page): long_description, brief, contact_name, contact_email, contact_phone. The
  *    demo seed fills them for the four seeded campaigns (columns this extension added; see ./types.ts).
  *
- * Demo rows (fresh seed only, from ctx.clients — Hannah Price of BCN): two published posts (an announcement and an
+ * Demo rows (fresh seed, and once on an older demo database by addDemoClientAccount; from ctx.clients — Hannah Price of BCN): two published posts (an announcement and an
  * update, each with its Announcements row authored by Hannah, the one core-row insert the rules allow), a declined
  * commission change, a pending one (Matt's Needs-attention item), and, for every campaign rate the pay seed recorded as
  * a client's approved change (campaign_rates.source = 'client', P1's demo history), the approved post it came from
@@ -29,16 +30,20 @@
  * a demo database first seeded before 1.3 (the owner's Mac) has no demo client, so nothing showed under the demo
  * accounts. On start-up such a database gains Hannah once — the same row the core seed makes (lib/client.ts
  * insertDemoClientAccounts), the same marker, and the demo posts above — so the sign-in page shows her under "Charity
- * accounts". Only on a database the demo seed created (meta `seeded_at` and `seed_today`), never on a real one; skipped
- * without the flag while the core tables are empty (the fresh-install upgrade runs before the seed); never when the demo
- * seed already made her (its marker), nor when someone already holds her access code or email. Reports
- * `demo-account` only when it inserted her, so the first restart after a fresh seed reports nothing. Rules: ./types.ts.
+ * accounts". Only while the database is still the demo (lib/demoTeams.ts demoStepAllowed): one the demo seed created
+ * (meta `seeded_at` and `seed_today`) whose four demo staff accounts are intact, on a server not run with
+ * LM_DEMO_ACCOUNTS=0. Every Linear Hub database starts from the demo seed, so a database in real use (its demo staff
+ * deactivated or changed) is marked done without gaining her. Skipped without the flag with LM_DEMO_ACCOUNTS=0 and while
+ * the core tables are empty (the fresh-install upgrade runs before the seed); never when the demo seed already made her
+ * (its marker), when someone already holds her access code or email, or when BCN already has a client account (its real
+ * portal never gets the demo posts). Reports `demo-account` only when it inserted her, so the first restart after a
+ * fresh seed reports nothing. Rules: ./types.ts.
  */
 import { all, get, transaction, type Db } from '../connection.ts';
 import { CLIENT_ACCOUNTS } from '../seed-data.ts';
 import { clientPayPlanId, demoClientMarkers, insertDemoClientAccounts, writeDemoClientMarkers } from '../../lib/client.ts';
 import { nowISO, todayISO } from '../../lib/dates.ts';
-import { demoTeamMarkers, isDemoDatabase } from '../../lib/demoTeams.ts';
+import { demoStepAllowed, demoTeamMarkers } from '../../lib/demoTeams.ts';
 import type { DbExtension, SeedClientRef, SeedContext, SeedUserRef } from './types.ts';
 import { addColumnIfMissing, metaFlag, setMetaFlag } from './types.ts';
 
@@ -169,7 +174,7 @@ function insertPost(db: Db, client: SeedClientRef, p: DemoPost, deciderId: numbe
 
 const money = (n: number) => `£${n.toFixed(2)}`;
 
-/** The demo rows described in the header (fresh seed only). Exported for its own test. */
+/** The demo rows described in the header (fresh seed, and the 1.3.1 step below). Exported for its own test. */
 export function seedClientDemo(db: Db, ctx: Pick<SeedContext, 'today' | 'nowIso' | 'users' | 'clients' | 'campaigns'>): void {
   // Campaign briefs: only the columns this extension added to `campaigns`.
   const brief = db.prepare(`UPDATE campaigns SET long_description = ?, brief = ?, contact_name = ?, contact_email = ?, contact_phone = ? WHERE id = ?`);
@@ -296,13 +301,21 @@ export const DEMO_CLIENT_STEP_KEY = 'ext:client:demo-account';
  */
 export function addDemoClientAccount(db: Db): boolean {
   if (metaFlag(db, DEMO_CLIENT_STEP_KEY) || demoClientMarkers(db).length > 0) return false;
-  if (!isDemoDatabase(db)) return false;
-  // the core rows it needs are missing (a fresh install before its seed): try again on the next start
-  if (!get(db, `SELECT 1 FROM users LIMIT 1`) || !get(db, `SELECT 1 FROM pay_plans LIMIT 1`) || !get(db, `SELECT 1 FROM campaigns LIMIT 1`)) return false;
+  // only while it is still the demo (lib/demoTeams.ts demoStepAllowed): LM_DEMO_ACCOUNTS=0, not a demo database, or core
+  // rows missing → ask again next start; the demo staff gone or changed (a database in real use) → done, nothing added
+  const allowed = demoStepAllowed(db);
+  if (allowed === 'later' || !get(db, `SELECT 1 FROM campaigns LIMIT 1`)) return false;
+  if (allowed === 'never') {
+    setMetaFlag(db, DEMO_CLIENT_STEP_KEY);
+    return false;
+  }
   return transaction(db, () => {
     setMetaFlag(db, DEMO_CLIENT_STEP_KEY);
-    // someone already holds the access code or the email (a real contact, or one typed in by hand): leave them be
-    const free = CLIENT_ACCOUNTS.filter((c) => !get(db, `SELECT 1 FROM users WHERE employee_id = ? COLLATE NOCASE OR email = ? COLLATE NOCASE`, [c.code, c.email]));
+    // Left alone: an access code or email someone already holds (a real contact, or one typed in by hand), and a campaign
+    // that already has a client account (its real portal never gets the demo posts beside its own).
+    const free = CLIENT_ACCOUNTS.filter((c) =>
+      !get(db, `SELECT 1 FROM users WHERE employee_id = ? COLLATE NOCASE OR email = ? COLLATE NOCASE`, [c.code, c.email]) &&
+      !get(db, `SELECT 1 FROM users u JOIN campaigns c ON c.id = u.client_campaign_id WHERE u.role = 'client' AND c.code = ?`, [c.campaign]));
     if (!free.length) return false;
     const today = todayISO();
     const clients = insertDemoClientAccounts(db, { today, payPlanId: clientPayPlanId(db), accounts: free });

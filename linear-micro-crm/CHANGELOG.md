@@ -28,8 +28,10 @@ The Sapiens team's demo sign-ins, and leaders and recruiters can add people. Det
 - **Charity accounts on the sign-in page.** The demo charity account, **Hannah Price — Breast Cancer Now** (CL-0001),
   now has its own group under the demo buttons with a **Charity** tag. A demo database first made before 1.3 gains the
   account once on its next start, with her demo posts (a declined and a pending commission change, an announcement and
-  an update), so the portal is not empty; a database the demo seed did not create, or where someone already holds that
-  access code or email, never does.
+  an update), so the portal is not empty. Only while the database is still the demo: the four demo staff accounts are
+  intact and the server is not run with `LM_DEMO_ACCOUNTS=0`; never when someone already holds that access code or
+  email, or Breast Cancer Now already has a client account. The Sapiens step now uses the same check, and the go-live
+  checklist asks you to turn the demo accounts off (`LM_DEMO_ACCOUNTS=0` only hides them).
 - **Team → Add person for recruiters and leaders.** Recruiters add trainees and field representatives to any team;
   Team Leaders and Crew Leaders to their own team. Afterwards **Sign-in details** shows the new person's employee ID —
   the only time a recruiter or leader sees it — with instructions to copy and send; a tap beside it does not close it,

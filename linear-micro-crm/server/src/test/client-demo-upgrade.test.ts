@@ -180,6 +180,55 @@ test('never on a database the demo seed did not create; skipped without the flag
   }
 });
 
+test('a database in real use never gains her: LM_DEMO_ACCOUNTS=0 (later), the demo staff changed (never), BCN with a real client (never)', () => {
+  // LM_DEMO_ACCOUNTS=0: the operator says real people use it — nothing now, and no flag (decided again on the next start)
+  const off = demo({ demoClients: false });
+  try {
+    process.env.LM_DEMO_ACCOUNTS = '0';
+    try {
+      assert.ok(!createSchema(off).includes('client:demo-account'));
+      assert.equal(get(off, `SELECT 1 FROM users WHERE email = ?`, [HANNAH]), undefined);
+      assert.equal(flagOf(off), undefined);
+    } finally {
+      delete process.env.LM_DEMO_ACCOUNTS;
+    }
+  } finally {
+    off.close();
+  }
+  // the demo staff are gone or changed (a demo-born database now in real use): done for good, nothing added
+  for (const change of [`UPDATE users SET status = 'left' WHERE employee_id = 'LM-0002'`, `UPDATE users SET role = 'leader' WHERE employee_id = 'LM-0010'`, `UPDATE users SET employee_id = 'LM-0901' WHERE employee_id = 'LM-0001'`]) {
+    const live = demo({ demoClients: false });
+    try {
+      run(live, change);
+      assert.deepEqual(createSchema(live), [], change);
+      assert.equal(get(live, `SELECT 1 FROM users WHERE email = ?`, [HANNAH]), undefined, change);
+      assert.ok(flagOf(live), `${change}: the step is done`);
+      run(live, `UPDATE users SET status = 'active', role = CASE employee_id WHEN 'LM-0010' THEN 'rep' ELSE role END`);
+      assert.deepEqual(createSchema(live), [], 'and stays done');
+    } finally {
+      live.close();
+    }
+  }
+  // Breast Cancer Now already has a client account (an invited contact): its portal never gets the demo posts
+  const invited = demo({ demoClients: false });
+  try {
+    const bcn = get<{ id: number }>(invited, `SELECT id FROM campaigns WHERE code = 'BCN'`)!.id;
+    const plan = get<{ id: number }>(invited, `SELECT id FROM pay_plans WHERE position = 'owner'`)!.id;
+    run(
+      invited,
+      `INSERT INTO users (employee_id, email, first_name, last_name, role, position, team_id, pay_plan_id, start_date, status, avatar_color, client_campaign_id)
+       VALUES ('CL-0002', 'contact@bcn.example', 'Real', 'Contact', 'client', 'client', NULL, ?, '2026-10-01', 'active', '#4F46E5', ?)`,
+      [plan, bcn],
+    );
+    assert.deepEqual(createSchema(invited), []);
+    assert.equal(get(invited, `SELECT 1 FROM users WHERE email = ?`, [HANNAH]), undefined);
+    assert.equal(count(invited, `SELECT COUNT(*) AS n FROM client_posts`), 0, 'no demo posts beside the real contact');
+    assert.ok(flagOf(invited));
+  } finally {
+    invited.close();
+  }
+});
+
 test('after the start-up step the sign-in page lists her under the charity accounts, and one click opens her portal', async () => {
   const srv = await startTestServer({ seed: true, seedOptions: { demoClients: false } });
   try {

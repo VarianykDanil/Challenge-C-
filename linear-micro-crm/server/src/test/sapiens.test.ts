@@ -268,6 +268,34 @@ test('a database the demo seed did not create never gains them (the test fixture
   }
 });
 
+test('a demo-born database in real use never gains them: LM_DEMO_ACCOUNTS=0 waits, changed demo staff end the step', () => {
+  const off = freshDemo({ demoTeams: false }).db;
+  try {
+    process.env.LM_DEMO_ACCOUNTS = '0';
+    try {
+      assert.deepEqual(createSchema(off), []);
+      assert.equal(sapiensTeam(off), undefined);
+      assert.equal(get(off, `SELECT 1 FROM meta WHERE key = ?`, [DEMO_TEAMS_DONE_KEY]), undefined, 'asked again next start');
+    } finally {
+      delete process.env.LM_DEMO_ACCOUNTS;
+    }
+    assert.deepEqual(createSchema(off), ['sapiens:team.sapiens'], 'still a demo once the variable is gone');
+  } finally {
+    off.close();
+  }
+  const live = freshDemo({ demoTeams: false }).db;
+  try {
+    run(live, `UPDATE users SET status = 'left' WHERE employee_id IN ('LM-0002', 'LM-0003', 'LM-0010')`);
+    assert.deepEqual(createSchema(live), []);
+    assert.equal(sapiensTeam(live), undefined);
+    assert.ok(get(live, `SELECT 1 FROM meta WHERE key = ?`, [DEMO_TEAMS_DONE_KEY]), 'done: a database in real use');
+    run(live, `UPDATE users SET status = 'active'`);
+    assert.deepEqual(createSchema(live), [], 'and stays done');
+  } finally {
+    live.close();
+  }
+});
+
 test('marker: an unreadable value lists nobody', () => {
   const db = openDb(':memory:');
   try {
