@@ -6,7 +6,7 @@
 import { useId, useState, type FormEvent } from 'react';
 import { Check, Plug, PlugZap, RefreshCw, TriangleAlert, Unplug, X } from 'lucide-react';
 import {
-  PAYMENT_LIVE_CONFIRMATION, PAYMENT_MODE_LABELS, abilityChecklist, formatPence, isLiveConfirmation,
+  PAYMENT_LIVE_CONFIRMATION, PAYMENT_MODE_LABELS, abilityChecklist, bankFileFormat, formatPence, isLiveConfirmation,
   type PaymentConfigField, type PaymentConnection, type PaymentProviderView,
 } from '@lm/shared';
 import { ApiError } from '@/api/client';
@@ -14,7 +14,8 @@ import { useCreateConnection, useDisconnectConnection, usePaymentConnections, us
 import { Badge, Button, Card, CardHeader, Field, Input, Modal, Select, Skeleton, Textarea, useToast } from '@/components/ui';
 import { ConfirmDialog, ErrorState, errorMessage } from '@/features/common';
 import { formatDateTime } from '@/lib/format';
-import { EXAMPLE_BANKS, ProviderLogo } from './ProviderLogo';
+import { OptionPicker, bankFileFormatLabel, hasOptionLogos } from './BankFileFormats';
+import { ProviderLogo } from './ProviderLogo';
 
 const STATUS: Record<PaymentConnection['status'], { label: string; tone: 'success' | 'neutral' | 'danger' }> = {
   connected: { label: 'Connected', tone: 'success' },
@@ -82,12 +83,7 @@ function ProviderCard({ provider: p, connections, onConnect }: { provider: Payme
           <p className="mt-0.5 text-sm text-muted">{p.summary}</p>
         </div>
       </div>
-      {p.iconKey === 'bank' && (
-        <div className="flex flex-wrap items-center gap-1.5 text-xs text-muted">
-          {EXAMPLE_BANKS.map((b) => <ProviderLogo key={b} iconKey={b} size="xs" />)}
-          <span>and any other UK business bank that takes a payment file</span>
-        </div>
-      )}
+      {p.iconKey === 'bank' && <FileFormatLogos p={p} />}
       <AbilityList p={p} />
       <dl className="grid gap-2 text-sm">
         <div><dt className="text-xs font-medium text-muted">Fees</dt><dd className="text-fg">{p.abilities.fees}</dd></div>
@@ -113,6 +109,18 @@ function ProviderCard({ provider: p, connections, onConnect }: { provider: Payme
   );
 }
 
+/** Release 1.4 (P): the bank file card names its formats with the banks' logos (from its form's "File format"). */
+function FileFormatLogos({ p }: { p: PaymentProviderView }) {
+  const banks = (p.configFields.find(hasOptionLogos)?.options ?? []).filter((o) => o.iconKey && o.iconKey !== 'bank');
+  if (!banks.length) return null;
+  return (
+    <div className="flex flex-wrap items-center gap-1.5 text-xs text-muted" data-file-formats="">
+      {banks.map((o) => <ProviderLogo key={o.value} iconKey={o.iconKey!} size="xs" />)}
+      <span>Ready-made files for {banks.map((o) => bankFileFormat(o.value)?.bank ?? o.label).join(' and ')}, and a general Faster Payments file for any other UK bank</span>
+    </div>
+  );
+}
+
 function ConnectionRow({ provider: p, connection: c, onEdit }: { provider: PaymentProviderView; connection: PaymentConnection; onEdit: () => void }) {
   const test = useTestConnection();
   const update = useUpdateConnection();
@@ -133,6 +141,7 @@ function ConnectionRow({ provider: p, connection: c, onEdit }: { provider: Payme
         {api && <Badge tone={c.mode === 'live' ? 'danger' : 'info'} size="sm">{c.mode === 'live' ? 'Live: real money' : PAYMENT_MODE_LABELS.test}</Badge>}
         <Badge tone={status.tone} size="sm" dot={c.status === 'connected'}>{status.label}</Badge>
       </div>
+      {!api && bankFileFormatLabel(c.settings) && <p className="mt-1 text-xs text-fg" data-connection-format={c.settings.format}>{bankFileFormatLabel(c.settings)}</p>}
       <p className="mt-1 text-xs text-muted">
         {c.lastCheckedAt ? `Last tested ${formatDateTime(c.lastCheckedAt)}` : api ? 'Test it before you pay anyone through it.' : 'Ready to make bank files.'}
         {c.balancePence != null ? ` · Balance ${formatPence(c.balancePence)}` : ''}
@@ -270,6 +279,8 @@ function ConnectModal({ provider: p, connection: c, onClose }: { provider: Payme
 
 function ConfigInput({ id, field: f, value, saved, error, onChange }: { id: string; field: PaymentConfigField; value: string; saved: boolean; error?: string; onChange: (v: string) => void }) {
   const hint = [f.help, f.secret && saved ? 'Saved. Leave it empty to keep the one stored.' : null].filter(Boolean).join(' ');
+  // Release 1.4 (P): a choice whose options have logos (the bank file's format) is a list of choices with the logos
+  if (hasOptionLogos(f)) return <OptionPicker field={f} value={value} error={error} onChange={onChange} />;
   return (
     <Field label={f.label} htmlFor={id} hint={hint || undefined} error={error} required={f.required && !(f.secret && saved)} optional={!f.required}>
       {f.type === 'select' ? (

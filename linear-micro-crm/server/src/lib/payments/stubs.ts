@@ -8,6 +8,7 @@
  */
 import { paymentProviderInfo, type PaymentConfigField, type PaymentProviderId, type PaymentProviderInfo } from '@lm/shared';
 import { HttpError } from '../errors.ts';
+import { BANK_FILE_CONFIG_FIELDS } from './bankFile.ts';
 import { validateConfigFields, type PaymentProviderAdapter } from './provider.ts';
 
 /** 501: this version cannot pay (or test) through the provider yet. */
@@ -21,16 +22,8 @@ export function notReadyError(name: string): HttpError {
 
 /** The connection form of each of the four ways to pay (help: where to find each value, in plain words). */
 export const PROVIDER_CONFIG_FIELDS: Record<PaymentProviderId, readonly PaymentConfigField[]> = {
-  bank_file: [
-    {
-      name: 'format',
-      label: 'File format',
-      type: 'select',
-      required: true,
-      options: [{ value: 'generic', label: 'General Faster Payments file (CSV)' }],
-      help: 'The file your bank’s bulk payment upload takes. If your bank is not in the list, use the general file and check its columns with your bank.',
-    },
-  ],
+  // Release 1.4 (P): the bank file's form lives with its adapter (./bankFile.ts), which the registry uses instead of a stub
+  bank_file: BANK_FILE_CONFIG_FIELDS,
   revolut: [
     {
       name: 'clientId',

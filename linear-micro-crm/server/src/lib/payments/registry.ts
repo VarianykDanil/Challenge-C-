@@ -2,20 +2,21 @@
  * Release 1.4 — OWNED BY F payments-foundation: the registry of ways to pay (adapters: ./provider.ts).
  *
  * The four built-in ones, in the order Settings → Payments shows them: bank_file, revolut, wise, truelayer. F registers
- * a stub for each (./stubs.ts: `ready: false`). Package P replaces `stubProvider('bank_file')` below with its adapter;
- * package A replaces the other three. Nothing else changes when they do.
+ * a stub for each (./stubs.ts: `ready: false`). Package P replaced `stubProvider('bank_file')` with its adapter
+ * (./bankFile.ts); package A replaces the other three. Nothing else changes when they do.
  *
  * Tests register the fake (./fake.ts) with `registerPaymentProvider(createFakeProvider())` and remove it with
  * `unregisterPaymentProvider('fake')`. LM_PAYMENTS_FAKE=1 registers it at start-up too, with a fake bank file
  * ('fake_file'), for trying the screens on a demo (they pay nobody) — never set it on a server people are paid from.
  */
 import type { PaymentProviderView } from '@lm/shared';
+import { createBankFileProvider } from './bankFile.ts';
 import { createFakeProvider } from './fake.ts';
 import type { PaymentProviderAdapter } from './provider.ts';
 import { stubProvider } from './stubs.ts';
 
 const BUILT_IN: readonly PaymentProviderAdapter[] = [
-  stubProvider('bank_file'), // package P: the bank payment file
+  createBankFileProvider(), // package P: the bank payment file (./bankFile.ts)
   stubProvider('revolut'), // package A
   stubProvider('wise'), // package A
   stubProvider('truelayer'), // package A

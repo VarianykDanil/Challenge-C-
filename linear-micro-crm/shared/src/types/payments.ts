@@ -67,6 +67,11 @@ export interface PaymentAbilities {
   checksBalance: boolean;
   /** Payments usually arrive the same day (UK Faster Payments). */
   sameDay: boolean;
+  /**
+   * Release 1.4 (P): works with any UK business bank (the bank payment file). Shown in the checklist only when set,
+   * so the API providers' checklists are unchanged.
+   */
+  anyUkBank?: boolean;
   /** Fees, in plain words. */
   fees: string;
   /** What Matt needs to set it up, one line each. */
@@ -100,7 +105,11 @@ export interface PaymentConfigField {
   help?: string;
   /** Default 'text'. 'textarea' for keys and certificates; 'select' uses `options`. */
   type?: 'text' | 'textarea' | 'select';
-  options?: { value: string; label: string }[];
+  /**
+   * Release 1.4 (P): an option may carry a logo key (the client's ProviderLogo) and a one-line hint; a select whose
+   * options have logos is drawn as a list of choices with their logos (the bank file's format picker).
+   */
+  options?: { value: string; label: string; iconKey?: string; hint?: string }[];
   placeholder?: string;
   /** Longest value accepted (default 200; 8000 for a textarea). */
   maxLength?: number;

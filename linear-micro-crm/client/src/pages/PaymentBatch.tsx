@@ -14,6 +14,7 @@ import { useCurrentUser } from '@/auth/AuthProvider';
 import { Badge, Button, Card, CardHeader, Field, Input, KpiTile, PageHeader, Skeleton, useToast } from '@/components/ui';
 import { ConfirmDialog, ErrorState, errorMessage } from '@/features/common';
 import { PaymentBatchStatusBadge, PaymentItemStatusBadge } from '@/features/payments';
+import { BankFileHelp } from '@/features/payments/BankFileFormats';
 import { ProviderLogo } from '@/features/payments/ProviderLogo';
 import { todayISO } from '@/lib/dates';
 import { formatDateTime, formatNumber } from '@/lib/format';
@@ -106,6 +107,8 @@ function BatchBody({ b, providerName, available }: { b: PaymentBatch; providerNa
             )}
           </div>
         </div>
+        {/* Release 1.4 (P): which bank file this is and where to upload it */}
+        {b.kind === 'file' && b.status !== 'cancelled' && <BankFileHelp connectionId={b.connectionId} className="mx-5 mb-4" />}
         <ItemList items={b.items} draft={draft} kind={b.kind} />
       </Card>
 
@@ -152,6 +155,8 @@ function ItemList({ items, draft, kind }: { items: PaymentItem[]; draft: boolean
             <span className="block truncate text-sm font-medium text-fg">{i.userName}</span>
             <span className="block text-xs text-muted">
               {payWeekLabel(i.weekStart)} · to {i.payeeName}, account <span className="font-mono">••••{i.accountLast4}</span>
+              {/* Release 1.4 (P): a bank file line's reference, to find it on the bank statement */}
+              {kind === 'file' && i.providerRef ? <> · reference <span className="font-mono">{i.providerRef}</span></> : null}
               {i.paidAt ? ` · paid ${formatDateTime(i.paidAt)}` : ''}
             </span>
             {i.failureReason && <span className="block text-xs text-danger">{i.failureReason}</span>}

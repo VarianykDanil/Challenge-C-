@@ -90,3 +90,4 @@ export * from './venues.ts';
 export * from './people.ts';
 // Release 1.4
 export * from './payments.ts';
+export * from './bankFiles.ts';

@@ -26,9 +26,6 @@ const MARKS: Record<string, Mark> = {
   tide: { title: 'Tide', path: siTide.path, bg: `#${siTide.hex}`, fg: '#FFFFFF' },
 };
 
-/** Banks shown on the bank file card as examples (any UK business bank that takes a payment file works). */
-export const EXAMPLE_BANKS = ['starling', 'monzo', 'barclays', 'hsbc', 'tide'] as const;
-
 const SIZES = { xs: 'h-6 w-6 rounded-md [&_svg]:h-3.5 [&_svg]:w-3.5 text-[9px]', sm: 'h-8 w-8 rounded-lg [&_svg]:h-4 [&_svg]:w-4 text-[10px]', md: 'h-10 w-10 rounded-xl [&_svg]:h-5 [&_svg]:w-5 text-xs', lg: 'h-12 w-12 rounded-xl [&_svg]:h-6 [&_svg]:w-6 text-sm' } as const;
 
 export function logoTitle(iconKey: string): string {

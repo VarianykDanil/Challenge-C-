@@ -31,9 +31,12 @@ export function PaymentItemStatusBadge({ status, kind }: { status: PaymentItemSt
   return <Badge tone={ITEM_TONE[status]} size="sm" dot={status === 'paid'}>{label}</Badge>;
 }
 
-/** "File ready" for a bank file not yet marked paid, else the shared label. */
+/**
+ * "File ready" for a bank file not yet marked paid (release 1.4, P: also when someone was left out of the file, which
+ * makes the batch 'processing'), else the shared label.
+ */
 export function PaymentBatchStatusBadge({ status, kind }: { status: PaymentBatchStatus; kind?: 'file' | 'api' }) {
-  const label = kind === 'file' && status === 'submitted' ? 'File ready' : PAYMENT_BATCH_STATUS_LABELS[status];
+  const label = kind === 'file' && (status === 'submitted' || status === 'processing') ? 'File ready' : PAYMENT_BATCH_STATUS_LABELS[status];
   return <Badge tone={BATCH_TONE[status]} dot={status === 'completed'}>{label}</Badge>;
 }
 
