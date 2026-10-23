@@ -868,7 +868,10 @@ Logic §15.5).
 #### Per-person write limit (429)
 
 At most 60 a minute per signed-in person, all together, of `POST /learning/*`, `PUT /pitches/*`, `POST /checkins`,
-`POST /auth/pin` (and `/auth/pin/*`) and `POST /gauges/bulk`. The next one inside the minute answers
+`POST /auth/pin` (and `/auth/pin/*`) and `POST /gauges/bulk` — since 1.3.1 also `POST /users` (and below it) and
+(1.3.1 fix) `POST` / `DELETE /events/:id/roster/me`, `PUT /events/:id/roster` and `PUT
+/recruitment/interviews/:id/answers` (any case, with or without a trailing slash, whatever the `:id` segment). The
+next one inside the minute answers
 `429 { "error": "That is more than 60 changes in a minute. Wait a minute, then try again." }` with `Retry-After: 60`
 and is not recorded; refused requests do not count. Reads, other writes and signed-out requests (401 as before) are
 not limited. `createApp(db, { writeLimitPerMinute })` sets the number (0 turns it off).
@@ -1074,11 +1077,20 @@ All routes are under `/api/invoices`, behind `requireAuth`; anonymous → 401, a
 | `PUT /invoices/company` | admin | `CompanySettings`; `CompanySettingsInput.signatureImage` is a `data:image/png;base64,…` (a complete PNG: IHDR first with a width and height of 1–4000 px, every chunk's CRC right, IEND last with nothing after it; ≤ 200 KB) or `null` to remove. 400 otherwise, and nothing is written |
 | `GET /invoices/signatures/:file` | every staff role | the signature PNG an invoice prints (content-addressed `<16 hex>.png`, cached privately) |
 | `GET /invoices?from=&to=&userId=&weekStart=&status=` | rep/recruiter own; leader own team + self; admin all | `InvoiceListRow[]` (an `InvoiceSummary` plus `payrollRunId, userId, userName, weekStart, weekEnd, dueDate, runStatus`), newest week first; default range the last 12 weeks |
-| `GET /invoices/by-run/:runId` · `GET /invoices/:id` | admin, the person, their team leader (others 403; none 404 "Invoice not found") | `Invoice` with `runStatus`, `paidDate`, `paidOverride`, `previousVersions` (after a reissue), `actions { accept, dispute, resolve, markPaidWithReason }` for the viewer, `agreementAccepted` for the supplier only, and `runTotal` + `figuresChanged` for the admin. A team leader's view has `supplier { name, vatNumber, withheld: true }` with no address, postcode or UTR. A deemed acceptance of someone who had not accepted any self-billing agreement by then has `acceptance.withoutAgreement: true`. An invoice whose run changed since is brought up to date first (see Logic) |
+| `GET /invoices/by-run/:runId` · `GET /invoices/:id` | admin, the person, their team leader (others 403; none 404 "Invoice not found") | `Invoice` (each line `InvoiceLine { kind, description, quantity?, unitPrice?, amount, paid, campaignId?, sourceWeekStart?, note? }`; release 1.3.1 fix: `note` is the pay breakdown line's note, see below) with `runStatus`, `paidDate`, `paidOverride`, `previousVersions` (after a reissue), `actions { accept, dispute, resolve, markPaidWithReason }` for the viewer, `agreementAccepted` for the supplier only, and `runTotal` + `figuresChanged` for the admin. A team leader's view has `supplier { name, vatNumber, withheld: true }` with no address, postcode or UTR. A deemed acceptance of someone who had not accepted any self-billing agreement by then has `acceptance.withoutAgreement: true`. An invoice whose run changed since is brought up to date first (see Logic) |
 | `POST /invoices/:id/accept` | the supplier only (403 otherwise) | `Invoice`. 409 `{ details.code: 'agreement_required' }` until the agreement is accepted; idempotent once accepted or deemed accepted; also from disputed (the person changed their mind) or resolved |
 | `POST /invoices/:id/dispute` `{ reason (3–1000), lines: [{ line, note? }] }` | the supplier only | `Invoice` (status `disputed`). 400 for a line that is not on the invoice or picked twice; 409 once paid, already disputed or already answered, or past the deadline ("The time to dispute this invoice passed at 12:00 Thu 22 Oct. Speak to the office: a correction can go on a later week.") |
 | `GET /invoices/disputes` | admin | `InvoiceDisputeRow[]` oldest first, with `disputedLines` (description, amount, the person's note), `ours { total, salesLogged, salesConfirmed? }`, `payrollRunId`, `dueDate`, `teamName`, `figuresChanged`, `runTotal`, and `statements [{ id, campaignCode }]`: the client statements that confirmed the person's sales for that week (P1's `sale_confirmations`) |
 | `POST /invoices/:id/resolve` `{ action: 'reissue' \| 'keep', note (3–1000), adjustment?: { amount, note? } }` | admin | `Invoice`. Disputed only (else 409). `keep` → `resolved` (payable); `reissue` (unpaid runs only) → optional correction, then version + 1, status `issued` |
+
+**Line notes (release 1.3.1 fix).** A line built from P1's breakdown carries `note` — the breakdown line's
+`PayLine.note`, why the line is what it is: "7 logged, 1 cancelled by CHN", "not yet confirmed by BCN", a correction's
+"1 cancelled by BCN: paid for 10, confirmed 9" — when there is one and the description does not already say it (a
+bonus's note is its description, "Bonus: top seller"). Additive: a line without a note has no `note` key, and
+invoices issued before this fix are never rewritten to add one (their stored lines are the record they were accepted
+or disputed on); a new invoice, the next version and an in-place refresh carry it. A note is wording: it never makes
+a new version. The invoice shows it in grey under the description, and the PDF in smaller grey text (through the PDF
+formula guard; invoice lines are in no CSV export).
 
 `PUT /invoices/profile`, `POST /invoices/agreement/accept`, `POST /invoices/:id/accept` and `/dispute` share a
 per-person limit of 60 a minute (the numbers and wording of `middleware/writeLimit.ts`, a counter of their own inside
@@ -1490,7 +1502,7 @@ Every route is for the recruitment roles only (admin, leader, recruiter; reps 40
 | `PATCH /recruitment/questions/:id` | any of the above | `InterviewQuestion` (moving it to another type puts it at the end there); a save of the same values changes nothing; the same 409 when the new words, type or position clash with another question |
 | `PUT /recruitment/questions/order` | `{ interviewType, ids }` — every question of that type, once each, in the new order | `InterviewQuestion[]` of that type |
 | `GET /recruitment/interviews/:id/sheet` | — | `InterviewSheet { interview (+ candidateName), answers, saved, candidate { id, name, stage, positionApplied, dateOfBirth }, summary, changes }`; a read never writes |
-| `PUT /recruitment/interviews/:id/answers` | `InterviewAnswerInput[]` (1–30 items) — the first save sends every question on screen, in order; later saves only **what this device changed**: `{ questionId (a bank question) or null (a question of their own), questionText (required for their own; for a bank question, the words on screen), answer (≤ 4,000 characters), score? (1–5 or null), base? { answer, score } (what this device started from), removed? (true: take the question off), device? + version? (both or neither: the sending browser tab's made-up id, 8–64 letters, digits, `-` or `_`, and its save number, a whole number rising with each save) }` | `InterviewSheet` (each stored answer also says `device`: the tab whose save last wrote it, or null); **409** `{ error: "Question 3 was changed by Rhys Morgan on another device. Choose which answer to keep.", details: InterviewSheetConflictDetails { conflicts: [{ questionId, questionText }], sheet } }` when another device changed (or answered) the same question since this one saw it — nothing is written then; 400 for an unknown bank question, a question twice, their own question without words, an empty list, a bad score, a long answer, or a sheet left with no question or more than 30 |
+| `PUT /recruitment/interviews/:id/answers` | `InterviewAnswerInput[]` (1–30 items) — the first save sends every question on screen, in order; later saves only **what this device changed**: `{ questionId (a bank question) or null (a question of their own), questionText (required for their own; for a bank question, the words on screen), answer (≤ 4,000 characters), score? (1–5 or null), base? { answer, score } (what this device started from), removed? (true: take the question off), device? + version? (both or neither: the sending browser tab's made-up id, 8–64 letters, digits, `-` or `_`, and its save number, a whole number rising with each save) }` | `InterviewSheet` (each stored answer also says `device`: the tab whose save last wrote it, or null); **409** `{ error: "Question 3 was changed by Rhys Morgan on another device. Choose which answer to keep.", details: InterviewSheetConflictDetails { conflicts: [{ questionId, questionText }], sheet } }` when another device changed (or answered) the same question since this one saw it — nothing is written then; 400 for an unknown bank question, a question twice, their own question without words, an empty list, a bad score, a long answer, or a sheet left with no question or more than 30; **429** (release 1.3.1 fix) after 60 writes a minute by the same person (the per-person write limit, shared with the other limited writes): nothing is written, audited or cleared from the cache |
 
 Changes to the 1.0 routes (`routes/recruitment.ts`, P7's in 1.3):
 
@@ -1570,6 +1582,10 @@ event was ever held there. Everything in the summary, plus:
 | `DELETE /events/:id/roster/me` | the admin, leaders, reps | the roster ("I can't make it") |
 | `GET /events/:id/plan[?userId=]` | every staff role (response-cached) | `EventPlan[]` |
 
+- **Write limit (release 1.3.1 fix).** `PUT /events/:id/roster` and `POST` / `DELETE /events/:id/roster/me` count
+  towards the per-person limit of 60 writes a minute (see Per-person write limit): the 61st answers `429 { "error":
+  "That is more than 60 changes in a minute. Wait a minute, then try again." }` with `Retry-After: 60`, books or takes
+  off nobody, is not audited and does not clear the response cache.
 - **PUT `{ add, remove }`** (last fix round; what Edit bookings sends): the changes from the list the page loaded.
   `add` is booked by the caller, `remove` is taken off, and everyone else stays as they are now. So someone who taps
   **I'm working this** while the leader has Edit bookings open stays booked, and the audit row names only the changes.
@@ -1839,6 +1855,15 @@ Now", sector: "charity", role: "client", email, employeeId }` — the same condi
 
 Every sentence or label the server builds from a person's name uses `personName` (or `TRIM(first_name || ' ' ||
 last_name)` in SQL): "Theo", never "Theo " or a double space. `leaderName` on `GET /teams` is "Theo".
+
+### Fixes from the 1.3 final security and pay check (additive)
+
+- **Write limit**: `POST` / `DELETE /events/:id/roster/me`, `PUT /events/:id/roster` and `PUT
+  /recruitment/interviews/:id/answers` now count towards the per-person limit of 60 writes a minute (Per-person write
+  limit, above): `429` with the usual sentence and `Retry-After: 60`; a refused call is not audited and does not clear
+  the response cache.
+- **Invoice lines**: `InvoiceLine.note?` — the pay breakdown line's note, on new invoices and new versions only
+  (Self-billing invoices, Line notes).
 
 ## Seed & demo accounts
 The server seeds `server/data/linear.sqlite` on first start (or `npm run seed` to reset) with deterministic

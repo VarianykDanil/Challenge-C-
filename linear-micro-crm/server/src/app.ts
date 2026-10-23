@@ -176,8 +176,10 @@ export function createApp(db: Db, opts: AppOptions = {}): Express {
   // Release 1.2 slots, both pass-through until their packages land: U1's PIN gate (403 until a required PIN is set),
   // then U3's audit recorder (successful writes, with before/after snapshots).
   api.use(pinSetupGate(db));
-  // Per person, at most 60 a minute of POST /learning/*, PUT /pitches/*, POST /checkins, POST /auth/pin(/*) and
-  // POST /gauges/bulk together (429 after that); before the recorder, so a refused write is never recorded.
+  // Per person, at most 60 a minute of POST /learning/*, PUT /pitches/*, POST /checkins, POST /auth/pin(/*),
+  // POST /gauges/bulk, POST /users(/*) and (1.3.1 fix) the event roster writes and PUT /recruitment/interviews/:id/answers
+  // together (429 after that); before the recorder and the cache bump, so a refused write is never recorded and clears
+  // nothing (middleware/writeLimit.ts WRITE_LIMITED_ROUTES).
   api.use(perUserWriteLimit({ perMinute: opts.writeLimitPerMinute }));
   api.use(auditMiddleware(db));
   // any write invalidates the aggregate cache before the handler runs (handlers are synchronous node:sqlite calls);

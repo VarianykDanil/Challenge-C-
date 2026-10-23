@@ -50,8 +50,10 @@ export interface PdfLineColumn {
 /**
  * One cell value per column key; `muted` rows are drawn in the lighter colour (e.g. "not paid" lines).
  * (P4: written as one index signature so a literal with `muted: true` type-checks; the cells are strings.)
+ * Release 1.3.1: `note` is drawn under the first column's text, smaller and in the muted grey (an invoice line's "7
+ * logged, 1 cancelled by CHN"); like `muted`, it is never a column of its own.
  */
-export type PdfLineRow = { [key: string]: string | boolean | undefined; muted?: boolean };
+export type PdfLineRow = { [key: string]: string | boolean | undefined; muted?: boolean; note?: string };
 
 export interface PdfSignature {
   /** e.g. "For Linear MCR Limited", "Accepted by the supplier". */

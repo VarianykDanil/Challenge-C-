@@ -1,10 +1,11 @@
 // Release 1.3 — OWNED BY P2 invoices. The self-billing invoice as a document: A4-like on screen, a clean page in print
 // (PayslipModal's print rules print only its data-print-root). Supplier = the person, customer = Linear MCR Limited,
-// every line from the pay week (a line listed but not paid is marked "Not paid"), the total, the self-billing
-// sentence, both signatures, earlier versions and the dispute / the office's answer.
+// every line from the pay week (a line listed but not paid is marked "Not paid"; release 1.3.1: its note, in grey
+// under the description), the total, the self-billing sentence, both signatures, earlier versions and the dispute /
+// the office's answer.
 import clsx from 'clsx';
 import type { Invoice, InvoiceParty } from '@lm/shared';
-import { INVOICE_STATUS_LABELS } from '@lm/shared';
+import { INVOICE_STATUS_LABELS, invoiceLineNote } from '@lm/shared';
 import { Badge } from '@/components/ui';
 import { formatNumber } from '@/lib/format';
 import {
@@ -82,6 +83,7 @@ export function InvoiceDocument({ invoice: inv, mine, className }: InvoiceDocume
         <tbody>
           {inv.lines.map((l, i) => {
             const flagged = disputed.get(i);
+            const note = invoiceLineNote(l);
             return (
               <tr key={i} className={clsx('border-b border-border align-top', !l.paid && 'text-muted')} data-invoice-line={i}>
                 <td className="py-2 pr-2">
@@ -91,6 +93,7 @@ export function InvoiceDocument({ invoice: inv, mine, className }: InvoiceDocume
                       {l.quantity !== undefined ? formatNumber(l.quantity) : ''}{l.quantity !== undefined && l.unitPrice !== undefined ? ' × ' : ''}{l.unitPrice !== undefined ? money(l.unitPrice) : ''}
                     </span>
                   )}
+                  {note && <span className="mt-0.5 block break-words text-xs text-muted" data-invoice-line-note="">{note}</span>}
                   {!l.paid && <span className="mt-0.5 block text-xs">Not paid: shown so you can see how the week was worked out</span>}
                   {flagged && <span className="mt-0.5 block text-xs font-medium text-danger">Disputed{flagged.note ? `: “${flagged.note}”` : ''}</span>}
                 </td>

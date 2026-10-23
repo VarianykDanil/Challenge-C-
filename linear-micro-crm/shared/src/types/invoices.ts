@@ -78,6 +78,13 @@ export interface InvoiceLine {
   paid: boolean;
   campaignId?: number;
   sourceWeekStart?: string;
+  /**
+   * Release 1.3.1 fix: why the line is what it is, from the pay breakdown (PayLine.note): "7 logged, 1 cancelled by
+   * CHN", "not yet confirmed by BCN", a correction's "1 cancelled by BCN: paid for 10, confirmed 9". Only when there is
+   * one that the description does not already say. Invoices issued before this fix have none (their lines are their
+   * record and are never rewritten to add one); a new invoice or a new version carries it.
+   */
+  note?: string;
 }
 
 /** What the payroll rows and lists carry (PayrollRunWithUser.invoice). */

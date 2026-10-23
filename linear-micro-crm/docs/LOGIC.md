@@ -1932,12 +1932,19 @@ check-in time. Admins always see everything. IP addresses are for admins only.
 
 The 1.2 writes anyone signed in can repeat at will share a budget of 60 per person per minute (the real clock, a
 one-minute window from the first of them): `POST /learning/*` (self-check, teach-back, sign-off), `PUT /pitches/*`,
-`POST /checkins`, `POST /auth/pin` and the routes below it, and `POST /gauges/bulk`. The next one inside the minute
-is refused with 429 "That is more than 60 changes in a minute. Wait a minute, then try again." and
-`Retry-After: 60`; refused requests do not count and nothing is recorded for them. Reads, other writes and
-signed-out requests are not affected. The counter is in memory (`server/src/middleware/writeLimit.ts`, on the login
-limiter's bounded map), so a restart forgets it. A phone replaying its queued check-ins stops at a 429 and tries
-again later; nothing queued is lost.
+`POST /checkins`, `POST /auth/pin` and the routes below it, and `POST /gauges/bulk`; since 1.3.1 also `POST /users`
+and (1.3.1 fix) three 1.3 writes, each of which writes an audit row and clears the whole response cache: `POST` and
+`DELETE /events/:id/roster/me` ("I'm working this" / "I can't make it"), `PUT /events/:id/roster` (Edit bookings) and
+`PUT /recruitment/interviews/:id/answers` (the interview sheet's autosave: one save at a time, 2.5 seconds after the
+typing stops or 0.3 seconds after a score is tapped, so normal use stays well under 60 a minute; a refused save shows
+its sentence on the sheet and keeps the words for the next save). Those three are matched by pattern on the whole path
+(`WRITE_LIMITED_ROUTES` takes a RegExp as well as a prefix; any case, with or without a trailing slash), and the `:id`
+is any path segment, not just digits: Express decodes the id before the route reads it, so `/events/%35/roster/me`
+books event 5 and counts too. The next one inside the minute is refused with 429 "That is more than 60 changes in a
+minute. Wait a minute, then try again." and `Retry-After: 60`; refused requests do not count and nothing is recorded
+for them. Reads, other writes and signed-out requests are not affected. The counter is in memory
+(`server/src/middleware/writeLimit.ts`, on the login limiter's bounded map), so a restart forgets it. A phone
+replaying its queued check-ins stops at a 429 and tries again later; nothing queued is lost.
 
 #### The diff
 
@@ -2200,7 +2207,9 @@ both `upgrade` and `seed`, `ctx.rng(salt)`, never gauge rows or payroll runs fro
 | `venues.ts` (P8) | `event_roster (event_id → events CASCADE, user_id → users CASCADE, booked_by, booked_at, source 'leader'\|'self'; PK event+user)` | — | — |
 
 Files on disk (git-ignored in `.gitignore`): `server/data/media/` (P5 videos), `server/data/statements/` (P3 PDFs),
-`server/data/uploads/` (P2's signature image). Tests write files only to a temp dir, never there.
+`server/data/uploads/` (P2's signature image). Tests write files only to a temp dir, never there — nor the key file
+`server/data/app-secret`: every test that encrypts points `configureAppSecret` at a temp dir first (`startTestServer`
+does; release 1.3.1 fix: `server/src/lib/crypto.test.ts` too, in a `before()` hook, restored afterwards).
 
 #### Shared types (`shared/src/types/*.ts`, re-exported from `@lm/shared`)
 
@@ -2550,6 +2559,19 @@ weeks, bonus, deductions); otherwise from the stored run (base, commission, bonu
 = £240.00 + 12 sales × £45.00 = £540.00 + £75.00 bonus = **£855.00**; a £20.00 deduction later reissues it as
 version 2 at **£835.00**. With P1's rule: 4 days × £63.50 = £254.00 paid; BCN 16 subs × £10.00 = £160.00 listed, not
 paid; bonus £25.00; correction for w/c 5 Oct −£20.00; deduction −£12.50 → **£246.50**.
+
+**Line notes (release 1.3.1 fix).** A line from P1's breakdown also carries the breakdown line's `note` — why it is
+what it is: "7 logged, 1 cancelled by CHN", "not yet confirmed by BCN", a correction's "1 cancelled by BCN: paid for
+10, confirmed 9", the office's words on a manual adjustment — unless its description already says it (a bonus reads
+"Bonus: top seller", so its note is not repeated) (`invoiceLinesFromBreakdown`). The invoice shows it in grey under
+the description, sentence case (`invoiceLineNote`), on screen and in the PDF (smaller, in the muted grey, every line
+through the PDF formula guard like any other text; invoice lines are in no CSV). Lines from the stored run have no
+note. A note is wording: it never makes a new version (`sameInvoicePayment` ignores it). **A stored invoice's lines
+are its record**: invoices issued before this fix keep their lines exactly as issued (no notes) — nothing rewrites
+them at start-up or when they are read — and read as before; the next version of one (a reissue, "Fix and reissue")
+or an in-place refresh when its run changes carries the notes, and a new week's invoice has them from the start. The
+note says how the week stood when that version was written: a paid week's invoice can say "not yet confirmed by BCN"
+where the breakdown now says "not confirmed by BCN when paid".
 
 **Change detection.** An invoice remembers its run's figures when its lines were last written (`run_fingerprint`:
 days, sales, team sales, base, commission, bonus, overrides, deductions, gross, and P1's paid-as / confirmed /
@@ -3432,3 +3454,13 @@ demo database. `GET /auth/demo-accounts` labels a demo client by organisation ("
 adds `name`, `organisation` and `sector`; the sign-in page heads the group **Charity accounts** (when every listed
 client's campaign is a charity; otherwise **Client accounts**) and shows "Hannah Price — Breast Cancer Now" with a
 **Charity** tag, under the four and the Sapiens group.
+
+#### Fixes from the 1.3 final security and pay check
+
+- **Write limit on bookings and the interview sheet.** `POST` / `DELETE /events/:id/roster/me`, `PUT
+  /events/:id/roster` and `PUT /recruitment/interviews/:id/answers` count towards the per-person limit of 60 writes a
+  minute (§15.5, Per-person write limit). The 61st is 429 with the usual sentence; a refused call is not audited and
+  does not clear the response cache (the limiter runs before the audit recorder and the cache bump).
+- **Invoice lines say why.** Each invoice line from the pay breakdown carries its note, shown in grey under the
+  description on screen and in the PDF; stored invoices are never rewritten for it (§16.2, Line notes).
+- **The crypto test's key file.** `crypto.test.ts` no longer reads or creates `server/data/app-secret` (§16.0).
