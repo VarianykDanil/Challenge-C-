@@ -9,7 +9,7 @@
  * accepted, else an admin override with a reason (audited); a disputed invoice is held until the office resolves it;
  * each person accepts the versioned self-billing agreement once before their first invoice can be accepted.
  *
- * Endpoints (server/src/routes/invoices.ts, mounted at /invoices, owned by P2; stubs: reads empty, writes 501):
+ * Endpoints (server/src/routes/invoices.ts, mounted at /invoices, owned by P2):
  *  - GET  /invoices/agreement                → SelfBillingAgreement (the current text + whether I accepted it)
  *  - POST /invoices/agreement/accept         → SelfBillingAgreement (records version, time, IP)
  *  - GET  /invoices/profile                  → InvoiceProfile (mine); PUT /invoices/profile InvoiceProfileInput
@@ -23,7 +23,7 @@
  *  - POST /invoices/:id/resolve  InvoiceResolveInput → Invoice (admin: 'reissue' = fix and reissue, 'keep' = keep as it is)
  *  - GET  /invoices/company, PUT /invoices/company CompanySettingsInput → CompanySettings (admin; GET also field roles:
  *    the customer block of their own invoice)
- * Server helpers called from finance.ts (wired by the foundation; stubs do nothing): lib/invoices.ts
+ * Server helpers called from finance.ts: lib/invoices.ts
  * `assertInvoicePayable(db, run, me, body)` before POST /finance/payroll/:id/pay, `withInvoiceSummaries(db, runs, me)`
  * on every payroll list / payslip answer, and `startInvoiceJobs(db)` from index.ts (issue on week close, deem accepted).
  * Tables (server/src/db/extensions/invoices.ts): self_billing_agreements, invoices; users columns address_line1,

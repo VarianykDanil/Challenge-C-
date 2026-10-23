@@ -78,6 +78,28 @@ test('environment: LM_DEMO_ACCOUNTS=0 reaches the service (no demo buttons, no d
   assert.ok(!('LM_DEMO_ACCOUNTS' in serviceEnvironment({ DB_PATH: '/var/lib/x.sqlite' })), 'left out when not set');
 });
 
+test('environment: the 1.3 settings reach the service (statement reader off, statements and uploads folders, from server/)', () => {
+  const env = serviceEnvironment({ LM_STATEMENTS_JOB: '0', LM_STATEMENTS_DIR: 'data/stmts', LM_UPLOADS_DIR: '/Volumes/Hub/uploads', COOKIE_SECURE: '1' });
+  assert.equal(env.LM_STATEMENTS_JOB, '0', 'the Gmail reader stays off under the service');
+  assert.equal(env.LM_STATEMENTS_DIR, path.join(serverDir, 'data', 'stmts'), 'resolved from server/ like DB_PATH');
+  assert.equal(env.LM_UPLOADS_DIR, '/Volumes/Hub/uploads');
+  assert.equal(env.COOKIE_SECURE, '1');
+  const none = serviceEnvironment({});
+  for (const key of ['LM_STATEMENTS_JOB', 'LM_STATEMENTS_DIR', 'LM_UPLOADS_DIR', 'COOKIE_SECURE']) assert.ok(!(key in none), `${key} left out when not set`);
+});
+
+test('--print --platform=darwin writes the statements and uploads settings into the LaunchAgent', () => {
+  const r = spawnSync(process.execPath, ['src/service.ts', 'install', '--print', '--platform=darwin'], {
+    cwd: serverDir,
+    encoding: 'utf8',
+    env: { ...process.env, NODE_NO_WARNINGS: '1', HOME: tmp, LM_STATEMENTS_JOB: '0', LM_STATEMENTS_DIR: '../x/stmts', LM_UPLOADS_DIR: '../x/upl' },
+  });
+  assert.equal(r.status, 0, r.stderr);
+  assert.match(r.stdout, /<key>LM_STATEMENTS_JOB<\/key>\s*<string>0<\/string>/);
+  assert.ok(r.stdout.includes(`<string>${path.resolve(serverDir, '../x/stmts')}</string>`), r.stdout);
+  assert.ok(r.stdout.includes(`<string>${path.resolve(serverDir, '../x/upl')}</string>`), r.stdout);
+});
+
 test('awkward paths survive both formats, and the Node path reads back', () => {
   const spec: ServiceSpec = {
     node: '/Users/Ann O\'Neil/.nvm/versions/node/v22.18.0/bin/node',
@@ -126,6 +148,12 @@ test('macOS: a checkout or backups folder in Desktop, Documents, Downloads or iC
     home,
   );
   assert.match(icloud ?? '', /the backups folder \(LM_BACKUP_DIR\) is in ~\/Library\/Mobile Documents/);
+  const moved = macPrivacyWarning(
+    spec(path.join(home, 'LinearHub', 'server'), { LM_STATEMENTS_DIR: path.join(home, 'Documents', 'statements'), LM_UPLOADS_DIR: path.join(home, 'Desktop', 'uploads') }),
+    home,
+  );
+  assert.match(moved ?? '', /the statements folder \(LM_STATEMENTS_DIR\) is in ~\/Documents/);
+  assert.match(moved ?? '', /the uploads folder, the signature image \(LM_UPLOADS_DIR\) is in ~\/Desktop/);
 
   // a link from a harmless name into Documents still counts
   mkdirSync(path.join(home, 'Documents', 'real'), { recursive: true });

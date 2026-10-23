@@ -118,7 +118,7 @@ unless the requester is an `admin` or the row is the requester themselves. `GET 
 
 ## Misc
 - `GET /announcements[?limit=&offset=]` → `Announcement[]` (pinned first, newest first, the id breaking a tie). Every signed-in role reads every announcement. Without `limit`, all of them (as before); `limit` (1–50, a larger number is capped at 50) and `offset` (≥ 0) page through the same order, so `?offset=5&limit=20` is the twenty after the dashboard's latest five (its **Older announcements** list). `limit` of 0, a negative number or not a whole number → 400; the same for `offset`, which must also be a safe integer (at most 2^53 − 1, as on `GET /audit` and `GET /gauges`); empty values are ignored. `POST /announcements` (admin, leader) → `Announcement` (201).
-- `GET /health` → `{ ok: true, version: string, seededAt: string }` (`version` is read from `server/package.json`, `"1.1.0"`). An admin session also gets `backup` (see *Backups, health and compression*).
+- `GET /health` → `{ ok: true, version: string, seededAt: string }` (`version` is read from `server/package.json`, so it is always the running release). An admin session also gets `backup` (see *Backups, health and compression*).
 
 ## Smart endpoints
 
@@ -534,9 +534,10 @@ Example (leader):
 }
 ```
 
-**Version.** `GET /api/health` reports `"version": "1.1.0"` (read from `server/package.json`). The root, shared,
-server and client `package.json` files (and the workspace entries in `package-lock.json`) are 1.1.0, and **About**
-shows **Version 1.1.0** (`client/src/content/about.ts`, `APP_VERSION`).
+**Version (1.1).** In release 1.1, `GET /api/health` reported `"version": "1.1.0"` (read from `server/package.json`),
+the root, shared, server and client `package.json` files (and the workspace entries in `package-lock.json`) were 1.1.0,
+and **About** showed **Version 1.1.0** (`client/src/content/about.ts`, `APP_VERSION`). Every release since moves all of
+them together; `CHANGELOG.md` names the current one.
 
 ### Backups, health and compression (p10)
 
@@ -1908,7 +1909,7 @@ also never has a zero-sales day this week), and an avatar palette with ≥ 4.5:1
 
 Behaviour that the contract above leaves open, as implemented in `server/`:
 
-- **Public endpoints.** `GET /auth/demo-accounts` is public (the login page needs it before a session exists), alongside `/auth/login` and `/health`. It only ever lists the four seeded demo accounts (all present, with their seeded roles, none `left`) and returns `{ accounts: [] }` otherwise or when the environment variable `LM_DEMO_ACCOUNTS=0` is set — set that on any deployment with real users. Unknown `/api/*` paths return `404 { "error": "Not found" }` whether or not a session is present.
+- **Public endpoints.** `GET /auth/demo-accounts` is public (the login page needs it before a session exists), alongside `/auth/login` and `/health`. It only ever lists the four seeded demo accounts (all present, with their seeded roles, none `left`), plus the demo client (`clientAccounts`) and team Sapiens (`demoTeams`) that the seed recorded, and returns `{ accounts: [] }` otherwise or when the environment variable `LM_DEMO_ACCOUNTS=0` is set — set that on any deployment with real users. Unknown `/api/*` paths return `404 { "error": "Not found" }` whether or not a session is present.
 - **Login & sessions.** Email and employee ID are matched case-insensitively; an unknown email, a wrong ID and a user with status `left` all get the same `401 Invalid email or employee ID` (the distinction is never disclosed). Failed attempts are counted in memory (`lib/limiter.ts`, bounded LRU maps of 10,000 keys, expired entries swept every 5 minutes off the request path) under two keys: **source address + email** (8 in 15 minutes → `429`) and **email alone** (20 in 15 minutes → `429`, a backstop against rotating addresses). The source is `req.socket.remoteAddress`, never `req.ip`/`X-Forwarded-For`. Sessions live 14 days in the `sessions` table (32 random bytes, hex) behind the `lm_session` cookie (httpOnly, SameSite=Lax). **`TRUST_PROXY`** (env, default off): with it unset the app ignores `X-Forwarded-*` entirely, so `req.secure` is false behind a TLS terminator — set `TRUST_PROXY=1` (one proxy hop), the proxy's IP or CIDR (`10.0.0.0/8`, `loopback`) or a comma list, which makes `req.secure` follow `X-Forwarded-Proto` (Secure cookies, HSTS); the proxy must overwrite inbound `X-Forwarded-For`. `COOKIE_SECURE=1` forces the Secure flag regardless. `authenticate` rejects (and deletes) the session of any user whose status is `left`, and `PATCH /users/:id` with `status: 'left'` deletes all of that user's sessions, so deactivation revokes access immediately. An admin cannot deactivate their own account (`400`).
 - **Employee IDs.** Because the employee ID is half of the credential, `redactUser`/`redactPayroll` (`server/src/lib/scope.ts`) blank it (`''`) on every user or payroll payload unless the requester is an admin or the row is their own; `q` on `GET /users` searches employee IDs for admins only.
 - **Dates and times.** `from`/`to` are inclusive `BETWEEN` filters, so `from=to=<date>` is an exact-date match (used to prefill an existing gauge entry via `GET /gauges?eventId&userId&from&to`). `parseRange` rejects `from` before `2020-01-01` and spans over 400 days with `400`, so daily trends and weekly summaries are bounded; `limit` is capped at 500. Week keys (`groupBy=week`, `FinanceWeek.weekStart`, `RecruitmentSummary.weekly`) are Monday dates. Dashboard/leaderboard ranges end at **today** (`week` = Monday → today) and the comparison period is the **same to-date span of the previous period** (`previousToDateRange` in `server/src/lib/dates.ts`: week → the same weekdays last week, month → days 1..n of the previous month clamped to its length, quarter → the same day-offset into the previous quarter), returned as `Dashboard.previous`; `deltas` are null when the previous value is 0. Quarter trends are weekly points (the first point is keyed by the quarter's first day and holds that partial week), week/month trends are daily, all zero-filled.

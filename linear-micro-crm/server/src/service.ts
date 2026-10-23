@@ -11,7 +11,8 @@
  * `--print` is a dry run: it prints the file and the commands and changes nothing (`--platform=darwin|linux|win32`
  * shows another platform's file). The service runs this checkout's server/src/index.ts with the Node that ran this
  * command, in production mode, with TZ=Europe/London, plus PORT/HOST/DB_PATH and the other Linear Hub settings that
- * are set in this terminal (paths resolved the way `npm start` resolves them, from server/).
+ * are set in this terminal, the 1.3 LM_STATEMENTS_JOB/LM_STATEMENTS_DIR/LM_UPLOADS_DIR among them (paths resolved the
+ * way `npm start` resolves them, from server/).
  */
 import { spawnSync } from 'node:child_process';
 import { existsSync, mkdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
@@ -54,8 +55,25 @@ export function installedServiceFile(platform: string = process.platform): strin
 }
 
 /** Linear Hub settings handed to the service when they are set in this terminal. */
-const PASS_THROUGH = ['PORT', 'HOST', 'DB_PATH', 'LM_APP_SECRET_FILE', 'LM_BACKUP', 'LM_BACKUP_DIR', 'LM_BACKUP_HOUR', 'TRUST_PROXY', 'LM_SMART', 'LM_COMPRESSION', 'LM_DEMO_ACCOUNTS'] as const;
-const PATH_VARS: ReadonlySet<string> = new Set(['DB_PATH', 'LM_APP_SECRET_FILE', 'LM_BACKUP_DIR']);
+const PASS_THROUGH = [
+  'PORT',
+  'HOST',
+  'DB_PATH',
+  'LM_APP_SECRET_FILE',
+  'LM_BACKUP',
+  'LM_BACKUP_DIR',
+  'LM_BACKUP_HOUR',
+  'TRUST_PROXY',
+  'COOKIE_SECURE',
+  'LM_SMART',
+  'LM_COMPRESSION',
+  'LM_DEMO_ACCOUNTS',
+  // release 1.3: the Gmail statement reader's switch, and the statements and uploads folders
+  'LM_STATEMENTS_JOB',
+  'LM_STATEMENTS_DIR',
+  'LM_UPLOADS_DIR',
+] as const;
+const PATH_VARS: ReadonlySet<string> = new Set(['DB_PATH', 'LM_APP_SECRET_FILE', 'LM_BACKUP_DIR', 'LM_STATEMENTS_DIR', 'LM_UPLOADS_DIR']);
 
 /** The service's environment: production, London time, quiet Node, plus the pass-through settings (absolute paths). */
 export function serviceEnvironment(env: NodeJS.ProcessEnv = process.env): Record<string, string> {
@@ -210,6 +228,8 @@ export function macPrivacyWarning(spec: ServiceSpec, home: string = os.homedir()
     ['the database (DB_PATH)', spec.env.DB_PATH],
     ['the backups folder (LM_BACKUP_DIR)', spec.env.LM_BACKUP_DIR],
     ['the app secret file, the two-step and PIN key (LM_APP_SECRET_FILE)', spec.env.LM_APP_SECRET_FILE],
+    ['the statements folder (LM_STATEMENTS_DIR)', spec.env.LM_STATEMENTS_DIR],
+    ['the uploads folder, the signature image (LM_UPLOADS_DIR)', spec.env.LM_UPLOADS_DIR],
   ];
   const hits = places.flatMap(([what, p]) => {
     const root = p ? macProtectedFolder(p, home) : null;

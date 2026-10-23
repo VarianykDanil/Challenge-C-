@@ -54,6 +54,41 @@ The Sapiens team's demo sign-ins, and leaders and recruiters can add people. Det
   initials from the first name alone; the Team list, Finance's payroll runs, the pay export, invoices, a campaign's
   client accounts and "Read by" sort Theo among the T surnames.
 - The administrator's form is called **Add person** (was **Add member**), and its employee ID may be left blank.
+- `npm run build` installs new dependencies first (`npm ci` when `package-lock.json` changed), so `git pull` followed
+  by `npm run build` no longer fails with "Cannot find module 'jspdf'".
+
+### Fixed
+
+- `npm run service:install` passes `LM_STATEMENTS_JOB`, `LM_STATEMENTS_DIR`, `LM_UPLOADS_DIR` and `COOKIE_SECURE` on
+  to the background service (the two folders resolved from `server/`, like `DB_PATH`) and warns when either folder is
+  in Desktop, Documents, Downloads or iCloud Drive. Before, a service installed with the Gmail reader off still read
+  Gmail every 15 minutes, and moved statement or upload folders read as missing.
+- `npm run backup` ends by naming the folders it does not copy (`media` for learning videos, `statements` for client
+  statement PDFs, `uploads` for the signature image), and `npm run restore` says that only the database was restored,
+  that those folders were left as they are, and that videos uploaded after the backup stay in `media/videos` with no
+  row.
+- Plainer messages on the upgrade path: `npm start` and `npm run latest` say "the dependencies were installed after
+  the last build" when only the packages changed (was "the app's screens changed"); the start-up line reads "Payroll
+  runs: 0 created, 29 brought up to date, 0 removed" (was "recomputed from late gauges", printed also when only a
+  week's stored breakdown was added); and a restore without `--yes` and without a terminal says why once, not twice.
+- README and DEPLOY.md: the database file no longer "holds everything". Moving to a server copies `media`,
+  `statements` and `uploads` with the database, the nightly off-site job copies them too (`rclone copy`, which never
+  deletes off-site), Fly.io and Render say how to bring and save them, and the go-live checklist asks for it.
+- USER_GUIDE: an invoice's **Download PDF** is described as always there (no longer "once PDFs are switched on").
+- README "What it does": **Finance & Pay** describes the base-or-commission rule and invoices (not 1.2's base per day,
+  commission and leader overrides), and **Export & print** the **Export** menu (CSV or PDF) and the invoice's
+  **Print invoice** and **Download PDF**.
+- API.md: `GET /health`'s version is no longer given as "1.1.0" (it is read from `server/package.json`), and the 1.1
+  version paragraph is marked as history.
+- API.md: the public-endpoints note now lists the demo client and team Sapiens that `GET /auth/demo-accounts` returns
+  besides the four demo staff.
+- CHANGELOG [1.3.0]: the 24-hour rule applies to any invoice issued late, not only a reissue; the settings bullet no
+  longer reads as if `npm run pin:reset` were new, and names all three kinds of file the nightly backup leaves out.
+- OWNER_NOTES_1.3.md: five build-time notes now describe what shipped: the audit PDF holds every matching entry (up to
+  2,000), opening an interview sheet is audited, venues export as PDF with **Venue report**, the audit PDF prints
+  "Attempt on Jordan Lee's account", and the test server turns keep-alive off.
+- Code comments in `shared/src/types` (client, pay, invoices), `server/src/index.ts` and the client's PDF and payslip
+  files no longer promise stubs that answer empty or 501.
 
 ### Fixed
 
@@ -97,9 +132,9 @@ in 1.3"), [docs/LOGIC.md](docs/LOGIC.md) §16, [docs/API.md](docs/API.md) ("1.3 
 - **Self-billing invoices.** Everyone in the field is self-employed: each closed pay week issues an invoice in the
   person's name to Linear MCR Limited, numbered `LM-SB-…`, with the breakdown, the office's signatory and signature,
   and the person's electronic acceptance. **Accept invoice** or **Something's wrong** (say which lines and why); the
-  office fixes and reissues it or keeps it with a note. Not disputed by 12:00 the day before payday (or 24 hours after
-  a late reissue) counts as accepted; **Mark paid** needs acceptance or an override with a reason. A one-off
-  self-billing agreement, supplier details (address, UTR, VAT) and company details in **Settings**.
+  office fixes and reissues it or keeps it with a note. Not disputed by 12:00 the day before payday, or 24 hours after
+  it was issued when that is later, counts as accepted; **Mark paid** needs acceptance or an override with a reason. A
+  one-off self-billing agreement, supplier details (address, UTR, VAT) and company details in **Settings**.
 - **Client accounts.** Each campaign's client gets an access code and a PIN and sees only a portal: post an update, an
   announcement or a commission change. Posts appear in Announcements ("From Breast Cancer Now") and in Matt's top box;
   commission changes wait for Matt's approval and apply from the date he confirms. Campaign pages hold the brief, rates
@@ -120,9 +155,9 @@ in 1.3"), [docs/LOGIC.md](docs/LOGIC.md) §16, [docs/API.md](docs/API.md) ("1.3 
   every export and download, opened invoices, candidates and the audit trail, client portal actions and automatic
   steps; a test fails for any write route without an audit entry. **Audit**: Everything or Changes only, a kind
   filter, and **Team → person → Activity**.
-- `npm run pin:reset` is joined by new settings: `LM_STATEMENTS_JOB=0` turns the statement reader off,
-  `LM_STATEMENTS_DIR` and `LM_UPLOADS_DIR` move where statements and the signature image are kept. Learning videos
-  live in `media/videos` next to the database; the nightly backup does not copy them.
+- New settings: `LM_STATEMENTS_JOB=0` turns the statement reader off; `LM_STATEMENTS_DIR` and `LM_UPLOADS_DIR` move
+  where statements and the signature image are kept. Learning videos live in `media/videos` next to the database. The
+  nightly backup copies none of these files (videos, statement PDFs, signature image).
 
 ### Fixed
 

@@ -103,7 +103,7 @@ const PEOPLE_COLUMNS: CsvColumn<PersonRow>[] = [
 /** "venue-report-golden-square--warrington-2026-10-21.pdf" */
 export const venueReportFilename = (v: Pick<VenueProfile, 'key'>, today: string) => `venue-report-${v.key}-${today}.pdf`;
 
-/** Builds and downloads the venue report (throws PdfUnavailableError while P4's PDF chunk cannot load). */
+/** Builds and downloads the venue report (throws PdfUnavailableError when the PDF chunk cannot load). */
 export async function downloadVenueReport(v: VenueProfile, today: string): Promise<void> {
   const law = v.lawOfAverages;
   const filename = venueReportFilename(v, today);

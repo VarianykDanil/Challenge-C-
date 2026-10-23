@@ -16,7 +16,7 @@ export type { PdfAddress, PdfDoc, PdfDocumentOptions, PdfLineColumn, PdfLineRow,
 
 export const PDF_EXPORTS_READY = true;
 
-/** Thrown by the stubs (and by P4 when the PDF chunk cannot load, e.g. offline). */
+/** Thrown when the PDF chunk cannot load (e.g. offline). */
 export class PdfUnavailableError extends Error {
   constructor(message = 'PDF export is not available yet') {
     super(message);

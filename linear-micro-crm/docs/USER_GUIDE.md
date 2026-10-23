@@ -131,7 +131,7 @@ is listed as *Not paid*, and the other way round), the total, and the deadline.
   payday. Until you accept it, the office needs a reason to pay it, so accept it as soon as it is right. A change that
   does not change your pay (for example cancellations on a week you were paid the base) just updates the lines:
   nothing to accept again.
-- **Print invoice** gives a clean A4 page (and **Download PDF** once PDFs are switched on).
+- **Print invoice** gives a clean A4 page, and **Download PDF** saves the same invoice as a PDF.
 - **Settings → Invoices**: your address, postcode, Unique Taxpayer Reference (if you have one) and VAT number (only
   if you are VAT registered). They are printed on every invoice still waiting to be accepted.
 
@@ -1091,6 +1091,9 @@ if the review and a tile ever disagree, the tile is looking at a different perio
 If there has been no backup for more than 36 hours the card turns amber (**No backup for 3 days**). Backups only
 happen while Linear Hub is running: leave it running overnight, or on the laptop run `npm run backup`. Either way,
 copy the backups folder to iCloud or Drive now and then — a backup on the same laptop does not survive losing it.
+The backups hold the database and the app secret only: copy `server/data/media` (learning videos),
+`server/data/statements` (client statement PDFs) and `server/data/uploads` (the signature image) with them;
+`npm run backup` names those folders when it finishes.
 
 If the server was started with automatic backups switched off (`LM_BACKUP=0`), the card says so with an amber **Off**
 badge and does not promise nightly copies: run `npm run backup` on the laptop yourself, or start Linear Hub again
@@ -1103,7 +1106,9 @@ commit it to git or share it.
 To go back to a backup (for example after a mistake that deleted the wrong entries): on the laptop, stop the server
 (`npm run stop`, or `npm run service:uninstall` if it runs in the background) and run
 `npm run restore -- <file name>`. It shows what will change and asks first; the database it replaces is kept, so you
-can change your mind.
+can change your mind. Only the database goes back: the videos, statement PDFs and signature image folders are left as
+they are, and restore says so (videos uploaded after that backup stay on disk with no entry; delete them if you do not
+need them).
 
 To keep Linear Hub running without a Terminal window — so phones on the hotspot keep working and it starts by itself
 when you log in — run `npm run service:install` once on the laptop. `npm run service:status` says whether it is

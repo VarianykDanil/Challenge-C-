@@ -13,7 +13,7 @@
  */
 import { spawnSync } from 'node:child_process';
 import path from 'node:path';
-import { clientBuildStatus, depsStatus, lockfileInstalled, recordInstalledLockfile, shortStamp } from './lib/buildStatus.ts';
+import { clientBuildStatus, depsStatus, lockfileInstalled, rebuildNotice, recordInstalledLockfile } from './lib/buildStatus.ts';
 
 const repoDir = path.resolve(import.meta.dirname, '..', '..');
 const npm = process.platform === 'win32' ? 'npm.cmd' : 'npm';
@@ -51,10 +51,6 @@ if (depsOnly) process.exit(0);
 
 const build = clientBuildStatus(repoDir);
 if (build.stale) {
-  console.log(
-    build.built
-      ? `Linear Hub: the app's screens changed since the last build (${build.newest?.file} is newer than the build from ${shortStamp(build.builtAtMs!)}) — building them now, about 10–20 s.`
-      : "Linear Hub: the app's screens have not been built yet — building them now, about 10–20 s.",
-  );
+  console.log(rebuildNotice(build));
   run(['run', 'build'], 'Build');
 }

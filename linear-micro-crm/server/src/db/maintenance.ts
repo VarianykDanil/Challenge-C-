@@ -296,6 +296,16 @@ export interface MaterialiseResult {
  *  2. recomputes the unpaid runs of the last two completed weeks from the gauges (idempotent upsert), so late or
  *     corrected entries reach pay even when no request-path sync saw them. Paid runs are never touched.
  */
+/**
+ * The server's log line after materialisePayrollRuns, or null when nothing changed. "brought up to date", not
+ * "recomputed from late gauges": an update may also be a statement's correction or a stored breakdown for a week
+ * calculated before 1.3, with no figure changed.
+ */
+export function payrollRunsLogLine(r: MaterialiseResult): string | null {
+  if (!r.created && !r.updated && !r.deleted) return null;
+  return `Payroll runs: ${r.created} created, ${r.updated} brought up to date, ${r.deleted} removed`;
+}
+
 export function materialisePayrollRuns(db: Db, today = todayISO()): MaterialiseResult {
   const result: MaterialiseResult = { created: 0, updated: 0, deleted: 0 };
   const firstGauge = get<{ d: string | null }>(db, `SELECT MIN(date) AS d FROM gauge_entries`)!.d;

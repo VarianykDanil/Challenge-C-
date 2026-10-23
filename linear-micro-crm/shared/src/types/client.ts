@@ -14,7 +14,7 @@
  * call ONLY /health, /auth/me, /auth/logout, /auth/login, /auth/login/2fa, /auth/demo-accounts, /auth/pin(/*) and
  * /client(/*); everything else answers 403 ClientPortalOnlyError.
  *
- * Endpoints (owned by P6; stubs: reads empty, writes 501):
+ * Endpoints (owned by P6):
  *  routes/client.ts, mounted at /client (the client's own portal; client role only, others 403):
  *   - GET  /client/portal                → ClientPortal
  *   - GET  /client/posts                 → ClientPost[] (their campaign's posts, newest first)

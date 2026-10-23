@@ -4,7 +4,7 @@ import path from 'node:path';
 import { createApp, parseTrustProxy } from './app.ts';
 import { openDb } from './db/connection.ts';
 import { createSchema, isSeeded } from './db/schema.ts';
-import { materialisePayrollRuns, rollForwardEventStatuses } from './db/maintenance.ts';
+import { materialisePayrollRuns, payrollRunsLogLine, rollForwardEventStatuses } from './db/maintenance.ts';
 import { DEFAULT_DB_PATH, seed } from './db/seed.ts';
 import { findPortHolder, installExitDiagnostics, listeningUrl, networkUrls, portBusyMessage } from './lib/boot.ts';
 import { backupDirFor, backupHour, backupsEnabled, configureBackupDir, scheduleBackups, whenBackupIdle } from './lib/backup.ts';
@@ -13,7 +13,7 @@ import { announceAppSecret, appSecretFile, configureAppSecret } from './lib/cryp
 import { businessClockPinned, businessNow } from './lib/dates.ts';
 import { purgeExpiredChallenges, reencryptLegacySecrets } from './lib/twofactor.ts';
 import { purgeAuditLog } from './lib/audit.ts';
-// Release 1.3 (r3-foundation): the packages' background jobs (stubs start nothing until P2 / P3 fill them).
+// Release 1.3: background jobs (invoices: issue on week close and deem accepted; statements: the Gmail check).
 import { startInvoiceJobs } from './lib/invoices.ts';
 import { startStatementJob } from './lib/statements/job.ts';
 import { purgeExpiredSessions } from './middleware/auth.ts';
@@ -53,8 +53,8 @@ function rollEvents(): void {
 }
 /** Payroll runs for newly completed pay weeks + a recompute of the last two weeks' unpaid runs: once a day (the finance routes also guard for it). */
 function materialisePayroll(): void {
-  const r = materialisePayrollRuns(db);
-  if (r.created || r.updated || r.deleted) console.log(`Payroll runs: ${r.created} created, ${r.updated} recomputed from late gauges, ${r.deleted} removed`);
+  const line = payrollRunsLogLine(materialisePayrollRuns(db));
+  if (line) console.log(line);
 }
 const guarded = (fn: () => void) => () => {
   try {

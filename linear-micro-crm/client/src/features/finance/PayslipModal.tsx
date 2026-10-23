@@ -1,7 +1,7 @@
 // Payslip breakdown for a single payroll run, with a "Print payslip" action that lays it out on A4.
 // Release 1.3 (P2 invoices, which owns this file in 1.3): a run with a self-billing invoice (reps and leaders) opens as
 // the invoice — the document replaces the pay table and plan box, with Accept / Something's wrong (or the office's
-// actions) above it, "Print invoice" and, once P4's PDFs are ready, "Download PDF". Runs without an invoice (office
+// actions) above it, "Print invoice" and "Download PDF". Runs without an invoice (office
 // roles, weeks paid before invoices began) keep the payslip; for a field person's week under the 1.3 base-or-commission
 // rule, P1's breakdown (same query, fetched once) replaces the 1.2 pay table and plan box, whose plan figures (commission
 // per sale £0.00, "Base pay 4 days × £63.50 £0.00") contradicted it.
