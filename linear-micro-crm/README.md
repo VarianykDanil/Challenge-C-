@@ -297,8 +297,8 @@ database is open in another process … Stop it first, with the PORT it runs on"
 port ("Stop it first: npm run stop"). It checks the backup
 (`PRAGMA integrity_check` and the Linear Hub tables), prints the current and the backup's users, gauge entries,
 payroll runs and latest gauge date side by side, and only then asks (`--yes` skips the question). The database it
-replaces is kept next to it as `linear.sqlite.before-restore-<date-time>`, so a restore can itself be undone. Only the
-database is restored: the `media`, `statements` and `uploads` folders are left as they are (restore says so, and that
+replaces is kept next to it as `linear.sqlite.before-restore-<date-time>`, so a restore can itself be undone. The
+`media`, `statements` and `uploads` folders are not in the backups and are left as they are (restore says so, and that
 videos uploaded after the backup stay in `media/videos` with no row; delete them if you do not need them). If
 Linear Hub runs as a background service, stop it with `npm run service:uninstall` instead of `npm run stop` (macOS
 would only start it again), restore, then `npm run service:install`.

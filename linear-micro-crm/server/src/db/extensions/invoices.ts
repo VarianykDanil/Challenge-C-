@@ -46,9 +46,9 @@
 import { SELF_BILLING_AGREEMENT_VERSION, effectiveInvoiceStatus, invoiceDeadline, isInvoicedRole, type InvoiceLine } from '@lm/shared';
 import type { Db } from '../connection.ts';
 import { addDays, mondayOf } from '../../lib/dates.ts';
-import { businessLocal, fromBusinessLocal, issueInvoiceForRun } from '../../lib/invoices.ts';
+import { businessLocal, fromBusinessLocal, issueInvoiceForRun, restampInvoiceFingerprints } from '../../lib/invoices.ts';
 import type { DbExtension, SeedContext } from './types.ts';
-import { addColumnIfMissing } from './types.ts';
+import { addColumnIfMissing, metaFlag, setMetaFlag } from './types.ts';
 
 /**
  * Keeps a removed invoice in invoice_voids, with every earlier version (invoice_versions rows still exist in a BEFORE
@@ -326,6 +326,17 @@ function seedInvoices(db: Db, ctx: SeedContext): void {
   if (jordanLate !== null) issueInvoiceForRun(db, jordanLate, new Date(now.getTime() - 3_600_000));
 }
 
+/** meta flag: invoices stamped before 1.3.1 got the new fingerprint (lib/invoices.ts restampInvoiceFingerprints). */
+const RESTAMP_KEY = 'ext:invoices:fingerprint-confirmations';
+
+/** The one-off restamp (a fresh install sets the flag on its empty table, so its seeded invoices are never touched). */
+function restampFingerprints(db: Db): string | null {
+  if (metaFlag(db, RESTAMP_KEY)) return null;
+  const n = restampInvoiceFingerprints(db);
+  setMetaFlag(db, RESTAMP_KEY);
+  return n > 0 ? 'invoices.run_fingerprint' : null;
+}
+
 export const extension: DbExtension = {
   name: 'invoices',
   sql: SQL,
@@ -347,6 +358,7 @@ export const extension: DbExtension = {
       // every version of a voided invoice (a database whose invoice_voids predates it)
       addColumnIfMissing(db, 'invoice_voids', 'versions_json', 'TEXT'),
       upgradeVoidTrigger(db),
+      restampFingerprints(db),
     ].filter((name): name is string => name !== null);
   },
   seed: seedInvoices,

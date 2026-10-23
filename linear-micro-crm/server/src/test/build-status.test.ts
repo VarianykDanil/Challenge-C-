@@ -89,6 +89,15 @@ describe('clientBuildStatus', () => {
     const i = rebuildNotice(clientBuildStatus(installed.root));
     assert.match(i, /^Linear Hub: the dependencies were installed after the last build \(the build is from .+\) — building the screens again, about 10–20 s\.$/);
     assert.ok(!/screens changed/.test(i), 'the screens did not change: the packages did');
+
+    // a git pull that changes both: the install is newest, but the screens changed too, so say that
+    const both = checkout(1_000_000);
+    both.touch('client/dist/index.html', 1_000_100);
+    both.touch('client/src/pages/NewScreen.tsx', 1_000_300);
+    both.touch('node_modules/.package-lock.json', 1_000_400);
+    const b = rebuildNotice(clientBuildStatus(both.root));
+    assert.match(b, /the app's screens changed since the last build/);
+    assert.ok(b.includes(path.join('client', 'src', 'pages', 'NewScreen.tsx')), b);
   });
 
   it('ignores an edit within a second of the build (coarse file-system clocks)', () => {

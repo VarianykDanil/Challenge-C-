@@ -1092,7 +1092,7 @@ if the review and a tile ever disagree, the tile is looking at a different perio
 If there has been no backup for more than 36 hours the card turns amber (**No backup for 3 days**). Backups only
 happen while Linear Hub is running: leave it running overnight, or on the laptop run `npm run backup`. Either way,
 copy the backups folder to iCloud or Drive now and then — a backup on the same laptop does not survive losing it.
-The backups hold the database and the app secret only: copy `server/data/media` (learning videos),
+The backups hold the database (and the app secret, unless you set `LM_APP_SECRET`) only: copy `server/data/media` (learning videos),
 `server/data/statements` (client statement PDFs) and `server/data/uploads` (the signature image) with them;
 `npm run backup` names those folders when it finishes.
 
@@ -1107,7 +1107,7 @@ commit it to git or share it.
 To go back to a backup (for example after a mistake that deleted the wrong entries): on the laptop, stop the server
 (`npm run stop`, or `npm run service:uninstall` if it runs in the background) and run
 `npm run restore -- <file name>`. It shows what will change and asks first; the database it replaces is kept, so you
-can change your mind. Only the database goes back: the videos, statement PDFs and signature image folders are left as
+can change your mind. The videos, statement PDFs and signature image folders are not in the backups and are left as
 they are, and restore says so (videos uploaded after that backup stay on disk with no entry; delete them if you do not
 need them).
 

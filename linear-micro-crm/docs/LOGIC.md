@@ -1275,12 +1275,13 @@ README.md ("Backups and restore", "Run it in the background"); the switches are 
    lost, PINs are reset (`npm run pin:reset -- <email>` for an administrator, then Reset PIN), and two-step users use
    a recovery code and an administrator resets their two-step sign-in (Team › Edit › Reset two-step verification).
    Nobody depending on the key: nothing is said.
-9. Folders (`restoreFolderNotes`, `foldersOutsideBackup`): "Only the database was restored", naming the learning
+9. Folders (`restoreFolderNotes`, `foldersOutsideBackup`): "… are not in the backups and were left as they are", naming the learning
    videos (`<data dir>/media`), the statement PDFs (`LM_STATEMENTS_DIR`, else `<data dir>/statements`) and the
    signature image (`LM_UPLOADS_DIR`, else `uploads/` next to the app secret), which are in no backup and were left as
    they are; when `media/videos` exists, also that videos uploaded after the backup stay there with no row. Then
    "Start it again". `npm run backup` likewise ends by naming those three folders (`backupFolderNote`): "the backups
-   hold the database and the app secret only".
+   hold the database and the app secret only" when the folder has the app-secret copy, "the backups hold the database
+   only" otherwise (and, with `LM_APP_SECRET` set, that the key is not in them: keep it in a password manager).
 
 **Health status for admins** (`GET /health` → `backup`): `count` = matching files in the folder; `lastAt`/`file` from
 meta unless the newest file is more than a minute newer (after a restore the meta table is the backup's own, older
@@ -2583,8 +2584,14 @@ where the breakdown now says "not confirmed by BCN when paid".
 
 **Change detection.** An invoice remembers its run's figures when its lines were last written (`run_fingerprint`:
 days, sales, team sales, base, commission, bonus, overrides, deductions, gross, and P1's paid-as / confirmed /
-cancelled / adjustments). A different value on an unpaid run means the run was recalculated (gauges, a statement, an
-adjustment, an approved rate). The lines are rebuilt and compared with the invoice's (`sameInvoicePayment`):
+cancelled / adjustments; since 1.3.1 followed by `#` and the week's statement confirmations, `campaignId:confirmed` in
+campaign order, when there are any). A different value on an unpaid run means the run was recalculated (gauges, a
+statement, an adjustment, an approved rate) or a statement confirmed the week: one that confirms exactly the number
+logged changes no figure but does change the lines' notes ("not yet confirmed by BCN" goes), so it refreshes the
+invoice in place. A dispute's `figuresChanged` compares the figures part only (`figuresOf`). Invoices stamped before
+1.3.1 hold the figures alone; the invoices extension restamps the ones that are up to date once (flag
+`ext:invoices:fingerprint-confirmations`, `restampInvoiceFingerprints`), so none is rewritten at start-up for the new
+stamp. The lines are rebuilt and compared with the invoice's (`sameInvoicePayment`):
 
 - **the same payment** — the same total and the same paid lines (kind, campaign, quantity, unit price, amount; "Not
   paid" lines and wording do not count): the lines are **refreshed in place** and the status, acceptance, version and

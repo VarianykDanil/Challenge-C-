@@ -94,12 +94,41 @@ const INVOICED_SQL = INVOICED_ROLES.map((r) => `'${r}'`).join(', ');
 const UNPAID_SQL = `('pending', 'failed')`;
 
 /**
- * The stored run's figures in one string: an invoice remembers it when issued, and a different value later means the
- * run was recalculated (gauges, a statement, an adjustment) and the invoice must be reissued.
+ * The stored run's figures in one string (RUN_FIGURES_SQL): an invoice remembers it when issued, and a different value
+ * later means the run was recalculated (gauges, a statement, an adjustment) and the invoice must be reissued.
  */
-export const RUN_FINGERPRINT_SQL = `printf('%d|%d|%d|%.2f|%.2f|%.2f|%.2f|%.2f|%.2f|%s|%d|%d|%.2f',
+export const RUN_FIGURES_SQL = `printf('%d|%d|%d|%.2f|%.2f|%.2f|%.2f|%.2f|%.2f|%s|%d|%d|%.2f',
   p.days_worked, p.sales, p.team_sales, p.base_pay, p.commission, p.bonus, p.overrides, p.deductions, p.gross,
   COALESCE(p.paid_as, ''), COALESCE(p.sales_confirmed, -1), COALESCE(p.sales_cancelled, -1), COALESCE(p.adjustments_total, 0))`;
+
+/**
+ * Release 1.3.1: the figures, then '#' and the week's statement confirmations ("campaignId:confirmed", in campaign
+ * order) when there are any. A statement that confirms exactly what was logged changes no figure, but it does change
+ * the lines' notes ("not yet confirmed by BCN" goes), so the invoice is refreshed in place (same payment) instead of
+ * keeping a note that is no longer true. figuresOf() strips the suffix where only the amounts matter (a dispute's
+ * "the figures have changed").
+ */
+export const RUN_FINGERPRINT_SQL = `${RUN_FIGURES_SQL} || COALESCE('#' || (SELECT group_concat(c.k, ',') FROM (
+    SELECT sc.campaign_id || ':' || sc.confirmed AS k FROM sale_confirmations sc
+    WHERE sc.user_id = p.user_id AND sc.week_start = p.week_start ORDER BY sc.campaign_id) c), '')`;
+
+/** The figures part of a fingerprint (without the confirmations suffix). */
+export const figuresOf = (fp: string | null): string | null => (fp === null ? null : fp.split('#')[0]!);
+
+/**
+ * One-off upgrade step (db/extensions/invoices.ts, flag `ext:invoices:fingerprint-confirmations`): an invoice stamped
+ * before 1.3.1 holds the figures alone. Where those still equal its run's figures it was up to date, so it gets the new
+ * stamp as is — no invoice is rewritten at start-up because the stamp's format changed. Returns how many were stamped.
+ */
+export function restampInvoiceFingerprints(db: Db): number {
+  return run(
+    db,
+    `UPDATE invoices SET run_fingerprint = (SELECT ${RUN_FINGERPRINT_SQL} FROM payroll_runs p WHERE p.id = invoices.payroll_run_id)
+     WHERE run_fingerprint IS NOT NULL AND instr(run_fingerprint, '#') = 0
+       AND run_fingerprint = (SELECT ${RUN_FIGURES_SQL} FROM payroll_runs p WHERE p.id = invoices.payroll_run_id)
+       AND run_fingerprint <> (SELECT ${RUN_FINGERPRINT_SQL} FROM payroll_runs p WHERE p.id = invoices.payroll_run_id)`,
+  ).changes;
+}
 
 interface InvoiceRow {
   id: number;
@@ -177,7 +206,9 @@ const parseJson = <T>(text: string | null | undefined, fallback: T): T => {
 
 const deadlineOf = (r: Pick<InvoiceRow, 'deemAt' | 'dueDate'>): string => r.deemAt ?? deemedAcceptedAt(r.dueDate) ?? `${r.dueDate}T12:00:00`;
 const isUnpaid = (status: PayrollStatus): boolean => status === 'pending' || status === 'failed';
-const runChanged = (r: Pick<InvoiceRow, 'runFingerprint' | 'currentFingerprint'>): boolean => r.runFingerprint !== r.currentFingerprint;
+/** The run's figures changed since the invoice was written (a same-number statement is not a change of figures). */
+const runChanged = (r: Pick<InvoiceRow, 'runFingerprint' | 'currentFingerprint'>): boolean =>
+  figuresOf(r.runFingerprint) !== figuresOf(r.currentFingerprint);
 
 function summaryOf(r: InvoiceRow, nowLocal: string): InvoiceSummary {
   const deadline = deadlineOf(r);
@@ -609,9 +640,12 @@ export interface InvoiceSyncResult {
 
 const REISSUE_REASON = 'The amounts changed after it was issued';
 
-/** An invoice behind its run: the run (unpaid) was recalculated since, and the invoice is not held by a dispute. */
+/**
+ * An invoice behind its run: the run (unpaid) was recalculated or a statement confirmed its week since, and the invoice
+ * is not held by a dispute. (The whole fingerprint, so a same-number confirmation refreshes the notes in place.)
+ */
 const isStale = (r: Pick<InvoiceRow, 'runStatus' | 'status' | 'runFingerprint' | 'currentFingerprint'>): boolean =>
-  isUnpaid(r.runStatus) && r.status !== 'disputed' && runChanged(r);
+  isUnpaid(r.runStatus) && r.status !== 'disputed' && r.runFingerprint !== r.currentFingerprint;
 
 /**
  * Brings stale invoices up to date with their runs (inside the caller's transaction). The same payment — the same total

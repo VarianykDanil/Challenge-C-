@@ -64,8 +64,8 @@ The Sapiens team's demo sign-ins, and leaders and recruiters can add people. Det
   in Desktop, Documents, Downloads or iCloud Drive. Before, a service installed with the Gmail reader off still read
   Gmail every 15 minutes, and moved statement or upload folders read as missing.
 - `npm run backup` ends by naming the folders it does not copy (`media` for learning videos, `statements` for client
-  statement PDFs, `uploads` for the signature image), and `npm run restore` says that only the database was restored,
-  that those folders were left as they are, and that videos uploaded after the backup stay in `media/videos` with no
+  statement PDFs, `uploads` for the signature image), and `npm run restore` says that those folders are not in the
+  backups and were left as they are, and that videos uploaded after the backup stay in `media/videos` with no
   row.
 - Plainer messages on the upgrade path: `npm start` and `npm run latest` say "the dependencies were installed after
   the last build" when only the packages changed (was "the app's screens changed"); the start-up line reads "Payroll
@@ -73,7 +73,8 @@ The Sapiens team's demo sign-ins, and leaders and recruiters can add people. Det
   week's stored breakdown was added); and a restore without `--yes` and without a terminal says why once, not twice.
 - README and DEPLOY.md: the database file no longer "holds everything". Moving to a server copies `media`,
   `statements` and `uploads` with the database, the nightly off-site job copies them too (`rclone copy`, which never
-  deletes off-site), Fly.io and Render say how to bring and save them, and the go-live checklist asks for it.
+  deletes off-site), Fly.io says how to bring and save them and Render that they need saving too, and the go-live
+  checklist asks for it.
 - USER_GUIDE: an invoice's **Download PDF** is described as always there (no longer "once PDFs are switched on").
 - README "What it does": **Finance & Pay** describes the base-or-commission rule and invoices (not 1.2's base per day,
   commission and leader overrides), and **Export & print** the **Export** menu (CSV or PDF) and the invoice's
@@ -142,6 +143,20 @@ The Sapiens team's demo sign-ins, and leaders and recruiters can add people. Det
   failing (dashboard, person page, event and team totals).
 - **The demo's disputed invoice reads sensibly**: Thomas's sales dispute says "2 sign-ups missing" on the commission
   line, not a whole week's "21 sales" pinned on a line that was not paid.
+- **"Not yet confirmed" goes once the statement confirms the week.** A statement that confirms exactly the number
+  logged changes no amount, so the open invoice kept saying "not yet confirmed by BCN" — and, once paid, kept it for
+  good. The week's confirmations are now part of what an invoice is checked against: such an invoice is brought up to
+  date in place (same version, same status), while a dispute's "the figures have changed" still compares the amounts
+  only. Invoices stamped before this release are restamped once on start-up, so none is rewritten for it.
+- The dashboard's **Conversion** tile shows no comparison while you have no stops (it showed "—" next to a red
+  "−100%").
+- Page headers put their buttons under the title only when the title needs the room (a long description no longer
+  pushes them down), and **Quick gauges** keeps its name in the top bar on a phone, where the page has no other
+  heading once an event is chosen.
+- `npm start` says "the dependencies were installed after the last build" only when nothing else changed; after a pull
+  that changes the screens too, it names the changed screen file. `npm run backup` says the backups hold the app secret
+  only when the folder has a copy of it (with `LM_APP_SECRET` set it says the key is not in them), and restore no longer
+  says "Only the database was restored" when it put the app secret back too.
 
 ## [1.3.0] - 2026-10-22
 

@@ -12,7 +12,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { openDb } from '../db/connection.ts';
 import { createSchema } from '../db/schema.ts';
-import { foldersOutsideBackup, restoreFolderNotes } from '../lib/backup.ts';
+import { backupFolderNote, foldersOutsideBackup, restoreFolderNotes } from '../lib/backup.ts';
 import { configureAppSecret } from '../lib/crypto.ts';
 import { uploadsDir } from '../lib/invoices.ts';
 import { statementsDir } from '../lib/statements/files.ts';
@@ -91,11 +91,20 @@ test('foldersOutsideBackup names the folders the server itself uses (defaults an
   }
 });
 
+test('the backup note says the app secret is in the backups only when the folder has a copy of it', () => {
+  const f = { media: '/d/media', statements: '/d/statements', uploads: '/d/uploads' };
+  assert.match(backupFolderNote(f, true), /the backups hold the database and the app secret only\.$/);
+  assert.match(backupFolderNote(f, false), /the backups hold the database only\.$/);
+  assert.match(backupFolderNote(f, false, true), /the backups hold the database only\. LM_APP_SECRET is not in them: keep it in your password manager\.$/);
+  assert.ok(!/LM_APP_SECRET/.test(backupFolderNote(f, true, true)), 'a copied key file is in them');
+});
+
 test('the orphan-video sentence appears only when the media folder holds videos', () => {
   const f = { media: '/d/media', statements: '/d/statements', uploads: '/d/uploads' };
   const none = restoreFolderNotes(f, () => false);
   assert.equal(none.length, 1);
-  assert.match(none[0]!, /^Only the database was restored\./);
+  assert.match(none[0]!, /^Learning videos \(/);
+  assert.ok(!/Only the database/.test(none[0]!), 'the app secret may have been restored too');
   assert.match(none[0]!, /\/d\/media.*\/d\/statements.*\/d\/uploads/);
   const some = restoreFolderNotes(f, () => true);
   assert.equal(some.length, 2);
@@ -108,7 +117,8 @@ test('npm run backup ends by naming the folders the backup leaves out', () => {
   const out = r.stdout;
   assert.match(out, /Backed up /);
   for (const name of ['media', 'statements', 'uploads']) assert.ok(out.includes(path.join(dataDir, name)), `${name} named:\n${out}`);
-  assert.match(out, /the backups hold the database and the app secret only/i);
+  // no app-secret file in this test's data folder, so none was copied: the note says the database only
+  assert.match(out, /the backups hold the database only\./i);
   assert.match(out, /learning videos/);
   assert.match(out, /client statement PDFs/);
   assert.match(out, /signature image/);
@@ -129,7 +139,7 @@ test('npm run restore: without --yes and no terminal it says why once; with --ye
   const ok = run('src/restore.ts', [file!, '--yes'], { PORT });
   assert.equal(ok.status, 0, ok.stderr + ok.stdout);
   assert.match(ok.stdout, /^Restored\./m);
-  assert.match(ok.stdout, /Only the database was restored\./);
+  assert.match(ok.stdout, /are not in the backups and were left as they are/);
   for (const name of ['media', 'statements', 'uploads']) assert.ok(ok.stdout.includes(path.join(dataDir, name)), `${name} named:\n${ok.stdout}`);
   assert.match(ok.stdout, /Videos uploaded after this backup stay in .*media[/\\]videos/);
   const lines = ok.stdout.trim().split('\n');

@@ -73,7 +73,7 @@ async function backup(): Promise<void> {
     const status = backupStatus(db, dir);
     console.log(`${status.count} backup${status.count === 1 ? '' : 's'} kept in ${dir}${r.removed.length ? ` (${r.removed.length} old one${r.removed.length === 1 ? '' : 's'} removed)` : ''}.`);
     console.log('Copy that folder to iCloud Drive or Google Drive now and then: a backup on the same laptop does not survive losing the laptop.');
-    console.log(backupFolderNote(foldersOutsideBackup(dbPath)));
+    console.log(backupFolderNote(foldersOutsideBackup(dbPath), existsSync(path.join(dir, SECRET_COPY_NAME)), Boolean(process.env.LM_APP_SECRET)));
   } finally {
     db.close();
   }

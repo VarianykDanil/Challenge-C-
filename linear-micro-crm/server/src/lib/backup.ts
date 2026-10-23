@@ -885,10 +885,11 @@ export function foldersOutsideBackup(dbPath: string, env: NodeJS.ProcessEnv = pr
 }
 
 /** The line `npm run backup` ends with. */
-export function backupFolderNote(f: FoldersOutsideBackup): string {
+export function backupFolderNote(f: FoldersOutsideBackup, secretInFolder: boolean, envSecret = false): string {
   return (
     `Copy ${f.media} (learning videos), ${f.statements} (client statement PDFs) and ${f.uploads} (the signature image) ` +
-    'yourself too: the backups hold the database and the app secret only.'
+    `yourself too: the backups hold the database${secretInFolder ? ' and the app secret' : ''} only.` +
+    (envSecret && !secretInFolder ? ' LM_APP_SECRET is not in them: keep it in your password manager.' : '')
   );
 }
 
@@ -899,9 +900,9 @@ export function backupFolderNote(f: FoldersOutsideBackup): string {
 export function restoreFolderNotes(f: FoldersOutsideBackup, exists: (p: string) => boolean = existsSync): string[] {
   const videos = path.join(f.media, 'videos');
   return [
-    `Only the database was restored. Learning videos (${f.media}), client statement PDFs (${f.statements}) and the ` +
-      `signature image (${f.uploads}) are not in the backups and were left as they are: if they are missing on this ` +
-      'computer, copy those folders back from your own copy.',
+    `Learning videos (${f.media}), client statement PDFs (${f.statements}) and the signature image (${f.uploads}) ` +
+      'are not in the backups and were left as they are: if they are missing on this computer, copy those folders back ' +
+      'from your own copy.',
     ...(exists(videos)
       ? [`Videos uploaded after this backup stay in ${videos} with no row in the restored database: delete them if you do not need them.`]
       : []),

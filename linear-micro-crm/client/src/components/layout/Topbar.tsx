@@ -101,7 +101,8 @@ export function Topbar({ user, items, onLogout, onOpenMenu, menuButtonRef, title
             {current && (
               <>
                 <ChevronRight className="hidden h-3.5 w-3.5 shrink-0 text-subtle sm:inline" aria-hidden />
-                <span className="min-w-[4.5rem] truncate font-semibold text-fg max-sm:sr-only max-sm:min-w-0" aria-current="page">{current.label}</span>
+                {/* on a phone the page's own heading names it, except Quick gauges (no visible heading once an event is chosen) */}
+                <span className={clsx('min-w-[4.5rem] truncate font-semibold text-fg', current.variant !== 'action' && 'max-sm:sr-only max-sm:min-w-0')} aria-current="page">{current.label}</span>
               </>
             )}
           </nav>

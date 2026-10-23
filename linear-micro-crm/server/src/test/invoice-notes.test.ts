@@ -12,7 +12,8 @@ import assert from 'node:assert/strict';
 import type { Invoice, InvoiceLine, PayLine, WeekPayBreakdown } from '@lm/shared';
 import { all, get, run } from '../db/connection.ts';
 import { setBusinessClock } from '../lib/dates.ts';
-import { syncInvoices } from '../lib/invoices.ts';
+import { restampInvoiceFingerprints, syncInvoices } from '../lib/invoices.ts';
+import { applyConfirmedSales } from '../lib/payRule.ts';
 import { startTestServer, type TestClient, type TestServer } from './helpers.ts';
 
 const NOW = new Date('2026-10-23T15:00:00');
@@ -94,4 +95,72 @@ test('an invoice stored without notes is never rewritten for them; its next vers
   assert.ok(next.lines.some((l) => l.note));
   const kept = get<{ l: string }>(srv.db, `SELECT lines_json AS l FROM invoice_versions WHERE invoice_id = ? AND version = ?`, [i.id, before.version])!.l;
   assert.equal(kept, asIssuedBefore, 'the version it replaced is kept exactly as it was issued');
+});
+
+/** An open invoice with a "not yet confirmed by <CODE>" note, the line's campaign and its logged number. */
+function unconfirmedLine(): { i: OpenInvoice; campaignId: number; logged: number; code: string } | undefined {
+  for (const i of openInvoices()) {
+    const lines = JSON.parse(storedLines(i.id)) as InvoiceLine[];
+    const l = lines.find((x) => x.note && /^not yet confirmed by /i.test(x.note) && x.campaignId && x.quantity != null);
+    if (l) return { i, campaignId: l.campaignId!, logged: l.quantity!, code: l.note!.replace(/^not yet confirmed by /i, '').trim() };
+  }
+  return undefined;
+}
+
+test('a statement that confirms exactly what was logged clears "not yet confirmed" on the open invoice, in place', async () => {
+  const t = unconfirmedLine();
+  assert.ok(t, 'an open invoice with a "not yet confirmed" line');
+  const { i, campaignId, logged, code } = t!;
+  const before = get<{ version: number; status: string; total: number }>(srv.db, `SELECT version, status, total FROM invoices WHERE id = ?`, [i.id])!;
+  const r = applyConfirmedSales(srv.db, [{ userId: i.userId, campaignId, weekStart: i.weekStart, confirmed: logged }], { statementId: null, actorId: null });
+  assert.ok(r, 'applied');
+  const sync = syncInvoices(srv.db, NOW);
+  assert.ok(sync.refreshed >= 1, `refreshed in place: ${JSON.stringify(sync)}`);
+  srv.resetCache();
+  const inv = (await admin.get(`/invoices/by-run/${i.runId}`)).json as Invoice;
+  assert.equal(inv.version, before.version, 'the same version: what is paid did not change');
+  assert.equal(inv.status, before.status, 'and the same status');
+  assert.equal(inv.total, before.total);
+  const line = inv.lines.find((l) => l.campaignId === campaignId && l.quantity === logged);
+  assert.ok(line, 'the line is still there');
+  assert.ok(!line!.note || !new RegExp(`not yet confirmed by ${code}`, 'i').test(line!.note), `the note no longer says it is unconfirmed: ${line!.note}`);
+  const b = await breakdownOf(i);
+  assert.deepEqual(inv.lines.map((l) => l.note), b.lines.map(shownNote), 'the invoice reads as the breakdown does');
+  assert.deepEqual(syncInvoices(srv.db, NOW), { issued: 0, reissued: 0, refreshed: 0, deemed: 0 }, 'and the next run changes nothing');
+});
+
+test('a disputed invoice: a same-number statement is not "the figures have changed"', async () => {
+  const t = unconfirmedLine();
+  assert.ok(t, 'another open invoice with a "not yet confirmed" line');
+  const { i, campaignId, logged } = t!;
+  run(srv.db, `UPDATE invoices SET status = 'disputed', dispute_reason = 'Checking the week', disputed_at = ? WHERE id = ?`, [NOW.toISOString(), i.id]);
+  applyConfirmedSales(srv.db, [{ userId: i.userId, campaignId, weekStart: i.weekStart, confirmed: logged }], { statementId: null, actorId: null });
+  syncInvoices(srv.db, NOW);
+  srv.resetCache();
+  const inv = (await admin.get(`/invoices/by-run/${i.runId}`)).json as Invoice & { figuresChanged?: boolean };
+  assert.equal(inv.status, 'disputed', 'held for the office');
+  assert.notEqual(inv.figuresChanged, true, 'the figures did not change');
+});
+
+test('upgrade: invoices stamped before 1.3.1 are restamped once, so none is rewritten at start-up for the new stamp', () => {
+  // an up-to-date invoice whose week has confirmations, stamped the old way (figures only)
+  const row = get<{ id: number; runId: number; fp: string; lines: string }>(
+    srv.db,
+    `SELECT i.id, i.payroll_run_id AS runId, i.run_fingerprint AS fp, i.lines_json AS lines FROM invoices i JOIN payroll_runs p ON p.id = i.payroll_run_id
+     WHERE p.status IN ('pending', 'failed') AND i.status <> 'disputed' AND instr(i.run_fingerprint, '#') > 0 ORDER BY i.id LIMIT 1`,
+  );
+  assert.ok(row, 'an open invoice whose week has confirmations');
+  const old = row!.fp.split('#')[0]!;
+  run(srv.db, `UPDATE invoices SET run_fingerprint = ? WHERE id = ?`, [old, row!.id]);
+  assert.equal(restampInvoiceFingerprints(srv.db) >= 1, true, 'restamped');
+  assert.equal(get<{ f: string }>(srv.db, `SELECT run_fingerprint AS f FROM invoices WHERE id = ?`, [row!.id])!.f, row!.fp, 'to the new stamp');
+  assert.equal(restampInvoiceFingerprints(srv.db), 0, 'once');
+  const refreshesBefore = get<{ n: number }>(srv.db, `SELECT COUNT(*) AS n FROM invoice_refreshes`)!.n;
+  syncInvoices(srv.db, NOW);
+  assert.equal(storedLines(row!.id), row!.lines, 'its lines are left as issued');
+  assert.equal(get<{ n: number }>(srv.db, `SELECT COUNT(*) AS n FROM invoice_refreshes`)!.n, refreshesBefore, 'no refresh record');
+  // an out-of-date one (its figures differ from the run's) is left for the job to bring up to date, as before
+  run(srv.db, `UPDATE invoices SET run_fingerprint = ? WHERE id = ?`, ['0|0|0|0.00|0.00|0.00|0.00|0.00|0.00||-1|-1|0.00', row!.id]);
+  restampInvoiceFingerprints(srv.db);
+  assert.equal(get<{ f: string }>(srv.db, `SELECT run_fingerprint AS f FROM invoices WHERE id = ?`, [row!.id])!.f, '0|0|0|0.00|0.00|0.00|0.00|0.00|0.00||-1|-1|0.00');
 });

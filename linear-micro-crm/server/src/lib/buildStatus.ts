@@ -25,6 +25,8 @@ export interface ClientBuildStatus {
   newest: NewestFile | null;
   /** True when there is no build, or a source file changed after it. */
   stale: boolean;
+  /** The newest file the client is built from other than npm's install record (the screens' own sources). */
+  newestSource?: NewestFile | null;
 }
 
 export interface DepsStatus {
@@ -77,10 +79,11 @@ function newestIn(dir: string, root: string, best: NewestFile | null): NewestFil
 }
 
 /** The newest client source file under `repoDir` (the linear-micro-crm folder). */
-export function newestClientSource(repoDir: string): NewestFile | null {
+export function newestClientSource(repoDir: string, { withInstall = true }: { withInstall?: boolean } = {}): NewestFile | null {
   let best: NewestFile | null = null;
   for (const d of SOURCE_DIRS) best = newestIn(path.join(repoDir, d), repoDir, best);
   for (const f of SOURCE_FILES) {
+    if (!withInstall && f === INSTALL_RECORD) continue;
     const m = mtimeOf(path.join(repoDir, f));
     if (m !== null && (!best || m > best.mtimeMs)) best = { file: f, mtimeMs: m };
   }
@@ -95,7 +98,8 @@ export function clientBuildStatus(repoDir: string): ClientBuildStatus {
   const newest = newestClientSource(repoDir);
   const built = builtAtMs !== null;
   const stale = !built || (newest !== null && newest.mtimeMs > builtAtMs + SLACK_MS);
-  return { built, builtAtMs, newest, stale };
+  const newestSource = newest?.file === INSTALL_RECORD ? newestClientSource(repoDir, { withInstall: false }) : newest;
+  return { built, builtAtMs, newest, stale, newestSource };
 }
 
 /** Fingerprint of package-lock.json recorded after `npm run setup` installs, so a reset or re-checkout of an identical
@@ -173,10 +177,13 @@ export function shortStamp(ms: number): string {
  */
 export function rebuildNotice(s: ClientBuildStatus): string {
   if (!s.built) return "Linear Hub: the app's screens have not been built yet — building them now, about 10–20 s.";
-  if (s.newest?.file === INSTALL_RECORD) {
+  // "the dependencies were installed" only when nothing but npm's install record is newer than the build
+  const source = s.newest?.file === INSTALL_RECORD ? (s.newestSource ?? null) : s.newest;
+  const screensChanged = source !== null && source.file !== INSTALL_RECORD && source.mtimeMs > s.builtAtMs! + SLACK_MS;
+  if (s.newest?.file === INSTALL_RECORD && !screensChanged) {
     return `Linear Hub: the dependencies were installed after the last build (the build is from ${shortStamp(s.builtAtMs!)}) — building the screens again, about 10–20 s.`;
   }
-  return `Linear Hub: the app's screens changed since the last build (${s.newest?.file} is newer than the build from ${shortStamp(s.builtAtMs!)}) — building them now, about 10–20 s.`;
+  return `Linear Hub: the app's screens changed since the last build (${(screensChanged ? source : s.newest)?.file} is newer than the build from ${shortStamp(s.builtAtMs!)}) — building them now, about 10–20 s.`;
 }
 
 /** One sentence for the start-up warning and the doctor, or null when the build is current. */

@@ -22,7 +22,7 @@ export function PageHeader({ title, description, actions, breadcrumbs, eyebrow, 
           not fit — at 768–1280 px a long event name or the greeting no longer shrinks to a few letters beside the
           buttons. A title longer than the row wraps to two lines before it is cut. */}
       <div className="flex flex-col gap-4 sm:flex-row sm:flex-wrap sm:items-end sm:justify-between">
-        <div className="min-w-0 sm:max-w-full sm:shrink-0">
+        <div className="min-w-0 sm:max-w-full sm:shrink-0 sm:grow">
           {breadcrumbs && <nav aria-label="Breadcrumb" className="mb-2 flex items-center gap-1.5 text-xs text-muted [&_a:hover]:text-fg">{breadcrumbs}</nav>}
           {eyebrow && <div className="eyebrow mb-1.5">{eyebrow}</div>}
           <div className="flex items-center gap-3">
@@ -33,7 +33,8 @@ export function PageHeader({ title, description, actions, breadcrumbs, eyebrow, 
             )}
             <h1 className="line-clamp-2 min-w-0 break-words text-2xl font-bold leading-tight tracking-tight text-fg sm:text-[28px]">{title}</h1>
           </div>
-          {description && <p className="mt-1.5 max-w-2xl text-sm leading-relaxed text-muted">{description}</p>}
+          {/* the description never sets the title column's width (contain), so the actions wrap only when the title needs the room */}
+          {description && <p className="mt-1.5 max-w-2xl text-sm leading-relaxed text-muted sm:[contain:inline-size]">{description}</p>}
         </div>
         {actions && <div className="flex max-w-full shrink-0 flex-wrap items-center gap-2">{actions}</div>}
       </div>
