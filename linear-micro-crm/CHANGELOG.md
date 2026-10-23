@@ -9,7 +9,7 @@ response field is renamed or removed, and new fields are optional.
 
 Nothing yet. What comes next is in [docs/ROADMAP.md](docs/ROADMAP.md).
 
-## [1.3.1] - 2026-10-22
+## [1.3.1] - 2026-10-23
 
 The Sapiens team's demo sign-ins, and leaders and recruiters can add people. Details:
 [docs/USER_GUIDE.md](docs/USER_GUIDE.md) ("What's new in 1.3.1"), [docs/LOGIC.md](docs/LOGIC.md) §16.10 and
@@ -90,8 +90,6 @@ The Sapiens team's demo sign-ins, and leaders and recruiters can add people. Det
 - Code comments in `shared/src/types` (client, pay, invoices), `server/src/index.ts` and the client's PDF and payslip
   files no longer promise stubs that answer empty or 501.
 
-### Fixed
-
 - **Bookings and interview sheets have the per-person write limit.** "I'm working this" / "I can't make it" (`POST` /
   `DELETE /events/:id/roster/me`), Edit bookings (`PUT /events/:id/roster`) and the interview sheet's saves (`PUT
   /recruitment/interviews/:id/answers`) had no limit, and each call wrote an audit row and cleared the whole response
@@ -106,8 +104,6 @@ The Sapiens team's demo sign-ins, and leaders and recruiters can add people. Det
 - **`npm test` no longer touches the real key file.** `server/src/lib/crypto.test.ts` used the default
   `server/data/app-secret` (reading the owner's, or creating one in a fresh clone that a later `npm start` would then
   use); it now points the key file at a temporary folder for the test and puts it back afterwards.
-
-### Fixed
 
 - **An event's name is no longer cut to a few letters** at 768–1280 px: the page header keeps the title at full width
   and puts Log gauges, Pitch, Edit and Cancel event under it when both do not fit; a name longer than the row wraps to
