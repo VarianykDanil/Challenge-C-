@@ -181,7 +181,8 @@ Always put numbers that sit in columns in `tabular` (or `kpi-number`).
 - **Radius** (overridden Tailwind scale): `rounded-md` 8px (small chips), `rounded-lg` 10px (buttons,
   inputs, nav items), `rounded-xl` 14px (cards, tiles, tables, menus), `rounded-2xl` 20px (modals,
   hero chips), `rounded-full` (badges, avatars).
-- **Control heights**: `sm` 32px, `md` 40px, `lg` 48px. Icon buttons are square at the same heights.
+- **Control heights**: `sm` 32px, `md` 40px, `lg` 48px. Icon buttons are square at the same heights. Below 640px a
+  `sm` `Button` or `Select`, a table's sort header and an editable star rating are 40px to tap (1.3.1).
 - **Motion**: 150–250ms, ease-out (`cubic-bezier(0.16,1,0.3,1)`). Utilities: `animate-fade-in`,
   `animate-scale-in`, `animate-slide-up`, `animate-slide-in-right/left`. Everything collapses under
   `prefers-reduced-motion`. No bouncing, no parallax.
@@ -238,7 +239,7 @@ All from `@/components/ui`. Prop names in the skeleton files are stable; everyth
 | Component | Key props | Added | Notes |
 |---|---|---|---|
 | `Button` | `variant` primary·secondary·outline·ghost·soft·accent·danger·link, `size` xs·sm·md·lg·icon·icon-sm·icon-xs, `loading`, `leftIcon`, `rightIcon` | `fullWidth`, `label` (a11y for icon-only), `type` defaults to `button` | Spinner replaces the left icon while loading. `ButtonGroup` joins buttons. |
-| `Card` / `CardHeader` / `CardFooter` | `padded` · `title description actions` | `hoverable`, `flat`, `tone`; header `icon` | Use `hoverable` only when the whole card is clickable. |
+| `Card` / `CardHeader` / `CardFooter` | `padded` · `title description actions` | `hoverable`, `flat`, `tone`; header `icon` | Use `hoverable` only when the whole card is clickable. The header's actions wrap under the title rather than squeeze it below 10rem. |
 | `KpiTile` | `label value delta deltaLabel invertDelta icon hint tone sparkline` | `loading`, `size`, `onClick`, `suffix` | Tone draws a coloured left edge and icon chip. Values scale with `clamp()` and never truncate; hints wrap to two lines. Pass `<Sparkline/>` to `sparkline`. |
 | `StatDelta` | `value` (fraction), `invert`, `label`, `size`, `format`, `plain` | new | Arrow + sign always present; `null` → neutral "—". |
 | `Badge` | `tone`, `dot`, `color` | `size`, `variant` soft·solid·outline | `color` = entity colour dot. Status badges stay `soft`. A leading `<svg>` in `children` is kept inline and sized to the pill (icon before text). |
@@ -249,14 +250,14 @@ All from `@/components/ui`. Prop names in the skeleton files are stable; everyth
 | `Stepper` | `value onChange min max step label size` | new; `hint`, `invalid`, `fullWidth` | Phone-first +/−: press-and-hold repeats, typing allowed, arrow keys. Use for gauges. |
 | `Switch` | `checked onChange label` | new; `description`, `size`, `labelPosition` | `role="switch"`. |
 | `Tabs` | `items value onChange variant` underline·pills | `size`, `fullWidth`, item `icon`/`disabled` | Animated indicator, roving tabindex. |
-| `DataTable` | `columns rows rowKey onRowClick emptyMessage loading dense initialSort footer stickyHeader` | `empty`, `loadingRows`, `sort`/`onSortChange` (controlled), `maxHeight`, `selectedKey`, `rowClassName`, `caption`, `bare`; column `hideBelow` | Sorts client-side when a column has `sortValue`. Headers never truncate (they set the column width); wide tables scroll inside the card with an edge fade and a "Swipe to see more" hint — keep `hideBelow` for genuinely optional columns only. Clicks/keys inside nested controls or portaled dialogs never trigger `onRowClick`. `footer` is `<tr>` content inside `<tfoot>`. Right-aligned cells are tabular. |
+| `DataTable` | `columns rows rowKey onRowClick emptyMessage loading dense initialSort footer stickyHeader` | `empty`, `loadingRows`, `sort`/`onSortChange` (controlled), `maxHeight`, `selectedKey`, `rowClassName`, `caption`, `bare`; column `hideBelow` | Sorts client-side when a column has `sortValue`. Headers never truncate (they set the column width); wide tables scroll inside the card with an edge fade and a "Swipe to see more" hint on a line under the table (never over the last row, never on an empty table); the empty state sits under the header at the card's width — keep `hideBelow` for genuinely optional columns only. Clicks/keys inside nested controls or portaled dialogs never trigger `onRowClick`. `footer` is `<tr>` content inside `<tfoot>`. Right-aligned cells are tabular. |
 | `Modal` | `open onClose title description footer size` | `hideClose`, `persistent`, `icon`, `tone`, `initialFocusRef`, size `full` | Portal, focus trap, Escape, scroll lock, full-width bottom-sheet on phones (pinned to the visual viewport). Initial focus: `initialFocusRef` → first form control → first focusable that isn't Close; an `autoFocus` field wins. Events inside never bubble to a clickable row behind it. |
 | `Dropdown` (= `Menu`) | `trigger items` (`label icon onSelect tone disabled shortcut checked separatorBefore`) | new; `header`, `align`, `side`, `width` | Full keyboard menu; portal-positioned. Menu-button ARIA (`aria-haspopup/expanded/controls`) is injected on the trigger element itself; Tab closes the menu and moves on from the trigger. |
 | `Tooltip` | `content children` | new; `side`, `delay`, `disabled` | CSS hover/focus; no deps. Child gets `aria-describedby`. |
 | `EmptyState` | `icon title description action` | `size`, `tone` | Default inbox icon and subtle brand-line backdrop. |
 | `ProgressBar` | `value max tone color label showValue size` | `marker` (benchmark line), `auto` (colour by progress), `formatValue` | Use `marker` for law-of-averages targets. |
 | `Skeleton` / `SkeletonKpi` / `SkeletonCard` | `className` | `circle`, `lines` | Shimmer, not pulse. |
-| `PageHeader` | `title description actions breadcrumbs` | `eyebrow`, `icon`, `tabs` | One per page, at the top. |
+| `PageHeader` | `title description actions breadcrumbs` | `eyebrow`, `icon`, `tabs` | One per page, at the top. The title column keeps its full width and the actions wrap under it when both do not fit; a title longer than the row wraps to two lines before it is cut. |
 | `Toast` (`ToastProvider`, `useToast`) | `success/error/info(title, description)` | `warning`, `dismiss`, `duration`, `action` | Icons per tone, slide-in, dismiss button; `aria-live="polite"` region; auto-dismiss pauses on hover **and** while any control inside has keyboard focus. |
 | `Divider` | — | new; `label`, `orientation`, `spacing` | "or" separators, toolbar dividers. |
 

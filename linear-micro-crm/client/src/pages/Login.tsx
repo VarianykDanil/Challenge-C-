@@ -728,8 +728,9 @@ function DemoAccounts({ accounts, clientAccounts, teams, loading, failed, busyId
               <Avatar name={acc.name ?? acc.label} size="sm" />
               <span className="min-w-0 flex-1">
                 <span className="flex min-w-0 items-center gap-2">
-                  {/* a charity's name wraps to a second line on a phone rather than losing the organisation */}
-                  <span className={clsx('min-w-0 text-sm font-semibold text-fg', acc.organisation ? 'break-words' : 'truncate')}>{title}</span>
+                  {/* the name and position (or a charity's organisation) wrap to a second line on a phone rather than being
+                      cut ("Jordan Lee (Field …", 1.3.1 UI review) */}
+                  <span className="min-w-0 break-words text-sm font-semibold text-fg">{title}</span>
                   <Badge size="sm" className="shrink-0" tone={ROLE_TONE[acc.role] ?? 'neutral'}>{tag}</Badge>
                 </span>
                 <span className="mt-0.5 block truncate text-xs text-muted">

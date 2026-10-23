@@ -15,16 +15,19 @@ export interface AnnouncementsCardProps {
   /** Admins and leaders: show "New announcement". */
   canAnnounce: boolean;
   onNew: () => void;
+  /** Grid placement on the dashboard (it spans the row's two columns until 1360 px). */
+  className?: string;
 }
 
 /** Capped so the row's other cards are not stretched by a long notice board. */
 const LIST_BOX = 'max-h-[32rem] overflow-y-auto scrollbar-thin';
 
-export function AnnouncementsCard({ dashboard: d, canAnnounce, onNew }: AnnouncementsCardProps) {
+export function AnnouncementsCard({ dashboard: d, canAnnounce, onNew, className }: AnnouncementsCardProps) {
   const older = d?.olderAnnouncements ?? 0;
   return (
-    // a size container: the button's label follows the card's width (a third of the row from 1024 px), not the screen's
-    <Card className="@container min-w-0">
+    // a size container: the button's label follows the card's width (the full row, or a third of it from 1360 px), not
+    // the screen's
+    <Card className={clsx('@container min-w-0', className)}>
       {/* top-aligned like CardHeader from 640 px, so the heading lines up with the cards beside it; centred on the
           40 px phone button below that, where the cards stack */}
       <div className="mb-4 flex flex-wrap items-center justify-between gap-x-3 gap-y-2 sm:items-start">

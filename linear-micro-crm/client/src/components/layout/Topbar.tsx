@@ -83,7 +83,9 @@ export function Topbar({ user, items, onLogout, onOpenMenu, menuButtonRef, title
         <MenuIcon className="h-5 w-5" aria-hidden />
       </button>
 
-      {/* Breadcrumb / title slot — brand and section never wrap; only the page name truncates */}
+      {/* Breadcrumb / title slot — brand and section never wrap; only the page name truncates. On a phone the page name is
+          for screen readers only: the page's own heading right below names it, and beside search, theme, Quick gauges,
+          the bell and the avatar it had 72 px ("Recruitm…", 1.3.1 UI review). */}
       <div className="min-w-0 flex-1">
         {title ?? (
           <nav aria-label="Breadcrumb" className="flex min-w-0 items-center gap-1.5 text-sm">
@@ -99,7 +101,7 @@ export function Topbar({ user, items, onLogout, onOpenMenu, menuButtonRef, title
             {current && (
               <>
                 <ChevronRight className="hidden h-3.5 w-3.5 shrink-0 text-subtle sm:inline" aria-hidden />
-                <span className="min-w-[4.5rem] truncate font-semibold text-fg" aria-current="page">{current.label}</span>
+                <span className="min-w-[4.5rem] truncate font-semibold text-fg max-sm:sr-only max-sm:min-w-0" aria-current="page">{current.label}</span>
               </>
             )}
           </nav>

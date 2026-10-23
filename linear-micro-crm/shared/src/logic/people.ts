@@ -122,15 +122,32 @@ export interface StaffSignInText {
   email: string;
   employeeId: string;
   teamName?: string | null;
-  /** The sign-in page as the person adding them opened it ("http://192.168.1.20:4000/login"), when known. */
+  /**
+   * The sign-in page as the person adding them opened it ("http://192.168.1.20:4000/login"), when known. A localhost
+   * address is left out (shareableSignInUrl).
+   */
   signInUrl?: string | null;
   /** True while the office requires a PIN for everyone (Settings → Security): their first sign-in creates one. */
   pinRequired: boolean;
 }
 
+/**
+ * The sign-in address to put in instructions for someone else, or null when there is none worth sending: an address
+ * only the computer it was opened on can reach (localhost, 127.x.x.x, [::1], 0.0.0.0) — the owner adding people on the
+ * MacBook that runs Linear Hub — would not open on the new person's phone, so the text names the sign-in page instead.
+ */
+export function shareableSignInUrl(url: string | null | undefined): string | null {
+  const u = url?.trim();
+  if (!u) return null;
+  const host = /^https?:\/\/(\[[^\]]*\]|[^/:?#]*)/i.exec(u)?.[1]?.toLowerCase().replace(/\.$/, '') ?? '';
+  if (host === 'localhost' || host === '[::1]' || host === '0.0.0.0' || /^127(\.\d{1,3}){3}$/.test(host)) return null;
+  return u;
+}
+
 /** The plain text a recruiter or leader sends a new person: where to sign in, with what, and (if asked) the PIN step. */
 export function staffSignInInstructions(t: StaffSignInText): string {
-  const where = t.signInUrl ? `Open ${t.signInUrl}` : 'Open the Linear Hub sign-in page';
+  const url = shareableSignInUrl(t.signInUrl);
+  const where = url ? `Open ${url}` : 'Open the Linear Hub sign-in page';
   const team = t.teamName?.trim();
   const steps = [
     `1. ${where}.`,

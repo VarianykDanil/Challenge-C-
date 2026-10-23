@@ -93,8 +93,9 @@ export function DashboardPage() {
           {/* Personal charts */}
           {!recruiterFirst && <PersonalCharts dashboard={d} canLog={canLog} onLog={() => setLogOpen(true)} baseline={insights?.personal.baseline} direction={insights?.personal.direction} />}
 
-          {/* Team, events, announcements */}
-          <div className="grid grid-cols-1 gap-6 lg:grid-cols-3 lg:items-start">
+          {/* Team, events, announcements: two columns (announcements across both) until 1360 px, where three cards still
+              leave room for names beside the sidebar (1.3.1 UI review: at 1024 px a third of the row cut them to "H.") */}
+          <div className="grid grid-cols-1 gap-6 lg:grid-cols-2 lg:items-start min-[1360px]:grid-cols-3">
             <TeamCard dashboard={d} meId={me.id} role={me.role} companyBoard={companyBoard} streaks={insights?.boardStreaks} checkIns={insights?.team?.checkIns} />
             <Card className="min-w-0">
               <CardHeader title="Upcoming events" actions={<Link to="/events" className="flex items-center gap-1 text-xs text-primary hover:underline">All events <ArrowRight className="h-3 w-3" aria-hidden /></Link>} />
@@ -106,7 +107,7 @@ export function DashboardPage() {
                 </>
               )}
             </Card>
-            <AnnouncementsCard dashboard={d} canAnnounce={canAnnounce} onNew={() => setAnnounceOpen(true)} />
+            <AnnouncementsCard dashboard={d} canAnnounce={canAnnounce} onNew={() => setAnnounceOpen(true)} className="lg:col-span-2 min-[1360px]:col-span-1" />
           </div>
 
           <ErrorBoundary name="week-in-review"><LazyWeekInReview /></ErrorBoundary>

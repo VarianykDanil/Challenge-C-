@@ -5,7 +5,7 @@ import { KpiSkeletons } from '@/features/common';
 import { streakHint } from '@/features/smart/streakHint';
 import { todayISO } from '@/lib/dates';
 import { formatDateShort, formatGBP, formatNumber, formatPct, formatRelative } from '@/lib/format';
-import { ratioTone } from '@/lib/ratios';
+import { conversionKpi } from '@/lib/ratios';
 
 /** Joins hint fragments with ' · ', skipping empty ones; undefined when nothing is left. */
 export function joinHints(...parts: Array<string | null | undefined | false>): string | undefined {
@@ -63,7 +63,7 @@ export function PersonalKpis({ dashboard: d, role, deltaLabel, streaks }: Person
       ) : (
         <>
           <KpiTile className={TILE} label="Sales" value={formatNumber(d.personal.totals.sales)} delta={d.personal.deltas.sales} deltaLabel={deltaLabel} tone="primary" hint={salesHint(d.personal, role, streaks)} hintLines={3} />
-          <KpiTile className={TILE} label="Conversion" value={formatPct(d.personal.ratios.overallConversion, 1)} delta={d.personal.deltas.conversion} deltaLabel={deltaLabel} tone={ratioTone('overallConversion', d.personal.ratios.overallConversion)} hint="sales ÷ stops" />
+          <KpiTile className={TILE} label="Conversion" {...conversionKpi(d.personal.totals.stops, d.personal.ratios.overallConversion)} delta={d.personal.deltas.conversion} deltaLabel={deltaLabel} hint="sales ÷ stops" />
           <KpiTile className={TILE} label="Stops" value={formatNumber(d.personal.totals.stops)} delta={d.personal.deltas.stops} deltaLabel={deltaLabel} hint={`${formatNumber(d.personal.totals.presentations)} presentations`} />
           <KpiTile className={TILE} label="Earnings to date" value={formatGBP(d.personal.earningsToDate)} hint="gross, this period" />
           <KpiTile className={TILE} label="Next payday" value={d.personal.nextPayday ? formatDateShort(d.personal.nextPayday) : '—'} tone={d.personal.nextPayday && d.personal.nextPayday < todayISO() ? 'danger' : 'default'} hint={d.personal.nextPayday ? `${d.personal.nextPayAmount != null ? formatGBP(d.personal.nextPayAmount, { cents: true }) : 'amount pending'} · ${d.personal.nextPayday < todayISO() ? 'overdue · ' : ''}${formatRelative(d.personal.nextPayday)}` : 'No pending run'} />

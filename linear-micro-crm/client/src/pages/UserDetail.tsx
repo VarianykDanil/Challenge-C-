@@ -46,7 +46,9 @@ export function UserDetailPage() {
       {userQ.isError ? (
         <ErrorState error={userQ.error} onRetry={() => void userQ.refetch()} title="Could not load this profile" />
       ) : (
-        <div className="grid grid-cols-1 gap-6 lg:grid-cols-4">
+        // the side cards (contact, invoice details…) stack above the main column until 1280 px: a quarter of the row at
+        // 1024 px left the invoice form's fields about 110 px wide (1.3.1 UI review)
+        <div className="grid grid-cols-1 gap-6 xl:grid-cols-4">
           <div className="min-w-0 space-y-6">
             <Card>
               <CardHeader title="Contact" />
@@ -81,7 +83,7 @@ export function UserDetailPage() {
               </>
             )}
           </div>
-          <div className="min-w-0 space-y-5 lg:col-span-3">
+          <div className="min-w-0 space-y-5 xl:col-span-3">
             <RangePicker value={range} onChange={setRange} />
             <PerformancePanel data={perf.data} loading={perf.isLoading} error={perf.error} onRetry={() => void perf.refetch()} range={range} userId={Number.isFinite(userId) ? userId : undefined} />
             {isAdmin && u && <ErrorBoundary name="person-activity" fallback={null}><PersonActivity user={u} /></ErrorBoundary>}

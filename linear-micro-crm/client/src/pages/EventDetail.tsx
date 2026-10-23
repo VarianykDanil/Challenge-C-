@@ -8,7 +8,7 @@ import { FunnelChart } from '@/components/charts';
 import { useDeleteEvent, useDeleteGauge, useEvent, useUpdateEvent, useUsers } from '@/api/hooks';
 import { useCurrentUser } from '@/auth/AuthProvider';
 import { ConfirmDialog, ErrorState, EventStatusBadge, EventTypeBadge, ExportButton, KpiSkeletons, errorMessage } from '@/features/common';
-import { DirectionsLink, EventForecastChip, EventFormModal, inRosterWindow } from '@/features/events';
+import { DirectionsLink, EventForecastChip, EventFormModal, eventPeopleLabel, inRosterWindow } from '@/features/events';
 import { GaugeEntriesTable, LogGaugesModal, TotalsKpis, gaugeEntryCsvColumns } from '@/features/gauges';
 import { CheckInRollCall } from '@/features/checkins/CheckInRollCall';
 import { ErrorBoundary } from '@/features/common/ErrorBoundary';
@@ -110,7 +110,8 @@ export function EventDetailPage() {
                   <ErrorBoundary name="venue-link" fallback={null}><VenueLink venue={ev.venue} city={ev.city} className="-my-1.5 ml-0.5" /></ErrorBoundary>
                 </span>
               </span>
-              <span className="inline-flex items-center gap-1"><Users className="h-3.5 w-3.5" aria-hidden />{formatNumber(ev.repCount)} rep{ev.repCount === 1 ? '' : 's'}</span>
+              {/* 1.3.1: "7 booked" before the day and "3 logged · 7 booked" during it (repCount is the people who logged gauges) */}
+              <span className="inline-flex items-center gap-1"><Users className="h-3.5 w-3.5" aria-hidden />{eventPeopleLabel(ev)}</span>
             </span>
           ) : undefined
         }

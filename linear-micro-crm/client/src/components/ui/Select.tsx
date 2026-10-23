@@ -15,7 +15,9 @@ export interface SelectProps extends Omit<SelectHTMLAttributes<HTMLSelectElement
   size?: 'sm' | 'md' | 'lg';
 }
 
-const SELECT_SIZE = { sm: 'h-8 pl-2.5 pr-8', md: 'h-10 pl-3 pr-9', lg: 'h-12 pl-3.5 pr-10 text-base' } as const;
+// sm is 40 px tall on phones like every filter row (1.3.1 UI review: the Events, Team and Leaderboard filters and the
+// Recruitment "Move to…" were 32 px)
+const SELECT_SIZE = { sm: 'h-8 pl-2.5 pr-8 max-sm:h-10', md: 'h-10 pl-3 pr-9', lg: 'h-12 pl-3.5 pr-10 text-base' } as const;
 
 export const Select = forwardRef<HTMLSelectElement, SelectProps>(function Select(
   { options, groups, placeholder, invalid, className, size = 'md', ...rest },

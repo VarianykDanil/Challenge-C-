@@ -19,7 +19,8 @@ export interface ButtonProps extends ButtonHTMLAttributes<HTMLButtonElement> {
 
 const SIZE: Record<ButtonSize, string> = {
   xs: 'h-7 px-2.5 text-xs gap-1.5 rounded-md [&_svg]:h-3.5 [&_svg]:w-3.5',
-  sm: 'h-8 px-3 text-sm gap-1.5 rounded-lg [&_svg]:h-4 [&_svg]:w-4',
+  // 40 px tall on phones (the phone rule, release 1.3.1 UI review: a gauge row's Edit and Delete were 32 px)
+  sm: 'h-8 px-3 text-sm gap-1.5 rounded-lg [&_svg]:h-4 [&_svg]:w-4 max-sm:h-10',
   md: 'h-10 px-4 text-sm gap-2 rounded-lg [&_svg]:h-4 [&_svg]:w-4',
   lg: 'h-12 px-5 text-base gap-2 rounded-xl [&_svg]:h-5 [&_svg]:w-5',
   icon: 'h-10 w-10 rounded-lg [&_svg]:h-[18px] [&_svg]:w-[18px]',

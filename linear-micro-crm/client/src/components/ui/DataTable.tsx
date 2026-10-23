@@ -132,6 +132,8 @@ export function DataTable<T>({
 
   return (
     <div className={clsx('relative w-full', !bare && 'rounded-xl border border-border bg-surface shadow-card', className)}>
+      {/* the scroller and its edge fades; the empty state and the hint sit below it, outside the fades */}
+      <div className="relative rounded-[inherit]">
       <div
         ref={scrollRef}
         className="scrollbar-thin relative w-full overflow-auto rounded-[inherit]"
@@ -170,6 +172,8 @@ export function DataTable<T>({
                       className={clsx(
                         // No truncation: the header sets the column's minimum width so titles always read in full.
                         'focus-ring -mx-1.5 inline-flex items-center gap-1 whitespace-nowrap rounded-md px-1.5 py-0.5 transition-colors hover:text-fg',
+                        // 40 px to tap on a phone, reaching into the cell's padding so the header row keeps its height
+                        dense ? 'max-sm:-my-2 max-sm:py-3' : 'max-sm:-my-2.5 max-sm:py-3',
                         c.align === 'right' && 'flex-row-reverse',
                         active && 'text-fg',
                       )}
@@ -196,18 +200,6 @@ export function DataTable<T>({
                 ))}
               </tr>
             ))}
-          {isEmpty && (
-            <tr>
-              <td colSpan={columns.length} className="px-4 py-12">
-                {empty ?? (
-                  <div className="flex flex-col items-center gap-2 text-center text-muted">
-                    <span className="inline-flex h-10 w-10 items-center justify-center rounded-xl bg-surface-2 text-subtle" aria-hidden><Inbox className="h-5 w-5" /></span>
-                    <span className="text-sm">{emptyMessage}</span>
-                  </div>
-                )}
-              </td>
-            </tr>
-          )}
           {!loading &&
             sorted.map((r) => {
               const key = rowKey(r);
@@ -266,9 +258,26 @@ export function DataTable<T>({
       </div>
       {edge.right && <div aria-hidden className="pointer-events-none absolute inset-y-0 right-0 z-20 w-12 rounded-r-[inherit] bg-gradient-to-l from-surface to-transparent" />}
       {edge.left && <div aria-hidden className="pointer-events-none absolute inset-y-0 left-0 z-20 w-8 rounded-l-[inherit] bg-gradient-to-r from-surface to-transparent" />}
-      {edge.right && !edge.left && (
-        <div aria-hidden className="pointer-events-none absolute bottom-2 right-3 z-20 rounded-full bg-fg/85 px-2 py-0.5 text-[11px] font-medium text-bg shadow-pop">
-          <span className="pointer-coarse:hidden">Scroll</span><span className="hidden pointer-coarse:inline">Swipe</span> to see more →
+      </div>
+      {/* 1.3.1 UI review: the empty state sits under the header row at the table's visible width, not centred across the
+          scrolling columns (on a phone it was cut off: "…appear once a we") */}
+      {isEmpty && (
+        <div className="px-4 py-12">
+          {empty ?? (
+            <div className="flex flex-col items-center gap-2 text-center text-muted">
+              <span className="inline-flex h-10 w-10 items-center justify-center rounded-xl bg-surface-2 text-subtle" aria-hidden><Inbox className="h-5 w-5" /></span>
+              <span className="text-sm">{emptyMessage}</span>
+            </div>
+          )}
+        </div>
+      )}
+      {/* The hint is a line under the table (it covered the last row's figures as a floating chip), kept while the table
+          scrolls so the rows do not jump when it fades; never on an empty table. */}
+      {scrollable && !isEmpty && (
+        <div aria-hidden className="flex justify-end px-3 py-1.5">
+          <span className={clsx('rounded-full bg-fg/85 px-2 py-0.5 text-[11px] font-medium text-bg shadow-pop transition-opacity', edge.right && !edge.left ? 'opacity-100' : 'opacity-0')}>
+            <span className="pointer-coarse:hidden">Scroll</span><span className="hidden pointer-coarse:inline">Swipe</span> to see more →
+          </span>
         </div>
       )}
     </div>

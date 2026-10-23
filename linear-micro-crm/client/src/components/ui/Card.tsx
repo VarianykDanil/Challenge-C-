@@ -48,8 +48,10 @@ export interface CardHeaderProps {
 
 export function CardHeader({ title, description, actions, icon, className }: CardHeaderProps) {
   return (
-    <div className={clsx('mb-4 flex items-start justify-between gap-4', className)}>
-      <div className="flex min-w-0 items-start gap-3">
+    // The actions wrap under the title rather than squeeze it below 10rem (1.3.1 UI review: "Client accounts" read "C…"
+    // and its description one word a line in a 213 px card at 1024 px).
+    <div className={clsx('mb-4 flex flex-wrap items-start justify-between gap-x-4 gap-y-2', className)}>
+      <div className="flex min-w-[min(100%,10rem)] flex-1 items-start gap-3">
         {icon && (
           <span className="mt-0.5 inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-primary-soft text-primary [&_svg]:h-4 [&_svg]:w-4" aria-hidden>
             {icon}

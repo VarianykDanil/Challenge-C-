@@ -5,6 +5,7 @@
  * No I/O; every function is deterministic and en-GB.
  */
 import { PIN_MAX_LENGTH, PIN_MIN_LENGTH } from '../types/pin.ts';
+import { shareableSignInUrl } from './people.ts';
 import { CLIENT_ACCESS_CODE_PREFIX, type ClientPost, type ClientPostInput, type ClientPostKind, type ClientPostStatus } from '../types/client.ts';
 
 export const CLIENT_POST_KIND_LABELS: Record<ClientPostKind, string> = {
@@ -196,13 +197,14 @@ export interface ClientInviteText {
   email: string;
   accessCode: string;
   campaignName: string;
-  /** The sign-in page, when known ("https://hub.example/login"). */
+  /** The sign-in page, when known ("https://hub.example/login"); a localhost address is left out (shareableSignInUrl). */
   signInUrl?: string | null;
 }
 
 /** The sign-in instructions the admin copies into an email after an invite (plain text, no secrets but the code). */
 export function clientInviteInstructions(t: ClientInviteText): string {
-  const where = t.signInUrl ? `Open ${t.signInUrl}` : 'Open the Linear Hub sign-in page';
+  const url = shareableSignInUrl(t.signInUrl);
+  const where = url ? `Open ${url}` : 'Open the Linear Hub sign-in page';
   return [
     `Hello ${t.firstName.trim() || 'there'},`,
     '',

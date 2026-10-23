@@ -257,7 +257,8 @@ with a reason the client sees, **Unpublish** an update or announcement (also fro
 next to "From BCN"). The optional **Note for the office** on Approve and Unpublish stays in the office (the campaign page
 and the audit trail); only a decline's reason reaches the client. **Edit brief** changes the description, the brief for
 the field team and the contact. **Client accounts** → **Invite** (name and email) shows the access code and the sign-in
-instructions to copy into an email; per account **Edit** (name or email; the access code stays), **Reset PIN** and
+instructions to copy into an email (sent from the computer that runs Linear Hub, a `localhost` address, they say "Open
+the Linear Hub sign-in page": add the address the client should use); per account **Edit** (name or email; the access code stays), **Reset PIN** and
 **Turn off** / **Turn on**. "No PIN yet" means the account has not created its PIN (a new invite, after Reset PIN, or
 the demo client).
 
@@ -1131,7 +1132,7 @@ The dashboard greets you by name and shows your position, team and the dates in 
 | Tile or card | What it shows |
 |---|---|
 | **Sales** | Confirmed sales for the period. Underneath: **Ranked #N of M in your team** (reps — the same people as your leaderboard) or **company-wide** (leaders and administrators). |
-| **Conversion** | sales ÷ stops, tinted against the benchmark. |
+| **Conversion** | sales ÷ stops, tinted against the benchmark. **—** with no colour while you have no stops in the period (nothing to convert yet). |
 | **Stops** | With your presentations underneath. |
 | **Earnings to date** | Gross pay for the period: the pay runs that start in it, plus a live estimate for any week that has no run yet. |
 | **Next payday** | The date and amount of the earliest **unpaid** run. If its due date has passed the tile turns red and says **overdue**; when nothing is owed it shows this week's payday and the live estimate. |
@@ -1233,7 +1234,7 @@ Open **Events**. The default range is **Upcoming** — a week back to three week
 
 Days are listed with **today first** (highlighted), then the days to come, then last week's completed days under an **Earlier** divider, newest first — so nobody scrolls past history to find today. Lists with more than 60 events show two weeks of days and a **Show N more days** button. Each row shows the event, campaign code, venue, times, team, type, sales against target, how many reps have logged, and the status. Statuses follow the clock: today's events turn **Live** at their start time and past events become **Completed**, checked every fifteen minutes.
 
-Open an event for the day's totals, the **Event funnel** against the benchmarks, the notes, and **Gauges by rep** — each person's six gauges, conversion and check-in punctuality.
+Open an event for the day's totals, the **Event funnel** against the benchmarks, the notes, and **Gauges by rep** — each person's six gauges, conversion and check-in punctuality. Under the title, the people count reads **7 booked** before the day, **3 logged · 7 booked** on the day, and the number of reps who logged otherwise (or when nobody was booked).
 
 ### The team directory
 
@@ -1284,7 +1285,8 @@ Team Leaders and Crew Leaders can add a new trainee or field representative to t
 3. Choose **Add person**.
 4. **Sign-in details** opens: their name, team, email and **Employee ID**. Choose **Copy instructions** and paste them into
    a message to the new person — they say which address to open (the one your phone or laptop is using), and to enter the
-   email and the employee ID. The button changes to **Copied** once they are on your clipboard. This is the only time
+   email and the employee ID. On the computer that runs Linear Hub (an address starting `localhost`), they say "Open the
+   Linear Hub sign-in page" instead, because that address would not open on their phone: add the address they use. The button changes to **Copied** once they are on your clipboard. This is the only time
    you see their employee ID: afterwards only administrators (on the **Team** page) and the person themselves can. A tap
    beside the box does not close it; choose **Done** when you have sent them.
 

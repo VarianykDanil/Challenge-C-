@@ -139,3 +139,13 @@ test('invite instructions: the email, the access code, the PIN rule and the sign
   assert.match(noUrl, /^Hello there,/);
   assert.match(noUrl, /1\. Open the Linear Hub sign-in page\./);
 });
+
+test('invite instructions: an invite sent from the computer that runs Linear Hub (localhost) names the general sign-in page', () => {
+  for (const signInUrl of ['http://localhost:4000/login', 'http://127.0.0.1:4000/login', 'http://[::1]:4000/login']) {
+    const text = clientInviteInstructions({ firstName: 'Jo', email: 'jo@charity.example', accessCode: 'CL-0002', campaignName: 'Breast Cancer Now', signInUrl });
+    assert.match(text, /1\. Open the Linear Hub sign-in page\./, signInUrl);
+    assert.doesNotMatch(text, /localhost|127\.0\.0\.1|::1/, signInUrl);
+  }
+  const lan = clientInviteInstructions({ firstName: 'Jo', email: 'jo@charity.example', accessCode: 'CL-0002', campaignName: 'BCN', signInUrl: 'http://192.168.1.20:4000/login' });
+  assert.match(lan, /1\. Open http:\/\/192\.168\.1\.20:4000\/login\./);
+});
