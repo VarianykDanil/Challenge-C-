@@ -33,6 +33,9 @@ export interface DepsStatus {
   stale: boolean;
 }
 
+/** npm's record of the installed packages, rewritten by every install: newer than the build = rebuild with them. */
+const INSTALL_RECORD = 'node_modules/.package-lock.json';
+
 /** What `npm run build` (client) reads: its sources, the shared package it imports, and its config. */
 const SOURCE_DIRS = ['client/src', 'client/public', 'shared/src'];
 const SOURCE_FILES = [
@@ -42,7 +45,7 @@ const SOURCE_FILES = [
   'client/package.json',
   'shared/package.json',
   // written by every npm install / npm ci: the installed packages changed (not merely the lockfile's timestamp)
-  'node_modules/.package-lock.json',
+  INSTALL_RECORD,
 ];
 const SKIP_DIRS = new Set(['node_modules', 'dist', '.git']);
 
@@ -162,6 +165,18 @@ export function lockfileInstalled(repoDir: string, { includeDev = true }: { incl
 /** "3 Oct 14:05" in the business zone, for messages. */
 export function shortStamp(ms: number): string {
   return new Date(ms).toLocaleString('en-GB', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit', timeZone: 'Europe/London' });
+}
+
+/**
+ * What `npm start` / `npm run latest` (prepare.ts) say before rebuilding a stale client: no build yet, new screens
+ * (naming the newest changed file), or packages installed after the build (the screens themselves did not change).
+ */
+export function rebuildNotice(s: ClientBuildStatus): string {
+  if (!s.built) return "Linear Hub: the app's screens have not been built yet — building them now, about 10–20 s.";
+  if (s.newest?.file === INSTALL_RECORD) {
+    return `Linear Hub: the dependencies were installed after the last build (the build is from ${shortStamp(s.builtAtMs!)}) — building the screens again, about 10–20 s.`;
+  }
+  return `Linear Hub: the app's screens changed since the last build (${s.newest?.file} is newer than the build from ${shortStamp(s.builtAtMs!)}) — building them now, about 10–20 s.`;
 }
 
 /** One sentence for the start-up warning and the doctor, or null when the build is current. */

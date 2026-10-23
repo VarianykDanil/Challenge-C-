@@ -14,8 +14,9 @@ There are two good routes:
 Add a domain name for either route (about £10 a year for a `.co.uk`), and off-site backup storage (pennies a month for
 a database this size: Backblaze B2, a Hetzner Storage Box from about €3.20, or any S3-compatible bucket).
 
-Whatever the route, Linear Hub keeps everything in **one SQLite file**, so it runs as **exactly one copy** with one
-disk. Never scale it out to two machines.
+Whatever the route, Linear Hub keeps its data in **one SQLite file** (with, since 1.3, the folders of learning videos,
+statement PDFs and the signature image beside it), so it runs as **exactly one copy** with one disk. Never scale it out
+to two machines.
 
 ---
 
@@ -24,7 +25,10 @@ disk. Never scale it out to two machines.
 1. **Decide where the data comes from.** On first start Linear Hub creates and seeds the **demo** data. To go live with
    the people, gauges and pay you already have, bring your existing database: stop Linear Hub on the laptop
    (`npm run stop`, or `npm run service:uninstall` if it runs as a service), make a fresh backup (`npm run backup`), and
-   copy two files up to the server: `server/data/linear.sqlite` and `server/data/app-secret`.
+   copy two files up to the server: `server/data/linear.sqlite` and `server/data/app-secret`. Since 1.3, also copy the
+   folders `server/data/media` (learning videos), `server/data/statements` (client statement PDFs) and
+   `server/data/uploads` (the signature image on invoices) when you have them: they are in neither the database file
+   nor its backups.
 2. **The app secret (the key for two-step secrets and sign-in PINs).**
    - New install: generate a key once and keep it in your password manager: `openssl rand -hex 32`. Set it as
      `LM_APP_SECRET`.
@@ -105,13 +109,19 @@ sudo -u linear npm ci --no-audit --no-fund
 sudo -u linear npm run build
 ```
 
-If you are bringing your database, copy it now (from the laptop):
+If you are bringing your database, copy it now with its folders (from the laptop; leave out any of `media`,
+`statements` and `uploads` that `server/data` does not have):
 
 ```bash
-scp server/data/linear.sqlite server/data/app-secret you@hub.example.co.uk:/tmp/
+scp -r server/data/linear.sqlite server/data/app-secret server/data/media server/data/statements server/data/uploads you@hub.example.co.uk:/tmp/
 # on the server:
 sudo install -o linear -g linear -m 600 /tmp/linear.sqlite /tmp/app-secret /var/lib/linear-hub/ && rm /tmp/linear.sqlite /tmp/app-secret
+# the folders (again, only those you copied); install cannot copy folders, so cp, then hand them to the linear user:
+sudo cp -r /tmp/media /tmp/statements /tmp/uploads /var/lib/linear-hub/ && sudo chown -R linear:linear /var/lib/linear-hub && sudo rm -r /tmp/media /tmp/statements /tmp/uploads
 ```
+
+With `DB_PATH=/var/lib/linear-hub/linear.sqlite` (step 4) the server finds all three there: `media` and `statements`
+next to the database, `uploads` next to the app secret.
 
 ### 4. The environment file
 
@@ -227,11 +237,19 @@ sudo -u linear rclone config        # add e.g. "b2" (Backblaze B2), then "offsit
 sudo -u linear crontab -e
 # 03:15 every night: copy the last two days of backups off the server
 15 3 * * * rclone copy /var/lib/linear-hub/backups offsite: --max-age 48h --log-file /var/lib/linear-hub/rclone.log
+# 03:20–03:30: the folders the backups leave out (learning videos, statement PDFs, the signature image)
+20 3 * * * rclone copy /var/lib/linear-hub/media offsite:media --log-file /var/lib/linear-hub/rclone.log
+25 3 * * * rclone copy /var/lib/linear-hub/statements offsite:statements --log-file /var/lib/linear-hub/rclone.log
+30 3 * * * rclone copy /var/lib/linear-hub/uploads offsite:uploads --log-file /var/lib/linear-hub/rclone.log
 ```
+
+`rclone copy` never deletes anything off-site, so an empty folder on a new server cannot wipe the copies (`rclone sync`
+would). A folder that does not exist yet (no video uploaded, say) only logs a line.
 
 **Test a restore** before you rely on it, and again every few months: download one copy to a laptop
 (`rclone copy offsite:linear-2026-10-19-0200.sqlite .`), run `npm run restore -- linear-2026-10-19-0200.sqlite` in a
-checkout there, start it and check the numbers.
+checkout there, start it and check the numbers. On a new server, put the folders back before starting:
+`sudo -u linear rclone copy offsite:media /var/lib/linear-hub/media`, and the same for `statements` and `uploads`.
 
 ### 8. Updating
 
@@ -302,6 +320,13 @@ primary_region = "lhr"
   `LM_APP_SECRET` in that case), then `fly machine restart`.
 - Backups: Fly snapshots the volume daily (kept 5 days by default), and the app's own copies are in
   `/app/server/data/backups`. Pull one off-site every week: `fly ssh sftp get /app/server/data/backups/<file>`.
+- The folders `media`, `statements` and `uploads` in `/app/server/data` (learning videos, statement PDFs, the signature
+  image) are in the volume snapshots but in no backup file; move them as one file (name only the folders you have).
+  To bring them: `tar czf folders.tgz -C server/data media statements uploads` on the laptop, `put folders.tgz
+  /app/server/data/folders.tgz` in `fly ssh sftp shell`, then
+  `fly ssh console -C "tar xzf /app/server/data/folders.tgz -C /app/server/data"`. To copy them off now and then:
+  `fly ssh console -C "tar czf /app/server/data/folders.tgz -C /app/server/data media statements uploads"`, then
+  `fly ssh sftp get /app/server/data/folders.tgz`.
 
 ### Render
 
@@ -314,7 +339,8 @@ primary_region = "lhr"
 4. **Health check path**: `/api/health`. **Custom domain**: add it under Settings; Render issues the certificate.
 
 A service with a disk runs one instance and restarts (a few seconds of downtime) on each deploy. Render keeps daily disk
-snapshots for 7 days; still pull a backup off-site every week from the Shell (`ls /app/server/data/backups`).
+snapshots for 7 days; still pull a backup off-site every week from the Shell (`ls /app/server/data/backups`), and now
+and then the `media`, `statements` and `uploads` folders next to it, which no backup file holds.
 
 ---
 
@@ -362,8 +388,8 @@ Tick every line before real people use it.
 - [ ] **Two-step for administrators**: your own two-step verification is on, then **Require two-step verification for
       administrators** is on.
 - [ ] **Session idle timeout** chosen (Sign-in rules; 12 hours by default, shorter for shared phones).
-- [ ] **Backups tested**: the off-site copy runs every night and you restored one on a laptop (write the date here:
-      ________).
+- [ ] **Backups tested**: the off-site copy runs every night, the `media`, `statements` and `uploads` folders are
+      copied off the server too, and you restored one on a laptop (write the date here: ________).
 - [ ] **No demo data**: the dashboard shows your own people (you brought `linear.sqlite`), not the seeded demo.
 - [ ] **Monitoring** (optional, free): an uptime check on `https://hub.example.co.uk/api/health` that emails you.
 - [ ] **`npm run doctor`** on the server (Route A) reports nothing to fix.

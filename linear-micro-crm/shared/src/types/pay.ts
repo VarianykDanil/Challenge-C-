@@ -9,7 +9,7 @@
  * (no base). Day rate £63.50 for everyone. NO automatic sales bonus and NO automatic leader overrides from 1.3: Matt adds
  * a bonus to individual top performers by hand. The breakdown must show all of this."
  *
- * Endpoints (server/src/routes/pay.ts, mounted at /pay, owned by P1; stubs answer empty data / 501 until P1 lands):
+ * Endpoints (server/src/routes/pay.ts, mounted at /pay, owned by P1):
  *  - GET    /pay/settings                          → PayRuleSettings (admin)
  *  - PUT    /pay/settings  PayRuleSettingsInput    → PayRuleSettings (admin)
  *  - GET    /pay/rates?campaignId=                 → CampaignRate[] (admin, leader; newest first)

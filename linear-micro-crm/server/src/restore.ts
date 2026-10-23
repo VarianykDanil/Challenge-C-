@@ -5,7 +5,8 @@
  * or anything answers on PORT (default 4000): stop it first with npm run stop (with the PORT it runs on), or
  * npm run service:uninstall when it runs as a background service. The backup is checked (PRAGMA integrity_check and
  * the core tables), compared with the current database, and only replaces it after --yes or a typed "y". The current
- * database and its -wal/-shm files are kept as <db>.before-restore-<time>.
+ * database and its -wal/-shm files are kept as <db>.before-restore-<time>. Only the database is restored: the 1.3
+ * folders beside it (learning videos, statement PDFs, the signature image) are left as they are, and it says so.
  *
  * <file> may be a path (relative to the folder you ran npm from) or just a file name from the backups folder.
  */
@@ -13,7 +14,7 @@ import { existsSync } from 'node:fs';
 import path from 'node:path';
 import { createInterface } from 'node:readline/promises';
 import { DEFAULT_DB_PATH } from './db/seed.ts';
-import { backupDirFor, listBackups, restoreDatabase, restoreKeyNotes } from './lib/backup.ts';
+import { backupDirFor, foldersOutsideBackup, listBackups, restoreDatabase, restoreFolderNotes, restoreKeyNotes } from './lib/backup.ts';
 import { installedServiceFile } from './service.ts';
 
 const dbPath = process.env.DB_PATH ? path.resolve(process.env.DB_PATH) : DEFAULT_DB_PATH;
@@ -47,10 +48,14 @@ function resolveCandidate(arg: string): string {
   return existsSync(inDir) ? inDir : typed;
 }
 
+/** Set when confirm has already said why nothing was changed, so the cancel line is not printed as well. */
+let toldWhy = false;
+
 async function confirm(question: string): Promise<boolean> {
   if (yes) return true;
   if (!process.stdin.isTTY) {
     console.log('Nothing was changed: add --yes to confirm when not running in a terminal.');
+    toldWhy = true;
     return false;
   }
   const rl = createInterface({ input: process.stdin, output: process.stdout });
@@ -79,10 +84,11 @@ if (outcome.status === 'refused') {
   process.exit(1);
 }
 if (outcome.status === 'cancelled') {
-  console.log('Restore cancelled; nothing was changed.');
+  if (!toldWhy) console.log('Restore cancelled; nothing was changed.');
   process.exit(1);
 }
 console.log(`Restored. ${outcome.dbPath} now holds the backup (${outcome.candidate.users} users, ${outcome.candidate.gauges} gauge entries).`);
 if (outcome.previous) console.log(`The database it replaced is kept as ${outcome.previous}${outcome.moved.length > 1 ? ' (with its -wal/-shm files)' : ''}.`);
 for (const line of restoreKeyNotes(outcome.secret, outcome.candidate)) console.log(line);
+for (const line of restoreFolderNotes(foldersOutsideBackup(dbPath))) console.log(line);
 console.log(service ? 'Start it again: npm run service:install' : 'Start it again: npm start');

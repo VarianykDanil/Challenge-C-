@@ -65,7 +65,7 @@ What Matt needs to know, set up or decide for each part of 1.3, collected from t
   adds `/invoices` prefixes to `WRITE_LIMITED_ROUTES`, drop it. (3) Removed runs leave void records in
   `invoice_voids` (no screen yet). (4) Merged with P1 the "Fix and reissue" correction moves the run's gross, and the
   lines come from P1's `weekPayBreakdown`; the P2 tests pass with and without P1. (5) Last fix round: the test server
-  in `server/src/test/helpers.ts` keeps idle sockets for 120 s (`server.keepAliveTimeout`), because r3-contracts'
+  in `server/src/test/helpers.ts` turns keep-alive off (`server.keepAliveTimeout = 0`), because r3-contracts'
   "anonymous → 401" test failed with ECONNRESET ("fetch failed") in every full `npm test` run on the merged tree: the
   synchronous extension-seed test before it blocks the event loop for ~6 s, longer than Node's 5 s keep-alive timeout,
   and the next request went out on a pooled socket the server then reset (integration-trial item 5). One line, test
@@ -121,9 +121,8 @@ What Matt needs to know, set up or decide for each part of 1.3, collected from t
   emoji and other scripts (Chinese, Arabic…) print as "?". **Decide before the self-billing invoices ship (P2 draws
   them with these blocks):** is a Latin spelling acceptable on an invoice, or should we embed a font that prints every
   name exactly (each PDF about 100–300 kB larger)?
-- The audit PDF holds every entry that matches the filters, up to 2,000 (filter by person, record or dates for a
-  longer period) — once the Audit page passes its filters to the button (a one-line change for P9 / the lead, in API
-  above); until then it is the 50 entries on screen.
+- The audit PDF holds every entry that matches the filters on screen, newest first, up to 2,000 (filter by person,
+  record or dates for a longer period).
 - Downloads made without signal are recorded when the phone is back online (stamped then; the file name keeps the
   day). If someone clears the browser's data first, or more than 100 wait, the oldest are lost. Invoice, candidate,
   interview-sheet and venue-report PDFs made without signal are not recorded until those pages use the waiting
@@ -215,8 +214,7 @@ What Matt needs to know, set up or decide for each part of 1.3, collected from t
 - **Leaders and recruiters can edit any sheet** (as they can edit any interview today); every save is in the audit
   trail with who wrote it, and each answer shows who last changed it (on the sheet and in the candidate's Questions
   and answers). Two devices on one sheet never overwrite each other: a clash on the same question asks the second
-  person to choose. Opening a sheet is reported to the audit trail like opening the candidate's profile (once P9 fills
-  `RecordOpened`).
+  person to choose. Opening a sheet is recorded in the audit trail, like opening the candidate's profile.
 - **For the lead / P9:** `lib/auditSpecs.ts` `candidateSnapshot` (P9's) has no `dateOfBirth`; P7 refines the two 1.2
   candidate specs from `recruitmentSpecs.ts` to add it (the same pattern as P6's campaign specs). If a 1.2 spec is not
   found it is skipped with a warning (no crash). Better: at merge, P9 adds `c.date_of_birth AS dateOfBirth` to
@@ -278,10 +276,8 @@ What Matt needs to know, set up or decide for each part of 1.3, collected from t
   Trafford Centre" are two venues: keep venue names consistent in the New event form.
 - Nothing stops one person being booked on two events on the same day (a split shift, or a mistake). Say if you want
   bookings to refuse a clash.
-- The venue list and a venue's events export as CSV now; P4's PDF export appears in the same **Export** button when it
-  lands, and the **Venue report** button (the whole page as a PDF, built on P4's page primitives) appears beside it at
-  the same time. Until then the report code is not even in the app (the build leaves it out); its builder was run
-  against 60 real venue pages with a stand-in PDF writer.
+- The venue list and a venue's events export as CSV or PDF (**Export**), and **Venue report** downloads the whole
+  venue page as a PDF.
 - Demo data: Golden Square is in Warrington in the seed (`/venues/golden-square--warrington`).
 
 ## Audit of every action
@@ -314,11 +310,8 @@ What Matt needs to know, set up or decide for each part of 1.3, collected from t
   once: sign-ins, the payroll exports and changes. Nothing is deleted; the two-year retention is unchanged.
 - The Audit page's line under the title is the page's own ("Everything done in Linear Hub: …"); `COPY.nav.audit`
   still says "Who changed what and when" (foundation copy) and the lead may want to change it there.
-- **For the lead (integration I1):** the Audit page now passes `total` and `query` to P4's **Download PDF**, so the PDF
-  holds every matching entry (checked: 91 of 91, not the 50 on screen). The PDF's **Who** column is P4's
-  (`client/src/features/pdf/auditPdf.ts`, `userName` or "Linear Hub"), so it still prints a failed try on Jordan's
-  account as "Jordan Lee"; the page's wording is `auditActorName` in `client/src/features/audit/kinds.tsx` — left to
-  the P4 fix (its list has "audit … Who"), so the two branches do not edit the same line.
+- The audit PDF's **Who** column uses the page's wording: a failed try on Jordan's account prints as "Attempt on
+  Jordan Lee's account".
 - **Sign-outs by the idle timeout** are written from the foundation's `middleware/auth.ts` (two calls to
   `lib/audit/sessions.ts recordIdleSignOut`: `authenticate` and `purgeExpiredSessions`), the hook P9 asked for.
 

@@ -27,11 +27,11 @@ Linear Hub fixes those four things without asking the business to change how it 
 | **Events & Gauges** | Leaders schedule events for their team against a campaign (venue, date, times, sales target); statuses roll forward by themselves (today's events go **Live** at their start time). Reps **Log gauges** for an event in under a minute: the date is the event's date, the event must be today or earlier and not cancelled, and the funnel rule (each stage ≤ the previous) is checked as you type. Everything rolls up by person, team, campaign, day and week. |
 | **Leaderboard** | Everyone who logged sales, ranked by **Sales** or **Conversion** for the week, month or quarter, with movement against the same days of the previous period. Reps see their own team; everyone else can filter by team. |
 | **Recruitment** | A board from Applied → Phone screen → Interview → Observation day → Offer → Hired, with interviews, owners, sources, ratings, next actions and overdue flags. Hiring asks for the **Team** and **Position** (Trainee or Field Representative) and creates the rep's account on the spot. |
-| **Finance & Pay** | **My pay** for everyone: twelve weeks of itemised payslips (base per day, commission, bonus, leader overrides, deductions) and the next payday. **Team pay** for leaders. **Company** for administrators: revenue, payroll, expenses and profit per pay week, **Runs to pay** with one-click **Mark paid**, payroll punctuality, expenses and margin by campaign. |
+| **Finance & Pay** | **My pay** for everyone: twelve weeks of payslips or self-billing invoices, each with its breakdown (the base or the commission, whichever is higher, plus any bonus, corrections and deductions), and the next payday. **Team pay** for leaders. **Company** for administrators: revenue, payroll, expenses and profit per pay week, **Runs to pay** with **Mark paid**, payroll punctuality, expenses and margin by campaign. |
 | **Team** | The directory: who is on which team, their position on the ladder (Trainee → Field Representative → Team Leader → Crew Leader → Assistant Owner → Owner, plus the office **Recruiter** position), and a performance view per person. |
 | **Campaigns** | The clients Linear represents, with sector, type, payout per sale, default rep commission and active/inactive status. |
 | **Public page** | Signed-out visitors land on an outward-facing page about Linear MCR and Linear Hub (what we do, the six gauges, the careers ladder) with **Sign in**; staff can review it any time at `/welcome`. The logo and colours come from one config (`client/src/content/brand.ts` and the `--brand-*` block in `client/src/index.css`). |
-| **Export & print** | Every table has **Download as CSV** (Excel-ready, exactly the rows on screen, filters in the file name), and each payslip has **Print payslip** for a clean A4 copy. |
+| **Export & print** | Every table has **Export** (CSV for Excel, or PDF): exactly the rows on screen, with the filters in the file name. Each payslip has **Print payslip**, and each invoice has **Print invoice** and **Download PDF**. |
 | **Smart features** (1.1) | Pace notes, this week's pay estimate, **Check in with…**, the **Needs attention** bell, event forecasts, signal-proof logging, recruitment deadlines and **Your week in review** — see [Smart features](#smart-features-11) below. |
 | **Learning** (1.2) | The COD pack as 21 lessons with self-checks, teach-backs your leader signs off, the leadership checklist and the progression tracker; a **pitch studio** per campaign (starting with Breast Cancer Now) with the theory behind each line, a step timer, a teleprompter and flashcards. |
 | **Field & office** (1.2) | One-tap **Check in** with a roll call; leader **Bulk entry** (or paste from WhatsApp); an optional sign-in **PIN**; the **Audit** trail and announcement read receipts; ⌘K search for people, events, candidates and campaigns; **Export for payroll** to Xero or Sage. See [What's new in 1.2](docs/USER_GUIDE.md#whats-new-in-12). |
@@ -129,7 +129,7 @@ Every command below exists in `package.json` (root) or `server/package.json`.
 | Command | What it does |
 |---|---|
 | `npm run dev` | Server (`node --watch`, `TZ=Europe/London`) and client (Vite) together |
-| `npm run build` | Typecheck and build the client into `client/dist` |
+| `npm run build` | Install the dependencies first if `package-lock.json` changed since the last install (`npm ci`), then typecheck and build the client into `client/dist` |
 | `npm run setup` | Install the dependencies if the lockfile changed (`npm ci`) and rebuild the client if its code changed; `npm start` runs it first |
 | `npm start` | Serve the API **and** the built client on <http://localhost:4000> (`NODE_ENV=production`), after `npm run setup` |
 | `npm run latest` | Update to the latest version: stop, pull, install, build, start (see Updating to the latest version) |
@@ -209,8 +209,10 @@ npm run service:uninstall    # stop it for good and free the port
   `~/Library/Logs/LinearHub/linear-hub.log`. It runs this checkout's `server/src/index.ts` with the Node you ran the
   command with (a Homebrew Cellar path becomes the stable `…/opt/node/bin/node` link), in production mode with
   `TZ=Europe/London`, plus `PORT`, `HOST`, `DB_PATH`, `LM_APP_SECRET_FILE`, `LM_BACKUP`, `LM_BACKUP_DIR`,
-  `LM_BACKUP_HOUR`, `TRUST_PROXY`, `LM_SMART`, `LM_COMPRESSION` and `LM_DEMO_ACCOUNTS` if they are set in that terminal. `LM_APP_SECRET`
-  is never written into the file (it would sit there in plain text): use `LM_APP_SECRET_FILE` instead.
+  `LM_BACKUP_HOUR`, `TRUST_PROXY`, `COOKIE_SECURE`, `LM_SMART`, `LM_COMPRESSION`, `LM_DEMO_ACCOUNTS`,
+  `LM_STATEMENTS_JOB`, `LM_STATEMENTS_DIR` and `LM_UPLOADS_DIR` if they are set in that terminal (folders resolved from
+  `server/`, as `npm start` resolves them). `LM_APP_SECRET` is never written into the file (it would sit there in plain
+  text): use `LM_APP_SECRET_FILE` instead.
 - It refuses to install without a built client (`npm run build` first), stops a copy running in a terminal, then loads
   the agent and waits up to 20 seconds for it to answer.
 - While it runs as a service, `npm run stop` only makes macOS start it again: use `npm run service:uninstall`
@@ -222,10 +224,10 @@ npm run service:uninstall    # stop it for good and free the port
 - **Keep the Linear Hub folder out of Desktop, Documents, Downloads and iCloud Drive.** macOS guards those folders, and
   a background service (unlike Terminal) can be refused access to them ("Operation not permitted" in the log), so it
   could not open the database or write backups. `service:install` and `service:status` warn when the checkout,
-  `DB_PATH`, `LM_BACKUP_DIR` or `LM_APP_SECRET_FILE` is in one: move the folder (for example to `~/LinearHub`) and
-  install again, or give the Node it names Full Disk Access in System Settings › Privacy & Security. For the same
-  reason, do not point `LM_BACKUP_DIR` into iCloud Drive while it runs as a service: copy the folder there by hand
-  instead.
+  `DB_PATH`, `LM_BACKUP_DIR`, `LM_APP_SECRET_FILE`, `LM_STATEMENTS_DIR` or `LM_UPLOADS_DIR` is in one: move the
+  folder (for example to `~/LinearHub`) and install again, or give the Node it names Full Disk Access in System
+  Settings › Privacy & Security. For the same reason, do not point `LM_BACKUP_DIR` into iCloud Drive while it runs as
+  a service: copy the folder there by hand instead.
 
 #### Linux and Windows
 
@@ -257,7 +259,7 @@ parses, `KeepAlive` and `RunAtLoad` are true, and the environment and log path a
 | The browser shows a blank page that never finishes loading on <http://localhost:4000> | Something else is answering on that port. If it is an old Linear Hub, `npm run stop` ends it; otherwise find it with `lsof -nP -iTCP:4000 -sTCP:LISTEN` and `kill <PID>`, or use `PORT=4001 npm start` |
 | An old copy keeps appearing on port 4000 | Stop the server with **Ctrl+C** in the terminal where it runs, not Ctrl+Z (which only pauses it and keeps the port) and not by closing the window. The current build stops within two seconds of Ctrl+C and treats Ctrl+Z as a stop request; an older copy that is still around is ended by `npm run stop` |
 | A phone on the same Wi-Fi or hotspot cannot open the address | Allow incoming connections for `node` in **System Settings → Network → Firewall**, check both devices are on the same network, re-run `npm run share` for the current address, and make sure `HOST` is not set |
-| `Cannot find module 'qrcode'` or similar after a `git pull` | Dependencies changed. `npm start` now installs them first; with an older checkout run `npm ci`, then `npm start` |
+| `Cannot find module 'qrcode'` or similar after a `git pull` | Dependencies changed. `npm start` and `npm run build` install them first; with an older checkout run `npm ci`, then `npm start` |
 | New features do not appear after updating | Either the pull did not happen or the screens were not rebuilt. Use `npm run latest`, which does both. `npm start` also rebuilds stale screens, and the server warns at start-up when they are out of date. `curl -s localhost:4000/api/health` shows the running version |
 | `git pull` says "Your local changes to package-lock.json would be overwritten" | npm rewrote that file during an install. It is generated, so discard it: `git restore package-lock.json`, then `git pull` (or just `npm run latest`, which does this for you). Installs now use `npm ci`, which never rewrites it |
 | `npm start` serves the API but the page is empty or stale | Rebuild the client: `npm run build` (the server serves `client/dist`) |
@@ -265,8 +267,11 @@ parses, `KeepAlive` and `RunAtLoad` are true, and the environment and log path a
 
 ### Backups and restore
 
-Everything — people, gauges, pay — is in one file, `server/data/linear.sqlite`. While the server runs it keeps dated
-copies of it in **`server/data/backups/`** (set `LM_BACKUP_DIR` to put them elsewhere):
+People, gauges and pay are in one file, `server/data/linear.sqlite`. Since 1.3, three folders next to it are neither
+in that file nor in the backups: `server/data/media/` (learning videos), `server/data/statements/` (client statement
+PDFs) and `server/data/uploads/` (the signature image on invoices). Copy them yourself when you back up or move Linear
+Hub; `npm run backup` and `npm run restore` name them. While the server runs it keeps dated copies of the database in
+**`server/data/backups/`** (set `LM_BACKUP_DIR` to put them elsewhere):
 
 - **10 minutes after start-up**, when the last backup is more than 24 hours old;
 - **every night**: an hourly check backs up once the London time has reached 02:00 (`LM_BACKUP_HOUR`) and there is no
@@ -292,7 +297,9 @@ database is open in another process … Stop it first, with the PORT it runs on"
 port ("Stop it first: npm run stop"). It checks the backup
 (`PRAGMA integrity_check` and the Linear Hub tables), prints the current and the backup's users, gauge entries,
 payroll runs and latest gauge date side by side, and only then asks (`--yes` skips the question). The database it
-replaces is kept next to it as `linear.sqlite.before-restore-<date-time>`, so a restore can itself be undone. If
+replaces is kept next to it as `linear.sqlite.before-restore-<date-time>`, so a restore can itself be undone. Only the
+database is restored: the `media`, `statements` and `uploads` folders are left as they are (restore says so, and that
+videos uploaded after the backup stay in `media/videos` with no row; delete them if you do not need them). If
 Linear Hub runs as a background service, stop it with `npm run service:uninstall` instead of `npm run stop` (macOS
 would only start it again), restore, then `npm run service:install`.
 

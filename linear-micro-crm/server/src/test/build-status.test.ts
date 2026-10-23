@@ -4,7 +4,7 @@ import { mkdirSync, mkdtempSync, rmSync, utimesSync, writeFileSync } from 'node:
 import os from 'node:os';
 import path from 'node:path';
 import { after, describe, it } from 'node:test';
-import { clientBuildStatus, depsStatus, lockfileInstalled, recordInstalledLockfile, staleBuildMessage } from '../lib/buildStatus.ts';
+import { clientBuildStatus, depsStatus, lockfileInstalled, rebuildNotice, recordInstalledLockfile, staleBuildMessage } from '../lib/buildStatus.ts';
 
 const roots: string[] = [];
 after(() => { for (const r of roots) rmSync(r, { recursive: true, force: true }); });
@@ -70,6 +70,25 @@ describe('clientBuildStatus', () => {
     dist.touch('client/dist/index.html', 1_000_100);
     dist.touch('client/dist/assets/index-abc.js', 1_000_900);
     assert.equal(clientBuildStatus(dist.root).stale, false);
+  });
+
+  it('npm start / npm run latest say why they rebuild: new screens, or dependencies installed after the build', () => {
+    const none = checkout(1_000_000);
+    assert.match(rebuildNotice(clientBuildStatus(none.root)), /screens have not been built yet/);
+
+    const edited = checkout(1_000_000);
+    edited.touch('client/dist/index.html', 1_000_100);
+    edited.touch('client/src/pages/Quick.tsx', 1_000_500);
+    const e = rebuildNotice(clientBuildStatus(edited.root));
+    assert.match(e, /the app's screens changed since the last build/);
+    assert.ok(e.includes(path.join('client', 'src', 'pages', 'Quick.tsx')), e);
+
+    const installed = checkout(1_000_000);
+    installed.touch('client/dist/index.html', 1_000_100);
+    installed.touch('node_modules/.package-lock.json', 1_000_200);
+    const i = rebuildNotice(clientBuildStatus(installed.root));
+    assert.match(i, /^Linear Hub: the dependencies were installed after the last build \(the build is from .+\) — building the screens again, about 10–20 s\.$/);
+    assert.ok(!/screens changed/.test(i), 'the screens did not change: the packages did');
   });
 
   it('ignores an edit within a second of the build (coarse file-system clocks)', () => {

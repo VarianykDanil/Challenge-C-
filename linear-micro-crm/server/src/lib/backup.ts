@@ -854,3 +854,56 @@ export function restoreKeyNotes(
   }
   return [];
 }
+
+// ── what the backups leave out ───────────────────────────────────────────────
+
+/** The release 1.3 folders kept beside the database: in neither the database file nor its backups. */
+export interface FoldersOutsideBackup {
+  /** Learning videos (`<data dir>/media`, uploads in `media/videos`). */
+  media: string;
+  /** Client statement PDFs (`LM_STATEMENTS_DIR`, else `<data dir>/statements`). */
+  statements: string;
+  /** The office's signature image (`LM_UPLOADS_DIR`, else `uploads/` next to the app secret). */
+  uploads: string;
+}
+
+/**
+ * Where those folders are for this database, resolved as the server resolves them (lib/videos/files.ts mediaRootFor,
+ * lib/statements/files.ts statementsDir, lib/invoices.ts uploadsDir; the app secret as index.ts places it), so the
+ * backup and restore scripts can name them without loading the server's modules.
+ */
+export function foldersOutsideBackup(dbPath: string, env: NodeJS.ProcessEnv = process.env): FoldersOutsideBackup {
+  const dataDir = path.dirname(path.resolve(dbPath));
+  const secretFile = env.LM_APP_SECRET_FILE ? path.resolve(env.LM_APP_SECRET_FILE) : path.join(dataDir, SECRET_COPY_NAME);
+  const statements = env.LM_STATEMENTS_DIR?.trim();
+  const uploads = env.LM_UPLOADS_DIR?.trim();
+  return {
+    media: path.join(dataDir, 'media'),
+    statements: statements ? path.resolve(statements) : path.join(dataDir, 'statements'),
+    uploads: uploads ? path.resolve(uploads) : path.join(path.dirname(secretFile), 'uploads'),
+  };
+}
+
+/** The line `npm run backup` ends with. */
+export function backupFolderNote(f: FoldersOutsideBackup): string {
+  return (
+    `Copy ${f.media} (learning videos), ${f.statements} (client statement PDFs) and ${f.uploads} (the signature image) ` +
+    'yourself too: the backups hold the database and the app secret only.'
+  );
+}
+
+/**
+ * What restore says about those folders once the database is back: they were left as they are, and videos uploaded
+ * after the backup are now files without a row (said only when the media folder holds videos).
+ */
+export function restoreFolderNotes(f: FoldersOutsideBackup, exists: (p: string) => boolean = existsSync): string[] {
+  const videos = path.join(f.media, 'videos');
+  return [
+    `Only the database was restored. Learning videos (${f.media}), client statement PDFs (${f.statements}) and the ` +
+      `signature image (${f.uploads}) are not in the backups and were left as they are: if they are missing on this ` +
+      'computer, copy those folders back from your own copy.',
+    ...(exists(videos)
+      ? [`Videos uploaded after this backup stay in ${videos} with no row in the restored database: delete them if you do not need them.`]
+      : []),
+  ];
+}

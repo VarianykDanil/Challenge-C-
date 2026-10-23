@@ -2,13 +2,24 @@
  * `npm run backup`: back the database up now (safe while the server is running: the online backup copies a
  * consistent snapshot of the WAL database).  `npm run backups`: list the backup files with their size and age.
  *
- * DB_PATH, LM_BACKUP_DIR and LM_APP_SECRET_FILE are read the same way as the server reads them.
+ * DB_PATH, LM_BACKUP_DIR and LM_APP_SECRET_FILE are read the same way as the server reads them. The backup ends by
+ * naming the 1.3 folders it does not copy (learning videos, statement PDFs, the signature image).
  */
 import { DatabaseSync } from 'node:sqlite';
 import { existsSync } from 'node:fs';
 import path from 'node:path';
 import { DEFAULT_DB_PATH } from './db/seed.ts';
-import { BACKUP_RULES, SECRET_COPY_NAME, backupDirFor, backupNow, backupStatus, formatBytes, listBackups } from './lib/backup.ts';
+import {
+  BACKUP_RULES,
+  SECRET_COPY_NAME,
+  backupDirFor,
+  backupFolderNote,
+  backupNow,
+  backupStatus,
+  foldersOutsideBackup,
+  formatBytes,
+  listBackups,
+} from './lib/backup.ts';
 
 const dbPath = process.env.DB_PATH ? path.resolve(process.env.DB_PATH) : DEFAULT_DB_PATH;
 const dir = backupDirFor(dbPath);
@@ -62,6 +73,7 @@ async function backup(): Promise<void> {
     const status = backupStatus(db, dir);
     console.log(`${status.count} backup${status.count === 1 ? '' : 's'} kept in ${dir}${r.removed.length ? ` (${r.removed.length} old one${r.removed.length === 1 ? '' : 's'} removed)` : ''}.`);
     console.log('Copy that folder to iCloud Drive or Google Drive now and then: a backup on the same laptop does not survive losing the laptop.');
+    console.log(backupFolderNote(foldersOutsideBackup(dbPath)));
   } finally {
     db.close();
   }

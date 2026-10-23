@@ -1261,7 +1261,8 @@ README.md ("Backups and restore", "Run it in the background"); the switches are 
 4. Open the staging copy read-only: `PRAGMA integrity_check` must return exactly `ok` and the tables `users, teams,
    pay_plans, campaigns, events, gauge_entries, payroll_runs, meta` must exist; otherwise refuse and delete staging.
 5. Print current v backup: users, gauge entries, payroll runs, latest gauge date.
-6. Ask (`--yes`, or a typed `y`/`yes` in a terminal; no terminal and no `--yes` = cancel).
+6. Ask (`--yes`, or a typed `y`/`yes` in a terminal; no terminal and no `--yes` = cancel, with the one line "Nothing
+   was changed: add --yes to confirm when not running in a terminal.").
 7. Check the lock and the port again, move `<db>`, `<db>-wal`, `<db>-shm`, `<db>-journal` to
    `<db>.before-restore-<YYYY-MM-DD-HHmmss>` (+ suffix), rename staging to `<db>`.
 8. Key (the app secret: it encrypts two-step secrets and, since 1.2, peppers every PIN; `restoreKeyNotes`): if
@@ -1274,6 +1275,12 @@ README.md ("Backups and restore", "Run it in the background"); the switches are 
    lost, PINs are reset (`npm run pin:reset -- <email>` for an administrator, then Reset PIN), and two-step users use
    a recovery code and an administrator resets their two-step sign-in (Team › Edit › Reset two-step verification).
    Nobody depending on the key: nothing is said.
+9. Folders (`restoreFolderNotes`, `foldersOutsideBackup`): "Only the database was restored", naming the learning
+   videos (`<data dir>/media`), the statement PDFs (`LM_STATEMENTS_DIR`, else `<data dir>/statements`) and the
+   signature image (`LM_UPLOADS_DIR`, else `uploads/` next to the app secret), which are in no backup and were left as
+   they are; when `media/videos` exists, also that videos uploaded after the backup stay there with no row. Then
+   "Start it again". `npm run backup` likewise ends by naming those three folders (`backupFolderNote`): "the backups
+   hold the database and the app secret only".
 
 **Health status for admins** (`GET /health` → `backup`): `count` = matching files in the folder; `lastAt`/`file` from
 meta unless the newest file is more than a minute newer (after a restore the meta table is the backup's own, older
@@ -1295,8 +1302,9 @@ record); `enabled` = the schedule this server started with.
 **Service files** (`server/src/service.ts`)
 - Label `uk.co.linear-mcr.hub`; `ProgramArguments [node, <abs>/server/src/index.ts]`; `WorkingDirectory server/`;
   `EnvironmentVariables` `TZ=Europe/London`, `NODE_ENV=production`, `NODE_NO_WARNINGS=1`, plus when set: `PORT`,
-  `HOST`, `DB_PATH`, `LM_APP_SECRET_FILE`, `LM_BACKUP`, `LM_BACKUP_DIR`, `LM_BACKUP_HOUR`, `TRUST_PROXY`, `LM_SMART`,
-  `LM_COMPRESSION` (relative paths resolved from `server/`, as `npm start` resolves them). `LM_APP_SECRET` is never
+  `HOST`, `DB_PATH`, `LM_APP_SECRET_FILE`, `LM_BACKUP`, `LM_BACKUP_DIR`, `LM_BACKUP_HOUR`, `TRUST_PROXY`,
+  `COOKIE_SECURE`, `LM_SMART`, `LM_COMPRESSION`, `LM_DEMO_ACCOUNTS`, `LM_STATEMENTS_JOB`, `LM_STATEMENTS_DIR`,
+  `LM_UPLOADS_DIR` (relative paths resolved from `server/`, as `npm start` resolves them). `LM_APP_SECRET` is never
   written into the file (it would sit there in plain text): install warns and suggests `LM_APP_SECRET_FILE`.
 - `node` is `process.execPath`, except a Homebrew Cellar path (deleted by the next `brew upgrade`) becomes its stable
   `<prefix>/opt/node/bin/node` link when that link points at the same binary.
@@ -1309,7 +1317,7 @@ record); `enabled` = the schedule this server started with.
   `ExecStart=`); `Restart=always`, `RestartSec=2`, `WantedBy=default.target`. `systemd-analyze verify` accepts the
   printed unit.
 - macOS privacy (TCC): install (and `--print`, as a `# warning:` line) and status warn when the checkout, `DB_PATH`,
-  `LM_BACKUP_DIR` or `LM_APP_SECRET_FILE` resolves (as written or through links, ignoring case) into `~/Desktop`,
+  `LM_BACKUP_DIR`, `LM_APP_SECRET_FILE`, `LM_STATEMENTS_DIR` or `LM_UPLOADS_DIR` resolves (as written or through links, ignoring case) into `~/Desktop`,
   `~/Documents`, `~/Downloads` or `~/Library/Mobile Documents` (iCloud Drive). Install still goes ahead.
 - Windows: the printed `.cmd` creates `%LOCALAPPDATA%\LinearHub` before redirecting the log there.
 - `npm run service:install -- --print` (optionally `--platform=darwin|linux|win32`) is a dry run: it prints the file
