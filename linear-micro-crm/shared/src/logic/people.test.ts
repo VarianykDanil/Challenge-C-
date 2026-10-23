@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
-  addPersonRefusal, canAddPeople, firstNameWithInitial, personInitials, personName, personSortKey, staffSignInInstructions,
+  addPersonRefusal, canAddPeople, firstNameWithInitial, personInitials, personName, personSortKey, shareableSignInUrl, staffSignInInstructions,
 } from './people.ts';
 
 test('personName: first and last name, and the first name alone when there is no surname (no stray spaces)', () => {
@@ -127,4 +127,25 @@ test('staffSignInInstructions: the address, the email, the employee ID and the P
   assert.match(withPin, /1\. Open the Linear Hub sign-in page\./);
   assert.match(withPin, /3\. The first time, create a PIN of 4 to 6 digits\./);
   assert.ok(!withPin.includes('  '), 'no double spaces');
+});
+
+test('shareableSignInUrl: an address only this computer can open (localhost, 127.x, [::1]) is no use to someone else', () => {
+  for (const url of ['http://localhost:4000/login', 'http://LOCALHOST/login', 'https://localhost:4443/login', 'http://127.0.0.1:4000/login', 'http://127.1.2.3/login', 'http://[::1]:4000/login', 'http://localhost./login', 'http://0.0.0.0:4000/login']) {
+    assert.equal(shareableSignInUrl(url), null, url);
+  }
+  for (const url of ['http://192.168.1.20:4000/login', 'http://matts-macbook.local:4000/login', 'https://hub.example/login', 'http://localhost.example.com/login', 'http://127.example/login']) {
+    assert.equal(shareableSignInUrl(url), url, url);
+  }
+  assert.equal(shareableSignInUrl(null), null);
+  assert.equal(shareableSignInUrl(undefined), null);
+  assert.equal(shareableSignInUrl('  '), null);
+  assert.equal(shareableSignInUrl(' http://192.168.1.20:4000/login '), 'http://192.168.1.20:4000/login');
+});
+
+test('staffSignInInstructions: added on the computer that runs Linear Hub (localhost) → the general sign-in page, never a localhost link', () => {
+  for (const signInUrl of ['http://localhost:4000/login', 'http://127.0.0.1:4000/login', 'http://[::1]:4000/login']) {
+    const text = staffSignInInstructions({ firstName: 'Sam', email: 'sam@b.example', employeeId: 'LM-0108', teamName: 'Sapiens', signInUrl, pinRequired: false });
+    assert.match(text, /1\. Open the Linear Hub sign-in page\./, signInUrl);
+    assert.doesNotMatch(text, /localhost|127\.0\.0\.1|::1/, signInUrl);
+  }
 });

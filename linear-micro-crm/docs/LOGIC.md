@@ -277,12 +277,12 @@ useful, and renders `EmptyChart` when there is nothing to plot.
 
 | Component | Notes |
 |---|---|
-| `TrendChart` | line / area / bar, multi-series, `stacked`, `xFormatter` / `yFormatter`, `referenceY` + `referenceLabel`, `showLegend`, `yDomain`, `syncId`. Legend only for ≥ 2 series; dots only on hover. |
+| `TrendChart` | line / area / bar, multi-series, `stacked`, `xFormatter` / `yFormatter`, `yTickFormatter` (axis ticks only; the tooltip keeps `yFormatter`), `referenceY` + `referenceLabel`, `showLegend`, `yDomain`, `syncId`. Legend only for ≥ 2 series; dots only on hover. Money axes use `formatGBPCompact` ticks ("£36K": the full "£36,000" does not fit the 44 px axis). |
 | `FunnelChart` | custom HTML/CSS: six proportional bars (one hue, light → dark towards the sale), ratio chips between stages, `showBenchmarks` grades chips via `benchmarkSeverity`; `orientation`, `compact`, `benchmarks`, `barHeight`. |
 | `BarsChart` | vertical or `horizontal`, per-bar `color`, optional `secondary` series, value labels (`showValues`). |
-| `DonutChart` | centre value (defaults to the total) + `centerLabel`, legend with values and shares, folds slices past `maxSlices` into "Other". |
+| `DonutChart` | centre value (defaults to the total) + `centerLabel`, legend with values and shares, folds slices past `maxSlices` into "Other". `height` is the largest diameter: in a narrower card the ring shrinks to fit. |
 | `Sparkline` | inline SVG, 2px line, end dot with surface ring, optional area `fill`; stretches without the stroke scaling. |
-| `ChartTooltip`, `ChartLegend`, `EmptyChart`, `theme` | shared building blocks (`seriesColor`, `formatNumber`, `formatCompact`, `formatPercent`, `wash`). |
+| `ChartTooltip`, `ChartLegend`, `EmptyChart`, `theme` | shared building blocks (`seriesColor`, `formatNumber`, `formatCompact`, `formatGBPCompact`, `formatPercent`, `wash`). |
 
 ## 12. Constants added to `shared/src/constants.ts`
 
@@ -2661,6 +2661,10 @@ in issue order), not backdated to its own week as if 1.3 had existed then; with 
 or counted as accepted by now. The demo agreements are dated a few days before that first Monday (or on a newer
 person's start date), and an invoice is only marked accepted after its person accepted the agreement (else it counts
 as accepted at its deadline). The first job tick on a fresh demo issues, refreshes, reissues and deems nothing.
+Jordan Lee (the demo rep) always has last week's invoice to accept: on a demo seeded after its Monday deadline (from
+12:00 Thursday, and over the weekend) his is issued an hour before the seed instead, with the last number, so the
+24-hour rule keeps it open (1.3.1 UI review). Of last week's two disputes, the sales one points at the commission line
+with "2 sign-ups missing" (the whole-week claim is in the reason), the days one at the base line with "6 days".
 
 **Files.** The signature is stored under `uploads/` next to the app secret (server/data/uploads/; `LM_UPLOADS_DIR`
 relocates it), content-addressed so an issued invoice always shows the signature it was issued with.
@@ -3405,7 +3409,8 @@ Checked in this order, first refusal wins; `null` = allowed. Empty values (`unde
 The route then validates as before (`400`), checks duplicates (`409`), gives the default plan for the position and the
 next employee ID, inserts, and answers `201` with the employee ID filled in this once plus `signInInstructions`
 (`staffSignInInstructions({ firstName, email, employeeId, teamName, signInUrl, pinRequired })`: a greeting, the team,
-"1. Open <address>." or "Open the Linear Hub sign-in page", "2. Enter your email (…) and your employee ID: LM-0108.", a
+"1. Open <address>." or "Open the Linear Hub sign-in page" (also for an address only that computer can open —
+localhost, 127.x.x.x, [::1], 0.0.0.0: `shareableSignInUrl`), "2. Enter your email (…) and your employee ID: LM-0108.", a
 third PIN step only while the office requires a PIN for everyone, and "Keep your employee ID to yourself"). Every later
 read redacts the ID as before (`lib/scope.ts redactUser`). The 1.2 audit spec records the caller as the actor; `POST
 /users` counts towards the per-person write limit.

@@ -13,6 +13,7 @@ import {
   type BenchmarkStatus,
   type RatioKey as BenchmarkKey,
 } from '@lm/shared';
+import { formatPct } from './format.ts';
 
 export type { BenchmarkKey };
 export { coachingInsights, weakestStage };
@@ -50,6 +51,16 @@ export function ratioTone(key: RatioKey, value: number): RatioTone {
   const status = benchmarkStatus(value, benchmark);
   const relativeDelta = benchmark > 0 ? (value - benchmark) / benchmark : 0;
   return severityTone(benchmarkSeverity({ status, relativeDelta }));
+}
+
+/**
+ * The Conversion KPI tile (dashboard, person page, event and team totals). With no stops there is nothing to convert,
+ * so it reads "—" in the neutral tone rather than "0.0%" in red as if the person were failing (1.3.1 UI review: brand
+ * new accounts). Stops but no sales is a real 0% and keeps its benchmark tone.
+ */
+export function conversionKpi(stops: number, conversion: number): { value: string; tone: RatioTone | 'default' } {
+  if (!(stops > 0)) return { value: '—', tone: 'default' };
+  return { value: formatPct(conversion, 1), tone: ratioTone('overallConversion', conversion) };
 }
 
 export const TONE_TEXT: Record<RatioTone, string> = {

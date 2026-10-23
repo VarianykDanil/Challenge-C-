@@ -38,7 +38,9 @@
  * has nothing to issue. Paid weeks accepted or deemed accepted (an invoice is only ever accepted after its person
  * accepted the agreement), one dispute the office kept as it was, and last week's (payday this Friday) a mix of
  * accepted, still to accept and two disputes waiting for the office. Jordan Lee (the demo rep) has last week's invoice
- * still to accept. Only this extension's tables, meta keys and users columns are written.
+ * still to accept, whenever the demo is seeded: after its Monday deadline (12:00 Thursday, and over the weekend) his is
+ * issued an hour before the seed instead (the last number), so the 24-hour rule keeps it open. Only this extension's
+ * tables, meta keys and users columns are written.
  * Rules: ./types.ts.
  */
 import { SELF_BILLING_AGREEMENT_VERSION, effectiveInvoiceStatus, invoiceDeadline, isInvoicedRole, type InvoiceLine } from '@lm/shared';
@@ -258,12 +260,20 @@ function seedInvoices(db: Db, ctx: SeedContext): void {
     return i >= 0 ? i : 0;
   };
 
+  let jordanLate: number | null = null;
   for (const r of runs) {
     if (!fieldIds.has(r.userId)) continue;
     const older = r.weekStart < firstWeek; // a failed transfer from before self-billing started
     const issueDay = older ? startedDay : addDays(r.weekEnd, 1); // Monday after the week
     const issuedAt = older ? at(issueDay, 6, rng.int(30, 59)) : at(issueDay, 7, rng.int(0, 40));
     if (issuedAt.getTime() > now.getTime()) continue;
+    // Jordan (the demo rep) always has last week's invoice to accept: on a demo seeded after its Monday deadline (12:00
+    // Thursday, and over the weekend) his is issued after the loop, an hour before the seed (so it takes the last
+    // number: nothing issued before it has a higher one), and the 24-hour rule keeps it open.
+    if (r.userId === jordan?.id && r.weekStart === lastWeek && r.status === 'pending' && invoiceDeadline(r.dueDate, businessLocal(issuedAt)) <= nowLocal) {
+      jordanLate = r.id;
+      continue;
+    }
     const id = issueInvoiceForRun(db, r.id, issuedAt);
     if (id === null) continue;
     const deadline = invoiceDeadline(r.dueDate, businessLocal(issuedAt));
@@ -283,7 +293,8 @@ function seedInvoices(db: Db, ctx: SeedContext): void {
     if (disputeRuns.has(r.id)) {
       const kind = disputeRuns.get(r.id)!;
       const line = kind === 'sales' ? commissionLine(id) : baseLine(id);
-      dispute.run(daytime(2), disputeReason(kind, r), JSON.stringify([{ line, note: kind === 'sales' ? `${r.sales + 2} sales` : `${r.daysWorked + 1} days` }]), id);
+      // the note is about the line it points at (the commission line: two sign-ups missing from it), not the week's total
+      dispute.run(daytime(2), disputeReason(kind, r), JSON.stringify([{ line, note: kind === 'sales' ? '2 sign-ups missing' : `${r.daysWorked + 1} days` }]), id);
       continue;
     }
     if (keptRun && r.id === keptRun.id) {
@@ -312,6 +323,7 @@ function seedInvoices(db: Db, ctx: SeedContext): void {
       else deem.run(id);
     } else deem.run(id);
   }
+  if (jordanLate !== null) issueInvoiceForRun(db, jordanLate, new Date(now.getTime() - 3_600_000));
 }
 
 export const extension: DbExtension = {

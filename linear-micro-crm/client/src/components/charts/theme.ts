@@ -58,6 +58,12 @@ export function formatCompact(n: number): string {
   return Math.abs(n) >= 1000 ? compactFmt.format(n) : numberFmt.format(n);
 }
 
+/** 36000 → "£36K", 950 → "£950" (axis ticks in pounds: the full "£36,000" does not fit the 44 px axis). */
+export function formatGBPCompact(n: number): string {
+  if (!Number.isFinite(n)) return '';
+  return `${n < 0 ? '−' : ''}£${formatCompact(Math.abs(n))}`;
+}
+
 /** 0.384 → "38%" */
 export function formatPercent(fraction: number, digits = 0): string {
   if (!Number.isFinite(fraction)) return '—';

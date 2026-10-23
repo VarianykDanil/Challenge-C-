@@ -7,7 +7,7 @@ import { ChartSkeleton, ErrorState, ExportButton, KpiSkeletons } from '@/feature
 import { csvFilename, sortRows } from '@/lib/csv';
 import type { DateRange } from '@/lib/dates';
 import { formatDateShort, formatDecimal, formatNumber, formatPct, formatStopsPerSale, fullName } from '@/lib/format';
-import { ratioTone } from '@/lib/ratios';
+import { conversionKpi } from '@/lib/ratios';
 import { COPY } from '@/content/copy';
 import { CoachingInsights } from './CoachingInsights';
 import { GaugeSummaryTable } from './GaugeSummaryTable';
@@ -43,7 +43,7 @@ export function PerformancePanel({ data, loading, error, onRetry, showEntries = 
         <KpiTile label="Sales" value={formatNumber(totals.sales)} tone="primary" hint={`${formatDecimal(salesPerDay)} per day`} />
         <KpiTile label="Stops" value={formatNumber(totals.stops)} hint={`${formatNumber(days)} day${days === 1 ? '' : 's'} worked`} />
         <KpiTile label="Presentations" value={formatNumber(totals.presentations)} hint={`${formatPct(ratios.tableToPresentation)} from table`} />
-        <KpiTile label="Conversion" value={formatPct(ratios.overallConversion, 1)} tone={ratioTone('overallConversion', ratios.overallConversion)} hint="sales ÷ stops" />
+        <KpiTile label="Conversion" {...conversionKpi(totals.stops, ratios.overallConversion)} hint="sales ÷ stops" />
         <KpiTile label="Stops per sale" value={formatStopsPerSale(ratios.stopsPerSale)} hint="lower is better" />
         <KpiTile label="Punctuality" value={punctualityRate == null ? '—' : formatPct(punctualityRate)} tone={punctualityRate == null ? 'default' : punctualityRate >= 0.9 ? 'success' : punctualityRate >= 0.75 ? 'warning' : 'danger'} hint="check-ins on time" />
       </div>

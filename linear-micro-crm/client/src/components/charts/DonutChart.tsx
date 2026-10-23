@@ -13,7 +13,7 @@ export interface DonutDatum {
 
 export interface DonutChartProps {
   data: DonutDatum[];
-  /** Diameter of the ring in px (default 160). */
+  /** Diameter of the ring in px (default 160); smaller when the container is narrower. */
   height?: number;
   centerLabel?: string;
   /** Defaults to the formatted total. */
@@ -73,7 +73,9 @@ export function DonutChart({
 
   return (
     <div className={clsx('flex flex-wrap items-center gap-x-6 gap-y-3', className)}>
-      <div role="img" aria-label={summary} className="relative shrink-0" style={{ width: height, height }}>
+      {/* `height` is the most it takes: a card narrower than that (1024 px, a third of the row) gets a smaller ring, never
+          one that runs past the card's edge (1.3.1 UI review) */}
+      <div role="img" aria-label={summary} className="relative aspect-square max-w-full shrink-0" style={{ width: height }}>
         <ResponsiveContainer width="100%" height="100%">
           <PieChart margin={{ top: 0, right: 0, bottom: 0, left: 0 }}>
             <Tooltip

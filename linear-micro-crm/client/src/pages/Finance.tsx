@@ -5,7 +5,7 @@ import clsx from 'clsx';
 import type { Expense, PayForecast, PayrollRunWithUser } from '@lm/shared';
 import { EXPENSE_CATEGORY_LABELS, payMoney } from '@lm/shared';
 import { Badge, Button, Card, CardHeader, DataTable, EmptyState, KpiTile, Modal, PageHeader, ProgressBar, Skeleton, Tabs, Tooltip, useToast, type Column } from '@/components/ui';
-import { DonutChart, TrendChart } from '@/components/charts';
+import { DonutChart, TrendChart, formatGBPCompact } from '@/components/charts';
 import { useCampaigns, useDeleteExpense, useExpenses, useFinanceSummary, useMyFinance, usePayRun, usePayroll } from '@/api/hooks';
 import { useCurrentUser } from '@/auth/AuthProvider';
 import { ChartSkeleton, ColourChip, ConfirmDialog, ErrorBoundary, ErrorState, ExportButton, KpiSkeletons, RangePicker, StopRowEvents, errorMessage, useRangeState } from '@/features/common';
@@ -429,7 +429,7 @@ function Company({ onOpen, scrollToRuns = false, onScrolled }: { onOpen: (r: Pay
             <Card className="min-w-0 lg:col-span-2">
               <CardHeader title="Weekly money flow" description={s ? `Revenue against payroll and expenses per pay week (Mon–Sun) · ${formatRangeLabel(s.from, s.to)}` : 'Revenue against payroll and expenses per pay week (Mon–Sun)'} actions={<ExportButton filename={csvFilename('weekly-money-flow', range)} rows={sortRows(s?.weeks ?? [], (w) => w.weekStart)} columns={financeWeekCsvColumns} disabled={!s} />} />
               {!s ? <ChartSkeleton /> : s.weeks.length ? (
-                <TrendChart data={s.weeks.map((w) => ({ week: w.weekStart, revenue: w.revenue, payroll: w.payroll, expenses: w.expenses }))} xKey="week" series={[{ key: 'revenue', label: 'Revenue' }, { key: 'payroll', label: 'Payroll' }, { key: 'expenses', label: 'Expenses' }]} kind="bar" xFormatter={formatDateShort} yFormatter={(v) => formatGBP(v)} height={260} />
+                <TrendChart data={s.weeks.map((w) => ({ week: w.weekStart, revenue: w.revenue, payroll: w.payroll, expenses: w.expenses }))} xKey="week" series={[{ key: 'revenue', label: 'Revenue' }, { key: 'payroll', label: 'Payroll' }, { key: 'expenses', label: 'Expenses' }]} kind="bar" xFormatter={formatDateShort} yFormatter={(v) => formatGBP(v)} yTickFormatter={formatGBPCompact} height={260} />
               ) : <EmptyState title="No weeks in range" size="sm" className="border-0" />}
             </Card>
             <Card className="min-w-0">

@@ -1457,7 +1457,7 @@ when he approves or unpublishes is the office's own and is always `null` in `GET
 | --- | --- | --- |
 | `GET /campaigns/:id/page` (cached per person) | every staff role | `CampaignPage`. **Admin, leader** (`full: true`): the campaign with its money, brief and client contact, `rates` (P1's `listCampaignRates`), every post with its status and `unread`; admin also `clientAccounts` and `paidThrough` (the last day of the latest pay week with a paid run, or `null`: the Approve dialog's warning). **Recruiter, rep** (`full: false`): no `payoutPerSale` / `repCommissionPerSale`, no rates, no accounts, `contactName` / `contactEmail` / `contactPhone` are `null` (the client contact's details are for the office), only published posts (never a commission change). Everyone: the client's announcements (authored by this campaign's client accounts, newest 50), this calendar month's events (a rep: own team only, as `GET /events`) and `sales: { thisMonth, lastMonth }` (gauge sales of this campaign's events). 404 for an unknown campaign. |
 | `GET /campaigns/:id/client-accounts` | admin | `ClientAccount[]`, active first. |
-| `POST /campaigns/:id/client-accounts` `ClientInviteInput { firstName, lastName, email, signInUrl? }` | admin | **201** `ClientInviteResult { account, accessCode, instructions }`: a `client` user (no team, the owner's pay plan, no PIN) with the next access code (`nextClientAccessCode`: CL-0002 onwards, never a demo code). `instructions` is the plain text to email (it names `signInUrl` when sent, an http(s) address). 409 for an email that already has an account (staff included). |
+| `POST /campaigns/:id/client-accounts` `ClientInviteInput { firstName, lastName, email, signInUrl? }` | admin | **201** `ClientInviteResult { account, accessCode, instructions }`: a `client` user (no team, the owner's pay plan, no PIN) with the next access code (`nextClientAccessCode`: CL-0002 onwards, never a demo code). `instructions` is the plain text to email (it names `signInUrl` when sent, an http(s) address; a localhost address is left out, as for `POST /users`). 409 for an email that already has an account (staff included). |
 
 #### Changed 1.0 routes
 
@@ -1810,7 +1810,8 @@ caller; when other fields are wrong too, the usual `400 "Validation failed"` lis
 among them), `email`, `position`, `teamId?`, `startDate?` (default business today), `phone?`, `city?`; admin only:
 `role` (required for an admin), `payPlanId?` (default: the plan for the position), `status?`, `avatarColor?`,
 `employeeId?`. Optional for every caller: `signInUrl` (an `http(s)` address, at most 300 characters; the sign-in page as
-the caller opened it — it goes into the instructions in the answer and is never stored).
+the caller opened it — it goes into the instructions in the answer and is never stored; a localhost, 127.x.x.x, [::1]
+or 0.0.0.0 address is left out, since it would not open on the new person's phone).
 
 - **Refused, never ignored.** A recruiter or leader who sends `role` other than `rep`, a `position` other than
   `trainee` / `field_rep`, any `payPlanId`, a `status` other than `active`, an `avatarColor` or an `employeeId` gets

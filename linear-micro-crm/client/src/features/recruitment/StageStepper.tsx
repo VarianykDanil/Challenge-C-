@@ -1,4 +1,6 @@
-// Horizontal pipeline stepper; terminal non-hired stages are shown as a badge after the steps.
+// Horizontal pipeline stepper; terminal non-hired stages are shown as a badge after the steps. On a phone the six labels
+// do not fit (they read "App… Pho… Inte… Obs…"), so the steps show their numbers and one line under them names the
+// current stage in full (1.3.1 UI review); the labels stay for screen readers.
 import { Check } from 'lucide-react';
 import clsx from 'clsx';
 import type { CandidateStage } from '@lm/shared';
@@ -20,13 +22,18 @@ export function StageStepper({ stage }: { stage: CandidateStage }) {
                 <span className={clsx('flex h-7 w-7 shrink-0 items-center justify-center rounded-full border text-xs font-semibold', done && 'border-success bg-success text-status-fg', current && 'border-primary bg-primary text-primary-fg', !done && !current && 'border-border bg-surface text-muted')}>
                   {done ? <Check className="h-3.5 w-3.5" aria-hidden /> : i + 1}
                 </span>
-                <span className={clsx('w-full truncate text-[11px]', current ? 'font-semibold text-fg' : 'text-muted')}>{STAGE_LABELS[s]}</span>
+                <span className={clsx('w-full truncate text-[11px] max-sm:sr-only', current ? 'font-semibold text-fg' : 'text-muted')}>{STAGE_LABELS[s]}</span>
               </span>
-              {i < PIPELINE_STAGES.length - 1 && <span className={clsx('mb-5 h-0.5 min-w-2 flex-1', done ? 'bg-success' : 'bg-border')} aria-hidden />}
+              {i < PIPELINE_STAGES.length - 1 && <span className={clsx('mb-5 h-0.5 min-w-2 flex-1 max-sm:mb-0', done ? 'bg-success' : 'bg-border')} aria-hidden />}
             </li>
           );
         })}
       </ol>
+      {!closed && (
+        <p className="mt-1.5 text-xs text-muted sm:hidden" aria-hidden>
+          Stage {idx + 1} of {PIPELINE_STAGES.length}: <span className="font-semibold text-fg">{STAGE_LABELS[stage]}</span>
+        </p>
+      )}
       {closed && <div className="mt-2 flex items-center gap-2 text-xs text-muted">Pipeline closed: <StageBadge stage={stage} /></div>}
     </div>
   );

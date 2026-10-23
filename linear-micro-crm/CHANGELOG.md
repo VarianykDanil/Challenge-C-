@@ -107,6 +107,46 @@ The Sapiens team's demo sign-ins, and leaders and recruiters can add people. Det
   `server/data/app-secret` (reading the owner's, or creating one in a fresh clone that a later `npm start` would then
   use); it now points the key file at a temporary folder for the test and puts it back afterwards.
 
+### Fixed
+
+- **An event's name is no longer cut to a few letters** at 768–1280 px: the page header keeps the title at full width
+  and puts Log gauges, Pitch, Edit and Cancel event under it when both do not fit; a name longer than the row wraps to
+  two lines (also on a phone) before it is cut.
+- **The dashboard greeting keeps your name** at 768 and 1024 px ("Good afternoon, …" lost it): the period choice and
+  Log gauges move under the greeting when the row is too narrow (the same header change).
+- **The dashboard's team card, Upcoming events and Announcements are readable at 1024 px**: two cards side by side with
+  Announcements across the row until 1360 px (three cards gave about 210 px each and cut names to "H.").
+- **Donut charts stay inside their cards** at 1024 px (Sales by campaign, Payroll punctuality): the ring shrinks to the
+  card instead of running 8–28 px past its edge.
+- **Card headings are no longer squeezed by their buttons**: the button wraps under a heading that would get less than
+  10rem ("Client accounts" read "C…" at 1024 px, "Company details on invoices" was cut on a phone), and a person's side
+  cards (contact, invoice details) stack above their performance until 1280 px.
+- **Weekly money flow's axis shows the £** (Finance → Company): ticks read "£36K" instead of a clipped "36,000"; the
+  tooltip keeps the exact amount.
+- **The demo rep always has last week's invoice to accept**: on a demo seeded from 12:00 Thursday to Sunday, Jordan's
+  invoice for last week was already "counts as accepted"; it is now issued an hour before the seed, so the 24-hour rule
+  keeps it open.
+- **An empty table on a phone shows its message in full** ("No pay runs yet…" was centred across the scrolling columns
+  and cut off), with no "Scroll to see more" on a table without rows.
+- **"Scroll to see more" no longer covers a table's last row**: it is a line under the table.
+- **40 px tap targets on phones** for small buttons (a gauge row's Edit and Delete), the filter selects (Events, Team,
+  Leaderboard, Recruitment's "Move to…"), table sort headers (were 20 px) and a candidate's rating stars (were 20 px).
+- **The top bar no longer shows a cut page name on a phone** ("Recruitm…"); the page's own heading names it, and screen
+  readers keep the breadcrumb.
+- **An event's header counts the people booked**: "7 booked" before the day and "3 logged · 7 booked" on it, instead
+  of "0 reps" next to "Plans for the 7 booked".
+- **Sign-in instructions never send a localhost link**: added on the computer that runs Linear Hub, a new person's (or
+  a client's) instructions say "Open the Linear Hub sign-in page" instead of `http://localhost:…/login`, which would not
+  open on their phone.
+- **A candidate's pipeline is readable on a phone**: the steps show their numbers and one line names the current stage
+  in full ("Stage 3 of 6: Interview") instead of "App… Pho… Inte… Obs…".
+- **The sign-in page's demo buttons show the whole name and position on a phone** ("Jordan Lee (Field …"): they wrap to
+  a second line like the charity account.
+- **Conversion with nothing logged reads "—" in the neutral tone**, not "0.0%" in red as if a brand-new person were
+  failing (dashboard, person page, event and team totals).
+- **The demo's disputed invoice reads sensibly**: Thomas's sales dispute says "2 sign-ups missing" on the commission
+  line, not a whole week's "21 sales" pinned on a line that was not paid.
+
 ## [1.3.0] - 2026-10-22
 
 Pay you can check, clients on board, data that coaches. Details: [docs/USER_GUIDE.md](docs/USER_GUIDE.md) ("What's new

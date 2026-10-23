@@ -36,6 +36,8 @@ export interface TrendChartProps {
   /** format tick labels on x axis */
   xFormatter?: (v: string) => string;
   yFormatter?: (v: number) => string;
+  /** Y-axis tick labels only (default: `yFormatter`, else compact numbers); the tooltip keeps `yFormatter`. */
+  yTickFormatter?: (v: number) => string;
   stacked?: boolean;
   className?: string;
   /** Draw a horizontal reference (target / benchmark) line at this y value. */
@@ -90,6 +92,7 @@ export function TrendChart({
   kind = 'line',
   xFormatter,
   yFormatter,
+  yTickFormatter,
   stacked = false,
   className,
   referenceY,
@@ -128,7 +131,7 @@ export function TrendChart({
     />,
     <YAxis
       key="y"
-      tickFormatter={(v: number) => (yFormatter ? yFormatter(v) : formatCompact(v))}
+      tickFormatter={(v: number) => (yTickFormatter ? yTickFormatter(v) : yFormatter ? yFormatter(v) : formatCompact(v))}
       tick={AXIS_TICK}
       axisLine={false}
       tickLine={false}
