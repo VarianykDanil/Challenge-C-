@@ -3381,3 +3381,29 @@ read redacts the ID as before (`lib/scope.ts redactUser`). The 1.2 audit spec re
   **Sign-in details** step with the name, team, email, employee ID and **Copy instructions** (`lib/clipboard.ts
   copyText`: the Clipboard API, or the textarea fallback on plain http; if both fail, the text is selected for copying by
   hand). Leaders see the button only when they have a team.
+
+#### The demo charity account on an older demo database (`db/extensions/client.ts addDemoClientAccount`)
+
+The demo client account (Hannah Price, Breast Cancer Now, CL-0001; seed-data.ts `CLIENT_ACCOUNTS`) was made only by a
+fresh 1.3 seed, so a demo database first seeded by 1.1 or 1.2 showed nothing under the demo accounts. The client
+extension's `upgrade` now runs a one-off step (flag `ext:client:demo-account`), only when the flag is not set, no demo
+client marker (`seed_demo_clients`) exists, the database is a demo database (`isDemoDatabase`) and the core rows exist
+(users, pay plans, campaigns; skipped **without** the flag otherwise, as on a fresh install before its seed). In a
+transaction it sets the flag and then, unless someone already holds the access code or the email (a real contact is
+never turned into the demo one) or there is no BCN campaign:
+
+- inserts her with `lib/client.ts insertDemoClientAccounts` — the same function the fresh seed now uses, so the row is
+  identical (role and position `client`, no team, the owner's pay plan, no PIN, joined four weeks before this week's
+  Monday);
+- writes the same marker (`writeDemoClientMarkers`), so the sign-in page lists her and the client PIN rule exempts her;
+- runs `seedClientDemo` for her, dated from today's business date: the declined and the pending commission change, the
+  published announcement and update (with their Announcements rows), approved posts for the campaign's client rate
+  changes, and read flags. Readers are the active staff except the blank demo teams (Sapiens stays empty). A campaign
+  brief is filled only where all five brief fields are still empty.
+
+It reports `client:demo-account` only when it inserted her; the next start reports nothing. A fresh 1.3 seed is
+unchanged (its marker means the step never runs). `seed(db, today, { demoClients: false })` (tests only) is the older
+demo database. `GET /auth/demo-accounts` labels a demo client by organisation ("Hannah Price (Breast Cancer Now)") and
+adds `name`, `organisation` and `sector`; the sign-in page heads the group **Charity accounts** (when every listed
+client's campaign is a charity; otherwise **Client accounts**) and shows "Hannah Price — Breast Cancer Now" with a
+**Charity** tag, under the four and the Sapiens group.

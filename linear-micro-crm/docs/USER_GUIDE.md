@@ -37,6 +37,14 @@ no PIN on these demo accounts. The first time a Sapiens leader or trainee signs 
 self-billing agreement, as it does for every new field person (**Later** puts it off until the next visit). The group
 is shown only on the demo database, like the other demo buttons; `LM_DEMO_ACCOUNTS=0` hides it.
 
+### A charity account on the demo
+
+Under the demo buttons, **Charity accounts** has a one-tap sign-in for **Hannah Price — Breast Cancer Now**, the demo
+charity's own account (CL-0001, hannah.price@breastcancernow.example, no PIN). It opens the client portal as the charity
+sees it: their updates and announcements, a commission change you declined and one waiting for you. A demo database
+first made before 1.3 gains this account, with those posts, the next time Linear Hub starts; nothing is added to a
+database with real people.
+
 ### Leaders and recruiters can add people
 
 **Team → Add person** is now there for recruiters and for leaders (Team Leaders and Crew Leaders), as well as

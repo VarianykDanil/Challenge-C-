@@ -448,13 +448,20 @@ export function authRouter(db: Db): Router {
     // access code and email) that are active and have no PIN are listed — never a client matched by its access code
     // alone, so on an upgraded database no real client ever shows here. P6 shows it on the sign-in page.
     const markers = demoClientMarkers(db);
-    const clientAccounts = markers.length === 0 ? [] : all<UserWithTeam & { pinSet: number }>(
+    // Release 1.3.1: labelled with the organisation ("Hannah Price (Breast Cancer Now)"), plus the name, organisation and
+    // sector on their own (additive) so the sign-in page can show "Charity accounts".
+    const clientAccounts = markers.length === 0 ? [] : all<UserWithTeam & { pinSet: number; campaignName: string | null; campaignSector: string | null }>(
       db,
-      `${USER_SELECT.replace('SELECT ', 'SELECT (u.pin_hash IS NOT NULL) AS pinSet, ')} WHERE u.role = 'client' AND u.id IN (${markers.map(() => '?').join(', ')}) ORDER BY u.employee_id`,
+      `${USER_SELECT.replace('SELECT ', 'SELECT (u.pin_hash IS NOT NULL) AS pinSet, cc.name AS campaignName, cc.sector AS campaignSector, ')}
+       LEFT JOIN campaigns cc ON cc.id = u.client_campaign_id
+       WHERE u.role = 'client' AND u.id IN (${markers.map(() => '?').join(', ')}) ORDER BY u.employee_id`,
       markers.map((m) => m.id),
     )
       .filter((u) => u.status !== 'left' && !u.pinSet && markers.some((m) => matchesDemoClient(m, u)))
-      .map((u) => ({ label: `${personName(u)} (Client)`, role: u.role, email: u.email, employeeId: u.employeeId }));
+      .map((u) => ({
+        label: `${personName(u)} (${u.campaignName ?? 'Client'})`, role: u.role, email: u.email, employeeId: u.employeeId,
+        name: personName(u), ...(u.campaignName ? { organisation: u.campaignName } : {}), ...(u.campaignSector ? { sector: u.campaignSector } : {}),
+      }));
     const demoTeams = listDemoTeams();
     res.json({ accounts, ...(clientAccounts.length ? { clientAccounts } : {}), ...(demoTeams.length ? { demoTeams } : {}) });
   });

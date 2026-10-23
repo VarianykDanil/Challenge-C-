@@ -331,6 +331,13 @@ Sign in with the email and employee ID (matching is case-insensitive). On a fres
 | recruiter | Priya Shah (Recruiter) | priya.shah@linear-mcr.co.uk | LM-0003 |
 | rep | Jordan Lee (Field Rep) | jordan.lee@linear-mcr.co.uk | LM-0010 |
 
+**The charity account** — the client portal as Breast Cancer Now sees it (no PIN on the demo). On the sign-in page it is
+under **Charity accounts**; a demo database first made before 1.3 gains it once on its next start.
+
+| Role | Name | Email | Access code |
+|---|---|---|---|
+| client | Hannah Price (Breast Cancer Now) | hannah.price@breastcancernow.example | CL-0001 |
+
 **The Sapiens team (1.3.1)** — seven blank accounts: everything works, nothing is logged yet (no gauges, events, pay or
 learning). First names only until an administrator adds surnames (**Team → the person → Edit profile**). On the sign-in
 page they are under **Sapiens team (7)**; an existing demo database gains them once on its next start (`npm run latest`).

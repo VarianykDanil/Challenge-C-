@@ -25,6 +25,11 @@ The Sapiens team's demo sign-ins, and leaders and recruiters can add people. Det
   demo seed did not create never does.
 - **Sapiens team (7) on the sign-in page**, under the four demo buttons: one tap signs in as any of the seven. Listed
   only from what the seed recorded, like the demo client, and hidden with `LM_DEMO_ACCOUNTS=0`.
+- **Charity accounts on the sign-in page.** The demo charity account, **Hannah Price — Breast Cancer Now** (CL-0001),
+  now has its own group under the demo buttons with a **Charity** tag. A demo database first made before 1.3 gains the
+  account once on its next start, with her demo posts (a declined and a pending commission change, an announcement and
+  an update), so the portal is not empty; a database the demo seed did not create, or where someone already holds that
+  access code or email, never does.
 - **Team → Add person for recruiters and leaders.** Recruiters add trainees and field representatives to any team;
   Team Leaders and Crew Leaders to their own team. Afterwards **Sign-in details** shows the new person's employee ID —
   the only time a recruiter or leader sees it — with instructions to copy and send. The role, pay plan, status, avatar
@@ -35,7 +40,10 @@ The Sapiens team's demo sign-ins, and leaders and recruiters can add people. Det
 - `POST /users`: open to recruiters and leaders under those rules; `employeeId` is optional for everyone (the next free
   ID is given); the answer adds `signInInstructions`. It counts towards the per-person limit of 60 writes a minute.
   `PATCH /users/:id` stays admin only and accepts an empty last name only while it is still empty.
-- `GET /auth/demo-accounts` adds `demoTeams` (additive).
+- `GET /auth/demo-accounts` adds `demoTeams` (additive). A `clientAccounts` item is labelled with its organisation
+  ("Hannah Price (Breast Cancer Now)", was "Hannah Price (Client)") and adds `name`, `organisation` and `sector`.
+- `client/tsconfig.json` no longer sets the deprecated `baseUrl` (the `@/*` path is relative to the file), so editors stop
+  warning about it.
 - Names without a surname read well everywhere: "Theo", never "Theo " in a sentence, a label, a CSV or the audit trail;
   initials from the first name alone; the Team list sorts Theo among the T surnames.
 - The administrator's form is called **Add person** (was **Add member**), and its employee ID may be left blank.

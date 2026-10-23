@@ -28,9 +28,12 @@ export interface DemoAccountItem {
   role: Role;
   email: string;
   employeeId: string;
-  /** Demo team accounts only: the name alone ("Theo") and the position, for the compact sign-in rows. */
+  /** Demo team and demo client accounts: the name alone ("Theo", "Hannah Price"). Demo team accounts: the position. */
   name?: string;
   position?: Position;
+  /** Release 1.3.1, demo client accounts only: the organisation ("Breast Cancer Now") and its campaign's sector ("charity"). */
+  organisation?: string;
+  sector?: string;
 }
 
 /**

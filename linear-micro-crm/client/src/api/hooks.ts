@@ -55,7 +55,7 @@ import { useAuth } from '@/auth/AuthProvider';
 
 // ───────────────────────────── Response shapes not in shared/types ─────────────────────────────
 
-export interface DemoAccount { label: string; role: Role; email: string; employeeId: string; name?: string; position?: Position }
+export interface DemoAccount { label: string; role: Role; email: string; employeeId: string; name?: string; position?: Position; organisation?: string; sector?: string }
 
 export interface UserPerformance {
   user: UserWithTeam;

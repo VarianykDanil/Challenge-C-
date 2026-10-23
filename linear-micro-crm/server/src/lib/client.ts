@@ -10,6 +10,9 @@
  */
 import { formatClientAccessCode, type UserWithTeam } from '@lm/shared';
 import { get, run, type Db } from '../db/connection.ts';
+import { CLIENT_ACCOUNTS, type ClientAccountSeed } from '../db/seed-data.ts';
+import type { SeedClientRef } from '../db/extensions/types.ts';
+import { addDays, mondayOf } from './dates.ts';
 
 export const CLIENT_ROLE = 'client' as const;
 
@@ -61,7 +64,32 @@ export interface DemoClientMarker {
   email: string;
 }
 
-/** Written by db/seed.ts only (inside its transaction), right after it inserts the demo client accounts. */
+/**
+ * Inserts the demo client accounts (seed-data.ts CLIENT_ACCOUNTS) whose campaign exists: role/position 'client', no
+ * team, `payPlanId` (the owner's plan: users.pay_plan_id is required, and lib/pay.ts never pays a client), no PIN, joined
+ * four weeks before this week's Monday. Shared by the fresh demo seed (db/seed.ts) and the start-up step that gives an
+ * older demo database its charity account (db/extensions/client.ts), so both make the same rows. The caller writes
+ * the marker (writeDemoClientMarkers) for what this returns.
+ */
+export function insertDemoClientAccounts(
+  db: Db,
+  opts: { today: string; payPlanId: number; accounts?: readonly ClientAccountSeed[] },
+): SeedClientRef[] {
+  const startDate = addDays(mondayOf(opts.today), -28);
+  return (opts.accounts ?? CLIENT_ACCOUNTS).flatMap((c) => {
+    const campaign = get<{ id: number }>(db, `SELECT id FROM campaigns WHERE code = ?`, [c.campaign]);
+    if (!campaign) return [];
+    const r = run(
+      db,
+      `INSERT INTO users (employee_id, email, first_name, last_name, role, position, team_id, pay_plan_id, start_date, status, phone, avatar_color, city, client_campaign_id)
+       VALUES (?, ?, ?, ?, 'client', 'client', NULL, ?, ?, 'active', NULL, ?, NULL, ?)`,
+      [c.code, c.email, c.firstName, c.lastName, opts.payPlanId, startDate, c.color, campaign.id],
+    );
+    return [{ id: Number(r.lastInsertRowid), employeeId: c.code, firstName: c.firstName, lastName: c.lastName, email: c.email, campaignId: campaign.id }];
+  });
+}
+
+/** Written by db/seed.ts and the client extension's start-up step only, right after they insert the demo client accounts. */
 export function writeDemoClientMarkers(db: Db, clients: readonly DemoClientMarker[]): void {
   const value = JSON.stringify(clients.map(({ id, employeeId, email }) => ({ id, employeeId, email })));
   run(db, `INSERT INTO meta (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value`, [DEMO_CLIENTS_META_KEY, value]);

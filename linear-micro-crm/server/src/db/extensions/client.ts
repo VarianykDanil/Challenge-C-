@@ -23,12 +23,24 @@
  * (linked through campaign_rates.client_post_id, the column P1 laid down for it). The owner has read the older posts.
  * The two published posts' Announcements rows also get read receipts from a share of the active staff
  * (announcement_reads, the audit extension's table, whose own seed ran before these rows existed).
- * Deterministic: no random stream, times from ctx.today / ctx.nowIso. An upgraded database gets no demo rows.
- * Rules: ./types.ts.
+ * Deterministic: no random stream, times from ctx.today / ctx.nowIso.
+ *
+ * Release 1.3.1, the charity account on an OLDER demo database (`ext:client:demo-account`, addDemoClientAccount below):
+ * a demo database first seeded before 1.3 (the owner's Mac) has no demo client, so nothing showed under the demo
+ * accounts. On start-up such a database gains Hannah once — the same row the core seed makes (lib/client.ts
+ * insertDemoClientAccounts), the same marker, and the demo posts above — so the sign-in page shows her under "Charity
+ * accounts". Only on a database the demo seed created (meta `seeded_at` and `seed_today`), never on a real one; skipped
+ * without the flag while the core tables are empty (the fresh-install upgrade runs before the seed); never when the demo
+ * seed already made her (its marker), nor when someone already holds her access code or email. Reports
+ * `demo-account` only when it inserted her, so the first restart after a fresh seed reports nothing. Rules: ./types.ts.
  */
-import type { Db } from '../connection.ts';
-import type { DbExtension, SeedClientRef, SeedContext } from './types.ts';
-import { addColumnIfMissing } from './types.ts';
+import { all, get, transaction, type Db } from '../connection.ts';
+import { CLIENT_ACCOUNTS } from '../seed-data.ts';
+import { clientPayPlanId, demoClientMarkers, insertDemoClientAccounts, writeDemoClientMarkers } from '../../lib/client.ts';
+import { nowISO, todayISO } from '../../lib/dates.ts';
+import { demoTeamMarkers, isDemoDatabase } from '../../lib/demoTeams.ts';
+import type { DbExtension, SeedClientRef, SeedContext, SeedUserRef } from './types.ts';
+import { addColumnIfMissing, metaFlag, setMetaFlag } from './types.ts';
 
 const SQL = `
 CREATE TABLE IF NOT EXISTS client_posts (
@@ -274,6 +286,44 @@ function seedClientAnnouncementReads(db: Db, ctx: Pick<SeedContext, 'nowIso' | '
   }
 }
 
+/** meta flag: the one-off step below has run (or decided not to) on this database; it never runs again. */
+export const DEMO_CLIENT_STEP_KEY = 'ext:client:demo-account';
+
+/**
+ * The one-off step described in the header: true when it inserted the demo charity account. Its demo posts are dated
+ * from today's business date; read receipts come from the active staff, never the blank demo teams (team Sapiens stays
+ * empty). A campaign brief is filled only where every brief field is still empty, so nothing Matt typed is replaced.
+ */
+export function addDemoClientAccount(db: Db): boolean {
+  if (metaFlag(db, DEMO_CLIENT_STEP_KEY) || demoClientMarkers(db).length > 0) return false;
+  if (!isDemoDatabase(db)) return false;
+  // the core rows it needs are missing (a fresh install before its seed): try again on the next start
+  if (!get(db, `SELECT 1 FROM users LIMIT 1`) || !get(db, `SELECT 1 FROM pay_plans LIMIT 1`) || !get(db, `SELECT 1 FROM campaigns LIMIT 1`)) return false;
+  return transaction(db, () => {
+    setMetaFlag(db, DEMO_CLIENT_STEP_KEY);
+    // someone already holds the access code or the email (a real contact, or one typed in by hand): leave them be
+    const free = CLIENT_ACCOUNTS.filter((c) => !get(db, `SELECT 1 FROM users WHERE employee_id = ? COLLATE NOCASE OR email = ? COLLATE NOCASE`, [c.code, c.email]));
+    if (!free.length) return false;
+    const today = todayISO();
+    const clients = insertDemoClientAccounts(db, { today, payPlanId: clientPayPlanId(db), accounts: free });
+    if (!clients.length) return false; // no Breast Cancer Now campaign on this database
+    writeDemoClientMarkers(db, clients);
+    const blank = new Set(demoTeamMarkers(db).flatMap((m) => m.accounts.map((a) => a.id)));
+    const users = all<SeedUserRef>(
+      db,
+      `SELECT id, employee_id AS employeeId, first_name AS firstName, last_name AS lastName, role, position, team_id AS teamId, status, start_date AS startDate
+       FROM users WHERE role <> 'client' ORDER BY id`,
+    ).filter((u) => !blank.has(u.id));
+    const campaigns = all<{ id: number; code: string; name: string }>(
+      db,
+      `SELECT id, code, name FROM campaigns
+       WHERE long_description IS NULL AND brief IS NULL AND contact_name IS NULL AND contact_email IS NULL AND contact_phone IS NULL ORDER BY id`,
+    );
+    seedClientDemo(db, { today, nowIso: nowISO(), users, clients, campaigns });
+    return true;
+  });
+}
+
 export const extension: DbExtension = {
   name: 'client',
   sql: SQL,
@@ -292,7 +342,9 @@ export const extension: DbExtension = {
     ];
     // The guard and the portal look client accounts up by campaign (after the column exists; idempotent).
     db.exec(`CREATE INDEX IF NOT EXISTS idx_users_client_campaign ON users(client_campaign_id)`);
-    return added.filter((name): name is string => name !== null);
+    const changed = added.filter((name): name is string => name !== null);
+    if (addDemoClientAccount(db)) changed.push('demo-account');
+    return changed;
   },
   seed(db, ctx) {
     seedClientDemo(db, ctx);

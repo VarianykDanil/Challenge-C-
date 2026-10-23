@@ -27,7 +27,7 @@ import { createSchema, backfillGaugeRates } from './schema.ts';
 import { seedExtensions } from './extensions/index.ts';
 import { extensionRng } from './extensions/types.ts';
 import { Rng } from '../lib/prng.ts';
-import { writeDemoClientMarkers } from '../lib/client.ts';
+import { insertDemoClientAccounts, writeDemoClientMarkers } from '../lib/client.ts';
 import { addDemoTeams, DEMO_TEAMS_DONE_KEY } from '../lib/demoTeams.ts';
 import { weekPayFor } from '../lib/pay.ts';
 import { computeWeek, DAY_RATE_KEY, payCalcContext, RULE_FROM_KEY } from '../lib/payWeek.ts';
@@ -110,6 +110,11 @@ export interface SeedOptions {
    * database as 1.3.0 seeded it, so sapiens.test.ts can prove an existing demo database gains them on start-up.
    */
   demoTeams?: boolean;
+  /**
+   * Release 1.3.1: false leaves out the demo client account (Hannah Price, Breast Cancer Now) and its marker — the demo
+   * database as 1.2 seeded it, so client-demo-upgrade.test.ts can prove an older demo database gains her on start-up.
+   */
+  demoClients?: boolean;
 }
 
 export function seed(db: Db, today: string = D.todayISO(), options: SeedOptions = {}): SeedStats {
@@ -816,22 +821,12 @@ export function seed(db: Db, today: string = D.todayISO(), options: SeedOptions 
     // `users` (the staff): extensions get them as ctx.clients. role/position 'client', no team, the owner's pay plan
     // (users.pay_plan_id is required; a client is never payable: lib/pay.ts payableUsers leaves clients out), no PIN —
     // so the demo sign-in works (P6 makes a PIN required for every other client account).
-    const clientPlan = plans.get('owner')!;
-    const clients = S.CLIENT_ACCOUNTS.flatMap((c) => {
-      const campaign = campaigns.get(c.campaign);
-      if (!campaign) return [];
-      const r = run(
-        db,
-        `INSERT INTO users (employee_id, email, first_name, last_name, role, position, team_id, pay_plan_id, start_date, status, phone, avatar_color, city, client_campaign_id)
-         VALUES (?, ?, ?, ?, 'client', 'client', NULL, ?, ?, 'active', NULL, ?, NULL, ?)`,
-        [c.code, c.email, c.firstName, c.lastName, clientPlan.id, D.addDays(thisMonday, -28), c.color, campaign.id],
-      );
-      return [{ id: r.lastInsertRowid, employeeId: c.code, firstName: c.firstName, lastName: c.lastName, email: c.email, campaignId: campaign.id }];
-    });
+    // (lib/client.ts insertDemoClientAccounts: the same rows an older demo database gains on start-up, extensions/client.ts.)
+    const clients = options.demoClients === false ? [] : insertDemoClientAccounts(db, { today, payPlanId: plans.get('owner')!.id });
     stats.users += clients.length;
-    // The marker that makes them THE demo client accounts (lib/client.ts isDemoClientAccount): only this seed writes it,
-    // so on an upgraded database a client with the same access code is never listed on the sign-in page.
-    writeDemoClientMarkers(db, clients);
+    // The marker that makes them THE demo client accounts (lib/client.ts isDemoClientAccount): only the demo seed and that
+    // start-up step write it, so on a real database a client with the same access code is never listed on the sign-in page.
+    if (clients.length) writeDemoClientMarkers(db, clients);
 
     // ── Release 1.2 database extensions (db/extensions): their demo rows, last, from the rows created above ──
     // Each extension draws from its own random stream (ctx.rng), so the core data above never changes.

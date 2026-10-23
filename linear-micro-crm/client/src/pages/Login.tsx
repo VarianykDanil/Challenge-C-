@@ -669,9 +669,9 @@ function PinStep({ email, pin, error, hint, locked, busy, inputRef, onPinChange,
 }
 
 interface DemoAccountsProps {
-  accounts?: { label: string; role: string; email: string; employeeId: string }[];
-  /** Release 1.3 (P6): the demo client portal account(s), under their own heading. */
-  clientAccounts?: { label: string; role: string; email: string; employeeId: string }[];
+  accounts?: { label: string; role: string; email: string; employeeId: string; name?: string; organisation?: string; sector?: string }[];
+  /** Release 1.3 (P6): the demo client portal account(s), under their own heading ("Charity accounts" since 1.3.1). */
+  clientAccounts?: NonNullable<DemoAccountsProps['accounts']>;
   /** Release 1.3.1: the blank demo teams (team Sapiens), each a disclosure under the four. */
   teams?: DemoTeamAccounts[];
   loading: boolean;
@@ -709,24 +709,27 @@ function DemoAccounts({ accounts, clientAccounts, teams, loading, failed, busyId
     <ul className="grid grid-cols-1 gap-2" data-testid={testId}>
       {items.map((acc) => {
         const isBusy = busyId === acc.employeeId;
+        // Release 1.3.1: a demo client account reads "Hannah Price — Breast Cancer Now" with a "Charity" tag.
+        const title = acc.organisation ? `${acc.name ?? acc.label} — ${acc.organisation}` : acc.label;
+        const tag = acc.organisation && acc.sector === 'charity' ? 'Charity' : (ROLE_LABELS[acc.role as keyof typeof ROLE_LABELS] ?? acc.role);
         return (
           <li key={acc.employeeId} className="min-w-0">
             <button
               type="button"
               onClick={() => onPick(acc)}
               disabled={disabled}
-              aria-label={`Sign in as ${acc.label}, ${ROLE_LABELS[acc.role as keyof typeof ROLE_LABELS] ?? acc.role}`}
+              aria-label={`Sign in as ${acc.organisation ? `${acc.name ?? acc.label}, ${acc.organisation}` : acc.label}, ${tag}`}
               className={clsx(
                 'focus-ring card-hover group flex w-full items-center gap-3 rounded-xl border border-border bg-surface p-3 text-left shadow-card transition-colors',
                 'hover:border-primary/40 disabled:cursor-not-allowed disabled:opacity-60 disabled:hover:translate-y-0',
                 isBusy && 'border-primary/50 bg-primary-soft/40',
               )}
             >
-              <Avatar name={acc.label} size="sm" />
+              <Avatar name={acc.name ?? acc.label} size="sm" />
               <span className="min-w-0 flex-1">
                 <span className="flex min-w-0 items-center gap-2">
-                  <span className="min-w-0 truncate text-sm font-semibold text-fg">{acc.label}</span>
-                  <Badge size="sm" className="shrink-0" tone={ROLE_TONE[acc.role] ?? 'neutral'}>{ROLE_LABELS[acc.role as keyof typeof ROLE_LABELS] ?? acc.role}</Badge>
+                  <span className="min-w-0 truncate text-sm font-semibold text-fg">{title}</span>
+                  <Badge size="sm" className="shrink-0" tone={ROLE_TONE[acc.role] ?? 'neutral'}>{tag}</Badge>
                 </span>
                 <span className="mt-0.5 block truncate text-xs text-muted">
                   {acc.email} · <span className="font-mono">{acc.employeeId}</span>
@@ -750,7 +753,7 @@ function DemoAccounts({ accounts, clientAccounts, teams, loading, failed, busyId
       {teams?.map((team) => <DemoTeam key={team.name} team={team} busyId={busyId} disabled={disabled} onPick={onPick} />)}
       {clientAccounts?.length ? (
         <div>
-          <p className="eyebrow mb-2 text-muted">Client portal</p>
+          <p className="eyebrow mb-2 text-muted">{clientAccounts.every((a) => a.sector === 'charity') ? 'Charity accounts' : 'Client accounts'}</p>
           {list(clientAccounts, 'demo-client-accounts')}
         </div>
       ) : null}

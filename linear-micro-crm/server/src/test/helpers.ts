@@ -31,7 +31,7 @@ import type { EventStatus, EventType, GaugeTotals } from '@lm/shared';
 import { createApp } from '../app.ts';
 import { get, openDb, run, type Db } from '../db/connection.ts';
 import { createSchema } from '../db/schema.ts';
-import { seed as seedDemo } from '../db/seed.ts';
+import { seed as seedDemo, type SeedOptions } from '../db/seed.ts';
 import { bumpDataVersion, clearResponseCache } from '../lib/cache.ts';
 import { clientPayPlanId, nextClientAccessCode } from '../lib/client.ts';
 import { configureAppSecret } from '../lib/crypto.ts';
@@ -310,6 +310,8 @@ export interface StartOptions {
   seed?: boolean;
   /** Business date for the seed / fixture (default: today). The server itself always uses the real clock. */
   today?: string;
+  /** Release 1.3.1: options for the demo seed (with `seed: true`), e.g. `{ demoClients: false }` for a 1.2-shaped demo. */
+  seedOptions?: SeedOptions;
 }
 
 export interface TestServer {
@@ -336,7 +338,7 @@ export async function startTestServer(opts: StartOptions = {}): Promise<TestServ
   const db = openDb(':memory:');
   createSchema(db);
   const today = opts.today ?? todayISO();
-  const fixture = opts.seed ? (seedDemo(db, today), null) : buildFixture(db, today);
+  const fixture = opts.seed ? (seedDemo(db, today, opts.seedOptions), null) : buildFixture(db, today);
   clearResponseCache();
   bumpDataVersion();
   resetLoginFailures();

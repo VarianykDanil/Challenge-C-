@@ -492,7 +492,10 @@ test('demo seed: the client account signs in, is listed apart from the four staf
   try {
     const accounts = await demo.anon().get('/auth/demo-accounts');
     assert.equal(accounts.json.accounts.length, 4, 'the four staff accounts, unchanged');
-    assert.deepEqual(accounts.json.clientAccounts, [{ label: 'Hannah Price (Client)', role: 'client', email: 'hannah.price@breastcancernow.example', employeeId: 'CL-0001' }]);
+    assert.deepEqual(accounts.json.clientAccounts, [{
+      label: 'Hannah Price (Breast Cancer Now)', role: 'client', email: 'hannah.price@breastcancernow.example', employeeId: 'CL-0001',
+      name: 'Hannah Price', organisation: 'Breast Cancer Now', sector: 'charity',
+    }]);
     const hannah = await demo.login('client');
     const portal = await hannah.get('/client/portal');
     assert.equal(portal.json.campaign.code, 'BCN');
