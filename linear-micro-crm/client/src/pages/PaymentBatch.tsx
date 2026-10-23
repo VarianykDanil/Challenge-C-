@@ -1,0 +1,275 @@
+// Release 1.4 — /finance/pay/batches/:id (admin) — OWNED BY F payments-foundation. One payment from Linear Hub:
+//  - a draft: the review (total, people, masked accounts, who was left out and why), then the code from the admin's
+//    authenticator app and "Approve and pay £X" (or "Approve and make the bank file"); Cancel;
+//  - once approved: each person's status, live while anything is on its way (the page refreshes every 10 seconds and
+//    "Check now" asks the provider at once); for a bank file, Download the file and Mark as paid (untick the ones the
+//    bank rejected, with a reason). Lazy (App.tsx).
+import { useEffect, useId, useState, type FormEvent } from 'react';
+import { Link, useParams } from 'react-router-dom';
+import { ArrowLeft, Download, RefreshCw, ShieldCheck, TriangleAlert, X } from 'lucide-react';
+import { formatPence, payDayLabel, payWeekLabel, type PaymentBatch, type PaymentItem } from '@lm/shared';
+import { ApiError } from '@/api/client';
+import { paymentFileUrl, useApproveBatch, useCancelBatch, useMarkBatchPaid, usePaymentBatch, usePaymentProviders, useRefreshBatch } from '@/api/payments';
+import { useCurrentUser } from '@/auth/AuthProvider';
+import { Badge, Button, Card, CardHeader, Field, Input, KpiTile, PageHeader, Skeleton, useToast } from '@/components/ui';
+import { ConfirmDialog, ErrorState, errorMessage } from '@/features/common';
+import { PaymentBatchStatusBadge, PaymentItemStatusBadge } from '@/features/payments';
+import { ProviderLogo } from '@/features/payments/ProviderLogo';
+import { todayISO } from '@/lib/dates';
+import { formatDateTime, formatNumber } from '@/lib/format';
+import { usePageTitle } from '@/lib/usePageTitle';
+import { NotFoundPage } from './NotFound';
+
+const back = (
+  <Link to="/finance/pay" className="inline-flex items-center gap-1 hover:underline max-sm:min-h-10 pointer-coarse:min-h-10">
+    <ArrowLeft className="h-3 w-3" aria-hidden /> Pay people
+  </Link>
+);
+
+const people = (n: number) => `${formatNumber(n)} ${n === 1 ? 'person' : 'people'}`;
+
+export function PaymentBatchPage() {
+  const { id } = useParams();
+  const batchId = Number(id);
+  usePageTitle(Number.isInteger(batchId) ? `Payment #${batchId}` : 'Payment');
+  const q = usePaymentBatch(Number.isInteger(batchId) && batchId > 0 ? batchId : null, { poll: true });
+  const providers = usePaymentProviders();
+  if (!Number.isInteger(batchId) || batchId <= 0 || (q.error instanceof ApiError && q.error.status === 404)) return <NotFoundPage />;
+  const b = q.data;
+  const provider = b ? providers.data?.find((p) => p.id === b.provider) : undefined;
+  return (
+    <>
+      <PageHeader
+        breadcrumbs={back}
+        title={b ? <span className="flex flex-wrap items-center gap-3"><ProviderLogo iconKey={provider?.iconKey ?? 'bank'} size="md" />Payment #{b.id}</span> : <Skeleton className="h-9 w-56" />}
+        description={b ? (
+          <span className="flex flex-wrap items-center gap-2">
+            <PaymentBatchStatusBadge status={b.status} kind={b.kind} />
+            {b.kind === 'api' && <Badge tone={b.mode === 'live' ? 'danger' : 'info'}>{b.mode === 'live' ? 'Live: real money' : 'Test mode: nobody is paid'}</Badge>}
+            <span>{b.connectionName} · made {payDayLabel(b.createdAt.slice(0, 10))}{b.createdByName ? ` by ${b.createdByName}` : ''}{b.approvedAt ? ` · approved ${formatDateTime(b.approvedAt)}${b.approvedByName ? ` by ${b.approvedByName}` : ''}` : ''}</span>
+          </span>
+        ) : undefined}
+      />
+      {q.isError ? <ErrorState error={q.error} onRetry={() => void q.refetch()} /> : !b ? (
+        <div className="space-y-4"><Skeleton className="h-24" /><Skeleton className="h-64" /></div>
+      ) : (
+        <BatchBody b={b} providerName={provider?.name ?? b.connectionName} available={provider?.available ?? false} />
+      )}
+    </>
+  );
+}
+
+function BatchBody({ b, providerName, available }: { b: PaymentBatch; providerName: string; available: boolean }) {
+  const toast = useToast();
+  const refresh = useRefreshBatch();
+  const cancel = useCancelBatch();
+  const [confirmCancel, setConfirmCancel] = useState(false);
+  const draft = b.status === 'draft';
+  return (
+    <div className="space-y-6">
+      <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
+        <KpiTile label="Total" value={formatPence(b.totalPence)} tone="primary" />
+        <KpiTile label="People" value={formatNumber(b.count)} hint={b.skipped.length ? `${formatNumber(b.skipped.length)} left out` : undefined} />
+        <KpiTile label="Paid" value={formatNumber(b.paidCount)} tone={b.paidCount ? 'success' : 'default'} />
+        <KpiTile label={draft ? 'To approve' : b.failedCount ? 'Failed' : 'On the way'} value={formatNumber(draft ? b.waitingCount : b.failedCount || b.waitingCount)} tone={b.failedCount ? 'danger' : 'default'} />
+      </div>
+
+      {b.lastError && (
+        <Card tone="danger" role="alert">
+          <p className="flex items-start gap-2 text-sm text-fg"><TriangleAlert className="mt-0.5 h-4 w-4 shrink-0 text-danger" aria-hidden />
+            <span>{b.lastError}. Nothing was paid twice: Linear Hub sends the same payments again with the same references when you check.</span>
+          </p>
+        </Card>
+      )}
+
+      {draft && <ApproveCard b={b} providerName={providerName} available={available} />}
+
+      <Card padded={false} className="min-w-0 overflow-hidden">
+        <div className="flex flex-wrap items-start justify-between gap-3 p-5 pb-3">
+          <CardHeader title={draft ? 'Who is paid' : 'Payments'} description={draft ? 'Check the names, accounts and amounts.' : b.kind === 'api' && b.waitingCount ? 'This page updates by itself while payments are on their way.' : undefined} className="mb-0" />
+          <div className="flex flex-wrap gap-2">
+            {b.actions.download && (
+              <a href={paymentFileUrl(b.id)} className="focus-ring inline-flex h-10 items-center gap-1.5 rounded-lg bg-primary px-4 text-sm font-medium text-primary-fg shadow-card hover:bg-primary-hover sm:h-8 sm:px-3" download>
+                <Download className="h-4 w-4" aria-hidden /> Download the bank file
+              </a>
+            )}
+            {b.actions.refresh && (
+              <Button size="sm" variant="outline" className="h-10 sm:h-8" loading={refresh.isPending} leftIcon={<RefreshCw aria-hidden />}
+                onClick={() => refresh.mutate({ id: b.id }, { onError: (e) => toast.error('Could not check', errorMessage(e)) })}>
+                Check now
+              </Button>
+            )}
+            {b.actions.cancel && (
+              <Button size="sm" variant="ghost" className="h-10 text-danger sm:h-8" leftIcon={<X aria-hidden />} onClick={() => setConfirmCancel(true)}>
+                {draft ? 'Cancel draft' : 'Cancel the rest'}
+              </Button>
+            )}
+          </div>
+        </div>
+        <ItemList items={b.items} draft={draft} kind={b.kind} />
+      </Card>
+
+      {b.actions.markPaid && <MarkPaidCard b={b} />}
+
+      {b.skipped.length > 0 && (
+        <Card>
+          <CardHeader title="Left out" description="These selected runs are not in this payment. They stay on Runs to pay." />
+          <ul className="space-y-2 text-sm" data-left-out="">
+            {b.skipped.map((s) => (
+              <li key={s.runId} className="flex flex-col gap-0.5 border-b border-border pb-2 last:border-0 last:pb-0 sm:flex-row sm:justify-between sm:gap-4">
+                <span className="font-medium text-fg">{s.userName ?? `Run ${s.runId}`}{s.weekStart ? <span className="font-normal text-muted"> · {payWeekLabel(s.weekStart)}</span> : null}</span>
+                <span className="text-muted sm:text-right">{s.reason}</span>
+              </li>
+            ))}
+          </ul>
+        </Card>
+      )}
+
+      <ConfirmDialog
+        open={confirmCancel}
+        onClose={() => setConfirmCancel(false)}
+        title={draft ? `Cancel draft payment #${b.id}?` : `Cancel what is left of payment #${b.id}?`}
+        description={draft ? 'Nothing has been sent. The runs stay on Runs to pay.' : b.kind === 'file' ? 'Only do this if you did not upload the file to your bank (or the bank did not pay them). Those runs stay unpaid on Runs to pay.' : 'Linear Hub asks the provider to stop the payments not yet paid.'}
+        confirmLabel={draft ? 'Cancel draft' : 'Cancel them'}
+        tone="danger"
+        loading={cancel.isPending}
+        onConfirm={() => cancel.mutate({ id: b.id }, {
+          onSuccess: () => { toast.success('Cancelled', 'The runs stay on Runs to pay.'); setConfirmCancel(false); },
+          onError: (e) => toast.error('Could not cancel', errorMessage(e)),
+        })}
+      />
+    </div>
+  );
+}
+
+function ItemList({ items, draft, kind }: { items: PaymentItem[]; draft: boolean; kind: 'file' | 'api' }) {
+  if (!items.length) return <p className="px-5 pb-5 text-sm text-muted">Nobody is in this payment.</p>;
+  return (
+    <ul className="divide-y divide-border border-t border-border" aria-label="People in this payment">
+      {items.map((i) => (
+        <li key={i.id} className="flex flex-col gap-1 px-5 py-3 sm:flex-row sm:items-center sm:gap-4" data-item={i.status}>
+          <span className="min-w-0 flex-1">
+            <span className="block truncate text-sm font-medium text-fg">{i.userName}</span>
+            <span className="block text-xs text-muted">
+              {payWeekLabel(i.weekStart)} · to {i.payeeName}, account <span className="font-mono">••••{i.accountLast4}</span>
+              {i.paidAt ? ` · paid ${formatDateTime(i.paidAt)}` : ''}
+            </span>
+            {i.failureReason && <span className="block text-xs text-danger">{i.failureReason}</span>}
+            {i.note && <span className="block text-xs text-warning">{i.note}</span>}
+          </span>
+          <span className="flex items-center gap-3 sm:justify-end">
+            {!draft && <PaymentItemStatusBadge status={i.status} kind={kind} />}
+            <span className="text-sm font-semibold tabular-nums text-fg">{formatPence(i.amountPence)}</span>
+          </span>
+        </li>
+      ))}
+    </ul>
+  );
+}
+
+function ApproveCard({ b, providerName, available }: { b: PaymentBatch; providerName: string; available: boolean }) {
+  const uid = useId();
+  const me = useCurrentUser();
+  const approve = useApproveBatch();
+  const toast = useToast();
+  const [code, setCode] = useState('');
+  const err = approve.error;
+  const needs2fa = !me.twoFactorEnabled || (err instanceof ApiError && err.status === 403);
+  const submit = (e: FormEvent) => {
+    e.preventDefault();
+    approve.mutate({ id: b.id, body: { code: code.replace(/\s+/g, '') } }, {
+      onSuccess: (next) => {
+        setCode('');
+        toast.success(next.kind === 'file' ? 'Bank file ready' : 'Payment approved', next.kind === 'file'
+          ? 'Download it, upload it to your bank and approve it there. Then mark it paid here.'
+          : next.mode === 'test' ? 'Test mode: nobody is paid.' : `${people(next.count)}, ${formatPence(next.totalPence)}.`);
+      },
+    });
+  };
+  const label = b.kind === 'file' ? 'Approve and make the bank file' : b.mode === 'test' ? `Approve test payment of ${formatPence(b.totalPence)}` : `Approve and pay ${formatPence(b.totalPence)}`;
+  return (
+    <Card tone={b.mode === 'live' && b.kind === 'api' ? 'warning' : 'default'}>
+      <CardHeader
+        title="Approve"
+        icon={<ShieldCheck aria-hidden />}
+        description={b.kind === 'file'
+          ? `Linear Hub makes the file for ${people(b.count)} (${formatPence(b.totalPence)}). Nothing moves until you upload it to your bank and approve it there.`
+          : b.mode === 'test'
+            ? `Test mode: ${providerName}'s sandbox gets the payments and nobody is paid. The runs stay on Runs to pay.`
+            : `${providerName} pays ${people(b.count)} ${formatPence(b.totalPence)} as soon as you approve. This cannot be undone from Linear Hub.`}
+      />
+      {!available ? (
+        <p className="flex items-start gap-2 rounded-lg bg-surface-2 px-3 py-2 text-sm text-muted">
+          <TriangleAlert className="mt-0.5 h-4 w-4 shrink-0" aria-hidden />
+          Paying through {providerName} is not switched on in this version of Linear Hub yet. Pay these people another way and mark their runs paid in Finance → Runs to pay, then cancel this draft.
+        </p>
+      ) : needs2fa ? (
+        <p className="flex flex-col gap-3 text-sm text-fg sm:flex-row sm:items-center sm:justify-between">
+          <span>Every payment needs a code from your authenticator app. Set up two-step verification first.</span>
+          <Link to="/settings" className="focus-ring inline-flex h-10 shrink-0 items-center justify-center rounded-lg bg-primary px-4 text-sm font-medium text-primary-fg shadow-card hover:bg-primary-hover">Open Settings → Security</Link>
+        </p>
+      ) : !b.actions.approve ? (
+        <p className="text-sm text-muted">This connection needs a working test first (Settings → Payments).</p>
+      ) : (
+        <form onSubmit={submit} className="flex flex-col gap-3 sm:flex-row sm:items-end" noValidate>
+          <Field label="Code from your authenticator app" htmlFor={`${uid}-code`} error={err ? errorMessage(err) : undefined} className="sm:w-64">
+            <Input id={`${uid}-code`} value={code} onChange={(e) => setCode(e.target.value)} inputMode="numeric" autoComplete="one-time-code" maxLength={7} placeholder="123456" className="font-mono" invalid={!!err} />
+          </Field>
+          <Button type="submit" className="h-10" variant={b.mode === 'live' && b.kind === 'api' ? 'danger' : 'primary'} loading={approve.isPending} disabled={code.replace(/\s+/g, '').length !== 6}>
+            {label}
+          </Button>
+        </form>
+      )}
+    </Card>
+  );
+}
+
+function MarkPaidCard({ b }: { b: PaymentBatch }) {
+  const uid = useId();
+  const toast = useToast();
+  const mark = useMarkBatchPaid();
+  const waiting = b.items.filter((i) => i.status === 'submitted' || i.status === 'processing');
+  const [paid, setPaid] = useState<ReadonlySet<number>>(() => new Set(waiting.map((i) => i.id)));
+  const [reason, setReason] = useState('');
+  const [date, setDate] = useState(todayISO());
+  useEffect(() => setPaid(new Set(waiting.map((i) => i.id))), [b.id, waiting.length]); // eslint-disable-line react-hooks/exhaustive-deps
+  const failed = waiting.filter((i) => !paid.has(i.id));
+  const submit = (e: FormEvent) => {
+    e.preventDefault();
+    mark.mutate({ id: b.id, body: { paid: [...paid], failed: failed.map((i) => i.id), reason: reason.trim() || undefined, paidDate: date } }, {
+      onSuccess: () => toast.success('Marked', failed.length ? `${people(paid.size)} paid, ${people(failed.length)} not paid: they stay on Runs to pay.` : `${people(paid.size)} paid.`),
+      onError: (er) => toast.error('Could not mark it', errorMessage(er)),
+    });
+  };
+  return (
+    <Card>
+      <CardHeader title="Mark as paid" description="Once your bank has paid the file, tick who it paid. Untick anyone the bank rejected: their week stays on Runs to pay with your reason." />
+      <form onSubmit={submit} className="space-y-4">
+        <ul className="divide-y divide-border rounded-lg border border-border">
+          {waiting.map((i) => (
+            <li key={i.id}>
+              <label className="flex min-h-12 cursor-pointer items-center gap-3 px-3 py-2">
+                <input type="checkbox" className="focus-ring h-5 w-5 shrink-0 cursor-pointer rounded border-control-border accent-[var(--color-primary)]" checked={paid.has(i.id)} onChange={(e) => { const next = new Set(paid); if (e.target.checked) next.add(i.id); else next.delete(i.id); setPaid(next); }} aria-label={`The bank paid ${i.userName}`} />
+                <span className="min-w-0 flex-1 truncate text-sm text-fg">{i.userName}</span>
+                <span className="text-sm tabular-nums text-fg">{formatPence(i.amountPence)}</span>
+              </label>
+            </li>
+          ))}
+        </ul>
+        <div className="grid gap-4 sm:grid-cols-2">
+          <Field label="Paid on" htmlFor={`${uid}-date`}>
+            <Input id={`${uid}-date`} type="date" value={date} max={todayISO()} onChange={(e) => setDate(e.target.value)} />
+          </Field>
+          {failed.length > 0 && (
+            <Field label="Why the bank did not pay them" htmlFor={`${uid}-reason`} hint="Shown on Runs to pay, not to the person.">
+              <Input id={`${uid}-reason`} value={reason} onChange={(e) => setReason(e.target.value)} maxLength={300} placeholder="e.g. Rejected: the name does not match the account" />
+            </Field>
+          )}
+        </div>
+        <Button type="submit" className="h-10" loading={mark.isPending} disabled={!waiting.length}>
+          {failed.length ? `Mark ${formatNumber(paid.size)} paid, ${formatNumber(failed.length)} not paid` : `Mark ${formatNumber(paid.size)} paid`}
+        </Button>
+      </form>
+    </Card>
+  );
+}

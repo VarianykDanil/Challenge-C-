@@ -17,5 +17,7 @@ export * from './types/recruitmentPlus.ts';
 export * from './types/venues.ts';
 // Release 1.3.1: adding people, demo teams on the sign-in page.
 export * from './types/people.ts';
+// Release 1.4: paying people from Linear Hub (package F; P and A add to it).
+export * from './types/payments.ts';
 export * from './constants.ts';
 export * from './logic/index.ts';

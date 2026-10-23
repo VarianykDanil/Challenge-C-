@@ -5,6 +5,7 @@
  * Release 1.3 (r3-foundation) appends, in package order: pay (P1), invoices (P2), statements (P3), videos (P5),
  * client (P6), recruitment (P7), venues (P8). P4 (PDF) and P9 (audit; it owns ./audit.ts) add no extension file.
  * Release 1.3.1 appends sapiens (team Sapiens' blank demo accounts on an existing demo database; no seed).
+ * Release 1.4 appends payments (F: bank details, payment connections, batches and items).
  */
 import type { Db } from '../connection.ts';
 import { extension as audit } from './audit.ts';
@@ -13,6 +14,7 @@ import { extension as client } from './client.ts';
 import { extension as invoices } from './invoices.ts';
 import { extension as learning } from './learning.ts';
 import { extension as pay } from './pay.ts';
+import { extension as payments } from './payments.ts';
 import { extension as pin } from './pin.ts';
 import { extension as pitches } from './pitches.ts';
 import { extension as recruitment } from './recruitment.ts';
@@ -31,6 +33,8 @@ export const EXTENSIONS: readonly DbExtension[] = [
   pay, invoices, statements, videos, client, recruitment, venues,
   // Release 1.3.1
   sapiens,
+  // Release 1.4 (F: bank details, payment connections, batches and items)
+  payments,
 ];
 
 /**

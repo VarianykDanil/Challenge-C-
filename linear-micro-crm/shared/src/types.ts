@@ -12,6 +12,7 @@
 // Release 1.3 (r3-foundation): optional fields on core types reference the package contract files (type-only imports).
 import type { AnnouncementSource } from './types/client.ts';
 import type { InvoiceSummary } from './types/invoices.ts';
+import type { PayrollRunPayment } from './types/payments.ts';
 import type { PaidAs } from './types/pay.ts';
 import type { EventBookingSummary } from './types/venues.ts';
 
@@ -325,6 +326,11 @@ export interface PayrollRunWithUser extends PayrollRun {
    * lib/invoices.ts `withInvoiceSummaries` once P2 lands (absent until an invoice is issued).
    */
   invoice?: InvoiceSummary;
+  /**
+   * Release 1.4 (F payments): on an unpaid run, for admins only, its latest payment from Linear Hub (on its way, or
+   * failed with the reason). Absent otherwise.
+   */
+  payment?: PayrollRunPayment;
 }
 
 export type ExpenseCategory =
@@ -790,7 +796,9 @@ export interface CheckInPerson {
  * registry (server/src/lib/attention/index.ts): `invoices` (P2: issued, deemed accepted soon, disputed, resolved),
  * `statements` (P3: a commission statement needs review) and `client` (P6: a new client post).
  */
-export type AttentionKind = 'gauges' | 'pay' | 'payroll' | 'events' | 'recruitment' | 'security' | 'invoices' | 'statements' | 'client';
+export type AttentionKind = 'gauges' | 'pay' | 'payroll' | 'events' | 'recruitment' | 'security' | 'invoices' | 'statements' | 'client'
+  // Release 1.4 (F): bank details to check, failed payments, bank files waiting to be marked paid (admin)
+  | 'payments';
 export type AttentionSeverity = 'info' | 'warning' | 'danger';
 
 /** p5 — one item in the role-scoped "Needs attention" feed (no table: derived on every request). */

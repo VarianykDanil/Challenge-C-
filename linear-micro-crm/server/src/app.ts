@@ -51,6 +51,9 @@ import { statementsRouter } from './routes/statements.ts';
 import { venuesRouter } from './routes/venues.ts';
 import { videosRouter } from './routes/videos.ts';
 import { isVideoProgressReport } from './lib/videos/progress.ts';
+// Release 1.4 (F): paying people from Linear Hub, and bank details
+import { myBankDetailsRouter, userBankDetailsRouter } from './routes/bankDetails.ts';
+import { paymentsRouter } from './routes/payments.ts';
 
 export interface AppOptions {
   /** When set (production), serve the built client from this folder with an SPA fallback. */
@@ -203,6 +206,9 @@ export function createApp(db: Db, opts: AppOptions = {}): Express {
   mount('/me', requireAuth, insightsRouter(db));
   mount('/me', requireAuth, attentionRouter(db));
   mount('/me', requireAuth, digestRouter(db));
+  // Release 1.4 (F): GET/PUT /me/bank-details, and the admin's /users/:id/bank-details(/confirm) before the users router
+  mount('/me', requireAuth, myBankDetailsRouter(db));
+  mount('/users', requireAuth, userBankDetailsRouter(db));
   mount('/users', requireAuth, usersRouter(db));
   mount('/teams', requireAuth, teamsRouter(db));
   mount('/campaigns', requireAuth, campaignPagesRouter(db)); // Release 1.3 (P6), before the campaigns router
@@ -240,6 +246,8 @@ export function createApp(db: Db, opts: AppOptions = {}): Express {
   mount('/client-posts', requireAuth, clientPostsRouter(db));
   mount('/client-accounts', requireAuth, clientAccountsRouter(db));
   mount('/venues', requireAuth, venuesRouter(db));
+  // Release 1.4 (F): connections, batches, approval with a fresh two-step code, bank files (admin only)
+  mount('/payments', requireAuth, paymentsRouter(db));
   api.use((_req, res) => {
     res.status(404).json({ error: 'Not found' });
   });

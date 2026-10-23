@@ -14,6 +14,8 @@ import { ErrorBoundary } from '@/features/common/ErrorBoundary';
 import { PersonActivity } from '@/features/audit/PersonActivity';
 import { InvoiceProfileSection } from '@/features/invoices/InvoiceProfileSection';
 import { ClientRefsSection } from '@/features/statements/ClientRefsSection';
+// Release 1.4 (F): the person's bank details, masked (admin): ready, waiting for your check, or missing.
+import { BankDetailsCard } from '@/features/payments/BankDetailsCard';
 import { formatDate, formatGBP, formatNumber, fullName } from '@/lib/format';
 import { usePageTitle } from '@/lib/usePageTitle';
 import { NotFoundPage } from './NotFound';
@@ -79,6 +81,7 @@ export function UserDetailPage() {
             {isAdmin && u && (
               <>
                 <ErrorBoundary name="invoice-profile" fallback={null}><InvoiceProfileSection user={u} /></ErrorBoundary>
+                {u.role !== 'client' && <ErrorBoundary name="bank-details" fallback={null}><BankDetailsCard user={u} /></ErrorBoundary>}
                 <ErrorBoundary name="client-refs" fallback={null}><ClientRefsSection user={u} /></ErrorBoundary>
               </>
             )}

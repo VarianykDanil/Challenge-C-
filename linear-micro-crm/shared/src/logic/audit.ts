@@ -21,6 +21,8 @@ export const AUDIT_ENTITIES: readonly AuditEntity[] = [
 export const AUDIT_ENTITIES_R3: readonly AuditEntity[] = [
   'campaign_rate', 'pay_adjustment', 'invoice', 'agreement', 'statement', 'video', 'client_post', 'client_account',
   'interview_question', 'event_roster', 'export',
+  // Release 1.4 (F)
+  'payment_connection', 'payment_batch', 'bank_account',
 ];
 
 export const AUDIT_ENTITY_LABELS: Record<AuditEntity, string> = {
@@ -48,6 +50,10 @@ export const AUDIT_ENTITY_LABELS: Record<AuditEntity, string> = {
   interview_question: 'Interview question',
   event_roster: 'Event booking',
   export: 'Export',
+  // Release 1.4 (F)
+  payment_connection: 'Payment connection',
+  payment_batch: 'Payment',
+  bank_account: 'Bank details',
 };
 
 export function isAuditEntity(value: unknown): value is AuditEntity {
@@ -175,6 +181,9 @@ export const AUDIT_REDACTED_KEYS: readonly string[] = [
   'pin', 'currentPin', 'newPin', 'pinHash', 'pin_hash', 'pinSalt', 'pin_salt', 'password', 'token', 'sessionToken',
   'challengeToken', 'secret', 'totp_secret_enc', 'totp_pending_enc', 'totpSecretEnc', 'totpPendingEnc', 'code',
   'recoveryCode', 'recoveryCodes', 'code_hash', 'codeHash', 'otpauthUrl', 'otpauth', 'qrDataUrl', 'manualKey',
+  // Release 1.4 (F): bank details and payment provider keys never reach the trail, even by mistake
+  'sortCode', 'sort_code', 'sort_code_enc', 'sortCodeEnc', 'accountNumber', 'account_number', 'account_number_enc', 'accountNumberEnc',
+  'privateKey', 'private_key', 'apiKey', 'api_key', 'apiToken', 'api_token', 'secrets', 'secrets_enc', 'secretsEnc', 'file_enc', 'fileEnc',
 ];
 
 /** Any key that CONTAINS one of these (case-insensitive) is redacted too, e.g. `appSecret`, `resetToken`. */

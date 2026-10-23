@@ -9,12 +9,14 @@ import { ATTENTION_MAX_ITEMS, sortAttentionItems, type AttentionItem, type Atten
 import type { Db } from '../../db/connection.ts';
 import { provider as clientPosts } from './clientPosts.ts';
 import { provider as invoices } from './invoices.ts';
+import { provider as payments } from './payments.ts';
 import { provider as statements } from './statements.ts';
 import type { AttentionProvider } from './types.ts';
 
 export type { AttentionProvider } from './types.ts';
 
-export const ATTENTION_PROVIDERS: readonly AttentionProvider[] = [invoices, statements, clientPosts];
+// Release 1.4 (F): payments (bank details to check, failed payments, bank files waiting, connections to look at)
+export const ATTENTION_PROVIDERS: readonly AttentionProvider[] = [invoices, statements, clientPosts, payments];
 
 /** Every provider's items for `me` (a failing provider contributes nothing). */
 export function providerAttentionItems(db: Db, me: UserWithTeam, now: AttentionNow): AttentionItem[] {
