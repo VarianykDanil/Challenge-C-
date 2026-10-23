@@ -3321,7 +3321,8 @@ One function, `lib/demoTeams.ts addDemoTeams(db, today)`, writes them for both p
   writes only `seeded_at`), the core rows it needs exist (users and pay plans; on a fresh install the upgrade runs
   before the seed, on empty tables, so it skips **without** setting the flag), the server is not run with
   `LM_DEMO_ACCOUNTS=0` (also skipped without the flag) and the four seeded staff demo accounts are intact (otherwise the
-  database is in real use: the flag is set and nothing is added). It runs in a transaction, sets the flag, and reports `sapiens:team.sapiens` only
+  database is in real use: the flag is set and nothing is added). Only from the server's own start (`createSchema(db,
+  { demoSteps: true })` in `index.ts`), never from `npm run pin:reset` or another maintenance command. It runs in a transaction, sets the flag, and reports `sapiens:team.sapiens` only
   when it inserted something. A database the seed did not create never gains them and gets no flag.
 
 `addDemoTeams` reuses a team of that name in any case (a "Sapiens" Matt made by hand, left as it is) and adds only the
@@ -3399,9 +3400,12 @@ read redacts the ID as before (`lib/scope.ts redactUser`). The 1.2 audit spec re
 The demo client account (Hannah Price, Breast Cancer Now, CL-0001; seed-data.ts `CLIENT_ACCOUNTS`) was made only by a
 fresh 1.3 seed, so a demo database first seeded by 1.1 or 1.2 showed nothing under the demo accounts. The client
 extension's `upgrade` now runs a one-off step (flag `ext:client:demo-account`) when the flag is not set and no demo
-client marker (`seed_demo_clients`) exists, gated by `lib/demoTeams.ts demoStepAllowed` — the same gate as the Sapiens
-step, because every Linear Hub database starts from the demo seed, so the seed's meta alone cannot tell a demo from a
-database in real use:
+client marker (`seed_demo_clients`) exists. Like the Sapiens step it runs **only from the server's own start**:
+`createSchema(db, { demoSteps: true })` in `index.ts` (`UpgradeOptions`, db/extensions/types.ts); every other caller —
+`npm run pin:reset`, which runs without the server's environment (on Route A `LM_DEMO_ACCOUNTS=0` lives only in the
+service's file), the seed, tests by default — leaves both demo steps out. It is then gated by `lib/demoTeams.ts
+demoStepAllowed` — the same gate as the Sapiens step, because every Linear Hub database starts from the demo seed, so
+the seed's meta alone cannot tell a demo from a database in real use:
 
 - **later** (skip without the flag, ask again next start): the server runs with `LM_DEMO_ACCOUNTS=0`; the database is
   not one the demo seed created (`isDemoDatabase`: meta `seeded_at` and `seed_today`); or users, pay plans or campaigns

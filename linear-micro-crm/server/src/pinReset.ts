@@ -56,7 +56,7 @@ if (!isLinearHub) {
   console.error(`${dbPath} is not a Linear Hub database (it has no people in it). Check DB_PATH.`);
   process.exit(1);
 }
-createSchema(db); // the PIN columns, exactly as the next start of the server would add them; nothing else changes
+createSchema(db); // the PIN columns, as the next start of the server would add them; never the demo-account steps (UpgradeOptions)
 
 const person = get<{ id: number; name: string; email: string }>(
   db,

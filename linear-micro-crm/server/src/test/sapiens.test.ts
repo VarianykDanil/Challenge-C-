@@ -16,6 +16,9 @@ import { demoTeamMarkers, DEMO_TEAMS_DONE_KEY, DEMO_TEAMS_META_KEY, isDemoDataba
 import { setBusinessClock } from '../lib/dates.ts';
 import { buildFixture, startTestServer, type TestServer } from './helpers.ts';
 
+/** How the server starts (index.ts): the demo-account steps may run. A maintenance command passes nothing. */
+const START = { demoSteps: true } as const;
+
 const TODAY = '2026-10-21';
 const SEVEN = [
   ['LM-0101', 'Theo', 'leader', 'team_leader'],
@@ -47,7 +50,7 @@ const count = (db: Db, sql: string, params: (string | number)[] = []) => Number(
 function freshDemo(options: Parameters<typeof seed>[2] = {}): { db: Db; stats: ReturnType<typeof seed> } {
   setBusinessClock(new Date(`${TODAY}T15:00:00`));
   const db = openDb(':memory:');
-  createSchema(db);
+  createSchema(db, START);
   const stats = seed(db, TODAY, options);
   return { db, stats };
 }
@@ -143,8 +146,8 @@ test('fresh demo seed: a restart reports no change and inserts nothing; the seed
   const plain = freshDemo({ demoTeams: false }).db;
   try {
     const before = count(db, `SELECT COUNT(*) AS n FROM users`);
-    assert.deepEqual(createSchema(db), [], 'the first restart after a fresh seed reports nothing');
-    assert.deepEqual(createSchema(db), []);
+    assert.deepEqual(createSchema(db, START), [], 'the first restart after a fresh seed reports nothing');
+    assert.deepEqual(createSchema(db, START), []);
     assert.equal(count(db, `SELECT COUNT(*) AS n FROM users`), before);
     // the seven are the only difference between the two seeds' people
     assert.equal(count(db, `SELECT COUNT(*) AS n FROM users`) - count(plain, `SELECT COUNT(*) AS n FROM users`), 7);
@@ -164,7 +167,7 @@ test('an existing demo database (seeded by 1.3.0) gains Sapiens once on start-up
     assert.equal(sapiensTeam(db), undefined);
     assert.ok(isDemoDatabase(db));
     const usersBefore = count(db, `SELECT COUNT(*) AS n FROM users`);
-    const changed = createSchema(db);
+    const changed = createSchema(db, START);
     assert.deepEqual(changed, ['sapiens:team.sapiens'], 'reported once, under the extension');
     const team = sapiensTeam(db)!;
     const people = sapiensUsers(db);
@@ -173,13 +176,13 @@ test('an existing demo database (seeded by 1.3.0) gains Sapiens once on start-up
     assert.equal(count(db, `SELECT COUNT(*) AS n FROM users`), usersBefore + 7);
     assert.equal(demoTeamMarkers(db)[0]!.accounts.length, 7);
     const snapshot = JSON.stringify(all(db, `SELECT * FROM users ORDER BY id`)) + JSON.stringify(all(db, `SELECT * FROM teams ORDER BY id`));
-    assert.deepEqual(createSchema(db), [], 'the second start reports nothing');
+    assert.deepEqual(createSchema(db, START), [], 'the second start reports nothing');
     assert.equal(JSON.stringify(all(db, `SELECT * FROM users ORDER BY id`)) + JSON.stringify(all(db, `SELECT * FROM teams ORDER BY id`)), snapshot, 'and changes nothing');
     // deleted by hand later: the step is done, it never comes back
     run(db, `UPDATE teams SET leader_id = NULL WHERE id = ?`, [team.id]);
     run(db, `DELETE FROM users WHERE team_id = ?`, [team.id]);
     run(db, `DELETE FROM teams WHERE id = ?`, [team.id]);
-    assert.deepEqual(createSchema(db), []);
+    assert.deepEqual(createSchema(db, START), []);
     assert.equal(sapiensTeam(db), undefined, 'once means once');
   } finally {
     db.close();
@@ -204,7 +207,7 @@ test('a "Sapiens" team made by hand is reused: only the missing accounts are add
        VALUES ('LM-0103', 'someone.else@linear-mcr.co.uk', 'Some', 'One', 'rep', 'field_rep', NULL, ?, '2026-10-01', 'active', NULL, '#4F46E5', NULL)`,
       [plan],
     );
-    assert.deepEqual(createSchema(db), ['sapiens:team.sapiens']);
+    assert.deepEqual(createSchema(db, START), ['sapiens:team.sapiens']);
     assert.equal(count(db, `SELECT COUNT(*) AS n FROM teams WHERE lower(name) = 'sapiens'`), 1, 'no second Sapiens team');
     const team = sapiensTeam(db)!;
     assert.equal(team.color, '#123456', 'the hand-made team is left as it was');
@@ -221,7 +224,7 @@ test('a "Sapiens" team made by hand is reused: only the missing accounts are add
     assert.equal(marked.teamId, teamId);
     assert.deepEqual(marked.accounts.map((a) => a.email), SEVEN.slice(1).map(([, f]) => emailOf(f)), 'the marker lists only the six it inserted');
     assert.equal(marked.accounts.find((a) => a.email === emailOf('Ridwan'))!.employeeId, ridwan.employeeId);
-    assert.deepEqual(createSchema(db), []);
+    assert.deepEqual(createSchema(db, START), []);
   } finally {
     db.close();
   }
@@ -231,10 +234,10 @@ test('a database the demo seed did not create never gains them (the test fixture
   // the route-test fixture writes `seeded_at` but is not the demo seed
   const fx = openDb(':memory:');
   try {
-    createSchema(fx);
+    createSchema(fx, START);
     buildFixture(fx, TODAY);
     assert.equal(isDemoDatabase(fx), false);
-    assert.ok(!createSchema(fx).some((c) => c.startsWith('sapiens:')), 'other extensions may backfill the fixture; this one does nothing');
+    assert.ok(!createSchema(fx, START).some((c) => c.startsWith('sapiens:')), 'other extensions may backfill the fixture; this one does nothing');
     assert.equal(sapiensTeam(fx), undefined);
     assert.equal(get(fx, `SELECT 1 FROM meta WHERE key = ?`, [DEMO_TEAMS_DONE_KEY]), undefined, 'no flag: nothing was done');
   } finally {
@@ -243,13 +246,13 @@ test('a database the demo seed did not create never gains them (the test fixture
   // a database with people but no demo seed meta at all
   const bare = openDb(':memory:');
   try {
-    createSchema(bare);
+    createSchema(bare, START);
     bare.exec(`INSERT INTO teams (name, leader_id, color) VALUES ('Real team', NULL, '#2563EB')`);
     bare.exec(`INSERT INTO pay_plans (name, position, base_per_day) VALUES ('Trainee', 'trainee', 60), ('Leader', 'team_leader', 60)`);
     bare.exec(`INSERT INTO users (employee_id, email, first_name, last_name, role, position, team_id, pay_plan_id, start_date, avatar_color)
                VALUES ('LM-0001', 'owner@real.example', 'Real', 'Owner', 'admin', 'owner', NULL, 1, '2025-01-06', '#4F46E5')`);
-    assert.deepEqual(sapiensExtension.upgrade(bare), []);
-    assert.ok(!createSchema(bare).some((c) => c.startsWith('sapiens:')));
+    assert.deepEqual(sapiensExtension.upgrade(bare, START), []);
+    assert.ok(!createSchema(bare, START).some((c) => c.startsWith('sapiens:')));
     assert.equal(sapiensTeam(bare), undefined);
     assert.equal(count(bare, `SELECT COUNT(*) AS n FROM users`), 1);
   } finally {
@@ -258,9 +261,9 @@ test('a database the demo seed did not create never gains them (the test fixture
   // an empty database (the fresh-install upgrade before the seed): skipped without setting the flag
   const empty = openDb(':memory:');
   try {
-    createSchema(empty);
+    createSchema(empty, START);
     empty.exec(`INSERT INTO meta (key, value) VALUES ('seeded_at', 'x'), ('seed_today', '${TODAY}')`);
-    assert.deepEqual(sapiensExtension.upgrade(empty), []);
+    assert.deepEqual(sapiensExtension.upgrade(empty, START), []);
     assert.equal(get(empty, `SELECT 1 FROM meta WHERE key = ?`, [DEMO_TEAMS_DONE_KEY]), undefined);
     assert.equal(count(empty, `SELECT COUNT(*) AS n FROM users`), 0);
   } finally {
@@ -273,24 +276,24 @@ test('a demo-born database in real use never gains them: LM_DEMO_ACCOUNTS=0 wait
   try {
     process.env.LM_DEMO_ACCOUNTS = '0';
     try {
-      assert.deepEqual(createSchema(off), []);
+      assert.deepEqual(createSchema(off, START), []);
       assert.equal(sapiensTeam(off), undefined);
       assert.equal(get(off, `SELECT 1 FROM meta WHERE key = ?`, [DEMO_TEAMS_DONE_KEY]), undefined, 'asked again next start');
     } finally {
       delete process.env.LM_DEMO_ACCOUNTS;
     }
-    assert.deepEqual(createSchema(off), ['sapiens:team.sapiens'], 'still a demo once the variable is gone');
+    assert.deepEqual(createSchema(off, START), ['sapiens:team.sapiens'], 'still a demo once the variable is gone');
   } finally {
     off.close();
   }
   const live = freshDemo({ demoTeams: false }).db;
   try {
     run(live, `UPDATE users SET status = 'left' WHERE employee_id IN ('LM-0002', 'LM-0003', 'LM-0010')`);
-    assert.deepEqual(createSchema(live), []);
+    assert.deepEqual(createSchema(live, START), []);
     assert.equal(sapiensTeam(live), undefined);
     assert.ok(get(live, `SELECT 1 FROM meta WHERE key = ?`, [DEMO_TEAMS_DONE_KEY]), 'done: a database in real use');
     run(live, `UPDATE users SET status = 'active'`);
-    assert.deepEqual(createSchema(live), [], 'and stays done');
+    assert.deepEqual(createSchema(live, START), [], 'and stays done');
   } finally {
     live.close();
   }
@@ -299,7 +302,7 @@ test('a demo-born database in real use never gains them: LM_DEMO_ACCOUNTS=0 wait
 test('marker: an unreadable value lists nobody', () => {
   const db = openDb(':memory:');
   try {
-    createSchema(db);
+    createSchema(db, START);
     for (const bad of ['not json', '{}', '[{"teamId":"x"}]', '[{"teamId":1,"accounts":[{"id":"1"}]}]']) {
       run(db, `INSERT INTO meta (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value`, [DEMO_TEAMS_META_KEY, bad]);
       assert.ok(demoTeamMarkers(db).every((m) => m.accounts.length === 0), bad);

@@ -30,14 +30,15 @@
  * a demo database first seeded before 1.3 (the owner's Mac) has no demo client, so nothing showed under the demo
  * accounts. On start-up such a database gains Hannah once — the same row the core seed makes (lib/client.ts
  * insertDemoClientAccounts), the same marker, and the demo posts above — so the sign-in page shows her under "Charity
- * accounts". Only while the database is still the demo (lib/demoTeams.ts demoStepAllowed): one the demo seed created
- * (meta `seeded_at` and `seed_today`) whose four demo staff accounts are intact, on a server not run with
- * LM_DEMO_ACCOUNTS=0. Every Linear Hub database starts from the demo seed, so a database in real use (its demo staff
- * deactivated or changed) is marked done without gaining her. Skipped without the flag with LM_DEMO_ACCOUNTS=0 and while
- * the core tables are empty (the fresh-install upgrade runs before the seed); never when the demo seed already made her
- * (its marker), when someone already holds her access code or email, or when BCN already has a client account (its real
- * portal never gets the demo posts). Reports `demo-account` only when it inserted her, so the first restart after a
- * fresh seed reports nothing. Rules: ./types.ts.
+ * accounts". Only from the server's own start (createSchema `{ demoSteps: true }` in index.ts — never a maintenance
+ * command such as npm run pin:reset), and only while the database is still the demo (lib/demoTeams.ts
+ * demoStepAllowed): one the demo seed created (meta `seeded_at` and `seed_today`) whose four demo staff accounts are
+ * intact, on a server not run with LM_DEMO_ACCOUNTS=0. Every Linear Hub database starts from the demo seed, so a
+ * database in real use (a demo staff account left, removed, or given another role) is marked done without gaining her.
+ * Skipped without the flag with LM_DEMO_ACCOUNTS=0 and while the core tables are empty (the fresh-install upgrade runs
+ * before the seed); never when the demo seed already made her (its marker), when someone already holds her access code
+ * or email, or when BCN already has a client account (its real portal never gets the demo posts). Reports
+ * `demo-account` only when it inserted her, so the first restart after a fresh seed reports nothing. Rules: ./types.ts.
  */
 import { all, get, transaction, type Db } from '../connection.ts';
 import { CLIENT_ACCOUNTS } from '../seed-data.ts';
@@ -302,7 +303,7 @@ export const DEMO_CLIENT_STEP_KEY = 'ext:client:demo-account';
 export function addDemoClientAccount(db: Db): boolean {
   if (metaFlag(db, DEMO_CLIENT_STEP_KEY) || demoClientMarkers(db).length > 0) return false;
   // only while it is still the demo (lib/demoTeams.ts demoStepAllowed): LM_DEMO_ACCOUNTS=0, not a demo database, or core
-  // rows missing → ask again next start; the demo staff gone or changed (a database in real use) → done, nothing added
+  // rows missing → ask again next start; a demo staff account left, removed or given another role → done, nothing added
   const allowed = demoStepAllowed(db);
   if (allowed === 'later' || !get(db, `SELECT 1 FROM campaigns LIMIT 1`)) return false;
   if (allowed === 'never') {
@@ -340,7 +341,7 @@ export function addDemoClientAccount(db: Db): boolean {
 export const extension: DbExtension = {
   name: 'client',
   sql: SQL,
-  upgrade(db) {
+  upgrade(db, opts) {
     const added = [
       addColumnIfMissing(db, 'users', 'client_campaign_id', 'INTEGER'),
       addColumnIfMissing(db, 'campaigns', 'long_description', 'TEXT'),
@@ -356,7 +357,8 @@ export const extension: DbExtension = {
     // The guard and the portal look client accounts up by campaign (after the column exists; idempotent).
     db.exec(`CREATE INDEX IF NOT EXISTS idx_users_client_campaign ON users(client_campaign_id)`);
     const changed = added.filter((name): name is string => name !== null);
-    if (addDemoClientAccount(db)) changed.push('demo-account');
+    // only from the server's own start, never a maintenance command (types.ts UpgradeOptions)
+    if (opts?.demoSteps && addDemoClientAccount(db)) changed.push('demo-account');
     return changed;
   },
   seed(db, ctx) {

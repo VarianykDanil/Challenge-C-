@@ -6,6 +6,10 @@
  */
 import { after, before, test } from 'node:test';
 import assert from 'node:assert/strict';
+import { spawnSync } from 'node:child_process';
+import { mkdtempSync, rmSync } from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
 import { all, get, openDb, run, type Db } from '../db/connection.ts';
 import { createSchema } from '../db/schema.ts';
 import { seed } from '../db/seed.ts';
@@ -14,6 +18,9 @@ import { demoClientMarkers, isDemoClientAccount } from '../lib/client.ts';
 import { demoTeamMarkers } from '../lib/demoTeams.ts';
 import { setBusinessClock } from '../lib/dates.ts';
 import { buildFixture, startTestServer } from './helpers.ts';
+
+/** How the server starts (index.ts): the demo-account steps may run. A maintenance command passes nothing. */
+const START = { demoSteps: true } as const;
 
 const TODAY = '2026-10-21';
 const HANNAH = 'hannah.price@breastcancernow.example';
@@ -45,7 +52,7 @@ function postsOf(db: Db): Record<string, unknown>[] {
 function demo(options: Parameters<typeof seed>[2] = {}): Db {
   setBusinessClock(new Date(`${TODAY}T15:00:00`));
   const db = openDb(':memory:');
-  createSchema(db);
+  createSchema(db, START);
   seed(db, TODAY, options);
   return db;
 }
@@ -61,7 +68,7 @@ test('an older demo database (no demo client) gains the charity account and her 
     assert.deepEqual(demoClientMarkers(older), []);
     const usersBefore = count(older, `SELECT COUNT(*) AS n FROM users`);
 
-    assert.deepEqual(createSchema(older), ['client:demo-account'], 'reported once, under the extension');
+    assert.deepEqual(createSchema(older, START), ['client:demo-account'], 'reported once, under the extension');
     assert.deepEqual(hannahRow(older), hannahRow(fresh), 'the same row the fresh seed makes');
     assert.equal(count(older, `SELECT COUNT(*) AS n FROM users`), usersBefore + 1);
     const hannah = get<{ id: number; role: 'client'; email: string; employeeId: string }>(older, `SELECT id, role, email, employee_id AS employeeId FROM users WHERE email = ?`, [HANNAH])!;
@@ -86,13 +93,13 @@ test('an older demo database (no demo client) gains the charity account and her 
     const snapshot = () =>
       JSON.stringify([all(older, `SELECT * FROM users ORDER BY id`), all(older, `SELECT * FROM client_posts ORDER BY id`), all(older, `SELECT * FROM announcements ORDER BY id`)]);
     const once = snapshot();
-    assert.deepEqual(createSchema(older), [], 'the second start reports nothing');
+    assert.deepEqual(createSchema(older, START), [], 'the second start reports nothing');
     assert.equal(snapshot(), once, 'and changes nothing');
 
     // turned into a real account later (new code and email, no marker): the step is done, she never comes back
     run(older, `DELETE FROM meta WHERE key = 'seed_demo_clients'`);
     run(older, `UPDATE users SET employee_id = 'CL-0007', email = 'h.price@breastcancernow.example' WHERE id = ?`, [hannah.id]);
-    assert.deepEqual(createSchema(older), []);
+    assert.deepEqual(createSchema(older, START), []);
     assert.equal(get(older, `SELECT 1 FROM users WHERE email = ? OR employee_id = 'CL-0001'`, [HANNAH]), undefined, 'once means once');
   } finally {
     fresh.close();
@@ -105,7 +112,7 @@ test('a fresh demo seed is unchanged: Hannah once, a restart reports nothing and
   try {
     assert.equal(count(db, `SELECT COUNT(*) AS n FROM users WHERE role = 'client'`), 1);
     const posts = postsOf(db).length;
-    assert.deepEqual(createSchema(db), []);
+    assert.deepEqual(createSchema(db, START), []);
     assert.equal(addDemoClientAccount(db), false);
     assert.equal(count(db, `SELECT COUNT(*) AS n FROM users WHERE role = 'client'`), 1);
     assert.equal(postsOf(db).length, posts);
@@ -119,7 +126,7 @@ test('the campaign brief is filled only where it is still empty: nothing Matt ty
   try {
     run(db, `UPDATE campaigns SET long_description = NULL, brief = NULL, contact_name = NULL, contact_email = NULL, contact_phone = NULL`);
     run(db, `UPDATE campaigns SET brief = 'Our own brief' WHERE code = 'CHN'`);
-    assert.deepEqual(createSchema(db), ['client:demo-account']);
+    assert.deepEqual(createSchema(db, START), ['client:demo-account']);
     const briefs = Object.fromEntries(all<{ code: string; brief: string | null; contact: string | null }>(db, `SELECT code, brief, contact_name AS contact FROM campaigns`).map((c) => [c.code, c]));
     assert.ok(briefs.BCN!.brief && briefs.BCN!.contact, 'an empty brief gets the demo one');
     assert.equal(briefs.CHN!.brief, 'Our own brief');
@@ -133,9 +140,9 @@ test('never on a database the demo seed did not create; skipped without the flag
   // the route-test fixture writes `seeded_at` but is not the demo seed
   const fx = openDb(':memory:');
   try {
-    createSchema(fx);
+    createSchema(fx, START);
     buildFixture(fx, TODAY);
-    assert.ok(!createSchema(fx).includes('client:demo-account'));
+    assert.ok(!createSchema(fx, START).includes('client:demo-account'));
     assert.equal(get(fx, `SELECT 1 FROM users WHERE email = ?`, [HANNAH]), undefined);
     assert.equal(flagOf(fx), undefined, 'no flag: nothing was decided');
   } finally {
@@ -144,7 +151,7 @@ test('never on a database the demo seed did not create; skipped without the flag
   // an empty demo database (the fresh-install upgrade before the seed): try again later
   const empty = openDb(':memory:');
   try {
-    createSchema(empty);
+    createSchema(empty, START);
     empty.exec(`INSERT INTO meta (key, value) VALUES ('seeded_at', 'x'), ('seed_today', '${TODAY}')`);
     assert.equal(addDemoClientAccount(empty), false);
     assert.equal(flagOf(empty), undefined);
@@ -162,7 +169,7 @@ test('never on a database the demo seed did not create; skipped without the flag
        VALUES ('CL-0001', 'real.contact@chn.example', 'Real', 'Contact', 'client', 'client', NULL, ?, '2026-10-01', 'active', '#4F46E5', ?)`,
       [plan, chn],
     );
-    assert.deepEqual(createSchema(held), []);
+    assert.deepEqual(createSchema(held, START), []);
     assert.equal(get(held, `SELECT 1 FROM users WHERE email = ?`, [HANNAH]), undefined);
     assert.deepEqual(demoClientMarkers(held), [], 'the real contact is never treated as the demo one');
     assert.ok(flagOf(held));
@@ -173,7 +180,7 @@ test('never on a database the demo seed did not create; skipped without the flag
   const noBcn = demo({ demoClients: false });
   try {
     run(noBcn, `UPDATE campaigns SET code = 'BCX' WHERE code = 'BCN'`);
-    assert.deepEqual(createSchema(noBcn), []);
+    assert.deepEqual(createSchema(noBcn, START), []);
     assert.equal(get(noBcn, `SELECT 1 FROM users WHERE email = ?`, [HANNAH]), undefined);
   } finally {
     noBcn.close();
@@ -186,7 +193,7 @@ test('a database in real use never gains her: LM_DEMO_ACCOUNTS=0 (later), the de
   try {
     process.env.LM_DEMO_ACCOUNTS = '0';
     try {
-      assert.ok(!createSchema(off).includes('client:demo-account'));
+      assert.ok(!createSchema(off, START).includes('client:demo-account'));
       assert.equal(get(off, `SELECT 1 FROM users WHERE email = ?`, [HANNAH]), undefined);
       assert.equal(flagOf(off), undefined);
     } finally {
@@ -200,11 +207,11 @@ test('a database in real use never gains her: LM_DEMO_ACCOUNTS=0 (later), the de
     const live = demo({ demoClients: false });
     try {
       run(live, change);
-      assert.deepEqual(createSchema(live), [], change);
+      assert.deepEqual(createSchema(live, START), [], change);
       assert.equal(get(live, `SELECT 1 FROM users WHERE email = ?`, [HANNAH]), undefined, change);
       assert.ok(flagOf(live), `${change}: the step is done`);
       run(live, `UPDATE users SET status = 'active', role = CASE employee_id WHEN 'LM-0010' THEN 'rep' ELSE role END`);
-      assert.deepEqual(createSchema(live), [], 'and stays done');
+      assert.deepEqual(createSchema(live, START), [], 'and stays done');
     } finally {
       live.close();
     }
@@ -220,7 +227,7 @@ test('a database in real use never gains her: LM_DEMO_ACCOUNTS=0 (later), the de
        VALUES ('CL-0002', 'contact@bcn.example', 'Real', 'Contact', 'client', 'client', NULL, ?, '2026-10-01', 'active', '#4F46E5', ?)`,
       [plan, bcn],
     );
-    assert.deepEqual(createSchema(invited), []);
+    assert.deepEqual(createSchema(invited, START), []);
     assert.equal(get(invited, `SELECT 1 FROM users WHERE email = ?`, [HANNAH]), undefined);
     assert.equal(count(invited, `SELECT COUNT(*) AS n FROM client_posts`), 0, 'no demo posts beside the real contact');
     assert.ok(flagOf(invited));
@@ -229,11 +236,42 @@ test('a database in real use never gains her: LM_DEMO_ACCOUNTS=0 (later), the de
   }
 });
 
+test('a maintenance command never runs the demo steps: npm run pin:reset on an older demo database adds nobody', () => {
+  const dir = mkdtempSync(path.join(os.tmpdir(), 'linear-pinreset-'));
+  const file = path.join(dir, 'linear.sqlite');
+  try {
+    const db = openDb(file);
+    createSchema(db);
+    seed(db, TODAY, { demoClients: false, demoTeams: false });
+    db.close();
+    // what pin:reset does to the schema: createSchema without the server's start option
+    const check = openDb(file);
+    assert.ok(!createSchema(check).some((c) => c === 'client:demo-account' || c === 'sapiens:team.sapiens'));
+    check.close();
+    // and the real command, with no LM_DEMO_ACCOUNTS in its environment
+    const env: NodeJS.ProcessEnv = { ...process.env, DB_PATH: file, LM_APP_SECRET_FILE: path.join(dir, 'app-secret'), NODE_NO_WARNINGS: '1' };
+    delete env.LM_DEMO_ACCOUNTS;
+    const r = spawnSync(process.execPath, [path.join(import.meta.dirname, '..', 'pinReset.ts'), 'danil@linear-mcr.co.uk'], { env, encoding: 'utf8' });
+    assert.equal(r.status, 0, r.stderr);
+    const after = openDb(file);
+    try {
+      assert.equal(get(after, `SELECT 1 FROM users WHERE email = ?`, [HANNAH]), undefined, 'no charity account');
+      assert.equal(count(after, `SELECT COUNT(*) AS n FROM users WHERE employee_id BETWEEN 'LM-0101' AND 'LM-0107'`), 0, 'no Sapiens');
+      assert.equal(flagOf(after), undefined, 'and the server decides on its next start');
+      assert.deepEqual(createSchema(after, START).filter((c) => c.includes('demo-account') || c.includes('sapiens')), ['client:demo-account', 'sapiens:team.sapiens'], 'which it does');
+    } finally {
+      after.close();
+    }
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 test('after the start-up step the sign-in page lists her under the charity accounts, and one click opens her portal', async () => {
   const srv = await startTestServer({ seed: true, seedOptions: { demoClients: false } });
   try {
     assert.ok(!('clientAccounts' in (await srv.anon().get('/auth/demo-accounts')).json), 'before: nothing under the demo accounts');
-    assert.deepEqual(createSchema(srv.db), ['client:demo-account'], 'the next start');
+    assert.deepEqual(createSchema(srv.db, START), ['client:demo-account'], 'the next start');
     const r = await srv.anon().get('/auth/demo-accounts');
     assert.equal(r.json.accounts.length, 4, 'the four staff accounts as before');
     assert.deepEqual(r.json.clientAccounts, [{

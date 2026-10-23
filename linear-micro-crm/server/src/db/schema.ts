@@ -1,6 +1,6 @@
 import { GAUGE_MAX_PER_DAY } from '@lm/shared';
 import type { Db } from './connection.ts';
-import { upgradeExtensions } from './extensions/index.ts';
+import { upgradeExtensions, type UpgradeOptions } from './extensions/index.ts';
 
 /** One gauge column: a whole number between 0 and the daily plausibility ceiling (CHECK constraints on new databases). */
 const gaugeCol = (name: string) => `${name} INTEGER NOT NULL DEFAULT 0 CHECK (${name} >= 0 AND ${name} <= ${GAUGE_MAX_PER_DAY})`;
@@ -275,10 +275,15 @@ export function upgradeSchema(db: Db): string[] {
  * Release 1.2: then every database extension (db/extensions, in their fixed order) creates its tables and runs its
  * upgrades. Returns the core columns added (`table.column`) followed by the extensions' changes (`<extension>:<name>`).
  */
-export function createSchema(db: Db): string[] {
+/**
+ * Creates and upgrades the schema; returns what changed. `{ demoSteps: true }` only from the server's start (index.ts):
+ * it also lets the one-off demo-account steps run (db/extensions/types.ts UpgradeOptions); every other caller (the
+ * pin:reset command, the seed, tests by default) leaves them out.
+ */
+export function createSchema(db: Db, opts: UpgradeOptions = {}): string[] {
   db.exec(SCHEMA_SQL);
   const added = upgradeSchema(db);
-  return [...added, ...upgradeExtensions(db)];
+  return [...added, ...upgradeExtensions(db, opts)];
 }
 
 export function isSeeded(db: Db): boolean {

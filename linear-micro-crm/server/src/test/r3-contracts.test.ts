@@ -97,7 +97,7 @@ test('a 1.2 database upgrades cleanly: new tables and columns appear, every row 
     assert.equal(afterRows[0]!.gross, 640);
     assert.equal(afterRows[0]!.paid_as, null, 'new columns start empty');
     assert.equal((db.prepare(`SELECT COUNT(*) AS n FROM users`).get() as { n: number }).n, 1);
-    assert.deepEqual(createSchema(db), [], 'the second start upgrades nothing');
+    assert.deepEqual(createSchema(db, { demoSteps: true }), [], 'the second start upgrades nothing');
   } finally {
     db.close();
   }

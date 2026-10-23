@@ -136,8 +136,8 @@ test('fresh install order: upgrades run on empty core tables, then seed; the fir
     seed(db, todayISO());
     // A data step that skipped on the empty database (its rows missing) now finds them: it must insert nothing new over
     // what seed() wrote (INSERT OR IGNORE) and report nothing (types.ts "ORDER ON A FRESH INSTALL").
-    assert.deepEqual(createSchema(db), [], 'a restart after a fresh seed reports no extension change');
-    assert.deepEqual(createSchema(db), [], 'and stays idempotent');
+    assert.deepEqual(createSchema(db, { demoSteps: true }), [], 'a restart after a fresh seed reports no extension change');
+    assert.deepEqual(createSchema(db, { demoSteps: true }), [], 'and stays idempotent');
   } finally {
     db.close();
   }

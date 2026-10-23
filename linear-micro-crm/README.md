@@ -209,7 +209,7 @@ npm run service:uninstall    # stop it for good and free the port
   `~/Library/Logs/LinearHub/linear-hub.log`. It runs this checkout's `server/src/index.ts` with the Node you ran the
   command with (a Homebrew Cellar path becomes the stable `…/opt/node/bin/node` link), in production mode with
   `TZ=Europe/London`, plus `PORT`, `HOST`, `DB_PATH`, `LM_APP_SECRET_FILE`, `LM_BACKUP`, `LM_BACKUP_DIR`,
-  `LM_BACKUP_HOUR`, `TRUST_PROXY`, `LM_SMART` and `LM_COMPRESSION` if they are set in that terminal. `LM_APP_SECRET`
+  `LM_BACKUP_HOUR`, `TRUST_PROXY`, `LM_SMART`, `LM_COMPRESSION` and `LM_DEMO_ACCOUNTS` if they are set in that terminal. `LM_APP_SECRET`
   is never written into the file (it would sit there in plain text): use `LM_APP_SECRET_FILE` instead.
 - It refuses to install without a built client (`npm run build` first), stops a copy running in a terminal, then loads
   the agent and waits up to 20 seconds for it to answer.

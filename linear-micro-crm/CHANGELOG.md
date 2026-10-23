@@ -30,8 +30,10 @@ The Sapiens team's demo sign-ins, and leaders and recruiters can add people. Det
   account once on its next start, with her demo posts (a declined and a pending commission change, an announcement and
   an update), so the portal is not empty. Only while the database is still the demo: the four demo staff accounts are
   intact and the server is not run with `LM_DEMO_ACCOUNTS=0`; never when someone already holds that access code or
-  email, or Breast Cancer Now already has a client account. The Sapiens step now uses the same check, and the go-live
-  checklist asks you to turn the demo accounts off (`LM_DEMO_ACCOUNTS=0` only hides them).
+  email, or Breast Cancer Now already has a client account. Both demo-account steps (this one and Sapiens) run only
+  when the server itself starts, never from `npm run pin:reset`. The go-live checklist asks you to turn every seeded
+  demo person off (`LM_DEMO_ACCOUNTS=0` only hides the buttons), and `npm run service:install` now passes
+  `LM_DEMO_ACCOUNTS` on to the service.
 - **Team → Add person for recruiters and leaders.** Recruiters add trainees and field representatives to any team;
   Team Leaders and Crew Leaders to their own team. Afterwards **Sign-in details** shows the new person's employee ID —
   the only time a recruiter or leader sees it — with instructions to copy and send; a tap beside it does not close it,

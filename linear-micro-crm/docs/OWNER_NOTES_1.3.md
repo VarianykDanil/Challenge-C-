@@ -331,9 +331,11 @@ What Matt needs to know, set up or decide for each part of 1.3, collected from t
   Breast Cancer Now, CL-0001, no PIN, with her demo posts — so the sign-in page shows her under **Charity accounts**.
   It happens only while the database is still the demo: the four demo staff accounts (LM-0001, LM-0002, LM-0003,
   LM-0010) are all there with their roles and none has left, the server is not run with `LM_DEMO_ACCOUNTS=0`, and
-  Breast Cancer Now has no client account yet. (In 1.3.0 an upgraded database never gained her.) Before real people
-  use the database, deactivate the demo accounts, Hannah included (**Campaigns → Breast Cancer Now → Open page →
-  Client accounts → Turn off**): `LM_DEMO_ACCOUNTS=0` only hides their buttons, their details still sign in.
+  Breast Cancer Now has no client account yet; and only when the server starts (`npm start`), never from
+  `npm run pin:reset`. (In 1.3.0 an upgraded database never gained her.) Before real people use the database, turn
+  every seeded demo person off, Hannah included (**Campaigns → Breast Cancer Now → Open page → Client accounts → Turn
+  off**; the go-live checklist in DEPLOY.md lists them all): `LM_DEMO_ACCOUNTS=0` only hides their buttons, their
+  details still sign in.
 - Client accounts sign in with their email and an access code, like staff use their employee ID. The first client you
   invite gets CL-0002: CL-0001 is kept for the demo account, so a real client never shares its code.
 - A client account sees only its own name, email, access code and campaign about itself: the pay plan its account is

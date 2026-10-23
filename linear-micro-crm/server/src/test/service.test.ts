@@ -73,6 +73,11 @@ test('environment: production, London, quiet, plus the Linear Hub settings with 
   });
 });
 
+test('environment: LM_DEMO_ACCOUNTS=0 reaches the service (no demo buttons, no demo-account start-up steps)', () => {
+  assert.equal(serviceEnvironment({ LM_DEMO_ACCOUNTS: '0', DB_PATH: '/var/lib/x.sqlite' }).LM_DEMO_ACCOUNTS, '0');
+  assert.ok(!('LM_DEMO_ACCOUNTS' in serviceEnvironment({ DB_PATH: '/var/lib/x.sqlite' })), 'left out when not set');
+});
+
 test('awkward paths survive both formats, and the Node path reads back', () => {
   const spec: ServiceSpec = {
     node: '/Users/Ann O\'Neil/.nvm/versions/node/v22.18.0/bin/node',

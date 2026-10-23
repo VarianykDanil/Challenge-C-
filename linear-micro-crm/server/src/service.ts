@@ -54,7 +54,7 @@ export function installedServiceFile(platform: string = process.platform): strin
 }
 
 /** Linear Hub settings handed to the service when they are set in this terminal. */
-const PASS_THROUGH = ['PORT', 'HOST', 'DB_PATH', 'LM_APP_SECRET_FILE', 'LM_BACKUP', 'LM_BACKUP_DIR', 'LM_BACKUP_HOUR', 'TRUST_PROXY', 'LM_SMART', 'LM_COMPRESSION'] as const;
+const PASS_THROUGH = ['PORT', 'HOST', 'DB_PATH', 'LM_APP_SECRET_FILE', 'LM_BACKUP', 'LM_BACKUP_DIR', 'LM_BACKUP_HOUR', 'TRUST_PROXY', 'LM_SMART', 'LM_COMPRESSION', 'LM_DEMO_ACCOUNTS'] as const;
 const PATH_VARS: ReadonlySet<string> = new Set(['DB_PATH', 'LM_APP_SECRET_FILE', 'LM_BACKUP_DIR']);
 
 /** The service's environment: production, London time, quiet Node, plus the pass-through settings (absolute paths). */

@@ -118,13 +118,23 @@ export interface SeedContext {
   rng(salt: number): Rng;
 }
 
+/**
+ * Release 1.3.1: what createSchema passes to every `upgrade`. `demoSteps` is true only when the SERVER starts
+ * (index.ts): the one-off steps that add demo accounts with public sign-in details to an older demo database
+ * (client.ts addDemoClientAccount, sapiens.ts) run only then — never from a maintenance command (npm run pin:reset), which
+ * runs without the server's environment (e.g. LM_DEMO_ACCOUNTS=0 set only in the service's file).
+ */
+export interface UpgradeOptions {
+  demoSteps?: boolean;
+}
+
 export interface DbExtension {
   /** Short, unique, stable: 'learning', 'pitches', 'pin', 'audit', 'checkins'. */
   name: string;
   /** CREATE … IF NOT EXISTS statements ('' when the extension has no tables yet). */
   sql: string;
   /** Idempotent upgrades of existing databases; returns what changed (see the rules above). */
-  upgrade(db: Db): string[];
+  upgrade(db: Db, opts?: UpgradeOptions): string[];
   /** Demo rows for a fresh seed (optional). */
   seed?(db: Db, ctx: SeedContext): void;
 }

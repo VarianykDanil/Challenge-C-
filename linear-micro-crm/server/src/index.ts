@@ -26,7 +26,7 @@ if (businessClockPinned()) {
   console.warn(`LM_BUSINESS_NOW is set: "today" for events, gauges and pay is ${businessNow().toString()}, not the real date. Unset it for real use.`);
 }
 const db = openDb(dbPath);
-const upgraded = createSchema(db);
+const upgraded = createSchema(db, { demoSteps: true }); // the server's start: the demo-account steps may run (UpgradeOptions)
 if (upgraded.length) console.log(`Upgraded schema: added ${upgraded.join(', ')}`);
 announceAppSecret();
 const rekeyed = reencryptLegacySecrets(db);

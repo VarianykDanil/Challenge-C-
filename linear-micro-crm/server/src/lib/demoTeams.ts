@@ -64,7 +64,8 @@ export function demoStaffIntact(db: Db): boolean {
  * - 'later': not now, ask again on the next start — the server runs with LM_DEMO_ACCOUNTS=0 (the operator says real
  *   people use it), the database is not one the demo seed created, or its core rows are not there yet (a fresh install
  *   before its seed);
- * - 'never': the database began as the demo but its demo staff are gone or changed — it is in real use now, so the step
+ * - 'never': the database began as the demo but one of its four demo staff is missing, has left, or has another role
+ *   or employee ID (a renamed person or a new email still counts as the demo) — it is in real use now, so the step
  *   is done without adding anything (the caller sets its flag);
  * - 'yes': a demo database whose four demo staff are intact.
  * Every Linear Hub database starts from the demo seed, so the seed's meta alone never decides this.

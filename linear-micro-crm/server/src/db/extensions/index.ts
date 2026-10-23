@@ -20,9 +20,9 @@ import { extension as sapiens } from './sapiens.ts';
 import { extension as statements } from './statements.ts';
 import { extension as venues } from './venues.ts';
 import { extension as videos } from './videos.ts';
-import type { DbExtension, SeedContext } from './types.ts';
+import type { DbExtension, SeedContext, UpgradeOptions } from './types.ts';
 
-export type { DbExtension, SeedContext } from './types.ts';
+export type { DbExtension, SeedContext, UpgradeOptions } from './types.ts';
 
 export const EXTENSIONS: readonly DbExtension[] = [
   // Release 1.2
@@ -37,11 +37,11 @@ export const EXTENSIONS: readonly DbExtension[] = [
  * Creates every extension's tables and runs its upgrades, in order. Returns what the upgrades changed, each name
  * prefixed with its extension (`pin:users.pin_hash`) so it never reads as a core column. Idempotent.
  */
-export function upgradeExtensions(db: Db): string[] {
+export function upgradeExtensions(db: Db, opts: UpgradeOptions = {}): string[] {
   const changed: string[] = [];
   for (const ext of EXTENSIONS) {
     if (ext.sql.trim()) db.exec(ext.sql);
-    for (const name of ext.upgrade(db)) changed.push(`${ext.name}:${name}`);
+    for (const name of ext.upgrade(db, opts)) changed.push(`${ext.name}:${name}`);
   }
   return changed;
 }
