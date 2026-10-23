@@ -1,8 +1,30 @@
 import assert from 'node:assert/strict';
-import { describe, it } from 'node:test';
-import { decrypt, encrypt } from './crypto.ts';
+import { mkdtempSync, rmSync } from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
+import { after, before, describe, it } from 'node:test';
+import { DEFAULT_APP_SECRET_FILE, appSecretFile, configureAppSecret, decrypt, encrypt } from './crypto.ts';
 
 describe('crypto (AES-256-GCM at rest)', () => {
+  // Release 1.3.1 fix: the generated key goes to a temporary folder, so npm test never reads the owner's
+  // server/data/app-secret, nor creates one in a fresh clone that a later npm start would then use.
+  let dir = '';
+  let previousFile = '';
+  before(() => {
+    previousFile = appSecretFile();
+    dir = mkdtempSync(path.join(os.tmpdir(), 'linear-crypto-test-'));
+    configureAppSecret(path.join(dir, 'app-secret'));
+  });
+  after(() => {
+    configureAppSecret(previousFile);
+    rmSync(dir, { recursive: true, force: true });
+  });
+
+  it('uses a key file in a temporary folder, never server/data/app-secret (LOGIC §16.0: tests write only to a temp dir)', () => {
+    assert.notEqual(appSecretFile(), DEFAULT_APP_SECRET_FILE);
+    assert.ok(appSecretFile().startsWith(os.tmpdir()), appSecretFile());
+  });
+
   it('round-trips text and never repeats a ciphertext', () => {
     const a = encrypt('JBSWY3DPEHPK3PXP');
     const b = encrypt('JBSWY3DPEHPK3PXP');

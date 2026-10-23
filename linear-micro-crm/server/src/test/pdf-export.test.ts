@@ -497,6 +497,55 @@ test('a table PDF guards every line too: title, subtitle, filters, headers, mult
   assert.ok(all.includes('Call back Monday'));
 });
 
+/** Each text-show operator with the font size and fill colour it was drawn in (jsPDF writes them inside BT … ET). */
+function styledText(content: string): { text: string; size: number; rgb: string }[] {
+  const out: { text: string; size: number; rgb: string }[] = [];
+  let size = 0;
+  let rgb = '';
+  const re = /\/F\d+\s+([\d.]+)\s+Tf|([\d.]+\s+[\d.]+\s+[\d.]+)\s+rg|([\d.]+)\s+g\b|\((?:\\.|[^\\)])*\)\s*Tj/g;
+  for (const m of content.matchAll(re)) {
+    if (m[1]) size = Number(m[1]);
+    else if (m[2]) rgb = m[2].split(/\s+/).map((n) => Number(n).toFixed(3)).join(' ');
+    else if (m[3]) rgb = [m[3], m[3], m[3]].map((n) => Number(n).toFixed(3)).join(' ');
+    else out.push({ text: fromWinAnsi(textOps(m[0])[0] ?? ''), size, rgb });
+  }
+  return out;
+}
+
+test('Release 1.3.1 fix: a line table row\'s note is drawn under its first cell, smaller and grey, every line guarded', () => {
+  const doc = createPdfDoc(engine, { title: 'Self-billed invoice LM-SB-2026-000123', now: NOW }).lineTable(
+    [
+      { key: 'description', header: 'Description', width: 4 },
+      { key: 'qty', header: 'Qty', align: 'right' },
+      { key: 'amount', header: 'Amount', align: 'right', width: 1.4 },
+    ],
+    [
+      { description: 'CHN: 6 subs × £45.00', qty: '6', amount: '£270.00', note: '7 logged, 1 cancelled by CHN' },
+      { description: '4 days × £63.50 (not paid)', qty: '4', amount: '£254.00', muted: true, note: 'Not paid: commission was higher' },
+      { description: 'Adjustment', qty: '', amount: '£5.00', note: 'Agreed with the office\n=HYPERLINK("http://evil.example","x")' },
+      { description: 'Deductions', qty: '', amount: '-£12.50' },
+    ],
+  );
+  const pdf = parsePdf(doc.bytes());
+  assert.deepEqual(formulaLines(pdf), [], 'no drawn line runs as a formula');
+  const drawn = styledText(pdf.contents[0]!);
+  const at = (s: string) => drawn.findIndex((d) => d.text === s);
+  const desc = drawn[at('CHN: 6 subs × £45.00')]!;
+  const note = drawn[at('7 logged, 1 cancelled by CHN')];
+  assert.ok(note, `the note is drawn: ${JSON.stringify(drawn.map((d) => d.text))}`);
+  assert.ok(at('7 logged, 1 cancelled by CHN') > at('CHN: 6 subs × £45.00'), 'after its description');
+  assert.ok(note.size < desc.size, `smaller (${note.size} pt under ${desc.size} pt)`);
+  const MUTED = '0.369 0.400 0.471'; // PDF_COLOURS.muted: 94, 102, 120
+  assert.equal(note.rgb, MUTED, 'in the muted grey');
+  assert.notEqual(desc.rgb, MUTED, 'the description stays in ink');
+  assert.equal(drawn[at('Not paid: commission was higher')]?.rgb, MUTED);
+  // a note a spreadsheet would run is guarded like every other line; the key is never a column of its own
+  assert.ok(at(`'=HYPERLINK("http://evil.example","x")`) > at('Agreed with the office'));
+  assert.ok(!drawn.some((d) => d.text === 'note'));
+  // the amounts stay in their column, after the note's row
+  assert.ok(at('£270.00') > 0 && at('-£12.50') > at(`'=HYPERLINK("http://evil.example","x")`));
+});
+
 test('audit PDF: who a row names, as the Audit page says it; how much of the trail the file holds', () => {
   type Who = Parameters<typeof auditPdfWho>[0];
   const row = (r: Partial<Who>): Who => ({ userName: null, kind: 'change', action: 'PATCH /users/:id', after: null, ...r }) as Who;

@@ -55,6 +55,23 @@ The Sapiens team's demo sign-ins, and leaders and recruiters can add people. Det
   client accounts and "Read by" sort Theo among the T surnames.
 - The administrator's form is called **Add person** (was **Add member**), and its employee ID may be left blank.
 
+### Fixed
+
+- **Bookings and interview sheets have the per-person write limit.** "I'm working this" / "I can't make it" (`POST` /
+  `DELETE /events/:id/roster/me`), Edit bookings (`PUT /events/:id/roster`) and the interview sheet's saves (`PUT
+  /recruitment/interviews/:id/answers`) had no limit, and each call wrote an audit row and cleared the whole response
+  cache: a rep could repeat a booking 200 times a minute. They now share the limit of 60 writes a minute per person
+  (`middleware/writeLimit.ts`, matched by pattern, any `:id`): the 61st is 429 "That is more than 60 changes in a
+  minute. Wait a minute, then try again.", is not audited and clears nothing.
+- **Invoice lines say why.** A self-billed invoice's lines now carry the pay breakdown's note ("8 logged, 1 cancelled
+  by CHN", "not yet confirmed by BCN", a correction's "2 cancelled by BCN: paid for 11, confirmed 9"), in grey under
+  the description on screen, in print and in the PDF (smaller and grey, through the formula guard). `InvoiceLine.note`
+  is optional (additive); invoices issued before this fix keep their lines exactly as issued, and the next version or
+  next week's invoice carries the notes.
+- **`npm test` no longer touches the real key file.** `server/src/lib/crypto.test.ts` used the default
+  `server/data/app-secret` (reading the owner's, or creating one in a fresh clone that a later `npm start` would then
+  use); it now points the key file at a temporary folder for the test and puts it back afterwards.
+
 ## [1.3.0] - 2026-10-22
 
 Pay you can check, clients on board, data that coaches. Details: [docs/USER_GUIDE.md](docs/USER_GUIDE.md) ("What's new

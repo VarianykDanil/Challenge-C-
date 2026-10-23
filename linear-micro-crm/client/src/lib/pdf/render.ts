@@ -129,11 +129,15 @@ function patchWinAnsiWidths(doc: jsPDF): void {
 
 const PT = 0.3528; // mm per point
 const lh = (size: number) => size * PT * 1.28;
+/** A table cell's padding (mm), and the space between a cell's text and its row's note (release 1.3.1). */
+const PAD_X = 1.6;
+const PAD_Y = 1.5;
+const NOTE_GAP = 0.4;
 const DATA_IMAGE = /^data:image\/(png|jpe?g);base64,[a-z0-9+/=\s]+$/i;
 
 interface Internals {
   doc: jsPDF;
-  drawTable(t: PreparedTable, opts?: { fontSize?: number; widths?: number[]; muted?: boolean[]; emptyText?: string }): void;
+  drawTable(t: PreparedTable, opts?: { fontSize?: number; widths?: number[]; muted?: boolean[]; notes?: string[]; emptyText?: string }): void;
 }
 
 function makeDoc(engine: PdfEngine, opts: PdfDocumentOptions): { api: PdfDoc; internals: Internals } {
@@ -249,16 +253,32 @@ function makeDoc(engine: PdfEngine, opts: PdfDocumentOptions): { api: PdfDoc; in
     if (finalised) return;
     const n = t.head.length;
     const fontSize = o.fontSize ?? tableFontSize(n);
-    const body: RowInput[] = t.body.length
-      ? t.body
-      : [[{ content: toPdfText(o.emptyText ?? 'Nothing to show'), colSpan: Math.max(1, n), styles: { halign: 'center', textColor: MUTED } }]];
     const columnStyles: UserOptions['columnStyles'] = {};
     t.align.forEach((a, i) => {
       columnStyles[i] = o.widths?.[i] != null ? { halign: a, cellWidth: o.widths[i] } : { halign: a };
     });
+    // Release 1.3.1: a row's note goes under its first cell, smaller and grey: the cell keeps room for it below its
+    // own text (a deeper bottom padding) and the note is written there once the cell is drawn (didDrawCell)
+    const noteSize = fontSize - 1.5;
+    const firstW = o.widths?.[0];
+    const noteLines = (o.notes ?? []).map((note) => {
+      if (!note || firstW == null) return [];
+      font(noteSize);
+      return split(pdfSafeText(note), firstW - 2 * PAD_X);
+    });
+    const withNotes: RowInput[] = t.body.map((row, i) => {
+      const lines = noteLines[i] ?? [];
+      if (!lines.length) return row;
+      const bottom = PAD_Y + NOTE_GAP + lines.length * lh(noteSize);
+      return row.map((c, j) => (j === 0 ? { content: c, styles: { cellPadding: { top: PAD_Y, bottom, left: PAD_X, right: PAD_X } } } : c));
+    });
+    const body: RowInput[] = t.body.length
+      ? withNotes
+      : [[{ content: toPdfText(o.emptyText ?? 'Nothing to show'), colSpan: Math.max(1, n), styles: { halign: 'center', textColor: MUTED } }]];
     // a short table stays on one page (it moves whole to the next one); a long one starts with at least two rows
     const rowH = lh(fontSize) + 3.2;
-    const whole = (t.body.length + 1 + (t.foot ? 1 : 0)) * rowH + 2;
+    const notesH = noteLines.reduce((h, l) => h + (l.length ? NOTE_GAP + l.length * lh(noteSize) : 0), 0);
+    const whole = (t.body.length + 1 + (t.foot ? 1 : 0)) * rowH + notesH + 2;
     room(whole <= (H - BOTTOM - TOP2) * 0.4 ? whole : rowH * 3 + 2);
     engine.autoTable(doc, {
       startY: y,
@@ -275,7 +295,7 @@ function makeDoc(engine: PdfEngine, opts: PdfDocumentOptions): { api: PdfDoc; in
         font: 'helvetica',
         fontSize,
         textColor: INK,
-        cellPadding: { top: 1.5, bottom: 1.5, left: 1.6, right: 1.6 },
+        cellPadding: { top: PAD_Y, bottom: PAD_Y, left: PAD_X, right: PAD_X },
         overflow: 'linebreak',
         valign: 'top',
         lineColor: BORDER,
@@ -294,6 +314,17 @@ function makeDoc(engine: PdfEngine, opts: PdfDocumentOptions): { api: PdfDoc; in
       // a right-aligned cell is measured, so it still ends at the column's edge
       willDrawCell: (d: CellHookData) => {
         d.cell.text = d.cell.text.map(pdfGuardLine);
+      },
+      // the row's note in the room its first cell kept below its text (write() guards every line)
+      didDrawCell: (d: CellHookData) => {
+        const lines = d.section === 'body' && d.column.index === 0 && t.body.length ? noteLines[d.row.index] : undefined;
+        if (!lines?.length) return;
+        font(noteSize, 'normal', MUTED);
+        let ny = d.cell.y + d.cell.height - PAD_Y - lines.length * lh(noteSize);
+        for (const line of lines) {
+          write(line, d.cell.x + PAD_X, ny);
+          ny += lh(noteSize);
+        }
       },
     });
     const last = (doc as unknown as { lastAutoTable?: { finalY?: number } }).lastAutoTable;
@@ -429,13 +460,18 @@ function makeDoc(engine: PdfEngine, opts: PdfDocumentOptions): { api: PdfDoc; in
         {
           head: columns.map((c) => pdfSafeText(c.header)),
           body: rows.map((r) => columns.map((c) => {
-            const v = c.key === 'muted' ? undefined : r[c.key];
+            const v = c.key === 'muted' || c.key === 'note' ? undefined : r[c.key];
             return typeof v === 'string' ? pdfSafeText(v) : '';
           })),
           align: columns.map((c) => (c.align === 'right' ? 'right' : 'left')),
           kinds: columns.map(() => 'text'),
         },
-        { fontSize: 9, widths: columns.map((c) => (CW * (c.width ?? 1)) / total), muted: rows.map((r) => r.muted === true) },
+        {
+          fontSize: 9,
+          widths: columns.map((c) => (CW * (c.width ?? 1)) / total),
+          muted: rows.map((r) => r.muted === true),
+          notes: rows.map((r) => (typeof r.note === 'string' ? r.note.trim() : '')),
+        },
       );
       return api;
     },

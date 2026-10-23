@@ -8,9 +8,13 @@
  *   POST /auth/pin, /auth/pin/*   setting, changing, removing or resetting a PIN
  *   POST /gauges/bulk       bulk gauge entry
  *   POST /users, /users/*   adding a person (release 1.3.1: recruiters and leaders may now add people), the 2FA reset
+ *   POST, DELETE /events/:id/roster/me      "I'm working this" / "I can't make it" (release 1.3.1 fix)
+ *   PUT  /events/:id/roster                 Edit bookings (release 1.3.1 fix)
+ *   PUT  /recruitment/interviews/:id/answers   the interview sheet's autosave (release 1.3.1 fix)
  * The next one inside the minute is refused with 429 and a plain sentence (WRITE_LIMIT_MESSAGE, `Retry-After: 60`);
  * a refused request does not count. Reads, other writes and signed-out requests pass straight through (a signed-out
- * write still gets its 401 from requireAuth). Paths match case-insensitively, as Express routes them.
+ * write still gets its 401 from requireAuth). Paths match case-insensitively and with or without a trailing slash,
+ * as Express routes them.
  *
  * The counter is the login limiter's FailureLimiter (lib/limiter.ts: bounded map, expired entries swept), keyed by
  * the person's id, in memory, on the real clock. createApp mounts one per app, after `authenticate` and the PIN gate,
@@ -18,6 +22,11 @@
  * "stop and try again later" (shared shiftCheckInReplayOutcome), so a queued check-in is never lost to the limit.
  *
  * Release 1.3 — P9 audit-everything adds a second counter, for POST /audit/events only (below).
+ *
+ * Release 1.3.1 fix (1.3 final security check): the three 1.3 writes above (event rosters, the interview sheet) had
+ * no limit, and each one writes an audit row and clears the whole response cache. They are matched by pattern, not
+ * prefix (an `:id` in the middle), and the `:id` segment is any segment ([^/]+), not just digits: Express decodes it
+ * before the route reads it, so `/events/%31%32/roster/me` books event 12 and must count too.
  */
 import type { RequestHandler } from 'express';
 import { AUDIT_EVENTS_PER_MINUTE } from '@lm/shared';
@@ -43,8 +52,11 @@ export function isAuditEventReport(method: string, path: string): boolean {
   return method === 'POST' && path.toLowerCase().replace(/\/+$/, '') === AUDIT_EVENTS_PATH;
 }
 
-/** The limited writes: the method and a path prefix relative to /api (the path itself, or anything below it). */
-export const WRITE_LIMITED_ROUTES: readonly { method: 'POST' | 'PUT'; path: string }[] = [
+/**
+ * The limited writes: the method and either a path prefix relative to /api (a string: the path itself, or anything
+ * below it) or a pattern for the whole path (a RegExp, tried on the lower-case path without its trailing slash).
+ */
+export const WRITE_LIMITED_ROUTES: readonly { method: 'POST' | 'PUT' | 'DELETE'; path: string | RegExp }[] = [
   { method: 'POST', path: '/learning' },
   { method: 'PUT', path: '/pitches' },
   { method: 'POST', path: '/checkins' },
@@ -52,12 +64,20 @@ export const WRITE_LIMITED_ROUTES: readonly { method: 'POST' | 'PUT'; path: stri
   { method: 'POST', path: '/gauges/bulk' },
   // Release 1.3.1
   { method: 'POST', path: '/users' },
+  // Release 1.3.1 fix: the 1.3 roster writes and the interview sheet's autosave
+  { method: 'POST', path: /^\/events\/[^/]+\/roster\/me$/ },
+  { method: 'DELETE', path: /^\/events\/[^/]+\/roster\/me$/ },
+  { method: 'PUT', path: /^\/events\/[^/]+\/roster$/ },
+  { method: 'PUT', path: /^\/recruitment\/interviews\/[^/]+\/answers$/ },
 ];
 
 /** Does the per-person write limit cover this request? `path` is relative to /api, e.g. "/checkins". */
 export function isWriteLimited(method: string, path: string): boolean {
   const p = path.toLowerCase();
-  return WRITE_LIMITED_ROUTES.some((r) => r.method === method && (p === r.path || p.startsWith(`${r.path}/`)));
+  const whole = p.replace(/\/+$/, '');
+  return WRITE_LIMITED_ROUTES.some(
+    (r) => r.method === method && (typeof r.path === 'string' ? p === r.path || p.startsWith(`${r.path}/`) : r.path.test(whole)),
+  );
 }
 
 export interface WriteLimitOptions {

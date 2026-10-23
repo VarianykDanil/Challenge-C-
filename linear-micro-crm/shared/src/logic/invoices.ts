@@ -167,7 +167,9 @@ export function invoiceLinesTotal(lines: readonly Pick<InvoiceLine, 'amount' | '
 /**
  * P1's breakdown lines → invoice lines (one per PayLine, in order). A deduction always takes money off (its amount is
  * made negative whatever sign the breakdown used); an adjustment that corrects an earlier week becomes a
- * 'correction' line.
+ * 'correction' line. Release 1.3.1 fix: the line's note comes too (why it is what it is), unless the description
+ * already says it (a bonus: "Bonus: top seller") — the note is wording, so it never changes what is paid
+ * (sameInvoicePayment).
  */
 export function invoiceLinesFromBreakdown(b: Pick<WeekPayBreakdown, 'lines' | 'weekStart'>): InvoiceLine[] {
   return b.lines.map((l: PayLine): InvoiceLine => {
@@ -178,8 +180,20 @@ export function invoiceLinesFromBreakdown(b: Pick<WeekPayBreakdown, 'lines' | 'w
     if (l.rate !== undefined) line.unitPrice = l.rate;
     if (l.campaignId !== undefined) line.campaignId = l.campaignId;
     if (l.sourceWeekStart) line.sourceWeekStart = l.sourceWeekStart;
+    const note = l.note?.trim();
+    if (note && !l.label.includes(note)) line.note = note;
     return line;
   });
+}
+
+/**
+ * Release 1.3.1 fix: a line's note as the invoice shows it, in grey under the description (screen and PDF): sentence
+ * case ("not yet confirmed by BCN" → "Not yet confirmed by BCN"). Null for a line without one — every line of an
+ * invoice issued before the fix.
+ */
+export function invoiceLineNote(l: Pick<InvoiceLine, 'note'>): string | null {
+  const note = l.note?.trim();
+  return note ? note[0]!.toUpperCase() + note.slice(1) : null;
 }
 
 /** The stored run's figures, for invoice lines when P1's breakdown is not available (or does not match the run). */

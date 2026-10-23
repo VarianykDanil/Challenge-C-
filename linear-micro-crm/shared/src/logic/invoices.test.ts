@@ -15,6 +15,7 @@ import {
   invoiceLinesFor,
   invoiceLinesFromBreakdown,
   invoiceLinesFromRun,
+  invoiceLineNote,
   invoiceLinesTotal,
   invoiceMoney,
   isInvoicePayable,
@@ -196,6 +197,39 @@ test('lines from P1\'s breakdown: the base paid, the commission shown as not pai
   assert.equal(lines[3]!.sourceWeekStart, '2026-10-05');
   // 254 + 25 − 20 − 12.50 = £246.50 (the £160 commission is listed, not paid)
   assert.equal(invoiceLinesTotal(lines), 246.5);
+});
+
+test('Release 1.3.1 fix: each line keeps the breakdown\'s note (why it is what it is), never one its description already says', () => {
+  const week: Pick<WeekPayBreakdown, 'lines' | 'weekStart'> = {
+    weekStart: '2026-10-12',
+    lines: [
+      { kind: 'base', label: '4 days × £63.50', quantity: 4, rate: 63.5, amount: 254, paid: false },
+      { kind: 'commission', label: 'CHN: 6 subs × £45.00', quantity: 6, rate: 45, amount: 270, paid: true, campaignId: 2, campaignCode: 'CHN', note: '7 logged, 1 cancelled by CHN' },
+      { kind: 'commission', label: 'BCN: 3 subs × £10.00', quantity: 3, rate: 10, amount: 30, paid: true, campaignId: 1, campaignCode: 'BCN', note: 'not yet confirmed by BCN' },
+      { kind: 'bonus', label: 'Bonus: top seller in September', amount: 50, paid: true, adjustmentId: 7, note: 'top seller in September' },
+      { kind: 'adjustment', label: 'Correction for w/c 5 Oct', amount: -10, paid: true, sourceWeekStart: '2026-10-05', adjustmentId: 8, note: '1 cancelled by BCN: paid for 10, confirmed 9' },
+      { kind: 'adjustment', label: 'Adjustment', amount: 5, paid: true, adjustmentId: 9, note: '  ' },
+      { kind: 'deduction', label: 'Deductions', amount: 12.5, paid: true },
+    ],
+  };
+  const lines = invoiceLinesFromBreakdown(week);
+  assert.deepEqual(lines.map((l) => l.note), [
+    undefined,
+    '7 logged, 1 cancelled by CHN',
+    'not yet confirmed by BCN',
+    undefined, // the bonus's note is its description already ("Bonus: top seller in September")
+    '1 cancelled by BCN: paid for 10, confirmed 9',
+    undefined, // nothing to say
+    undefined,
+  ]);
+  assert.ok(!('note' in lines[0]!), 'a line without a note has no note key (stored invoices look as before)');
+  // as the invoice shows it, under the description: sentence case; nothing for a line without one
+  assert.deepEqual(lines.map(invoiceLineNote), [null, '7 logged, 1 cancelled by CHN', 'Not yet confirmed by BCN', null, '1 cancelled by BCN: paid for 10, confirmed 9', null, null]);
+  assert.equal(invoiceLineNote({}), null, 'an invoice stored before 1.3.1 (no notes) reads as before');
+  // a note is wording: the same payment with or without it, so a note alone never makes a new version
+  const total = invoiceLinesTotal(lines);
+  const without = lines.map(({ note: _note, ...l }) => l);
+  assert.equal(sameInvoicePayment({ total, lines }, { total, lines: without }), true);
 });
 
 test('invoiceLinesFor: the breakdown when it adds up to the run, else the run\'s own figures', () => {

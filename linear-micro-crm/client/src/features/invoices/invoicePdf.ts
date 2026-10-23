@@ -1,8 +1,9 @@
 // Release 1.3 — OWNED BY P2 invoices. The invoice as an A4 PDF from P4's page primitives (client/src/lib/pdf): header,
-// supplier and customer blocks, the lines, the total, the self-billing sentence, both signatures and the footer.
+// supplier and customer blocks, the lines (each with its note, release 1.3.1), the total, the self-billing sentence,
+// both signatures and the footer.
 // Loaded on demand (PayslipModal imports it on click); the PDF button shows only while PDF_EXPORTS_READY.
 import type { Invoice } from '@lm/shared';
-import { INVOICE_STATUS_LABELS } from '@lm/shared';
+import { INVOICE_STATUS_LABELS, invoiceLineNote } from '@lm/shared';
 import { pdfDocument, type PdfLineRow } from '@/lib/pdf';
 import { formatNumber } from '@/lib/format';
 import { reportAuditEvent } from '@/api/auditEvents';
@@ -30,14 +31,19 @@ export const invoicePdfFilename = (inv: Pick<Invoice, 'number' | 'version'>) => 
 
 export async function downloadInvoicePdf(inv: Invoice): Promise<void> {
   const doc = await pdfDocument({ orientation: 'portrait', title: `Self-billed invoice ${inv.number}` });
-  // PdfLineRow is string cells plus an optional `muted` flag (the "not paid" lines)
-  const rows = inv.lines.map((l) => ({
-    description: l.paid ? l.description : `${l.description} (not paid)`,
-    qty: l.quantity !== undefined ? formatNumber(l.quantity) : '',
-    rate: l.unitPrice !== undefined ? money(l.unitPrice) : '',
-    amount: signedMoney(l.amount),
-    ...(l.paid ? {} : { muted: true }),
-  }) as unknown as PdfLineRow);
+  // PdfLineRow is string cells plus an optional `muted` flag (the "not paid" lines) and `note` (release 1.3.1: why the
+  // line is what it is, drawn smaller and grey under the description; none on an invoice issued before then)
+  const rows = inv.lines.map((l) => {
+    const note = invoiceLineNote(l);
+    return {
+      description: l.paid ? l.description : `${l.description} (not paid)`,
+      qty: l.quantity !== undefined ? formatNumber(l.quantity) : '',
+      rate: l.unitPrice !== undefined ? money(l.unitPrice) : '',
+      amount: signedMoney(l.amount),
+      ...(l.paid ? {} : { muted: true }),
+      ...(note ? { note } : {}),
+    } as unknown as PdfLineRow;
+  });
   const signature = await dataUrlOf(inv.signatory.signatureUrl);
   doc
     .header({

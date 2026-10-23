@@ -2,7 +2,7 @@
 
 Step-by-step for everyone at Linear MCR, by role. Start with **Everyone**, then jump to your section. Buttons, tabs and fields are named exactly as they appear in the app, in **bold**.
 
-- [What's new in 1.3.1](#whats-new-in-131) — the Sapiens team's demo sign-ins, and leaders and recruiters can add people
+- [What's new in 1.3.1](#whats-new-in-131) — the Sapiens team's demo sign-ins, leaders and recruiters can add people, and invoice lines that say why
 - [What's new in 1.3](#whats-new-in-13) — pay you can check, client accounts, learning videos, PDFs, venues and the audit
 - [What's new in 1.2](#whats-new-in-12) — learning the COD pack and your pitch, and field and office upgrades
 - [What's new in 1.1](#whats-new-in-11) — the smart release
@@ -53,6 +53,21 @@ demo accounts (see the go-live checklist in [DEPLOY.md](DEPLOY.md)); `LM_DEMO_AC
 **Team → Add person** is now there for recruiters and for leaders (Team Leaders and Crew Leaders), as well as
 administrators. See [Adding a person (leaders)](#adding-a-person-leaders) and
 [Adding a person (recruiters)](#adding-a-person-recruiters).
+
+### Invoice lines say why
+
+Each line of your self-billing invoice now says why it is what it is, in grey under the line, as **How this week is
+worked out** does: "8 logged, 1 cancelled by CHN", "Not yet confirmed by BCN", or for a correction "2 cancelled by BCN:
+paid for 11, confirmed 9". It is on the printed invoice and the PDF too, so you can check a line before you accept it
+or tap **Something's wrong**. Invoices issued before this update stay exactly as they were issued (no notes); the next
+version of one, and every new week's invoice, has them.
+
+### Fair-use limit on bookings and interview sheets
+
+**I'm working this** / **I can't make it**, **Edit bookings** and the interview sheet's saves now count towards the
+same limit as check-ins and other quick changes: 60 changes a minute per person. Normal use never comes near it. If
+you do reach it, Linear Hub says "That is more than 60 changes in a minute. Wait a minute, then try again." and
+nothing is changed; on an interview sheet it shows **Not saved** with **Try again**, and your words stay on the screen.
 
 ## What's new in 1.3
 
@@ -109,6 +124,8 @@ is listed as *Not paid*, and the other way round), the total, and the deadline.
 - Do nothing, and the invoice **counts as accepted at 12:00 the day before payday** (Thursday for a Friday payday).
   You always get at least 24 hours: an invoice that arrives later than Wednesday 12:00 counts as accepted 24 hours
   after it arrived (the invoice and your notification say exactly when).
+- A line can have a note in grey under it saying why it is what it is ("8 logged, 1 cancelled by CHN", "Not yet
+  confirmed by BCN"; release 1.3.1).
 - If what you are paid changes (a late gauge, a client's statement, a correction), you get a new version to accept,
   and a notification such as "Your invoice changed: £300.00 (was £345.00)". It has the same 24 hours at least, even on
   payday. Until you accept it, the office needs a reason to pay it, so accept it as soon as it is right. A change that

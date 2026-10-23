@@ -146,7 +146,7 @@ Every command below exists in `package.json` (root) or `server/package.json`.
 | `npm run service:status` | Is the service loaded and answering; its last 20 log lines; whether it still points at this Node |
 | `npm run service:install -- --print` | Dry run: print the service file and the commands for this machine and change nothing (add `--platform=darwin`, `linux` or `win32` to see another platform's file) |
 | `npm run typecheck` | Typecheck `shared`, `server` and `client` |
-| `npm test` | Run the shared domain-logic tests and the server route tests (`node:test`) |
+| `npm test` | Run the shared domain-logic tests and the server route tests (`node:test`). They write only to temporary folders, never to `server/data` (not even the `app-secret` key file) |
 | `npm run smoke -w server` | Boot the API on a temporary seeded database and exercise every endpoint against the contract (it pins the business clock to 15:00 on the latest weekday; `SMOKE_REAL_CLOCK=1` uses the real clock) |
 
 ### Environment variables
@@ -435,7 +435,7 @@ linear-micro-crm/
 - [`docs/ROADMAP.md`](docs/ROADMAP.md) — what comes next
 - [`docs/OWNER_NOTES_1.3.md`](docs/OWNER_NOTES_1.3.md) — what the owner needs to set up or decide for 1.3 (Gmail app password, company details, client accounts, videos)
 - [`docs/DEPLOY.md`](docs/DEPLOY.md) — putting Linear Hub online (HTTPS, backups off the server, a go-live checklist)
-- [`CHANGELOG.md`](CHANGELOG.md) — what changed in each release (1.3.1: the Sapiens demo logins, leaders and recruiters add people; 1.3.0: pay, invoices, statements, clients; 1.2.0: learning, field and office; 1.1.0: the smart release)
+- [`CHANGELOG.md`](CHANGELOG.md) — what changed in each release (1.3.1: the Sapiens demo logins, leaders and recruiters add people, invoice lines that say why; 1.3.0: pay, invoices, statements, clients; 1.2.0: learning, field and office; 1.1.0: the smart release)
 - [`docs/API.md`](docs/API.md) — the API contract and implementation notes
 - [`docs/LOGIC.md`](docs/LOGIC.md) and [`docs/DESIGN.md`](docs/DESIGN.md) — the maths (section 14: the smart release, backups and what loads when; section 15: release 1.2; section 16: release 1.3) and the design system
 - [`docs/LOAD_TEST.md`](docs/LOAD_TEST.md) — the load and robustness report (§10: 1.1 against 1.0 on the same machine)
