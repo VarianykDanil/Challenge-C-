@@ -9,10 +9,13 @@
 //   being overwritten, and so does an update whose entry was deleted meanwhile (it is not quietly re-created).
 //   The (eventId, userId, date) upsert makes a repeated send idempotent.
 // Replay only ever reads the signed-in person's key, and the server still enforces who may write what.
+// Release 1.4 (package S): a session now ends 14 hours after sign-in, mid-shift perhaps. Nothing waiting here is lost:
+// the key is per person and survives the sign-out, a 401 stops the replay with every item still waiting, and so does
+// the setup gate's 403 (PIN or two-step verification still to set up) — the replay runs again after the next sign-in.
 import { useSyncExternalStore } from 'react';
 import type { GaugeEntryWithMeta, GaugeUpsertInput } from '@lm/shared';
 import { OUTBOX_LIMIT, replayDecision, replayOutcome, sameGaugeDay } from '@lm/shared';
-import { ApiError, apiRaw, isNetworkError, qs } from '@/api/client';
+import { ApiError, PIN_SETUP_REQUIRED_EVENT, apiRaw, isNetworkError, qs } from '@/api/client';
 
 export type OutboxStatus = 'waiting' | 'review' | 'failed';
 
@@ -239,8 +242,28 @@ function forcedInput(input: GaugeUpsertInput): GaugeUpsertInput {
   return out;
 }
 
-function handleError(ownerId: number, item: OutboxItem, e: unknown): StepResult {
+/**
+ * One request, noting whether the answer was a setup gate's 403 (a PIN or two-step verification still to set up:
+ * api/client.ts announces it with PIN_SETUP_REQUIRED_EVENT before it throws). Such an item keeps waiting.
+ */
+async function noteGate<T>(fn: () => Promise<T>): Promise<{ value: T } | { error: unknown; gate: boolean }> {
+  let gate = false;
+  const onGate = () => {
+    gate = true;
+  };
+  if (typeof window !== 'undefined') window.addEventListener(PIN_SETUP_REQUIRED_EVENT, onGate);
+  try {
+    return { value: await fn() };
+  } catch (error) {
+    return { error, gate };
+  } finally {
+    if (typeof window !== 'undefined') window.removeEventListener(PIN_SETUP_REQUIRED_EVENT, onGate);
+  }
+}
+
+function handleError(ownerId: number, item: OutboxItem, e: unknown, gate = false): StepResult {
   if (isNetworkError(e)) return { kind: 'stop', reason: 'network' };
+  if (gate) return { kind: 'stop', reason: 'signed-out' }; // set up the PIN / two-step first; it waits
   if (e instanceof ApiError) {
     const outcome = replayOutcome(e.status);
     if (outcome === 'failed') {
@@ -258,13 +281,9 @@ function handleError(ownerId: number, item: OutboxItem, e: unknown): StepResult 
 
 async function replayOne(ownerId: number, item: OutboxItem, force: boolean): Promise<StepResult> {
   const { eventId, userId, date } = item.input;
-  let existing: GaugeEntryWithMeta | null;
-  try {
-    const r = await apiRaw<GaugeEntryWithMeta[]>(`/gauges${qs({ eventId, userId, from: date, to: date, limit: 5 })}`);
-    existing = (r.data ?? []).find((g) => g.eventId === eventId && g.userId === userId && g.date === date) ?? null;
-  } catch (e) {
-    return handleError(ownerId, item, e);
-  }
+  const lookup = await noteGate(() => apiRaw<GaugeEntryWithMeta[]>(`/gauges${qs({ eventId, userId, from: date, to: date, limit: 5 })}`));
+  if ('error' in lookup) return handleError(ownerId, item, lookup.error, lookup.gate);
+  const existing = (lookup.value.data ?? []).find((g) => g.eventId === eventId && g.userId === userId && g.date === date) ?? null;
   // A save that reached the server but whose answer was lost: nothing left to send.
   if (existing && sameGaugeDay(existing, item.input)) {
     discardOutboxItem(ownerId, item.id);
@@ -282,13 +301,10 @@ async function replayOne(ownerId: number, item: OutboxItem, force: boolean): Pro
       return { kind: 'review', item: { ...item, status: 'review', server, error: undefined } };
     }
   }
-  try {
-    const r = await apiRaw<GaugeEntryWithMeta>('/gauges', { method: 'POST', json: force ? forcedInput(item.input) : item.input });
-    discardOutboxItem(ownerId, item.id);
-    return { kind: 'sent', outcome: replayOutcome(r.status) === 'logged' ? 'logged' : 'updated', entry: r.data ?? null };
-  } catch (e) {
-    return handleError(ownerId, item, e);
-  }
+  const sent = await noteGate(() => apiRaw<GaugeEntryWithMeta>('/gauges', { method: 'POST', json: force ? forcedInput(item.input) : item.input }));
+  if ('error' in sent) return handleError(ownerId, item, sent.error, sent.gate);
+  discardOutboxItem(ownerId, item.id);
+  return { kind: 'sent', outcome: replayOutcome(sent.value.status) === 'logged' ? 'logged' : 'updated', entry: sent.value.data ?? null };
 }
 
 // One replay at a time: replayAll and "Send mine anyway" never race on the same item.

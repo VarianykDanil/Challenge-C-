@@ -1,16 +1,20 @@
 // Release 1.2 — OWNED BY U1 sign-in-pin. Settings > Security, under two-step verification (mounted in pages/Settings.tsx
 // in an ErrorBoundary with fallback={null}; `className` carries the spacing, mt-4):
 //  - "Sign-in PIN": your own PIN — set, change (asks for the current one) or remove (not while a PIN is required).
-//  - "Sign-in rules" (administrators): require a PIN for everyone, require two-step verification for administrators,
-//    and the session idle timeout. Switching a rule on asks first; the server refuses a rule that would lock out the
-//    admin making the change, and the switches say so before anyone tries.
+//  - "Sign-in rules" (administrators): require a PIN for everyone, and the session idle timeout. Switching a rule on
+//    asks first; the server refuses a rule that would lock out the admin making the change, and the switch says so
+//    before anyone tries. Release 1.4 (package S): the "Require two-step verification for administrators" switch is now
+//    a plain line ("Two-step verification is required for everyone"), and "Sign out after" sets the hours from sign-in
+//    to the automatic sign-out (4–24, default 14).
 import { useEffect, useId, useState, type FormEvent } from 'react';
-import { KeyRound, RefreshCw, Trash2 } from 'lucide-react';
+import { KeyRound, RefreshCw, ShieldCheck, Trash2 } from 'lucide-react';
 import clsx from 'clsx';
 import { useQueryClient } from '@tanstack/react-query';
-import { PIN_PROBLEM_MESSAGES, SESSION_IDLE_HOURS_DEFAULT, isPinFormatValid, pinProblem, type SecuritySettings } from '@lm/shared';
+import {
+  PIN_PROBLEM_MESSAGES, SESSION_IDLE_HOURS_DEFAULT, SESSION_MAX_HOURS_DEFAULT, SESSION_MAX_HOURS_MAX, SESSION_MAX_HOURS_MIN, isPinFormatValid, pinProblem,
+  type SecuritySettings,
+} from '@lm/shared';
 import { ApiError } from '@/api/client';
-import { useTwoFactorStatus } from '@/api/hooks';
 import { pinKeys, usePinStatus, useRemovePin, useSecuritySettings, useSetPin, useUpdateSecuritySettings } from '@/api/pin';
 import { useCurrentUser } from '@/auth/AuthProvider';
 import { Badge, Button, Modal, Select, Skeleton, Switch, useToast } from '@/components/ui';
@@ -290,7 +294,17 @@ function idleOptions(current: number): { value: string; label: string }[] {
   return hours.map((h) => ({ value: String(h), label: `${PIN_COPY.rules.hours(h)}${h === SESSION_IDLE_HOURS_DEFAULT ? ' (default)' : ''}` }));
 }
 
-type RuleKey = 'requirePin' | 'requireAdminTwoFactor';
+/** Release 1.4: "Sign out after" — every two hours from 4 to 24 (the server takes any whole hour in the range). */
+const MAX_AGE_CHOICES = [4, 6, 8, 10, 12, 14, 16, 18, 20, 22, 24] as const;
+
+function maxAgeOptions(current: number): { value: string; label: string }[] {
+  const hours = MAX_AGE_CHOICES.includes(current as (typeof MAX_AGE_CHOICES)[number]) ? [...MAX_AGE_CHOICES] : [...MAX_AGE_CHOICES, current].sort((a, b) => a - b);
+  return hours
+    .filter((h) => h >= SESSION_MAX_HOURS_MIN && h <= SESSION_MAX_HOURS_MAX)
+    .map((h) => ({ value: String(h), label: `${PIN_COPY.rules.hours(h)}${h === SESSION_MAX_HOURS_DEFAULT ? ' (default)' : ''}` }));
+}
+
+type RuleKey = 'requirePin';
 
 /**
  * One rule switch. When switching it on would lock out the admin looking at it (`blocked`), the switch is disabled and
@@ -320,11 +334,10 @@ function SignInRulesSection() {
   const settings = useSecuritySettings();
   const update = useUpdateSecuritySettings();
   const ownPin = usePinStatus();
-  const ownTwoFactor = useTwoFactorStatus();
   const [confirm, setConfirm] = useState<RuleKey | null>(null);
   const s = settings.data;
   const hasOwnPin = Boolean(ownPin.data?.hasPin);
-  const hasOwnTwoFactor = Boolean(ownTwoFactor.data?.enabled);
+  const maxHours = s?.sessionMaxHours ?? SESSION_MAX_HOURS_DEFAULT;
 
   async function save(patch: Partial<SecuritySettings>) {
     try {
@@ -371,15 +384,29 @@ function SignInRulesSection() {
             body={t.requirePinBody}
             blockedNote={t.requirePinNeedsOwn}
           />
-          <RuleRow
-            checked={s.requireAdminTwoFactor}
-            onChange={toggle('requireAdminTwoFactor')}
-            busy={update.isPending}
-            blocked={!s.requireAdminTwoFactor && !hasOwnTwoFactor}
-            label={t.requireAdmin2fa}
-            body={t.requireAdmin2faBody}
-            blockedNote={t.requireAdmin2faNeedsOwn}
-          />
+          {/* Release 1.4 (package S): not a switch any more — required for every account */}
+          <div className="flex items-start gap-3 py-3" data-testid="two-factor-everyone">
+            <ShieldCheck className="mt-0.5 h-4 w-4 shrink-0 text-success" aria-hidden />
+            <div className="min-w-0">
+              <p className="text-sm font-medium text-fg">{t.twoFactorEveryone}</p>
+              <p className="mt-0.5 text-xs text-muted">{t.twoFactorEveryoneBody}</p>
+            </div>
+          </div>
+          <div className="flex flex-col gap-2 py-3 sm:flex-row sm:items-center sm:justify-between sm:gap-4">
+            <div className="min-w-0">
+              <label htmlFor={`${uid}-max-age`} className="text-sm font-medium text-fg">{t.maxAge}</label>
+              <p className="mt-0.5 text-xs text-muted">{t.maxAgeHint(maxHours)}</p>
+            </div>
+            <Select
+              id={`${uid}-max-age`}
+              data-testid="session-max-hours"
+              className="sm:w-44"
+              value={String(maxHours)}
+              onChange={(e) => void save({ sessionMaxHours: Number(e.target.value) })}
+              options={maxAgeOptions(maxHours)}
+              disabled={update.isPending}
+            />
+          </div>
           <div className="flex flex-col gap-2 pt-3 sm:flex-row sm:items-center sm:justify-between sm:gap-4">
             <div className="min-w-0">
               <label htmlFor={`${uid}-idle`} className="text-sm font-medium text-fg">{t.idle}</label>
@@ -404,15 +431,6 @@ function SignInRulesSection() {
         onConfirm={() => void save({ requirePin: true })}
         title={t.requirePinConfirmTitle}
         description={t.requirePinConfirmBody}
-        confirmLabel={t.turnOn}
-        loading={update.isPending}
-      />
-      <ConfirmDialog
-        open={confirm === 'requireAdminTwoFactor'}
-        onClose={() => setConfirm(null)}
-        onConfirm={() => void save({ requireAdminTwoFactor: true })}
-        title={t.requireAdmin2faConfirmTitle}
-        description={t.requireAdmin2faConfirmBody}
         confirmLabel={t.turnOn}
         loading={update.isPending}
       />

@@ -217,14 +217,21 @@ export function usersRouter(db: Db): Router {
 
   /**
    * Lost-device recovery: an admin switches someone's two-step verification off without a code (active and pending
-   * secrets, recovery codes and open challenges go) and signs them out everywhere. Admins turn their own off through
-   * `POST /auth/2fa/disable`, which asks for a code, never through this route.
+   * secrets, recovery codes and open challenges go) and signs them out everywhere. Release 1.4: two-step is required
+   * for everyone, so they set it up again at their next sign-in. Never your own: you sign in with a recovery code and
+   * make new codes, or run `npm run 2fa:reset -- <email>` on the server (server/src/twoFactorReset.ts).
    */
   router.post('/:id/2fa/reset', requireRole('admin'), (req, res) => {
     const me = currentUser(req);
     const id = idParam(req);
     if (!getStaffUser(db, id)) throw notFound('User');
-    if (id === me.id) throw badRequest('Use Settings → Security to turn off your own two-step verification');
+    // Release 1.4: two-step cannot be turned off any more (required for every account but the demo sign-in ones)
+    if (id === me.id) {
+      throw badRequest(
+        `You cannot reset your own two-step verification here. Sign in with a recovery code and make new codes in Settings → Security, ` +
+          `or run "npm run 2fa:reset -- ${me.email}" on the server.`,
+      );
+    }
     clearTwoFactor(db, id);
     destroyUserSessions(db, id);
     res.status(204).end();

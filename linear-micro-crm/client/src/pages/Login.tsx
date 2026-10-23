@@ -1,6 +1,7 @@
 // Owned by the Product Designer (layout); the two-step verification step by the Frontend Developer; the PIN step by
 // U1 sign-in-pin (release 1.2); the client sign-in (an access code instead of an employee ID) and the demo client button
-// by P6 client-portal (release 1.3).
+// by P6 client-portal (release 1.3). Release 1.4 (package S): the sentence after the automatic sign-out 14 hours after
+// sign-in, on step one (api/sessionEnd.ts); two-step verification is asked of every account but the demo ones.
 // Contract: exports LoginPage(); uses useAuth() and pickDemoAccounts().
 import { useEffect, useId, useRef, useState, type FormEvent } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
@@ -11,6 +12,7 @@ import { COPY } from '@/content/copy';
 import { useAuth } from '@/auth/AuthProvider';
 import { pickDemoAccounts } from '@/api/hooks';
 import { ApiError } from '@/api/client';
+import { onSessionEnded, peekSessionEndNotice, takeSessionEndNotice } from '@/api/sessionEnd';
 import { apiMessage } from '@/features/common/QueryStates';
 import { OneTimeCodeInput, RECOVERY_CODE_RE, RecoveryCodeInput, isCompleteCode } from '@/features/settings/OneTimeCodeInput';
 import { PinField, PinInput } from '@/features/settings/PinInput';
@@ -61,8 +63,11 @@ export function LoginPage() {
   const [employeeId, setEmployeeId] = useState('');
   const [touched, setTouched] = useState<{ email?: boolean; employeeId?: boolean }>({});
   const [error, setError] = useState<string | null>(null);
-  /** Informational banner on step one, e.g. after a verification challenge expired. */
-  const [notice, setNotice] = useState<string | null>(null);
+  /**
+   * Informational banner on step one, e.g. after a verification challenge expired. Release 1.4: or why the last
+   * session ended — "For security you are signed out 14 hours after signing in. Sign in again to carry on."
+   */
+  const [notice, setNotice] = useState<string | null>(() => peekSessionEndNotice());
   const [submitting, setSubmitting] = useState<null | 'form' | string>(null);
   const emailRef = useRef<HTMLInputElement>(null);
 
@@ -88,6 +93,16 @@ export function LoginPage() {
   const stage: 'credentials' | 'pin' | 'code' = challenge ? 'code' : pinStep ? 'pin' : 'credentials';
 
   useEffect(() => { if (stage === 'credentials') emailRef.current?.focus(); }, [stage]);
+
+  // Release 1.4: the sentence is shown once (forgotten now), and a reason that arrives a moment later (another request
+  // was still in flight when the page opened) still shows.
+  useEffect(() => {
+    takeSessionEndNotice();
+    return onSessionEnded(() => {
+      const late = takeSessionEndNotice();
+      if (late) setNotice(late);
+    });
+  }, []);
 
   const emailError = touched.email && !EMAIL_RE.test(email.trim()) ? 'Enter a valid work email.' : undefined;
   const client = isAccessCode(employeeId);
@@ -365,6 +380,7 @@ export function LoginPage() {
             {stage === 'code' ? (
               <TwoFactorStep
                 email={email}
+                client={client}
                 useRecovery={useRecovery}
                 code={code}
                 recoveryCode={recoveryCode}
@@ -382,6 +398,7 @@ export function LoginPage() {
             ) : stage === 'pin' ? (
               <PinStep
                 email={email}
+                client={client}
                 pin={pin}
                 error={pinError}
                 hint={pinHint}
@@ -516,6 +533,8 @@ export function LoginPage() {
 
 interface TwoFactorStepProps {
   email: string;
+  /** Release 1.4: a client account (an access code, not an employee ID). */
+  client: boolean;
   useRecovery: boolean;
   code: string;
   recoveryCode: string;
@@ -533,7 +552,7 @@ interface TwoFactorStepProps {
 }
 
 /** Step two of sign-in: the authenticator code (auto-submits on the sixth digit) or a recovery code. */
-function TwoFactorStep({ email, useRecovery, code, recoveryCode, error, locked, verifying, inputRef, onCodeChange, onRecoveryChange, onComplete, onSubmit, onToggleRecovery, onBack }: TwoFactorStepProps) {
+function TwoFactorStep({ email, client, useRecovery, code, recoveryCode, error, locked, verifying, inputRef, onCodeChange, onRecoveryChange, onComplete, onSubmit, onToggleRecovery, onBack }: TwoFactorStepProps) {
   const t = COPY.security.login;
   const canSubmit = useRecovery ? RECOVERY_CODE_RE.test(recoveryCode) : isCompleteCode(code);
   const disabled = locked || verifying;
@@ -594,7 +613,7 @@ function TwoFactorStep({ email, useRecovery, code, recoveryCode, error, locked, 
             {useRecovery ? t.useApp : t.useRecovery}
           </Button>
           <Button type="button" variant="link" size="sm" onClick={onBack} disabled={verifying} leftIcon={<ArrowLeft />}>
-            {t.back}
+            {client ? t.backClient : t.back}
           </Button>
         </div>
       </form>
@@ -604,6 +623,8 @@ function TwoFactorStep({ email, useRecovery, code, recoveryCode, error, locked, 
 
 interface PinStepProps {
   email: string;
+  /** Release 1.4: a client account (an access code, not an employee ID). */
+  client: boolean;
   pin: string;
   error: string | null;
   /** A quiet line under the field (e.g. tries left), shown when there is no error. */
@@ -617,7 +638,7 @@ interface PinStepProps {
 }
 
 /** Release 1.2 (U1): sign-in step for accounts with a PIN, between the credentials and the two-step code. */
-function PinStep({ email, pin, error, hint, locked, busy, inputRef, onPinChange, onSubmit, onBack }: PinStepProps) {
+function PinStep({ email, client, pin, error, hint, locked, busy, inputRef, onPinChange, onSubmit, onBack }: PinStepProps) {
   const t = PIN_COPY.login;
   return (
     <div data-testid="login-pin" className="animate-slide-up">
@@ -660,7 +681,7 @@ function PinStep({ email, pin, error, hint, locked, busy, inputRef, onPinChange,
         <p className="text-xs leading-relaxed text-muted">{t.forgot}</p>
         <div className="flex justify-end">
           <Button type="button" variant="link" size="sm" onClick={onBack} disabled={busy} leftIcon={<ArrowLeft />}>
-            {t.back}
+            {client ? t.backClient : t.back}
           </Button>
         </div>
       </form>

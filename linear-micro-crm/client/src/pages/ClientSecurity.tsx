@@ -2,6 +2,8 @@
 // access code, campaign) and their sign-in PIN: change it (asks for the current one; other devices are signed out),
 // or set one (the demo client, the only account allowed to have none). A PIN is required for client accounts, so it
 // can never be removed here. A lock shows when it ends. Endpoints: GET/POST /auth/pin (routes/auth.ts, U1).
+// Release 1.4 (package S): and their two-step verification (required for client accounts, the demo one aside): status,
+// new recovery codes, set up — the same section as Settings (features/settings/TwoFactorSection), in a client's words.
 import { useEffect, useId, useState, type FormEvent } from 'react';
 import { KeyRound, RefreshCw, ShieldCheck } from 'lucide-react';
 import { isPinFormatValid, pinProblem } from '@lm/shared';
@@ -14,6 +16,7 @@ import { CLIENT_PIN_COPY, clientPinProblemMessage } from '@/features/client/clie
 import { apiMessage, errorMessage } from '@/features/common/QueryStates';
 import { PinField, PinInput } from '@/features/settings/PinInput';
 import { PIN_COPY, pinUnlockTime } from '@/features/settings/pinCopy';
+import { TwoFactorSection } from '@/features/settings/TwoFactorSection';
 import { COPY } from '@/content/copy';
 import { formatDate, fullName } from '@/lib/format';
 import { usePageTitle } from '@/lib/usePageTitle';
@@ -43,6 +46,9 @@ export function ClientSecurityPage() {
           <p className="mt-4 text-xs text-muted">To change your name or email, ask Linear MCR. They can also switch your account off.</p>
         </Card>
         <ClientPinCard />
+        <Card data-testid="client-two-factor">
+          <TwoFactorSection audience="client" asCard />
+        </Card>
       </div>
     </>
   );

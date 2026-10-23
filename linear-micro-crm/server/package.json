@@ -17,6 +17,7 @@
     "backups": "NODE_NO_WARNINGS=1 node src/backup.ts --list",
     "restore": "NODE_NO_WARNINGS=1 node src/restore.ts",
     "pin:reset": "NODE_NO_WARNINGS=1 node src/pinReset.ts",
+    "2fa:reset": "NODE_NO_WARNINGS=1 node src/twoFactorReset.ts",
     "service:install": "NODE_NO_WARNINGS=1 node src/service.ts install",
     "service:uninstall": "NODE_NO_WARNINGS=1 node src/service.ts uninstall",
     "service:status": "NODE_NO_WARNINGS=1 node src/service.ts status",

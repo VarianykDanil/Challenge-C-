@@ -2,11 +2,12 @@
 // to the client portal, with their access code, whether they have created their PIN yet, and **Invite** (name, email →
 // the access code and sign-in instructions, shown once to copy into an email), **Edit** (correct the name or email),
 // **Reset PIN** and **Turn off** / **Turn on**. A PIN is required for client accounts: an invited client creates it at
-// their first sign-in ("No PIN yet" until then, and again after Reset PIN).
+// their first sign-in ("No PIN yet" until then, and again after Reset PIN). Release 1.4 (package S): so is two-step
+// verification, set up at sign-in after the PIN ("No two-step yet" until then); **Reset two-step** after a lost phone.
 import { useId, useState } from 'react';
-import { Copy, KeyRound, Pencil, Power, UserPlus, UsersRound } from 'lucide-react';
+import { Copy, KeyRound, Pencil, Power, ShieldOff, UserPlus, UsersRound } from 'lucide-react';
 import type { ClientAccount, ClientInviteResult } from '@lm/shared';
-import { useInviteClient, useResetClientPin, useUpdateClientAccount } from '@/api/clientPortal';
+import { useInviteClient, useResetClientPin, useResetClientTwoFactor, useUpdateClientAccount } from '@/api/clientPortal';
 import { Badge, Button, Card, CardHeader, EmptyState, Field, Input, Modal, useToast } from '@/components/ui';
 import { ConfirmDialog } from '@/features/common/ConfirmDialog';
 import { errorMessage } from '@/features/common/QueryStates';
@@ -14,7 +15,7 @@ import { fullName } from '@/lib/format';
 
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
-type Confirm = { account: ClientAccount; action: 'reset' | 'off' | 'on' };
+type Confirm = { account: ClientAccount; action: 'reset' | 'reset2fa' | 'off' | 'on' };
 
 export function ClientAccountsCard({ campaignId, campaignName, accounts, className }: { campaignId: number; campaignName: string; accounts: ClientAccount[]; className?: string }) {
   const [inviting, setInviting] = useState(false);
@@ -38,12 +39,20 @@ export function ClientAccountsCard({ campaignId, campaignName, accounts, classNa
                 <span className="min-w-0 truncate text-sm font-semibold text-fg">{fullName(a)}</span>
                 <Badge size="sm" tone={a.status === 'active' ? 'success' : 'neutral'} dot>{a.status === 'active' ? 'Active' : 'Turned off'}</Badge>
                 <Badge size="sm" tone={a.hasPin ? 'info' : 'warning'}>{a.hasPin ? 'PIN set' : 'No PIN yet'}</Badge>
+                {a.twoFactorEnabled !== undefined && (
+                  <Badge size="sm" tone={a.twoFactorEnabled ? 'info' : 'warning'} data-testid="client-two-factor-badge">
+                    {a.twoFactorEnabled ? 'Two-step on' : 'No two-step yet'}
+                  </Badge>
+                )}
               </div>
               <p className="mt-0.5 text-xs text-muted"><span className="break-all">{a.email}</span> · <span className="whitespace-nowrap font-mono">{a.accessCode}</span></p>
               <div className="mt-2 flex flex-wrap gap-2">
                 <Button size="md" variant="ghost" onClick={() => setEditing(a)} leftIcon={<Pencil aria-hidden />}>Edit</Button>
                 {a.hasPin && a.status === 'active' && (
                   <Button size="md" variant="ghost" onClick={() => setConfirm({ account: a, action: 'reset' })} leftIcon={<KeyRound aria-hidden />}>Reset PIN</Button>
+                )}
+                {a.twoFactorEnabled && a.status === 'active' && (
+                  <Button size="md" variant="ghost" onClick={() => setConfirm({ account: a, action: 'reset2fa' })} leftIcon={<ShieldOff aria-hidden />}>Reset two-step</Button>
                 )}
                 <Button size="md" variant="ghost" onClick={() => setConfirm({ account: a, action: a.status === 'active' ? 'off' : 'on' })} leftIcon={<Power aria-hidden />}>
                   {a.status === 'active' ? 'Turn off' : 'Turn on'}
@@ -63,14 +72,21 @@ export function ClientAccountsCard({ campaignId, campaignName, accounts, classNa
 function AccountConfirm({ confirm: { account, action }, onClose }: { confirm: Confirm; onClose: () => void }) {
   const toast = useToast();
   const reset = useResetClientPin();
+  const reset2fa = useResetClientTwoFactor();
   const update = useUpdateClientAccount();
   const name = fullName(account);
   const text = {
     reset: { title: `Reset ${name}’s PIN?`, body: 'They are signed out everywhere and create a new PIN when they next sign in with their email and access code.', label: 'Reset PIN', done: 'PIN reset' },
+    reset2fa: {
+      title: `Reset ${name}’s two-step verification?`,
+      body: 'For a lost or new phone. They are signed out everywhere and set it up again, with a new authenticator code, when they next sign in.',
+      label: 'Reset two-step',
+      done: 'Two-step verification reset',
+    },
     off: { title: `Turn off ${name}’s account?`, body: 'They are signed out at once and cannot sign in until you turn it back on. Their posts stay.', label: 'Turn off', done: 'Account turned off' },
     on: { title: `Turn on ${name}’s account?`, body: 'They can sign in again with their email, access code and PIN.', label: 'Turn on', done: 'Account turned on' },
   }[action];
-  const busy = reset.isPending || update.isPending;
+  const busy = reset.isPending || reset2fa.isPending || update.isPending;
   return (
     <ConfirmDialog
       open
@@ -83,6 +99,7 @@ function AccountConfirm({ confirm: { account, action }, onClose }: { confirm: Co
       onConfirm={() => {
         const done = { onSuccess: () => { toast.success(text.done, name); onClose(); }, onError: (e: unknown) => toast.error('Could not do that', errorMessage(e)) };
         if (action === 'reset') reset.mutate(account.id, done);
+        else if (action === 'reset2fa') reset2fa.mutate(account.id, done);
         else update.mutate({ id: account.id, status: action === 'off' ? 'left' : 'active' }, done);
       }}
     />

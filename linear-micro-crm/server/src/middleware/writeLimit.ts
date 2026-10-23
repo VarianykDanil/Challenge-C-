@@ -11,6 +11,7 @@
  *   POST, DELETE /events/:id/roster/me      "I'm working this" / "I can't make it" (release 1.3.1 fix)
  *   PUT  /events/:id/roster                 Edit bookings (release 1.3.1 fix)
  *   PUT  /recruitment/interviews/:id/answers   the interview sheet's autosave (release 1.3.1 fix)
+ *   POST /client-accounts/:id/reset-2fa         an admin resets a client account's two-step verification (release 1.4)
  * The next one inside the minute is refused with 429 and a plain sentence (WRITE_LIMIT_MESSAGE, `Retry-After: 60`);
  * a refused request does not count. Reads, other writes and signed-out requests pass straight through (a signed-out
  * write still gets its 401 from requireAuth). Paths match case-insensitively and with or without a trailing slash,
@@ -69,6 +70,8 @@ export const WRITE_LIMITED_ROUTES: readonly { method: 'POST' | 'PUT' | 'DELETE';
   { method: 'DELETE', path: /^\/events\/[^/]+\/roster\/me$/ },
   { method: 'PUT', path: /^\/events\/[^/]+\/roster$/ },
   { method: 'PUT', path: /^\/recruitment\/interviews\/[^/]+\/answers$/ },
+  // Release 1.4 (package S)
+  { method: 'POST', path: /^\/client-accounts\/[^/]+\/reset-2fa$/ },
 ];
 
 /** Does the per-person write limit cover this request? `path` is relative to /api, e.g. "/checkins". */

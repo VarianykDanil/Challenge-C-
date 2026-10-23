@@ -161,17 +161,20 @@ export function CreatePinStep() {
 }
 
 /**
- * "Set up two-step verification" for an administrator while the admin rule requires it. The setup itself is the
+ * "Set up two-step verification" — release 1.4 (package S): for every account that has not set it up (the demo sign-in
+ * accounts aside), client accounts included (after "Create your PIN"). The setup itself is the
  * Settings modal (scan, verify, save the recovery codes). `onStart` runs as it opens (the gate then keeps this step up
  * while the modal is open), `onDone` when it closes, finished or not, and the gate re-reads /auth/me to decide whether
  * the app opens.
  */
 export function TwoFactorRequiredStep({ onStart, onDone }: { onStart: () => void; onDone: () => void }) {
   const [open, setOpen] = useState(false);
+  const user = useCurrentUser();
   const t = PIN_COPY.twoFactor;
   return (
     <StepFrame testId="two-factor-required-step">
-      <StepHeading icon={<ShieldCheck />} eyebrow={t.eyebrow} title={t.heading} body={t.body} />
+      {/* Release 1.4 (package S): every account, a client account (after its PIN) in its own words */}
+      <StepHeading icon={<ShieldCheck />} eyebrow={t.eyebrow} title={t.heading} body={user.role === 'client' ? t.clientBody : t.body} />
       <p className="mt-3 text-xs text-muted">{COPY.security.twoFactor.apps}</p>
       <Button
         className="mt-6"

@@ -2,11 +2,14 @@
 // Smart release 1.1 (p7-signal-proof-logging): saves without signal go to the gauge outbox on this phone; `prefill`
 // starts from the tally's counts or an entry kept on the phone; smart defaults (today's event, a check-in chip, the
 // first rep without an entry) apply when the modal is opened with no event and no entry.
-import { useEffect, useId, useMemo, useRef, useState } from 'react';
+// Release 1.4 (package S): signed out with the form open (the session ends 14 hours after sign-in), nothing typed is
+// lost — a save answered 401 is kept on this phone and sent after the next sign-in, and counts typed but not saved
+// come back the next time Log gauges opens (gaugeDraft.ts).
+import { useEffect, useId, useMemo, useRef, useState, type MutableRefObject } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 import type { GaugeEntryWithMeta, GaugeKey, GaugeTotals, GaugeUpsertInput, SalesEventWithMeta } from '@lm/shared';
 import { EMPTY_TOTALS, GAUGE_KEYS, GAUGE_LABELS, GAUGE_MAX_PER_DAY, firstMemberWithoutEntry, funnelRatios, inCheckInWindow, preselectTodayEvent, validateGaugeFunnel } from '@lm/shared';
-import { AlertTriangle, Clock, Smartphone } from 'lucide-react';
+import { AlertTriangle, Clock, History, Smartphone } from 'lucide-react';
 import { Button, Field, Input, Modal, Select, Stepper, Textarea, useToast } from '@/components/ui';
 import { ApiError, isNetworkError } from '@/api/client';
 import { useEvent, useGauges, useUpdateGauge, useUpsertGauge, useUsers } from '@/api/hooks';
@@ -21,6 +24,7 @@ import { GAUGE_HELP } from '@/content/copy';
 import { format } from 'date-fns';
 import { cachedMembers, useLoggableEvents } from './loggableEvents';
 import { discardOutboxItem, enqueueGauge, outboxAvailable, outboxItemFor, useOutbox, type OutboxItem } from './outbox';
+import { clearGaugeDraft, saveGaugeDraft, takeGaugeDraft } from './gaugeDraft';
 
 /** The server caps every gauge count (shared `GAUGE_MAX_PER_DAY`; the funnel rule keeps the later stages at or below stops). */
 export const GAUGE_MAX = GAUGE_MAX_PER_DAY;
@@ -57,10 +61,23 @@ export interface LogGaugesModalProps {
 }
 
 export function LogGaugesModal(props: LogGaugesModalProps) {
+  // Release 1.4: true once the person closes the form (or it closes itself after a save); the form going away
+  // otherwise — the page changed under it, e.g. the sign-in page after the session ended — keeps a draft.
+  const closing = useRef(false);
+  const me = useCurrentUser();
+  const { onClose } = props;
+  const close = () => {
+    closing.current = true;
+    clearGaugeDraft(me.id); // saved, or closed by the person: nothing to bring back
+    onClose();
+  };
+  useEffect(() => {
+    if (props.open) closing.current = false;
+  }, [props.open]);
   // Modal unmounts its children when closed, so the form state resets naturally on every open.
   return (
-    <Modal open={props.open} onClose={props.onClose} title={props.entry ? 'Update gauges' : 'Log gauges'} description="Stops ≥ to table ≥ presentations ≥ closes ≥ taps ≥ sales. Saving again for the same event updates the entry." size="lg">
-      <LogGaugesForm {...props} />
+    <Modal open={props.open} onClose={close} title={props.entry ? 'Update gauges' : 'Log gauges'} description="Stops ≥ to table ≥ presentations ≥ closes ≥ taps ≥ sales. Saving again for the same event updates the entry." size="lg">
+      <LogGaugesForm {...props} onClose={close} closingRef={closing} />
       {/* Release 1.2 slot (U3): the entry's change history; nothing until the package lands. */}
       {props.entry && (
         <ErrorBoundary name="gauge-history" fallback={null}>
@@ -111,8 +128,16 @@ function useBrowserOnline(): boolean {
   return online;
 }
 
-function LogGaugesForm({ onClose, event, defaultUserId, entry, onSaved, prefill, onQueued }: LogGaugesModalProps) {
+function LogGaugesForm({
+  onClose, event, defaultUserId, entry, onSaved, prefill: prefillProp, onQueued, closingRef,
+}: LogGaugesModalProps & { closingRef: MutableRefObject<boolean> }) {
   const me = useCurrentUser();
+  // Release 1.4: what was typed here before the form went away unsaved (signed out mid-shift), once, when nothing else
+  // fills the form (an entry to edit, the tally's counts): it starts from it like a prefill and says so.
+  const [restored] = useState(() => (!entry && !prefillProp ? takeGaugeDraft(me.id, event?.id) : null));
+  const prefill: GaugePrefill | null | undefined = prefillProp ?? (restored
+    ? { gauges: restored.gauges, eventId: restored.eventId, userId: restored.userId, ...(restored.checkIn ? { checkedInAt: restored.checkIn } : {}), ...(restored.notes ? { notes: restored.notes } : {}) }
+    : null);
   const toast = useToast();
   const qc = useQueryClient();
   const uid = useId();
@@ -272,6 +297,28 @@ function LogGaugesForm({ onClose, event, defaultUserId, entry, onSaved, prefill,
     if (nt !== undefined) setNotes(nt);
   }, [kept, entry, usePrefill]);
 
+  // Release 1.4: the draft kept when the form goes away unsaved (not closed by the person, not saved): see gaugeDraft.ts.
+  const draft = useRef<{ eventId: number; userId: number; gauges: GaugeTotals; checkIn: string; notes: string } | null>(null);
+  useEffect(() => {
+    draft.current = (userTyped.current || restored) && eventId != null && userId != null ? { eventId, userId, gauges, checkIn, notes } : null;
+  });
+  useEffect(() => {
+    const keep = () => {
+      if (!closingRef.current && draft.current) saveGaugeDraft(me.id, draft.current);
+    };
+    // the phone locks or the tab goes away: a phone may drop a background tab without running any cleanup
+    const onHidden = () => {
+      if (document.visibilityState === 'hidden') keep();
+    };
+    document.addEventListener('visibilitychange', onHidden);
+    window.addEventListener('pagehide', keep);
+    return () => {
+      document.removeEventListener('visibilitychange', onHidden);
+      window.removeEventListener('pagehide', keep);
+      keep(); // the form went away without a save or a close (e.g. the sign-in page after the session ended)
+    };
+  }, [closingRef, me.id]);
+
   const warnings = useMemo(() => validateGaugeFunnel(gauges), [gauges]);
   const ratios = useMemo(() => funnelRatios(gauges), [gauges]);
   const upsert = useUpsertGauge();
@@ -345,11 +392,18 @@ function LogGaugesForm({ onClose, event, defaultUserId, entry, onSaved, prefill,
       if (checkInValue !== baseline.checkIn) fields.checkedInAt = checkInValue || null;
       if (notes.trim() !== baseline.notes.trim()) fields.notes = notes.trim() || null;
     }
-    const keep = (): boolean => {
+    /**
+     * `signedOut`: release 1.4 (package S) — the session ended (14 hours after sign-in) as this was sent, so the day is
+     * kept on the phone and sent after the next sign-in (the outbox is per person and survives signing out).
+     */
+    const keep = (signedOut = false): boolean => {
       if (!canKeepOnPhone) return false;
       const item = enqueueGauge(me.id, { input: fields, expectedExistingId: prefilledId, seenSubmittedAt: prefilledId != null ? seenSubmittedAt : null, eventName: eventName(), userName: repName() });
       if (!item) return false;
-      toast.info("Saved on this phone — it will send when you're back online", `${fields.sales} sale${fields.sales === 1 ? '' : 's'} from ${fields.stops} stops · ${item.eventName}`);
+      toast.info(
+        signedOut ? 'Saved on this phone — it sends after you sign in again' : "Saved on this phone — it will send when you're back online",
+        `${fields.sales} sale${fields.sales === 1 ? '' : 's'} from ${fields.stops} stops · ${item.eventName}`,
+      );
       onQueued?.(item);
       onClose();
       return true;
@@ -383,6 +437,8 @@ function LogGaugesForm({ onClose, event, defaultUserId, entry, onSaved, prefill,
       // No answer at all (the signal dropped mid-save): keep it on the phone. The replay looks the day up first, so a
       // save that did land is recognised and never sent twice.
       if (isNetworkError(e) && keep()) return;
+      // Release 1.4: signed out as it was sent (the 14 hours from sign-in ran out) — nothing typed is lost.
+      if (e instanceof ApiError && e.status === 401 && keep(true)) return;
       // Validation and conflict replies (400/403/409) belong in the form; anything else is a toast.
       if (e instanceof ApiError && e.status >= 400 && e.status < 500) setServerError({ message: e.message, details: errorDetails(e) });
       else toast.error('Could not save gauges', errorMessage(e));
@@ -442,6 +498,12 @@ function LogGaugesForm({ onClose, event, defaultUserId, entry, onSaved, prefill,
       }}
       className="space-y-5"
     >
+      {restored && (
+        <p role="status" data-testid="gauge-draft-restored" className="flex items-start gap-2 rounded-lg border border-info/30 bg-info-soft px-3 py-2 text-sm text-fg">
+          <History className="mt-0.5 h-4 w-4 shrink-0 text-info" aria-hidden />
+          <span>These are the counts you had typed but not saved. Check them, then save.</span>
+        </p>
+      )}
       <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
         <Field label="Event" required htmlFor={`${uid}-event`} className="min-w-0 md:col-span-2" error={blocked ?? undefined} hint={eventHint}>
           {event || entry ? (

@@ -251,9 +251,10 @@ test('POST /users over the limit: 429 with the sentence, nothing added', async (
   await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', () => resolve()));
   try {
     const port = (server.address() as { port: number }).port;
-    const { TestClient } = await import('./helpers.ts');
+    const { TestClient, signInWith } = await import('./helpers.ts');
     const c = new TestClient(`http://127.0.0.1:${port}/api`);
-    assert.equal((await c.post('/auth/login', { email: 'lee.leader@fixture.test', employeeId: 'FX-0002' })).status, 200);
+    // Release 1.4: the fixture leader signs in with a two-step code (signInWith sets it up and answers it)
+    assert.equal((await signInWith(limited.db, c, { email: 'lee.leader@fixture.test', employeeId: 'FX-0002' })).status, 200);
     const add = (i: number) => c.post('/users', { firstName: 'Lim', lastName: `It${i}`, email: `lim.it${i}@linear-mcr.co.uk`, position: 'trainee' });
     assert.equal((await add(1)).status, 201);
     assert.equal((await add(2)).status, 201);

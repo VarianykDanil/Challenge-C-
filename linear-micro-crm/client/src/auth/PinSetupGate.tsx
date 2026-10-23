@@ -1,13 +1,15 @@
 // Release 1.2 — OWNED BY U1 sign-in-pin. Wraps the signed-in shell (App.tsx ShellLayout).
 //  - While the signed-in user must still create a PIN (`user.pinSetupRequired`), it shows the full-screen
 //    "Create your PIN" step instead of the app.
-//  - Then, for an administrator who must use two-step verification and has not set it up (`twoFactorSetupRequired`),
-//    the "Set up two-step verification" step. Once its setup modal opens it stays on screen until the modal closes,
-//    even though /auth/me stops asking for it the moment the code is accepted: the recovery codes are shown exactly
-//    once, in that modal.
-// An already open session learns of a new PIN requirement through `PIN_SETUP_REQUIRED_EVENT` (api/client.ts): it fires
-// when any API answers 403 { pinSetupRequired: true }; the gate then re-reads /auth/me (one request at a time) and shows
-// the step without a reload. Both steps are lazy, so the main chunk stays under 460 kB.
+//  - Then, for anyone who must use two-step verification and has not set it up (`twoFactorSetupRequired`; release 1.4:
+//    every account but the demo sign-in ones, client accounts included — App.tsx wraps the client portal in this gate
+//    too), the "Set up two-step verification" step. Once its setup modal opens it stays on screen until the modal
+//    closes, even though /auth/me stops asking for it the moment the code is accepted: the recovery codes are shown
+//    exactly once, in that modal.
+// An already open session learns of a new requirement through `PIN_SETUP_REQUIRED_EVENT` (api/client.ts): it fires
+// when any API answers 403 { pinSetupRequired: true } or (1.4) { twoFactorSetupRequired: true }; the gate then re-reads
+// /auth/me (one request at a time) and shows the step without a reload. Both steps are lazy, so the main chunk stays
+// under 460 kB.
 import { Suspense, lazy, useEffect, useRef, useState, type ReactNode } from 'react';
 import { PIN_SETUP_REQUIRED_EVENT } from '@/api/client';
 import { useAuth } from '@/auth/AuthProvider';

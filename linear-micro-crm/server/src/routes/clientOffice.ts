@@ -19,6 +19,9 @@
  *   PATCH /client-accounts/:id  ClientAccountUpdateInput → ClientAccount (deactivate signs them out everywhere)
  *   POST  /client-accounts/:id/reset-pin             → ClientAccount (clears the PIN and its lock, signs them out;
  *        they create a new PIN at their next sign-in)
+ *   POST  /client-accounts/:id/reset-2fa             → ClientAccount (release 1.4, package S: a lost phone — clears
+ *        their two-step verification and signs them out everywhere; they set it up again at their next sign-in,
+ *        after the PIN, as for staff in Team › Edit)
  *  404 "Client post not found" / "Client account not found" for an unknown id, or a staff member's id.
  * Inviting an account (POST /campaigns/:id/client-accounts) is in routes/campaignPages.ts.
  */
@@ -39,6 +42,7 @@ import { addDays, isISODate, nowISO, todayISO } from '../lib/dates.ts';
 import { badRequest, conflict, notFound } from '../lib/errors.ts';
 import { addCampaignRate, campaignRateOn } from '../lib/payRule.ts';
 import { resetPinAndSignOut } from '../lib/pin.ts';
+import { clearTwoFactor } from '../lib/twofactor.ts';
 import { idParam, optionalIdQuery } from '../lib/validate.ts';
 import { currentUser, destroyUserSessions, requireRole } from '../middleware/auth.ts';
 
@@ -193,6 +197,15 @@ export function clientAccountsRouter(db: Db): Router {
     const id = idParam(req);
     if (!getClientAccount(db, id)) throw notFound('Client account');
     resetPinAndSignOut(db, id);
+    res.json(getClientAccount(db, id));
+  });
+
+  // Release 1.4 (package S): two-step verification is required for client accounts; a lost phone is reset here.
+  router.post('/:id/reset-2fa', requireRole('admin'), (req, res) => {
+    const id = idParam(req);
+    if (!getClientAccount(db, id)) throw notFound('Client account');
+    clearTwoFactor(db, id); // its own transaction (secrets, recovery codes, open sign-in challenges)
+    destroyUserSessions(db, id);
     res.json(getClientAccount(db, id));
   });
 

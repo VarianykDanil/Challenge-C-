@@ -6,7 +6,7 @@
  */
 import { after, before, test } from 'node:test';
 import assert from 'node:assert/strict';
-import { openDb } from '../db/connection.ts';
+import { get, openDb } from '../db/connection.ts';
 import { EXTENSIONS, upgradeExtensions } from '../db/extensions/index.ts';
 import { columnsOf } from '../db/extensions/types.ts';
 import { createSchema, SCHEMA_SQL, upgradeSchema } from '../db/schema.ts';
@@ -22,7 +22,7 @@ import {
 } from '../lib/client.ts';
 import { CLIENT_ACCOUNTS } from '../db/seed-data.ts';
 import { setBusinessClock, todayISO } from '../lib/dates.ts';
-import { addClientUser, addClientUserWithPin, FIXTURE_ACCOUNTS, startTestServer, type TestClient, type TestServer } from './helpers.ts';
+import { addClientUser, addClientUserWithPin, currentCode, FIXTURE_ACCOUNTS, signInWith, startTestServer, type TestClient, type TestServer } from './helpers.ts';
 
 const R2_EXTENSIONS = ['learning', 'pitches', 'pin', 'audit', 'checkins'];
 const R3_EXTENSIONS = ['pay', 'invoices', 'statements', 'videos', 'client', 'recruitment', 'venues'];
@@ -210,10 +210,11 @@ test('each 1.3 extension seed, run after the extensions before it, writes only i
 });
 
 test('client guard: the portal paths a client may call, and nothing else', () => {
-  for (const p of ['/health', '/auth/me', '/auth/logout', '/auth/login', '/auth/login/2fa', '/auth/demo-accounts', '/auth/pin', '/auth/pin/remove', '/client', '/client/portal', '/client/posts/', '/AUTH/ME']) {
+  // Release 1.4 (package S): and their own two-step verification, which client accounts must use too
+  for (const p of ['/health', '/auth/me', '/auth/logout', '/auth/login', '/auth/login/2fa', '/auth/demo-accounts', '/auth/pin', '/auth/pin/remove', '/client', '/client/portal', '/client/posts/', '/AUTH/ME', '/auth/2fa', '/auth/2fa/setup', '/auth/2fa/enable', '/auth/2fa/recovery-codes']) {
     assert.ok(clientMayCall(p), p);
   }
-  for (const p of ['/client-posts', '/client-accounts/1', '/clientx', '/auth/2fa', '/auth/security-settings', '/me/dashboard', '/users', '/', '/finance/me', '/audit/events']) {
+  for (const p of ['/client-posts', '/client-accounts/1', '/clientx', '/auth/2fax', '/auth/security-settings', '/me/dashboard', '/users', '/', '/finance/me', '/audit/events', '/users/1/2fa/reset']) {
     assert.ok(!clientMayCall(p), p);
   }
 });
@@ -390,7 +391,11 @@ test('client sign-in: the fixture client has a PIN; the response carries the cam
   assert.equal(challenge.status, 200);
   assert.equal(challenge.json.requiresPin, true, 'an invited client signs in with a PIN');
   assert.ok(!anon.cookie, 'no session without the PIN');
-  const signedIn = await anon.post('/auth/login', { email, employeeId, pin });
+  // Release 1.4: then the two-step code (required for client accounts; srv.login set it up in before())
+  const afterPin = await anon.post('/auth/login', { email, employeeId, pin });
+  assert.equal(afterPin.json.requiresTwoFactor, true);
+  const clientId = Number(get<{ id: number }>(srv.db, `SELECT id FROM users WHERE employee_id = ?`, [employeeId])!.id);
+  const signedIn = await anon.post('/auth/login/2fa', { challengeToken: afterPin.json.challengeToken, code: currentCode(srv.db, clientId) });
   assert.equal(signedIn.status, 200);
   const user = signedIn.json.user;
   assert.equal(user.role, 'client');
@@ -398,7 +403,7 @@ test('client sign-in: the fixture client has a PIN; the response carries the cam
   assert.equal(user.hasPin, true);
   assert.equal(user.pinSetupRequired, false);
   for (const k of CLIENT_HIDDEN_USER_FIELDS) assert.ok(!(k in user), `login response has no ${k}`);
-  const staff = await srv.anon().post('/auth/login', FIXTURE_ACCOUNTS.rep);
+  const staff = await signInWith(srv.db, srv.anon(), FIXTURE_ACCOUNTS.rep);
   assert.equal(staff.json.user.payPlanId, fx().plans.rep, 'staff sign-in unchanged');
   assert.ok(!('clientCampaignId' in staff.json.user));
   // A client with a PIN from addClientUserWithPin signs in the same way.
@@ -424,7 +429,8 @@ test('client guard: a client session gets 403 clientPortalOnly on every other ro
   // and nothing was written on the way: the fixture client's audit rows are its sign-ins only
   const rows = srv.db.prepare(`SELECT action FROM audit_log WHERE user_id = (SELECT id FROM users WHERE employee_id = ?)`).all(FIXTURE_ACCOUNTS.client.employeeId) as { action: string }[];
   assert.ok(rows.length >= 1);
-  assert.deepEqual([...new Set(rows.map((r) => r.action))], ['POST /auth/login'], 'only sign-ins');
+  // Release 1.4: a client account signs in with a two-step code, so its sign-in rows are the code step's
+  assert.ok(rows.every((r) => r.action === 'POST /auth/login' || r.action === 'POST /auth/login/2fa'), 'only sign-ins');
 });
 
 test('client accounts never appear in staff lists', async () => {

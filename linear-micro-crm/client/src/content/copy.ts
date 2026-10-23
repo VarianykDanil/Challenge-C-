@@ -105,7 +105,7 @@ export const COPY = {
     },
     clientSecurity: {
       title: 'Security',
-      description: 'Your sign-in PIN.',
+      description: 'Your sign-in PIN and two-step verification.',
     },
   },
 
@@ -182,6 +182,18 @@ export const COPY = {
       pendingHint: 'You started setting this up but did not finish. Set up again to get a fresh code.',
       lowCodesHint: 'You are running low on recovery codes. Generate a new set before you need one.',
       apps: 'Works with Google Authenticator, Microsoft Authenticator, 1Password and Authy.',
+      /** Release 1.4 (package S): two-step verification is required for every account but the demo sign-in ones. */
+      required: 'Required',
+      staff: {
+        description: 'A 6-digit code from an authenticator app each time you sign in, so an email and employee ID alone are never enough.',
+        offHint: 'Right now anyone with your email and employee ID could sign in as you. Turn this on to add a second step.',
+        requiredHint: 'Required for every account, so it stays on. Lost your phone? Sign in with a recovery code, or ask an administrator to reset it.',
+      },
+      client: {
+        description: 'A 6-digit code from an authenticator app each time you sign in, after your email, access code and PIN.',
+        offHint: 'Right now your email, access code and PIN are enough to sign in. Turn this on to add a second step.',
+        requiredHint: 'Required for client accounts, so it stays on. Lost your phone? Sign in with a recovery code, or ask Linear MCR to reset it.',
+      },
     },
     setup: {
       title: 'Set up two-step verification',
@@ -234,16 +246,18 @@ export const COPY = {
       verify: 'Verify',
       /** The only way back on the two-step step (the header's "Back" to the public page shows on step one only). */
       back: 'Back to email and employee ID',
+      /** Release 1.4: a client account signs in with an access code. */
+      backClient: 'Back to email and access code',
       expired: 'That sign-in attempt expired. Enter your details again to get a new code.',
       invalid: 'That code is not valid. Check your app and try again.',
       tooMany: 'Too many attempts. Wait a few minutes before trying again.',
     },
     admin: {
       title: 'Two-step verification',
-      body: 'Reset this if they have lost their device. They will be signed out everywhere and can set it up again from Settings.',
+      body: 'Reset this if they have lost their phone. They are signed out everywhere and set it up again, with a new code, when they next sign in.',
       reset: 'Reset two-step verification',
       confirmTitle: 'Reset two-step verification?',
-      confirmBody: 'will be signed out of every device and will sign in with just their email and employee ID until they set it up again.',
+      confirmBody: 'will be signed out of every device and will set up two-step verification again, with a new authenticator code, when they next sign in.',
       toast: 'Two-step verification reset',
       notSetUp: 'Not set up',
     },

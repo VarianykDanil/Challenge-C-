@@ -136,3 +136,9 @@ export function useResetClientPin() {
   const qc = useQueryClient();
   return useMutation({ mutationFn: (id: number) => api<ClientAccount>(`/client-accounts/${id}/reset-pin`, { method: 'POST' }), onSuccess: () => invalidateClient(qc) });
 }
+
+/** Release 1.4 (package S): POST /client-accounts/:id/reset-2fa — a lost phone; they set it up again at their next sign-in. */
+export function useResetClientTwoFactor() {
+  const qc = useQueryClient();
+  return useMutation({ mutationFn: (id: number) => api<ClientAccount>(`/client-accounts/${id}/reset-2fa`, { method: 'POST' }), onSuccess: () => invalidateClient(qc) });
+}

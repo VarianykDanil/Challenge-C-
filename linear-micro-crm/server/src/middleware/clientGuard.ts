@@ -7,6 +7,8 @@
  *   /auth/me, /auth/logout, /auth/login, /auth/login/2fa, /auth/demo-accounts
  *   /auth/pin and /auth/pin/*          (their own PIN: status, set, change, remove — admin-only PIN routes still
  *                                       answer 403 from their own role check)
+ *   /auth/2fa and /auth/2fa/*          (release 1.4, package S: their own two-step verification — status, setup,
+ *                                       turning it on, new recovery codes — which client accounts must use too)
  *   /client and /client/*              (P6's portal router; NOT /client-posts or /client-accounts, the office's)
  *
  * Everything else answers 403 ClientPortalOnlyError `{ error, clientPortalOnly: true }`, whatever the method, before any
@@ -20,8 +22,8 @@ import { CLIENT_ROLE } from '../lib/client.ts';
 
 export const CLIENT_PORTAL_ONLY_MESSAGE = 'This account can only use the client portal';
 
-const OPEN_PATHS = new Set(['/health', '/auth/me', '/auth/logout', '/auth/login', '/auth/login/2fa', '/auth/demo-accounts', '/auth/pin', '/client']);
-const OPEN_PREFIXES = ['/health/', '/auth/pin/', '/client/'];
+const OPEN_PATHS = new Set(['/health', '/auth/me', '/auth/logout', '/auth/login', '/auth/login/2fa', '/auth/demo-accounts', '/auth/pin', '/auth/2fa', '/client']);
+const OPEN_PREFIXES = ['/health/', '/auth/pin/', '/auth/2fa/', '/client/'];
 
 /** True when a client session may call `path` (relative to /api). */
 export function clientMayCall(path: string): boolean {

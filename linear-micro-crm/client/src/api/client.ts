@@ -1,5 +1,6 @@
 // Owned by the Frontend Developer.
-import type { ApiError as ApiErrorBody, PinSetupRequiredError } from '@lm/shared';
+import type { ApiError as ApiErrorBody, PinSetupRequiredError, TwoFactorSetupRequiredError } from '@lm/shared';
+import { isSessionEndedDetails, noteSessionEnded } from './sessionEnd';
 
 export class ApiError extends Error {
   status: number;
@@ -91,13 +92,20 @@ export async function apiRaw<T>(path: string, init: ApiInit = {}): Promise<ApiRe
   }
   const body = await res.json().catch(() => null);
   if (!res.ok) {
+    // Release 1.4 (package S): the request that found the session past its hours-from-sign-in limit says so (any path,
+    // /auth/me included); the sign-in page shows the sentence (api/sessionEnd.ts).
+    const details: unknown = (body as ApiErrorBody | null)?.details;
+    if (res.status === 401 && isSessionEndedDetails(details)) noteSessionEnded(details);
     // A 401 on anything but the auth probes means the session ended (expired, deactivated, signed out elsewhere):
     // let the app clear its state and route to sign-in once, instead of every page showing a raw error.
     if (res.status === 401 && !path.startsWith('/auth/') && typeof window !== 'undefined') window.dispatchEvent(new CustomEvent(UNAUTHENTICATED_EVENT));
     // Release 1.2 (U1's PIN gate): once an admin requires a PIN, a signed-in person without one gets 403
     // { pinSetupRequired: true } from every API. Tell the app, so an already open session shows "Create your PIN"
-    // (auth/PinSetupGate.tsx re-reads /auth/me) instead of every card failing until a reload.
-    if (res.status === 403 && isPinSetupRequiredBody(body) && typeof window !== 'undefined') window.dispatchEvent(new CustomEvent(PIN_SETUP_REQUIRED_EVENT));
+    // (auth/PinSetupGate.tsx re-reads /auth/me) instead of every card failing until a reload. Release 1.4: the same for
+    // { twoFactorSetupRequired: true } — after the upgrade, someone signed in without two-step meets its setup step.
+    if (res.status === 403 && (isPinSetupRequiredBody(body) || isTwoFactorSetupRequiredBody(body)) && typeof window !== 'undefined') {
+      window.dispatchEvent(new CustomEvent(PIN_SETUP_REQUIRED_EVENT));
+    }
     throw new ApiError(res.status, body);
   }
   return { data: body as T, status: res.status, headers: res.headers };
@@ -126,6 +134,10 @@ export const PIN_SETUP_REQUIRED_EVENT = 'lm:pin-setup-required';
 
 function isPinSetupRequiredBody(body: unknown): body is PinSetupRequiredError {
   return typeof body === 'object' && body !== null && (body as { pinSetupRequired?: unknown }).pinSetupRequired === true;
+}
+
+function isTwoFactorSetupRequiredBody(body: unknown): body is TwoFactorSetupRequiredError {
+  return typeof body === 'object' && body !== null && (body as { twoFactorSetupRequired?: unknown }).twoFactorSetupRequired === true;
 }
 
 export function qs(params: Record<string, string | number | boolean | null | undefined>): string {

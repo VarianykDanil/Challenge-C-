@@ -12,6 +12,7 @@ import { AUDIT_SPECS as client } from './clientSpecs.ts';
 import { AUDIT_SPECS as invoices } from './invoiceSpecs.ts';
 import { AUDIT_SPECS as pay } from './paySpecs.ts';
 import { AUDIT_SPECS as recruitment } from './recruitmentSpecs.ts';
+import { AUDIT_SPECS as security } from './securitySpecs.ts';
 import { AUDIT_SPECS as statements } from './statementSpecs.ts';
 import { AUDIT_SPECS as venues } from './venueSpecs.ts';
 import { AUDIT_SPECS as videos } from './videoSpecs.ts';
@@ -20,6 +21,8 @@ import { AUDIT_SPECS as videos } from './videoSpecs.ts';
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 export const PACKAGE_AUDIT_SPECS: Readonly<Record<string, readonly AuditRouteSpec<any>[]>> = {
   pay, invoices, statements, videos, client, recruitment, venues, auditEvents,
+  // Release 1.4
+  security,
 };
 
 /** Every spec, in match order: the 1.3 packages' first, then the 1.2 registry. */

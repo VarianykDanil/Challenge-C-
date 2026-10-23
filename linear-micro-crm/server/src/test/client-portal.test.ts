@@ -13,7 +13,8 @@ import { createApp } from '../app.ts';
 import { listApiRoutes } from '../lib/routeTable.ts';
 import { clientMayCall } from '../middleware/clientGuard.ts';
 import { clientPostDayLabel } from '@lm/shared';
-import { addClientUserWithPin, addEvent, addGauge, FIXTURE_ACCOUNTS, startTestServer, type Json, type TestClient, type TestResponse, type TestServer } from './helpers.ts';
+import { addClientUserWithPin, addEvent, addGauge, currentCode, FIXTURE_ACCOUNTS, startTestServer, type Json, type TestClient, type TestResponse, type TestServer } from './helpers.ts';
+import { totp } from '../lib/totp.ts';
 
 let srv: TestServer;
 let admin: TestClient;
@@ -463,7 +464,7 @@ test('invite: the next access code (never a demo code), the instructions, and 40
   assert.equal(r.accessCode, 'CL-0061', 'the next after the highest code in use (CL-0060)');
   assert.deepEqual(
     { ...r.account, createdAt: undefined },
-    { id: r.account.id, firstName: 'Jo', lastName: 'Bloggs', email: 'jo.bloggs@charity.example', accessCode: 'CL-0061', campaignId: cid, status: 'active', hasPin: false, createdAt: undefined },
+    { id: r.account.id, firstName: 'Jo', lastName: 'Bloggs', email: 'jo.bloggs@charity.example', accessCode: 'CL-0061', campaignId: cid, status: 'active', hasPin: false, createdAt: undefined, twoFactorEnabled: false },
   );
   assert.match(r.instructions, /1\. Open https:\/\/hub\.example\/login\./);
   assert.match(r.instructions, /\(jo\.bloggs@charity\.example\) and your access code: CL-0061/);
@@ -495,6 +496,12 @@ test('an invited client’s first sign-in creates the PIN (the gate holds them u
   assert.equal((await jo.get('/auth/pin')).json.required, true, 'PIN status says it is required');
   is(await jo.post('/auth/pin', { pin: '0061' }), 400, 'not the digits of the access code');
   is(await jo.post('/auth/pin', { pin: '4826' }), 204, 'create the PIN');
+  // Release 1.4 (package S): then two-step verification, required for client accounts too (after the PIN step)
+  const twoStep = await jo.get('/client/portal');
+  is(twoStep, 403, 'held at "Set up two-step verification"');
+  assert.equal(twoStep.json.twoFactorSetupRequired, true);
+  const setup = is(await jo.post('/auth/2fa/setup'), 201, 'two-step setup');
+  is(await jo.post('/auth/2fa/enable', { code: totp(setup.secret) }), 200, 'two-step on');
   is(await jo.get('/client/portal'), 200, 'the portal opens');
   const removal = await jo.post('/auth/pin/remove', { currentPin: '4826' });
   is(removal, 409, 'a client account cannot remove its PIN');
@@ -502,7 +509,8 @@ test('an invited client’s first sign-in creates the PIN (the gate holds them u
   assert.ok(get<{ hash: string | null }>(srv.db, `SELECT pin_hash AS hash FROM users WHERE employee_id = 'CL-0061'`)!.hash, 'the PIN stays');
   const again = await srv.anon().post('/auth/login', creds);
   assert.equal(again.json.requiresPin, true, 'the next sign-in asks for the PIN');
-  is(await srv.anon().post('/auth/login', { ...creds, pin: '4826' }), 200, 'with the PIN');
+  const withPin = is(await srv.anon().post('/auth/login', { ...creds, pin: '4826' }), 200, 'with the PIN');
+  assert.equal(withPin.requiresTwoFactor, true, 'then the two-step code (release 1.4)');
 });
 
 test('deactivate signs the client out everywhere and stops sign-in; reactivate; edit; 404 for staff', async () => {
@@ -536,7 +544,10 @@ test('reset PIN: cleared, signed out; the next sign-in creates a new one', async
   const reset = is(await admin.post(`/client-accounts/${id}/reset-pin`), 200, 'reset');
   assert.equal(reset.hasPin, false);
   is(await jo.get('/client/portal'), 401, 'signed out');
-  const back = is(await srv.anon().post('/auth/login', { email: 'jo@charity.example', employeeId: 'CL-0061' }), 200, 'sign in without a PIN');
+  const anon = srv.anon();
+  const step = is(await anon.post('/auth/login', { email: 'jo@charity.example', employeeId: 'CL-0061' }), 200, 'sign in without a PIN');
+  assert.equal(step.requiresTwoFactor, true, 'release 1.4: two-step stays on after a PIN reset');
+  const back = is(await anon.post('/auth/login/2fa', { challengeToken: step.challengeToken, code: currentCode(srv.db, id) }), 200, 'the code');
   assert.equal(back.user.pinSetupRequired, true);
   const rows = auditRows(`action = 'POST /client-accounts/:id/reset-pin'`);
   assert.equal(rows[0]!.summary, 'Reset the PIN of Jo Bloggs (Fixture Charity); they create a new one at their next sign-in');

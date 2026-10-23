@@ -1,16 +1,16 @@
 import { Router, type Request, type Response } from 'express';
 import { z } from 'zod';
 import {
-  PIN_PROBLEM_MESSAGES, POSITION_LABELS, SESSION_IDLE_HOURS_MAX, SESSION_IDLE_HOURS_MIN, personName, pinProblem,
-  type DemoTeamAccounts, type LoginPinChallenge, type LoginPinDetails, type LoginPinReason, type LoginPinRequired, type Role,
-  type TwoFactorChallenge, type UserWithTeam,
+  PIN_PROBLEM_MESSAGES, POSITION_LABELS, SESSION_IDLE_HOURS_MAX, SESSION_IDLE_HOURS_MIN, SESSION_MAX_HOURS_MAX, SESSION_MAX_HOURS_MIN, personName,
+  pinProblem, type AuthResponse, type DemoTeamAccounts, type LoginPinChallenge, type LoginPinDetails, type LoginPinReason, type LoginPinRequired,
+  type Role, type TwoFactorChallenge, type TwoFactorStatus, type UserWithTeam,
 } from '@lm/shared';
-import { all, get, run, transaction, type Db } from '../db/connection.ts';
+import { all, get, transaction, type Db } from '../db/connection.ts';
 import { USER_SELECT } from '../db/queries.ts';
 import { HttpError, badRequest, conflict, notFound, unauthorized } from '../lib/errors.ts';
 import { FailureLimiter } from '../lib/limiter.ts';
 import { clientCampaignIdOf, clientSafeUser, demoClientMarkers, isClientUser, isDemoClientAccount, matchesDemoClient } from '../lib/client.ts';
-import { DEMO_STAFF, demoTeamMarkers } from '../lib/demoTeams.ts';
+import { DEMO_STAFF, demoTeamMarkers, isDemoSignInAccount } from '../lib/demoTeams.ts';
 import {
   accountFlags, clearPin, clearPinFailures, clientPinRequired, countPinAttempt, hashPin, isPinLocked, pinAttemptsLeft, pinHashNeedsUpgrade,
   pinLockedMessage, pinRow, pinStatusFor, readSecuritySettings, resetPinAndSignOut, savePinHash, upgradePinHash, verifyPin,
@@ -40,10 +40,22 @@ const removePinBody = z.object({ currentPin: pinField });
 const securitySettingsBody = z
   .object({
     requirePin: z.boolean().optional(),
+    /** Release 1.4: still accepted and stored, but it no longer decides anything (two-step is required for everyone). */
     requireAdminTwoFactor: z.boolean().optional(),
     sessionIdleHours: z.number().int('Whole hours only').min(SESSION_IDLE_HOURS_MIN).max(SESSION_IDLE_HOURS_MAX).optional(),
+    /** Release 1.4 (package S): hours from sign-in to the automatic sign-out, 4–24. */
+    sessionMaxHours: z
+      .number()
+      .int('Whole hours only')
+      .min(SESSION_MAX_HOURS_MIN, `At least ${SESSION_MAX_HOURS_MIN} hours`)
+      .max(SESSION_MAX_HOURS_MAX, `At most ${SESSION_MAX_HOURS_MAX} hours`)
+      .optional(),
   })
   .strict();
+
+/** Release 1.4 (package S): POST /auth/2fa/disable for an account that must use two-step verification. */
+export const TWO_FACTOR_REQUIRED_MESSAGE =
+  'Two-step verification is required for every account, so it cannot be turned off. If you have lost your phone, ask an administrator to reset it.';
 
 /** A code as typed: whitespace is tolerated, the shape is checked by the verifier (a malformed code is simply wrong). */
 const codeField = z.string().trim().min(1, 'Code is required').max(64);
@@ -162,9 +174,21 @@ export function authRouter(db: Db): Router {
         hasPin: Boolean(pinRow(db, user.id)?.hash),
         twoFactorEnabled,
         demoClient: client && isDemoClientAccount(db, user),
+        demoSignIn: isDemoSignInAccount(db, user),
       }),
       ...(client ? { clientCampaignId: clientCampaignIdOf(db, user.id) } : {}),
     });
+  };
+
+  /**
+   * Release 1.4 (package S): a new session — the admin's hours-from-sign-in limit for everyone, 14 days for the demo
+   * sign-in accounts (middleware/auth.ts createSession) — its cookie with the same Max-Age, and the sign-in answer.
+   */
+  const signIn = (req: Request, res: Response, user: UserWithTeam, twoFactorEnabled: boolean): void => {
+    const session = createSession(db, user);
+    setSessionCookie(req, res, session.token, session.maxAgeMs);
+    const body: AuthResponse = { user: withFlags(user, twoFactorEnabled), session: session.info };
+    res.json(body);
   };
 
   /**
@@ -247,9 +271,7 @@ export function authRouter(db: Db): Router {
       return res.json(challenge);
     }
     clearLoginFailures(keys); // a successful sign-in resets the counters
-    const token = createSession(db, user.id);
-    setSessionCookie(req, res, token);
-    res.json({ user: withFlags(user, false) });
+    signIn(req, res, user, false);
   });
 
   /** Step two: the challenge token from `/login` plus a current code or an unused recovery code. */
@@ -270,9 +292,7 @@ export function authRouter(db: Db): Router {
     });
     deleteChallenge(db, challenge.token);
     clearLoginFailures(keys);
-    const token = createSession(db, user.id);
-    setSessionCookie(req, res, token);
-    res.json({ user: withFlags(user, true) });
+    signIn(req, res, user, true);
   });
 
   router.post('/logout', (req, res) => {
@@ -282,13 +302,18 @@ export function authRouter(db: Db): Router {
   });
 
   router.get('/me', requireAuth, (req, res) => {
-    res.json({ user: currentUser(req) });
+    // Release 1.4: and when this session ends (the sign-in page says why once it has)
+    const body: AuthResponse = { user: currentUser(req), ...(req.sessionInfo ? { session: req.sessionInfo } : {}) };
+    res.json(body);
   });
 
   // ── two-step verification (signed in) ──
 
   router.get('/2fa', requireAuth, (req, res) => {
-    res.json(twoFactorStatus(db, currentUser(req).id));
+    const me = currentUser(req);
+    // Release 1.4: `required` — every account but the demo sign-in accounts (while still the demo) must keep it on.
+    const body: TwoFactorStatus = { ...twoFactorStatus(db, me.id), required: !isDemoSignInAccount(db, me) };
+    res.json(body);
   });
 
   router.post('/2fa/setup', requireAuth, async (req, res) => {
@@ -313,10 +338,9 @@ export function authRouter(db: Db): Router {
     const me = currentUser(req);
     const body = disableBody.parse(req.body);
     if (!isTwoFactorEnabled(db, me.id)) throw conflict('Two-step verification is not on');
-    // Release 1.2 (U1): while the admin rule holds, an administrator keeps two-step verification on.
-    if (me.role === 'admin' && readSecuritySettings(db).requireAdminTwoFactor) {
-      throw conflict('Two-step verification is required for administrators. Switch that rule off in Settings → Security first.');
-    }
+    // Release 1.4 (package S): every account keeps it on (an administrator can reset it after a lost phone); only the
+    // demo sign-in accounts, while Linear Hub is still the demo, may switch it off.
+    if (!isDemoSignInAccount(db, me)) throw conflict(TWO_FACTOR_REQUIRED_MESSAGE);
     checkFactor(me.id, clientSource(req), body, 400);
     clearTwoFactor(db, me.id);
     res.status(204).end();
@@ -402,8 +426,10 @@ export function authRouter(db: Db): Router {
 
   /**
    * Partial update. Switching on a rule that would shut out the admin making the change is refused (409): set your own
-   * PIN before requiring one, turn on your own two-step verification before requiring it. Requiring two-step
-   * verification signs out the other administrators who have not set it up, so they meet the setup step at sign-in.
+   * PIN before requiring one. Release 1.4 (package S): `sessionMaxHours` (4–24) applies at once — a session already
+   * older than a shorter limit ends at its next request — and to every sign-in from now on. `requireAdminTwoFactor` is
+   * still stored but no longer decides anything (two-step verification is required for everyone), so it has no
+   * lock-out check and signs nobody out.
    */
   router.put('/security-settings', requireRole('admin'), (req, res) => {
     const me = currentUser(req);
@@ -412,17 +438,7 @@ export function authRouter(db: Db): Router {
     if (patch.requirePin && !before.requirePin && !me.hasPin) {
       throw conflict('Set your own PIN first, so the new rule cannot lock you out.');
     }
-    if (patch.requireAdminTwoFactor && !before.requireAdminTwoFactor && !me.twoFactorEnabled) {
-      throw conflict('Turn on two-step verification for yourself first, so the new rule cannot lock you out.');
-    }
-    const after = transaction(db, () => {
-      const next = writeSecuritySettings(db, patch);
-      if (next.requireAdminTwoFactor && !before.requireAdminTwoFactor) {
-        run(db, `DELETE FROM sessions WHERE user_id IN (SELECT id FROM users WHERE role = 'admin' AND totp_enabled_at IS NULL AND id <> ?)`, [me.id]);
-      }
-      return next;
-    });
-    res.json(after);
+    res.json(writeSecuritySettings(db, patch));
   });
 
   /**

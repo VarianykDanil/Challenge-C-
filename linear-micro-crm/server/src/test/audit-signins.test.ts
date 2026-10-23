@@ -20,7 +20,7 @@ import { purgeExpiredSessions } from '../middleware/auth.ts';
 import { hashPin, savePinHash } from '../lib/pin.ts';
 import { totp } from '../lib/totp.ts';
 import { INVALID_LOGIN, PIN_MESSAGES, resetLoginFailures } from '../routes/auth.ts';
-import { FIXTURE_ACCOUNTS, buildFixture, startTestServer, type TestClient, type TestServer } from './helpers.ts';
+import { FIXTURE_ACCOUNTS, buildFixture, currentCode, enrolTwoFactor, startTestServer, type TestClient, type TestServer } from './helpers.ts';
 
 let srv: TestServer;
 const fx = () => srv.fixture!;
@@ -154,7 +154,8 @@ test('the login limiter\'s refusal (429) is recorded, with when to try again', a
 });
 
 test('two-step: a wrong code at sign-in, and wrong codes in Settings, are recorded; the code never is', async () => {
-  const lee = await srv.login('leader');
+  // Release 1.4: lee must use two-step (the fixture is not the demo); he signs in without it and sets it up himself
+  const lee = await srv.login('leader', undefined, { twoFactor: false });
   const setup = await lee.post('/auth/2fa/setup');
   assert.equal(setup.status, 201);
   const n0 = count(srv.db);
@@ -182,11 +183,11 @@ test('two-step: a wrong code at sign-in, and wrong codes in Settings, are record
 
   assert.equal((await lee.post('/auth/2fa/recovery-codes', { code: '000000' })).status, 400);
   assert.equal(newest(srv.db).summary, 'Wrong two-step code while making new recovery codes');
-  assert.equal((await lee.post('/auth/2fa/disable', { code: '000000' })).status, 400);
-  assert.equal(newest(srv.db).summary, 'Wrong two-step code while turning off two-step verification');
   assert.equal(newest(srv.db).userId, fx().users.leader);
+  // Release 1.4: two-step is required for every account, so turning it off is refused before any code is checked
+  assert.equal((await lee.post('/auth/2fa/disable', { code: '000000' })).status, 409);
   assert.equal((await lee.post('/auth/2fa/disable', {})).status, 400, 'validation');
-  assert.equal(count(srv.db), n1 + 3);
+  assert.equal(count(srv.db), n1 + 2);
   resetLoginFailures();
 });
 
@@ -230,7 +231,7 @@ test(`a flood of failed sign-ins from one address stops being recorded after ${F
     assert.equal(added.at(-1)!.kind, 'sign_in');
     // successful sign-ins are never held back
     await flood.login('admin');
-    assert.equal(newest(flood.db).summary, 'Signed in');
+    assert.match(newest(flood.db).summary, /^Signed in( with two-step verification)?$/, 'release 1.4: the fixture admin signs in with a code');
   } finally {
     await flood.close();
   }
@@ -252,9 +253,14 @@ async function proxiedServer() {
     await new Promise<void>((resolve) => server.close(() => resolve()));
     db.close();
   };
-  /** An admin session's GET (the fixture's owner, no PIN), for reading what was recorded through the API. */
+  // Release 1.4: two-step verification is required for the fixture's owner too (the fixture is not the demo).
+  enrolTwoFactor(db, fixture.users.admin);
+  /** An admin session's GET (the fixture's owner, no PIN, two-step on), for reading what was recorded through the API. */
   const adminGet = async (path: string) => {
-    const signIn = await fetch(`${base}/auth/login`, { method: 'POST', headers: { 'content-type': 'application/json', 'x-forwarded-for': '10.250.0.1' }, body: JSON.stringify(FIXTURE_ACCOUNTS.admin) });
+    const headers = { 'content-type': 'application/json', 'x-forwarded-for': '10.250.0.1' };
+    const step = await fetch(`${base}/auth/login`, { method: 'POST', headers, body: JSON.stringify(FIXTURE_ACCOUNTS.admin) });
+    const { challengeToken } = (await step.json()) as { challengeToken: string };
+    const signIn = await fetch(`${base}/auth/login/2fa`, { method: 'POST', headers, body: JSON.stringify({ challengeToken, code: currentCode(db, fixture.users.admin) }) });
     const cookie = /lm_session=[^;]*/.exec(signIn.headers.get('set-cookie') ?? '')?.[0] ?? '';
     return (await fetch(`${base}${path}`, { headers: { cookie } })).json();
   };
@@ -398,7 +404,8 @@ test('a sign-out by the idle timeout is recorded once, under the person, when th
     const admin = await s.login('admin');
     const activity = (await admin.get(`/audit/person/${fx2(s).users.recruiter}`)).json;
     assert.ok(activity.rows.some((r: { action: string }) => r.action === IDLE_SIGN_OUT_ACTION));
-    const signIn = rows(db, `WHERE user_id = ? AND action = 'POST /auth/login'`, [fx2(s).users.recruiter]).length;
+    // Release 1.4: the fixture's accounts sign in with a two-step code, so the sign-in is the code step's row
+    const signIn = rows(db, `WHERE user_id = ? AND action IN ('POST /auth/login', 'POST /auth/login/2fa')`, [fx2(s).users.recruiter]).length;
     assert.equal(signIn, 1);
     assert.ok(activity.lastActiveAt < get<{ at: string }>(db, `SELECT at FROM audit_log WHERE action = ? AND user_id = ?`, [IDLE_SIGN_OUT_ACTION, fx2(s).users.recruiter])!.at);
     // …and a Sign-ins row: the kind filter finds it
