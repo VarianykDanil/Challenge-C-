@@ -83,11 +83,15 @@ export function paymentsRouter(db: Db): Router {
     const id = idParam(req);
     const file = batchFile(db, id);
     const batch = batchDetail(db, id);
+    // review fix (cross:X-4): what is IN the file — a line the bank format refused is not (no file reference)
+    const inFile = batch.items.filter((i) => i.providerRef);
+    const count = inFile.length;
+    const totalPence = inFile.reduce((sum, i) => sum + i.amountPence, 0);
     try {
       recordAudit(db, {
         userId: me.id, action: 'GET /payments/batches/:id/file', entity: 'payment_batch', entityId: id, kind: 'export', actorRole: me.role,
-        summary: `Downloaded the bank file for payment #${id}: ${batch.count} ${batch.count === 1 ? 'person' : 'people'}, ${formatPence(batch.totalPence)}`,
-        after: { fileName: file.name, count: batch.count, totalPence: batch.totalPence }, ip: req.ip ?? null,
+        summary: `Downloaded the bank file for payment #${id}: ${count} ${count === 1 ? 'person' : 'people'}, ${formatPence(totalPence)}`,
+        after: { fileName: file.name, count, totalPence }, ip: req.ip ?? null,
       });
     } catch (err) {
       console.error('Audit trail (bank file download) failed', err);

@@ -3686,7 +3686,11 @@ the four tables (and the review-fix columns on a database that tried an earlier 
 unconfirmed (`confirmed_by_admin_at` NULL or older than `changed_at`): the next payment to them is skipped ("Thomas
 changed their bank details on Thu 22 Oct: check them with Thomas, then confirm them in Team") and Needs attention says
 "Thomas Grainger changed their bank details" until an admin confirms them (`POST /users/:id/bank-details/confirm`,
-Team › person › **Confirm details**). Details an admin types in count as confirmed by that admin. Saving the same
+Team › person › **Confirm details**). The page sends the `changedAt` of the details it showed; if the person changed
+them again since, the confirm answers 409 "They changed their bank details again since you looked: check the new ones
+before confirming." and confirms nothing (review fix: the admin confirms exactly what they checked; without
+`changedAt`, as from an older client, whatever is stored is confirmed). Details an admin types in count as confirmed by
+that admin. Saving the same
 details again changes nothing. A change needs the changer's current authenticator code when they have two-step on
 (every non-demo account, §17.14); the fields are checked before the code, so a typing mistake never uses one up. A
 change of bank details after an approval holds **future** payments only (drafts and approvals); it never fails an
@@ -3723,8 +3727,12 @@ interface PaymentProviderAdapter {
 - **Registry** (`lib/payments/registry.ts`): the four built-in adapters in the order Settings → Payments shows them
   (`bank_file`, `revolut`, `wise`, `truelayer`). The stubs (`lib/payments/stubs.ts`, `ready: false`, 501) stay for tests.
   The fake (`lib/payments/fake.ts`: deterministic, scriptable failures and timeouts) is registered by tests, and by
-  `LM_PAYMENTS_FAKE=1` at start-up together with a fake bank file ("Test provider", "Test bank file"): they pay nobody,
-  for trying the screens on a demo — never on a server people are paid from.
+  `LM_PAYMENTS_FAKE=1` at start-up together with a fake bank file ("Test provider", "Test bank file",
+  `demoFakeProviders`): they pay nobody, for trying the screens on a demo — never on a server people are paid from.
+  Both are `testOnly` (`PaymentProviderInfo.testOnly`, review fix): their connections stay in test mode — the test bank
+  file too — so Mark as paid or a "paid" answer marks no run paid ("Test mode: nobody was paid"), and switching them to
+  live answers 400 "The test providers never pay anyone: they have no live mode.". The test suite's own fake is not
+  test-only: it stands in for a real provider that goes live.
 - **Connections** (`lib/payments/connections.ts`): settings stored as JSON, secrets as one encrypted blob; no answer,
   audit row, log line or error carries a secret (a connection answers only the NAMES of the secrets stored,
   `secretsSet`); an empty secret on PATCH keeps the stored one. An API connection starts `mode: 'test'`,
@@ -3732,7 +3740,7 @@ interface PaymentProviderAdapter {
   its settings or secrets puts it back to `not_connected` and forgets the last test and its balance. Switching to live
   needs `confirm: "PAY FOR REAL"` typed exactly and a connected test, and then a new test against the live service
   (`not_connected` again, balance forgotten). A bank file connection is `mode: 'live'`, `status: 'connected'` from the
-  start and has no test mode (nothing moves until Matt uploads the file). Disconnecting wipes the secrets, cancels the
+  start and has no test mode (nothing moves until Matt uploads the file); only the test bank file is `mode: 'test'`. Disconnecting wipes the secrets, cancels the
   drafts through it and keeps the history; not while a payment through it is on its way (409).
 
 ### 17.6 A payment, from draft to paid (`server/src/lib/payments/batches.ts`, F)
@@ -3745,7 +3753,9 @@ interface PaymentProviderAdapter {
    `not_positive`, `invoice_not_accepted`, `invoice_disputed`, `no_bank_details`, `bank_details_unconfirmed`). Items copy
    the amount in pence, the holder name and the last four digits. Drafts do not hold a run.
 2. **Approve** (`approveBatch`). Everything is checked again **before** the code is used: still a draft, the provider
-   built, the connection connected and still in the draft's mode, and nothing changed since the draft (a run paid or
+   built, the connection connected and still in the draft's mode (review fix: the payment's `actions.approveBlocked`
+   gives the same reason the approval would, e.g. "This draft was made in test mode, but the connection is now live:
+   cancel it and make a new payment.", and the page shows it instead of a guess), and nothing changed since the draft (a run paid or
    in another payment, a run's pay changed, bank details changed or removed, an invoice no longer payable → `409
    batch_changed` with `details.problems`). Then the admin's fresh authenticator code (`lib/payments/code.ts`: a current
    code from the app, not a recovery code; accepted once, like at sign-in; wrong codes count towards the same limiter,
@@ -3762,9 +3772,14 @@ interface PaymentProviderAdapter {
    payment moves gets its own audit row ("Marked paid by payment #12: …" / "Payment #12 failed: …"), by the admin or,
    from the job, by Linear Hub on the approver's behalf.
 4. **Refresh** (**Check now**, `POST …/refresh`, and `lib/payments/job.ts` every 5 minutes while an approved API
-   payment has items waiting; `LM_PAYMENTS_JOB=0` turns the job off, Check now still works): resends queued items after
+   payment has items waiting (a payment and the list answer `queuedCount`, the items still waiting to be sent; when it
+   is every item not cancelled, nothing has reached the provider and the screens say **Waiting to send**, not
+   **Sent**); `LM_PAYMENTS_JOB=0` turns the job off, Check now still works): resends queued items after
    a submit that threw or timed out (same keys, to the account each was approved with), then asks the provider about
-   submitted and processing items. One conversation per batch at a time (409 "Linear Hub is talking to the provider
+   submitted and processing items. A provider recognises a repeated key only for a while, so the adapters stop
+   resending in time (Revolut after 13 days looks the payment up, §17.11; TrueLayer after 5 hours fails it, §17.13);
+   the batch's `createdAt` and `approvedAt` reach them on the real clock, so a pinned `LM_BUSINESS_NOW` never makes a
+   fresh approval look old. One conversation per batch at a time (409 "Linear Hub is talking to the provider
    about this payment right now"). The job is unref'd, needs no session, and does nothing when nothing is waiting (one
    cheap query).
 5. **Test mode** (a provider's sandbox) moves no money: items can come back paid but never mark a run paid ("Test
@@ -3777,7 +3792,9 @@ interface PaymentProviderAdapter {
 
 `POST /finance/payroll/:id/pay` (Mark paid by hand) answers `409 { code: 'in_payment', batchId }` while the run is in an
 approved payment still on its way: "Jordan's pay for w/c 5 Oct is in payment #12, which is still on its way. Wait for
-it to finish, or cancel it, before marking the week paid by hand."
+it to finish, or cancel it, before marking the week paid by hand." While Linear Hub does not know whether the provider
+made it (the "unsure" items of §17.9) it says instead "… Wait until Linear Hub hears back from Revolut Business (Check
+now on the payment) before marking the week paid by hand.", because Cancel cannot help then either.
 
 **Never twice**, in layers: the partial unique index (a run in at most one live payment); the draft and approval
 checks; the conditional claim; per-item idempotency keys sent to the provider (a resend is the same request with the
@@ -3827,8 +3844,9 @@ flagged run is brought up to date at once (`lib/payRule.ts syncPersonWeek`) befo
 `POST …/cancel`: a draft is cancelled at once (nothing was sent); a bank file's people not yet marked are cancelled
 (the file was not used); an API payment's queued items Linear Hub never handed over (`attempted_at` NULL) are cancelled
 at once, through any provider. It answers 409 "Linear Hub is still finding out whether Wise Business made the transfer
-for …: press Check now, then cancel" while an item was sent but has no provider reference yet (it may exist at the
-provider), and changes nothing then. The rest are asked to stop only when the adapter can (Wise); otherwise, with nothing else to stop, 409 "Payments
+for …: press Check now, then cancel. If Wise Business cannot be reached, the week stays held until Wise Business
+answers." while an item was sent but has no provider reference yet (it may exist at the provider), and changes nothing
+then; the payment's `actions.cancelBlocked` says the same and the page shows **Cancel the rest** greyed out with it. The rest are asked to stop only when the adapter can (Wise); otherwise, with nothing else to stop, 409 "Payments
 already sent to … cannot be stopped from Linear Hub. Check them with the provider." `cancelled_at` is set only when something actually stopped, nothing is sent once a cancel
 was recorded, and the page's toast says how many stopped and how many are still on their way.
 
@@ -3937,6 +3955,12 @@ Hosts (from TrueLayer's own PHP library): auth `https://auth.truelayer-sandbox.c
   /v3/payouts` to an `external_account` beneficiary (holder name, sort code and account number, reference) with an
   `Idempotency-Key` (the item's UUID). The same key and body answer the first payout; the same key with a different body
   (422 "Idempotency-Key Reuse") stays queued with a plain error to check the Console.
+- **Never resent blind** (review fix): TrueLayer recognises a key for a limited time (6 hours on
+  docs.truelayer.com/docs/idempotency, 30 days on /docs/idempotency-for-payment-requests) and has no lookup by key for
+  payouts, so a queued payout approved more than `TRUELAYER_REPEAT_HOURS` (5) hours ago is not sent again: it fails
+  with "Not sent: this payout was approved more than 5 hours ago and TrueLayer only recognises a repeated payout for 6
+  hours, so Linear Hub will not send it again. Check the payouts in the TrueLayer Console, then pay this week again if
+  it was not paid." and its run goes back to Runs to pay.
 - **Statuses** (`GET /v3/payouts/{id}`): `executed` → paid; `failed` → failed (`insufficient_funds`, `blocked`,
   `invalid_scan`, `invalid_iban`, `returned`, `scheme_error` in plain words); `pending`, `authorized` → processing.
 - TrueLayer asks non-regulated businesses for each payee's date of birth and address for sanctions screening; the API
@@ -3946,7 +3970,9 @@ Hosts (from TrueLayer's own PHP library): auth `https://auth.truelayer-sandbox.c
 
 **When a provider does not answer** (all three, `lib/payments/apiCommon.ts`): if a call times out, or the provider
 answers 429, 5xx or 409, `submit` stops and returns what it knows, saying why in `error` (the batch's `lastError`, e.g.
-"TrueLayer did not answer within 15 seconds"); the rest stay queued and go again with the same ids at the next check. A
+"TrueLayer did not answer within 15 seconds"; a network failure — Node's "fetch failed", ENOTFOUND, ECONNREFUSED,
+ECONNRESET and the like — reads "Linear Hub could not reach Wise: check this computer’s internet connection, or Wise
+may be down.", never claiming nothing was sent); the rest stay queued and go again with the same ids at the next check. A
 refusal of one person (4xx) fails only that item, with the provider's words and never the full account number. A
 refused sign-in (401) stops the whole submit. **Paid means the provider says the money left**: a payment the receiving
 bank returns later (Wise "bounced back" after "sent", TrueLayer "returned" after "executed") is not undone in Linear
@@ -3976,15 +4002,17 @@ Hub; the week stays paid and is sorted out by hand with an adjustment on a later
 
 - **Needs attention** (`lib/attention/payments.ts`, admin only, kind `payments`, the bell's "Payments" group, one
   `UNION ALL` statement): changed bank details to check (by name up to three, then one line), failed live payments whose
-  run is still unpaid with no newer payment (one line, danger), bank files approved but not marked paid (info, the
-  newest two: "Payment #12 is waiting for your bank"), connections whose last test failed (warning: "… needs a look"),
+  run is still unpaid with no newer payment (one line, danger; one full stop after a reason that ends with one), bank
+  files approved but not marked paid (info, the newest two: "Payment #12 is waiting for your bank", with the people and
+  the money still in the file — a line the bank format refused is not counted), connections whose last test failed (warning: "… needs a look"),
   and runs whose figures changed after their payment was approved (one line, warning, 30 days, gone once a correction
   for that week is added).
 - **Audit** (`lib/audit/paymentSpecs.ts`, `lib/audit/securitySpecs.ts`): every payments and bank-details write route
   has a spec; entities `payment_connection`, `payment_batch`, `bank_account` (labels "Payment connection", "Payment",
   "Bank details"; bank details filed under the person). Snapshots never hold a secret, token, sort code or account
   number (a connection shows its secrets' names; bank details only the masked digits), and `AUDIT_REDACTED_KEYS` redacts
-  those keys again. The bank file download is an `export` row. A wrong code at approval or on a bank details change is
+  those keys again. The bank file download is an `export` row giving the people and the money in the file (the lines the bank
+  format refused are left out of the file and of the row). A wrong code at approval or on a bank details change is
   a `sign_in` row.
 - **Write limit**: every `POST`, `PATCH` and `DELETE` under `/payments`, `PUT /me/bank-details`, `PUT
   /users/:id/bank-details`, `POST /users/:id/bank-details/confirm` (under `POST /users`) and `POST

@@ -16,13 +16,13 @@ import { generateKeyPairSync, type KeyObject } from 'node:crypto';
 import { PAYMENT_LIVE_CONFIRMATION, paydayForWeek } from '@lm/shared';
 import { all, get, run, type Db } from '../db/connection.ts';
 import { encrypt } from '../lib/crypto.ts';
-import { addDays, businessNow, mondayOf } from '../lib/dates.ts';
+import { addDays, businessNow, mondayOf, setBusinessClock } from '../lib/dates.ts';
 import { paymentUuid } from '../lib/payments/apiCommon.ts';
 import type { PaymentProviderAdapter, ProviderBatch, ProviderConnection, ProviderContext, ProviderItem } from '../lib/payments/provider.ts';
 import { ProviderConfigError } from '../lib/payments/provider.ts';
 import { registerPaymentProvider, unregisterPaymentProvider } from '../lib/payments/registry.ts';
 import { createRevolutProvider, REVOLUT_LIVE_URL, REVOLUT_SANDBOX_URL } from '../lib/payments/revolut.ts';
-import { createTrueLayerProvider, TRUELAYER_URLS } from '../lib/payments/truelayer.ts';
+import { createTrueLayerProvider, TRUELAYER_REPEAT_HOURS, TRUELAYER_URLS } from '../lib/payments/truelayer.ts';
 import { createWiseProvider, WISE_LIVE_URL, WISE_SANDBOX_URL } from '../lib/payments/wise.ts';
 import { startRevolutFake, startTrueLayerFake, startWiseFake, type RevolutFake, type TrueLayerFake, type WiseFake } from './paymentApiFakes.ts';
 import { currentCode, startTestServer, type Json, type TestClient, type TestServer } from './helpers.ts';
@@ -537,6 +537,23 @@ describe('TrueLayer payouts adapter (sandbox fake)', () => {
     assert.ok(!(out.items[1].failureReason ?? '').includes('00000002'));
   });
 
+  test('cross:X-1: a payout approved more than 5 hours ago is never sent again blind (TrueLayer only knows a repeated key for 6 hours)', async () => {
+    assert.equal(TRUELAYER_REPEAT_HOURS, 5);
+    const posts = () => fake.requests.filter((r) => r.method === 'POST' && r.path === '/v3/payouts').length;
+    const old = new Date(Date.now() - 6 * 3_600_000).toISOString();
+    const out = await tl.submit(stored.conn('truelayer'), batch({ createdAt: old, approvedAt: old }), [item(1), item(2)], stored.ctx(fake.url));
+    assert.deepEqual(out.items.map((r) => r.status), ['failed', 'failed']);
+    assert.match(out.items[0].failureReason ?? '', /^Not sent: this payout was approved more than 5 hours ago and TrueLayer only recognises a repeated payout for 6 hours/);
+    assert.match(out.items[0].failureReason ?? '', /Check the payouts in the TrueLayer Console, then pay this week again if it was not paid\.$/);
+    assert.equal(posts(), 0, 'nothing sent');
+    assert.equal(fake.payouts.size, 0);
+    // inside the window it is sent as usual
+    const recent = new Date(Date.now() - 4 * 3_600_000).toISOString();
+    const ok = await tl.submit(stored.conn('truelayer'), batch({ createdAt: recent, approvedAt: recent }), [item(1)], stored.ctx(fake.url));
+    assert.equal(ok.items[0].status, 'processing');
+    assert.equal(posts(), 1);
+  });
+
   test('refresh: executed → paid; failed → failed with plain words; pending and authorized → processing', async () => {
     const sent = await tl.submit(stored.conn('truelayer'), batch(), [1, 2, 3, 4].map((n) => item(n)), stored.ctx(fake.url));
     const ids = sent.items.map((r) => r.providerRef!);
@@ -722,6 +739,49 @@ describe('through Linear Hub: connect, test, live, approve with a code, checked,
     assert.equal(again.json.items[0].status, 'processing');
     assert.equal(again.json.lastError ?? null, null);
     assert.equal(tlFake.payouts.size, before + 1, 'one payout although it was sent twice');
+  });
+
+  test('cross:X-1: a TrueLayer payout that timed out and is checked more than 5 hours later is failed, never sent again', async () => {
+    const id = await connectLive('truelayer', { clientId: tlFake.clientId, signingKeyId: tlFake.kid }, { clientSecret: tlFake.clientSecret, privateKey: EC_PEM });
+    registerPaymentProvider(createTrueLayerProvider({ baseUrl: tlFake.url, timeoutMs: 300 }));
+    tlFake.script({ payoutSlow: 3 });
+    const userId = srv.fixture!.users.rep;
+    setBank(srv.db, userId, '00000015');
+    const runId = addRun(srv.db, { userId, weekStart, gross: 25 });
+    const draft = (await admin.post('/payments/batches', { connectionId: id, runIds: [runId] })).json;
+    const approved = await admin.post(`/payments/batches/${draft.id}/approve`, { code: code() });
+    assert.equal(approved.json.items[0].status, 'queued');
+    const posts = () => tlFake.requests.filter((r) => r.method === 'POST' && r.path === '/v3/payouts').length;
+    const sentBefore = posts();
+    // a MacBook closed for the afternoon: the approval was 6 hours ago
+    const aged = new Date(Date.now() - 6 * 3_600_000).toISOString();
+    run(srv.db, `UPDATE payment_batches SET approved_at = ?, created_at = ? WHERE id = ?`, [aged, aged, draft.id]);
+    run(srv.db, `UPDATE payment_items SET attempted_at = ? WHERE batch_id = ?`, [aged, draft.id]);
+    const checked = await admin.post(`/payments/batches/${draft.id}/refresh`);
+    assert.equal(checked.status, 200, JSON.stringify(checked.json));
+    assert.equal(posts(), sentBefore, 'POST /v3/payouts sent again: 0');
+    assert.equal(checked.json.items[0].status, 'failed');
+    assert.match(checked.json.items[0].failureReason, /Not sent: this payout was approved more than 5 hours ago/);
+    assert.equal(runStatus(runId), 'failed', 'back on Runs to pay with the reason');
+  });
+
+  test('cross:X-1: the age is measured on one clock (a pinned business clock does not make a fresh approval look old)', async () => {
+    const id = await connectLive('truelayer', { clientId: tlFake.clientId, signingKeyId: tlFake.kid }, { clientSecret: tlFake.clientSecret, privateKey: EC_PEM });
+    registerPaymentProvider(createTrueLayerProvider({ baseUrl: tlFake.url, timeoutMs: 300 }));
+    setBusinessClock(new Date(Date.now() - 2 * 86_400_000)); // LM_BUSINESS_NOW two days behind, as for screenshots
+    try {
+      tlFake.script({ payoutSlow: 3 });
+      const userId = srv.fixture!.users.rep;
+      setBank(srv.db, userId, '00000016');
+      const runId = addRun(srv.db, { userId, weekStart: addDays(weekStart, -7), gross: 26 });
+      const draft = (await admin.post('/payments/batches', { connectionId: id, runIds: [runId] })).json;
+      const approved = await admin.post(`/payments/batches/${draft.id}/approve`, { code: code() });
+      assert.equal(approved.json.items[0].status, 'queued', JSON.stringify(approved.json));
+      const again = await admin.post(`/payments/batches/${draft.id}/refresh`);
+      assert.equal(again.json.items[0].status, 'processing', 'sent again with the same key, not failed as too old');
+    } finally {
+      setBusinessClock(null);
+    }
   });
 
   test('test mode pays nobody real and marks no run paid (sandbox)', async () => {

@@ -717,7 +717,7 @@ test('providerFetch: a timeout in plain words, secrets redacted, no retry of a P
     throw new Error('connect ECONNREFUSED with token sk_live_ABCDEFGHIJ');
   };
   await assert.rejects(providerFetch('http://127.0.0.1:1/pay', { method: 'POST' }, { provider: 'Revolut', secrets: ['sk_live_ABCDEFGHIJ'], fetchImpl: failing }), (e: Error) => {
-    assert.match(e.message, /Could not reach Revolut/);
+    assert.match(e.message, /could not reach Revolut/i);
     assert.ok(!e.message.includes('sk_live_ABCDEFGHIJ'));
     return true;
   });

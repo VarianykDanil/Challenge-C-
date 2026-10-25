@@ -5,7 +5,7 @@
 import { useMemo, useState } from 'react';
 import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import { ArrowLeft, ArrowRight, Settings as SettingsIcon, TriangleAlert } from 'lucide-react';
-import { PAYMENT_MODE_LABELS, formatPence, payDayLabel, payWeekLabel, poundsToPence, type PaymentConnection, type PaymentSkip, type PayrollRunWithUser } from '@lm/shared';
+import { PAYMENT_MODE_LABELS, formatPence, payDayLabel, payWeekLabel, poundsToPence, type PaymentConnection, type PaymentProviderView, type PaymentSkip, type PayrollRunWithUser } from '@lm/shared';
 import { ApiError } from '@/api/client';
 import { usePayroll } from '@/api/hooks';
 import { useCreateBatch, usePaymentBatches, usePaymentConnections, usePaymentProviders } from '@/api/payments';
@@ -164,18 +164,7 @@ export function PaymentsPayPage() {
             {connections.isLoading ? <Skeleton className="h-16" /> : !usable.length ? (
               <div className="space-y-3 text-sm text-muted">
                 {untested.length ? (
-                  <ul className="grid gap-2" aria-label="Connections to test first" data-untested="">
-                    {untested.map((c) => (
-                      <li key={c.id} className="flex min-h-14 items-center gap-3 rounded-lg border border-dashed border-border p-3" aria-disabled="true">
-                        <ProviderLogo iconKey={info(c)?.iconKey ?? 'bank'} size="sm" />
-                        <span className="min-w-0 flex-1">
-                          <span className="block text-sm font-medium text-fg">{c.name}</span>
-                          <span className="block text-xs text-muted">Test it in Settings → Payments first{c.status === 'error' && c.lastError ? `. Last time: ${c.lastError}` : ''}</span>
-                        </span>
-                        {info(c)?.kind === 'api' && c.mode === 'test' && <Badge tone="info" size="sm">Test</Badge>}
-                      </li>
-                    ))}
-                  </ul>
+                  <UntestedList connections={untested} info={info} />
                 ) : (
                   <p>Set up a way to pay first: a bank payment file, Revolut Business, Wise Business or Open Banking through TrueLayer.</p>
                 )}
@@ -202,10 +191,12 @@ export function PaymentsPayPage() {
                         <span className="block truncate text-sm font-medium text-fg">{c.name}</span>
                         <span className="block text-xs text-muted">{p?.kind === 'file' ? (bankFileFormatLabel(c.settings) ?? 'Bank payment file') : PAYMENT_MODE_LABELS[c.mode]}{p && !p.available ? ' · not switched on in this version yet' : ''}</span>
                       </span>
-                      {p?.kind === 'api' && c.mode === 'test' && <Badge tone="info" size="sm">Test</Badge>}
+                      {(p?.kind === 'api' || p?.testOnly) && c.mode === 'test' && <Badge tone="info" size="sm">Test</Badge>}
                     </button>
                   );
                 })}
+                {/* review fix (UI-8): a connection that needs a (new) test stays listed, greyed, below the ones that work */}
+                {untested.length > 0 && <UntestedList connections={untested} info={info} className="mt-1" />}
               </div>
             )}
           </Card>
@@ -233,6 +224,24 @@ export function PaymentsPayPage() {
   );
 }
 
+/** Connections that exist but need a (new) test: listed, not selectable, with what to do. */
+function UntestedList({ connections, info, className }: { connections: PaymentConnection[]; info: (c: PaymentConnection) => PaymentProviderView | undefined; className?: string }) {
+  return (
+    <ul className={`grid gap-2 ${className ?? ''}`} aria-label="Connections to test first" data-untested="">
+      {connections.map((c) => (
+        <li key={c.id} className="flex min-h-14 items-center gap-3 rounded-lg border border-dashed border-border p-3 opacity-80" aria-disabled="true">
+          <ProviderLogo iconKey={info(c)?.iconKey ?? 'bank'} size="sm" />
+          <span className="min-w-0 flex-1">
+            <span className="block text-sm font-medium text-fg">{c.name}</span>
+            <span className="block text-xs text-muted">Test it in Settings → Payments first{c.status === 'error' && c.lastError ? `. Last time: ${c.lastError}` : ''}</span>
+          </span>
+          {info(c)?.kind === 'api' && c.mode === 'test' && <Badge tone="info" size="sm">Test</Badge>}
+        </li>
+      ))}
+    </ul>
+  );
+}
+
 function RecentPayments({ loading, rows, iconFor, kindFor }: { loading: boolean; rows: import('@lm/shared').PaymentBatchSummary[]; iconFor: (p: string) => string; kindFor: (p: string) => 'file' | 'api' | undefined }) {
   return (
     <Card padded={false} className="min-w-0 overflow-hidden">
@@ -251,8 +260,9 @@ function RecentPayments({ loading, rows, iconFor, kindFor }: { loading: boolean;
                   <span className="block text-xs text-muted">{b.connectionName} · {formatNumber(b.count)} {b.count === 1 ? 'payment' : 'payments'} · {payDayLabel(b.createdAt.slice(0, 10))}</span>
                 </span>
                 <span className="flex shrink-0 flex-col items-end gap-1">
-                  <PaymentBatchStatusBadge status={b.status} kind={kindFor(b.provider)} mode={b.mode} />
-                  {b.mode === 'test' && kindFor(b.provider) === 'api' && <Badge tone="info" size="sm">Test</Badge>}
+                  {/* review fix (UI-2): nothing reached the provider yet → "Waiting to send", not "Sent" */}
+                  <PaymentBatchStatusBadge status={b.status} kind={kindFor(b.provider)} mode={b.mode} allQueued={!!b.queuedCount && b.queuedCount === b.paidCount + b.failedCount + b.waitingCount} />
+                  {b.mode === 'test' && <Badge tone="info" size="sm">Test</Badge>}
                 </span>
               </Link>
             </li>

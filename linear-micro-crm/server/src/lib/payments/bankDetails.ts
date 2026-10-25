@@ -15,7 +15,7 @@ import { maskAccountNumber, maskSortCode, validateBankDetails, type BankDetails,
 import { all, get, placeholders, run, type Db } from '../../db/connection.ts';
 import { decrypt, encrypt } from '../crypto.ts';
 import { nowISO } from '../dates.ts';
-import { badRequest, forbidden, notFound } from '../errors.ts';
+import { HttpError, badRequest, forbidden, notFound } from '../errors.ts';
 import { isTwoFactorEnabled } from '../twofactor.ts';
 
 interface BankRow {
@@ -130,11 +130,19 @@ export function saveBankDetails(db: Db, actor: UserWithTeam, targetId: number, i
   return { view: bankDetailsView(db, actor, targetId), changed: true, before };
 }
 
-/** The admin checked the details with the person: payments may use them. 404 when there are none. */
-export function confirmBankDetails(db: Db, admin: UserWithTeam, targetId: number): { view: BankDetailsView; changed: boolean } {
+/**
+ * The admin checked the details with the person: payments may use them. 404 when there are none. Review fix
+ * (cross:X-2): `expectedChangedAt` is the `changedAt` of the details the admin looked at; when the person changed them
+ * again since, 409 and nothing is confirmed (the newer details stay held). Left out (older clients), whatever is
+ * stored is confirmed, as before.
+ */
+export function confirmBankDetails(db: Db, admin: UserWithTeam, targetId: number, expectedChangedAt?: string): { view: BankDetailsView; changed: boolean } {
   const r = bankRow(db, targetId);
   if (!r) throw notFound('Bank details');
   if (!needsConfirmation(r)) return { view: bankDetailsView(db, admin, targetId), changed: false };
+  if (expectedChangedAt !== undefined && expectedChangedAt !== r.changedAt) {
+    throw new HttpError(409, 'They changed their bank details again since you looked: check the new ones before confirming.', { code: 'bank_details_changed' });
+  }
   const at = nowISO();
   run(db, `UPDATE bank_accounts SET confirmed_by_admin_at = ?, confirmed_by = ? WHERE user_id = ?`, [at > r.changedAt ? at : r.changedAt, admin.id, targetId]);
   return { view: bankDetailsView(db, admin, targetId), changed: true };

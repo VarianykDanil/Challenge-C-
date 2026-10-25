@@ -102,7 +102,7 @@ function Summary({ view, userId, own, first }: { view: BankDetailsView; userId: 
               className="h-10 shrink-0 self-start @xl:self-auto"
               loading={confirm.isPending}
               leftIcon={<CheckCircle2 aria-hidden />}
-              onClick={() => confirm.mutate(undefined, {
+              onClick={() => confirm.mutate(d.changedAt, {
                 onSuccess: () => toast.success('Bank details confirmed', `Payments to ${first} can use them now.`),
                 onError: (e) => toast.error('Could not confirm them', errorMessage(e)),
               })}

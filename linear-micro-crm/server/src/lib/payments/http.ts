@@ -8,7 +8,8 @@
  *  - Secrets are redacted from every error: pass the connection's secret values in `secrets` and any of them (and any
  *    `Bearer …` token) appearing in a message is replaced with "[redacted]". Bodies of failed responses are cut to
  *    300 characters before they reach an error message.
- * Errors are thrown as ProviderError with plain words ("Revolut did not answer within 15 seconds").
+ * Errors are thrown as ProviderError with plain words ("Revolut did not answer within 15 seconds"; a network failure:
+ * "Linear Hub could not reach Wise: check this computer’s internet connection, or Wise may be down.").
  */
 import { ProviderError } from './provider.ts';
 
@@ -48,6 +49,16 @@ export function redactSecrets(text: string, secrets: readonly string[] = []): st
 }
 
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+
+const NETWORK_CODES = /\b(ENOTFOUND|EAI_AGAIN|ECONNREFUSED|ECONNRESET|ECONNABORTED|ETIMEDOUT|EHOSTUNREACH|ENETUNREACH|ENETDOWN|EPIPE|UND_ERR_[A-Z_]+)\b/;
+
+/** Node's fetch failing to connect: TypeError "fetch failed" with a `cause` carrying the system error code. */
+function isNetworkFailure(err: unknown): boolean {
+  const e = err as { name?: unknown; message?: unknown; code?: unknown; cause?: { code?: unknown; message?: unknown } } | null;
+  if (!e || typeof e !== 'object') return false;
+  if (e.name === 'TypeError' && /fetch failed/i.test(String(e.message ?? ''))) return true;
+  return [e.code, e.cause?.code, e.message, e.cause?.message].some((v) => typeof v === 'string' && NETWORK_CODES.test(v));
+}
 
 /**
  * One request to a provider. Answers every HTTP status (check `ok`); throws ProviderError only when no answer came
@@ -89,7 +100,11 @@ export async function providerFetch(url: string, init: RequestInit, opts: Provid
     ? `${opts.provider} did not answer within ${Math.round(timeoutMs / 1000)} seconds`
     : lastError instanceof ProviderError
       ? `${opts.provider} is not answering properly (${lastError.message.replace(`${opts.provider} `, '')})`
-      : `Could not reach ${opts.provider}: ${redactSecrets(String(e?.message ?? 'network error'), opts.secrets).slice(0, 200)}`;
+      : isNetworkFailure(lastError)
+        // review fix (UI-10): plain words, never Node's "fetch failed"; and no promise that nothing was sent (a reset
+        // connection can come after the provider received the request)
+        ? `Linear Hub could not reach ${opts.provider}: check this computer’s internet connection, or ${opts.provider} may be down.`
+        : `Could not reach ${opts.provider}: ${redactSecrets(String(e?.message ?? 'network error'), opts.secrets).slice(0, 200)}`;
   throw new ProviderError(redactSecrets(message, opts.secrets), lastError instanceof ProviderError ? lastError.status : null);
 }
 

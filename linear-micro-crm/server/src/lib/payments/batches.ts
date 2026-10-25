@@ -63,7 +63,7 @@ import { recordSystemEvent } from '../audit/events.ts';
 import { payrollSnapshot } from '../auditSpecs.ts';
 import { bumpDataVersion } from '../cache.ts';
 import { decrypt, encrypt } from '../crypto.ts';
-import { addDays, isISODate, nowISO, todayISO } from '../dates.ts';
+import { addDays, businessNow, isISODate, nowISO, todayISO } from '../dates.ts';
 import { HttpError, badRequest, conflict, notFound } from '../errors.ts';
 import { withInvoiceSummaries } from '../invoices.ts';
 import { markPayrollRunPaid } from '../markPaid.ts';
@@ -105,6 +105,7 @@ interface BatchRow {
   paidCount: number;
   failedCount: number;
   waitingCount: number;
+  queuedCount: number;
 }
 
 const BATCH_SELECT = `
@@ -114,13 +115,14 @@ const BATCH_SELECT = `
          b.count, b.status, b.file_name AS fileName, b.idempotency_key AS idempotencyKey, b.provider_ref AS providerRef,
          b.skipped_json AS skippedJson, (b.file_enc IS NOT NULL) AS hasFile, b.last_error AS lastError, b.updated_at AS updatedAt,
          b.cancelled_at AS cancelledAt,
-         COALESCE(s.paid, 0) AS paidCount, COALESCE(s.failed, 0) AS failedCount, COALESCE(s.waiting, 0) AS waitingCount
+         COALESCE(s.paid, 0) AS paidCount, COALESCE(s.failed, 0) AS failedCount, COALESCE(s.waiting, 0) AS waitingCount,
+         COALESCE(s.queued, 0) AS queuedCount
   FROM payment_batches b
   JOIN payment_connections c ON c.id = b.connection_id
   LEFT JOIN users cu ON cu.id = b.created_by
   LEFT JOIN users au ON au.id = b.approved_by
   LEFT JOIN (SELECT batch_id, SUM(status = 'paid') AS paid, SUM(status = 'failed') AS failed,
-                    SUM(status IN ('queued', 'submitted', 'processing')) AS waiting
+                    SUM(status IN ('queued', 'submitted', 'processing')) AS waiting, SUM(status = 'queued') AS queued
              FROM payment_items GROUP BY batch_id) s ON s.batch_id = b.id`;
 
 interface ItemRow {
@@ -241,6 +243,26 @@ function modeMismatch(b: Pick<BatchRow, 'id' | 'mode'>, conn: Pick<ConnectionRow
 }
 
 /**
+ * Review fix (UI-7): why a draft cannot be approved through its connection now (null: it can, as far as the connection
+ * goes). The approval answers 409 with the same words; the payment page shows them instead of a guess.
+ */
+function approveBlockedReason(b: Pick<BatchRow, 'mode'>, conn: ConnectionRow | undefined): string | null {
+  if (!conn || conn.disconnectedAt) return 'Its connection was disconnected. Cancel this payment and make a new one.';
+  if (conn.mode !== b.mode) {
+    return b.mode === 'test'
+      ? 'This draft was made in test mode, but the connection is now live: cancel it and make a new payment.'
+      : 'This draft was made live, but the connection is now in test mode: cancel it and make a new payment.';
+  }
+  if (conn.status !== 'connected') return `Test the ${conn.name} connection in Settings → Payments first${conn.lastError ? ` (last time: ${conn.lastError})` : ''}.`;
+  return null;
+}
+
+/** Review fix (UI-9): why Cancel the rest waits while Linear Hub does not know whether the provider made some items. */
+function cancelBlockedReason(unsure: number, providerName: string): string {
+  return `Linear Hub is still finding out whether ${providerName} made ${unsure === 1 ? 'it' : 'them'}: press Check now first. If ${providerName} cannot be reached, the week stays held until it answers.`;
+}
+
+/**
  * What Cancel can do with the items still waiting: `local`, queued items Linear Hub never sent (cancelled here);
  * `unsure`, items the provider may have made with no reference back yet (Check now first); `provider`, the rest.
  */
@@ -271,6 +293,7 @@ function toSummary(b: BatchRow): PaymentBatchSummary {
     paidCount: Number(b.paidCount),
     failedCount: Number(b.failedCount),
     waitingCount: Number(b.waitingCount),
+    queuedCount: Number(b.queuedCount),
     lastError: b.lastError,
   };
 }
@@ -320,17 +343,24 @@ export function batchDetail(db: Db, id: number): PaymentBatch {
   const approved = b.approvedAt !== null;
   const plan = cancelPlan(waitingRows);
   const cancelApi = plan.local.length === waitingRows.length || (!plan.unsure.length && !!adapter?.cancel && reachable);
+  const cancel = b.status === 'draft' || (approved && waiting && (kind === 'file' || cancelApi));
+  const approve = b.status === 'draft' && !!adapter?.ready && connected;
+  // review fixes UI-7 / UI-9: why, when the button is missing (only when there is something to say)
+  const approveBlocked = b.status === 'draft' && !approve ? approveBlockedReason(b, conn) : null;
+  const cancelBlocked = !cancel && approved && kind === 'api' && plan.unsure.length ? cancelBlockedReason(plan.unsure.length, conn?.name ?? 'the provider') : null;
   return {
     ...toSummary(b),
     items,
     skipped: parseSkipped(b.skippedJson),
     kind,
     actions: {
-      approve: b.status === 'draft' && !!adapter?.ready && connected,
-      cancel: b.status === 'draft' || (approved && waiting && (kind === 'file' || cancelApi)),
+      approve,
+      cancel,
       refresh: approved && kind === 'api' && waiting && !!adapter?.ready && reachable,
       download: kind === 'file' && Boolean(b.hasFile) && b.status !== 'cancelled',
       markPaid: kind === 'file' && approved && items.some((i) => i.status === 'submitted' || i.status === 'processing'),
+      ...(approveBlocked ? { approveBlocked } : {}),
+      ...(cancelBlocked ? { cancelBlocked } : {}),
     },
   };
 }
@@ -512,11 +542,12 @@ export async function approveBatch(db: Db, me: UserWithTeam, id: number, code: u
   if (b.status === 'cancelled') throw conflict('This payment was cancelled. Make a new one from Runs to pay.');
   if (b.status !== 'draft') throw conflict(`This payment was already approved${b.approvedAt ? ` on ${payDayLabel(b.approvedAt.slice(0, 10))}` : ''}.`);
   const conn = connectionRow(db, b.connectionId);
-  if (!conn || conn.disconnectedAt) throw conflict('Its connection was disconnected. Cancel this payment and make a new one.');
-  if (conn.mode !== b.mode) throw conflict(`The connection was switched to ${conn.mode === 'live' ? 'live' : 'test mode'} after this payment was made. Cancel it and make a new one.`);
+  // the same words the payment page shows (review fix UI-7)
+  if (!conn || conn.disconnectedAt || conn.mode !== b.mode) throw conflict(approveBlockedReason(b, conn) ?? 'Cancel this payment and make a new one.');
   const adapter = adapterFor(conn.provider);
   if (!adapter.ready) throw notReadyError(adapter.info.name);
-  if (conn.status !== 'connected') throw conflict(`Test the ${conn.name} connection in Settings → Payments first${conn.lastError ? ` (last time: ${conn.lastError})` : ''}.`);
+  const blocked = approveBlockedReason(b, conn);
+  if (blocked) throw conflict(blocked);
   const items = itemRows(db, id).filter((i) => i.status === 'queued');
   if (!items.length) throw conflict('There is nobody left to pay in this payment.');
   // before the code is used: nothing changed since the draft
@@ -598,7 +629,10 @@ async function sendQueued(db: Db, id: number, actor: UserWithTeam | null, action
       const at = nowISO();
       run(db, `UPDATE payment_items SET attempted_at = ? WHERE attempted_at IS NULL AND id IN (${placeholders(send.length)})`, [at, ...send.map((s) => s.id)]);
       try {
-        const out = await adapter.submit(pc, { id: b.id, mode: b.mode, idempotencyKey: b.idempotencyKey, createdAt: b.createdAt, today: todayISO(), approvedAt: b.approvedAt }, send, providerContext(db, conn.id));
+        // the batch's times on the real clock, the one adapters compare them with (review fix cross:X-1: a pinned
+        // LM_BUSINESS_NOW must not make a fresh approval look old to a provider's idempotency window)
+        const real = (iso: string) => new Date(Date.parse(iso) - (businessNow().getTime() - Date.now())).toISOString();
+        const out = await adapter.submit(pc, { id: b.id, mode: b.mode, idempotencyKey: b.idempotencyKey, createdAt: real(b.createdAt), today: todayISO(), approvedAt: b.approvedAt ? real(b.approvedAt) : null }, send, providerContext(db, conn.id));
         applyResults(db, b, out.items, actor, action);
         if (out.file) {
           const name = out.file.name.replace(/[^A-Za-z0-9._-]+/g, '-').slice(0, 120) || `linear-hub-payment-${b.id}.csv`;
@@ -839,7 +873,8 @@ export async function cancelBatch(db: Db, me: UserWithTeam, id: number): Promise
   if (plan.unsure.length) {
     const names = [...new Set(plan.unsure.map((i) => i.userName || i.payeeName))];
     const noun = conn?.provider === 'wise' ? 'transfer' : 'payment';
-    throw conflict(`Linear Hub is still finding out whether ${providerName} made the ${noun}${plan.unsure.length === 1 ? '' : 's'} for ${names.slice(0, 3).join(', ')}${names.length > 3 ? ` and ${names.length - 3} more` : ''}: press Check now, then cancel.`);
+    // review fix (UI-9): and what happens while the provider cannot be reached
+    throw conflict(`Linear Hub is still finding out whether ${providerName} made the ${noun}${plan.unsure.length === 1 ? '' : 's'} for ${names.slice(0, 3).join(', ')}${names.length > 3 ? ` and ${names.length - 3} more` : ''}: press Check now, then cancel. If ${providerName} cannot be reached, the week stays held until ${providerName} answers.`);
   }
   const canStop = !!adapter?.cancel && !!conn && !conn.disconnectedAt && conn.mode === b.mode;
   if (plan.provider.length && !canStop && !plan.local.length) {

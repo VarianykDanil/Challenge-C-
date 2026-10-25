@@ -120,13 +120,18 @@ export function useSaveBankDetails(userId: number | null) {
   });
 }
 
+/**
+ * Review fix (cross:X-2): sends the `changedAt` of the details on screen, so the server confirms exactly those; if the
+ * person changed them again meanwhile it answers 409 and the card reloads to show the new ones.
+ */
 export function useConfirmBankDetails(userId: number) {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: () => api<BankDetailsView>(`/users/${userId}/bank-details/confirm`, { method: 'POST' }),
+    mutationFn: (changedAt: string) => api<BankDetailsView>(`/users/${userId}/bank-details/confirm`, { method: 'POST', json: { changedAt } }),
     onSuccess: (v) => {
       qc.setQueryData(paymentKeys.bank(userId), v);
       void qc.invalidateQueries({ queryKey: ['dashboard'] });
     },
+    onError: () => void qc.invalidateQueries({ queryKey: paymentKeys.bank(userId) }),
   });
 }

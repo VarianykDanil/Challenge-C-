@@ -678,7 +678,7 @@ function PinStep({ email, client, pin, error, hint, locked, busy, inputRef, onPi
         <Button type="submit" size="lg" fullWidth loading={busy} disabled={locked || !isPinFormatValid(pin)} rightIcon={<ArrowRight />}>
           {t.submit}
         </Button>
-        <p className="text-xs leading-relaxed text-muted">{t.forgot}</p>
+        <p className="text-xs leading-relaxed text-muted">{client ? t.forgotClient : t.forgot}</p>
         <div className="flex justify-end">
           <Button type="button" variant="link" size="sm" onClick={onBack} disabled={busy} leftIcon={<ArrowLeft />}>
             {client ? t.backClient : t.back}

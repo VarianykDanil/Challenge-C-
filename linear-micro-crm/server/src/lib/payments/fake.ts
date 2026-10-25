@@ -1,6 +1,7 @@
 /**
  * Release 1.4 — OWNED BY F payments-foundation: a FAKE way to pay, for tests (and, with LM_PAYMENTS_FAKE=1, for trying
- * the screens on a demo database). It moves no money and talks to nothing. Deterministic and scriptable:
+ * the screens on a demo database: those are `testOnly`, so they stay in test mode and mark no run paid). It moves no
+ * money and talks to nothing. Deterministic and scriptable:
  *
  *   const fake = createFakeProvider({ failFor: (i) => (i.payeeName === 'Bo Rep' ? 'Account closed' : null) });
  *   registerPaymentProvider(fake);          // lib/payments/registry.ts
@@ -31,6 +32,12 @@ export interface FakeProviderOptions {
   testResult?: ConnectionTestResult;
   /** Supports cancel (answers 'failed' "Stopped before it was paid" for items not yet paid). */
   cancellable?: boolean;
+  /**
+   * Review fix (cross:X-3): never pays anyone — `info.testOnly`, so its connections stay in test mode (a test bank file
+   * too) and cannot be switched to live. The LM_PAYMENTS_FAKE=1 providers (registry.ts demoFakeProviders) set it; the
+   * test suite's fake leaves it off, standing in for a real provider that can go live.
+   */
+  testOnly?: boolean;
 }
 
 export interface FakePayment {
@@ -84,6 +91,7 @@ export function createFakeProvider(options: FakeProviderOptions = {}): FakeProvi
       kind,
       iconKey: 'test',
       abilities: kind === 'file' ? { ...FAKE_ABILITIES, paysFromApp: false, confirmsAutomatically: false, needsBankApproval: true, checksBalance: false } : FAKE_ABILITIES,
+      ...(opts.testOnly ? { testOnly: true } : {}),
     },
     configFields: fields.map((f) => ({ ...f })),
     ready: true,

@@ -21,6 +21,9 @@ import { useScrollToHash } from '@/lib/useScrollToHash';
 import { OptionPicker, bankFileFormatLabel, hasOptionLogos } from './BankFileFormats';
 import { ProviderLogo } from './ProviderLogo';
 
+/** Review fix (UI-12): the Name hint's example names this provider, briefly ("Wise (office account)"). */
+const NAME_EXAMPLE: Record<string, string> = { bank_file: 'Bank file', revolut: 'Revolut', wise: 'Wise', truelayer: 'TrueLayer' };
+
 const STATUS: Record<PaymentConnection['status'], { label: string; tone: 'success' | 'neutral' | 'danger' }> = {
   connected: { label: 'Connected', tone: 'success' },
   not_connected: { label: 'Not tested yet', tone: 'neutral' },
@@ -144,7 +147,7 @@ function ConnectionRow({ provider: p, connection: c, onEdit }: { provider: Payme
     <div className="rounded-lg border border-border bg-surface-2/40 p-3" data-connection={c.id}>
       <div className="flex flex-wrap items-center gap-2">
         <span className="min-w-0 truncate text-sm font-medium text-fg">{c.name}</span>
-        {api && <Badge tone={c.mode === 'live' ? 'danger' : 'info'} size="sm">{c.mode === 'live' ? 'Live: real money' : PAYMENT_MODE_LABELS.test}</Badge>}
+        {(api || p.testOnly) && <Badge tone={c.mode === 'live' ? 'danger' : 'info'} size="sm">{c.mode === 'live' ? 'Live: real money' : PAYMENT_MODE_LABELS.test}</Badge>}
         <Badge tone={status.tone} size="sm" dot={c.status === 'connected'}>{status.label}</Badge>
       </div>
       {!api && bankFileFormatLabel(c.settings) && <p className="mt-1 text-xs text-fg" data-connection-format={c.settings.format}>{bankFileFormatLabel(c.settings)}</p>}
@@ -157,7 +160,7 @@ function ConnectionRow({ provider: p, connection: c, onEdit }: { provider: Payme
       {c.lastError && <p className="mt-1 text-xs text-danger">{c.lastError}</p>}
       <div className="mt-2 flex flex-wrap gap-2">
         {api && <Button size="sm" variant="outline" className="h-10 sm:h-8" loading={test.isPending} leftIcon={<RefreshCw aria-hidden />} onClick={runTest}>Test</Button>}
-        {api && c.mode === 'test' && <Button size="sm" variant="outline" className="h-10 sm:h-8" disabled={c.status !== 'connected'} title={c.status !== 'connected' ? 'Test it in test mode first' : undefined} onClick={() => setLive(true)}>Switch to live</Button>}
+        {api && c.mode === 'test' && !p.testOnly && <Button size="sm" variant="outline" className="h-10 sm:h-8" disabled={c.status !== 'connected'} title={c.status !== 'connected' ? 'Test it in test mode first' : undefined} onClick={() => setLive(true)}>Switch to live</Button>}
         {api && c.mode === 'live' && (
           <Button size="sm" variant="ghost" className="h-10 sm:h-8" loading={update.isPending} onClick={() => update.mutate({ id: c.id, patch: { mode: 'test' } }, { onError: (e) => toast.error('Could not switch', errorMessage(e)) })}>
             Switch to test mode
@@ -271,7 +274,12 @@ function ConnectModal({ provider: p, connection: c, onClose }: { provider: Payme
       size="lg"
       icon={<ProviderLogo iconKey={p.iconKey} size="sm" />}
       title={c ? `Edit ${c.name}` : `Connect ${p.name}`}
-      description={p.kind === 'api' ? 'It starts in test mode: nothing real is paid until you test it and switch it to live.' : 'Linear Hub makes the file; you upload and approve it in your online banking.'}
+      description={p.kind !== 'api'
+        ? 'Linear Hub makes the file; you upload and approve it in your online banking.'
+        // review fix (UI-3): an existing live connection is not "in test mode"
+        : c?.mode === 'live'
+          ? 'This connection is live: approving a payment through it moves real money. After you change its details, test it again.'
+          : 'It starts in test mode: nothing real is paid until you test it and switch it to live.'}
       footer={(
         <>
           <Button variant="ghost" onClick={onClose}>Cancel</Button>
@@ -287,7 +295,7 @@ function ConnectModal({ provider: p, connection: c, onClose }: { provider: Payme
             <ol className="mt-2 list-decimal space-y-1.5 pl-5 text-sm text-fg">{p.connectSteps.map((step) => <li key={step}>{step}</li>)}</ol>
           </section>
         )}
-        <Field label="Name" htmlFor={`${uid}-name`} hint="What you call it, e.g. “Revolut (office account)”" error={errs.name}>
+        <Field label="Name" htmlFor={`${uid}-name`} hint={`What you call it, e.g. “${NAME_EXAMPLE[p.id] ?? p.name} (office account)”`} error={errs.name}>
           <Input id={`${uid}-name`} value={name} onChange={(e) => setName(e.target.value)} maxLength={80} />
         </Field>
         {p.configFields.map((f) => (
@@ -309,7 +317,9 @@ function ConnectModal({ provider: p, connection: c, onClose }: { provider: Payme
 }
 
 function ConfigInput({ id, field: f, value, saved, neededNow, error, onChange }: { id: string; field: PaymentConfigField; value: string; saved: boolean; neededNow?: boolean; error?: string; onChange: (v: string) => void }) {
-  const hint = [f.help, f.secret && saved ? 'Saved. Leave it empty to keep the one stored.' : null].filter(Boolean).join(' ');
+  // review fix (UI-12): needed again (Revolut's code once its sign-in has gone): never "leave it empty"
+  const savedHint = f.secret && saved ? (neededNow ? 'Paste a new code: the saved one has expired or was already used.' : 'Saved. Leave it empty to keep the one stored.') : null;
+  const hint = [f.help, savedHint].filter(Boolean).join(' ');
   // Release 1.4 (P): a choice whose options have logos (the bank file's format) is a list of choices with the logos
   if (hasOptionLogos(f)) return <OptionPicker field={f} value={value} error={error} onChange={onChange} />;
   // package A: `requiredUnless` — e.g. Revolut's code is needed until Linear Hub holds Revolut's sign-in

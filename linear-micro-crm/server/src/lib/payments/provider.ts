@@ -58,7 +58,8 @@ export interface ProviderBatch {
   today: string;
   /**
    * Package A: when the admin approved it (real clock; null for a draft). An adapter whose provider only spots a
-   * repeated idempotency key for a limited time (Revolut: 2 weeks) uses it to never send a payment again blind.
+   * repeated idempotency key for a limited time (Revolut: 2 weeks; TrueLayer: 6 hours) uses it to never send a payment
+   * again blind. Review fix: batches.ts hands both times over on the real clock even while LM_BUSINESS_NOW is set.
    */
   approvedAt?: string | null;
 }

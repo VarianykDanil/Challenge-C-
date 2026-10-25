@@ -35,6 +35,16 @@ const people = (n: number) => `${formatNumber(n)} ${n === 1 ? 'person' : 'people
 /** Review fix: "People" counts people — someone paid for two weeks is one person with two payments. */
 const personCount = (b: Pick<PaymentBatch, 'items'>) => new Set(b.items.map((i) => i.userId)).size;
 
+/** Review fix (UI-2): nothing in this approved payment has reached the provider yet (every live item still queued). */
+function allQueued(b: Pick<PaymentBatch, 'items' | 'status'>): boolean {
+  const live = b.items.filter((i) => i.status !== 'cancelled');
+  return b.status !== 'draft' && live.length > 0 && live.every((i) => i.status === 'queued');
+}
+
+/** Review fix (UI-12): "the Wise sandbox", never "Wise Business's sandbox". */
+const SANDBOX: Record<string, string> = { revolut: 'the Revolut sandbox', wise: 'the Wise sandbox', truelayer: 'the TrueLayer sandbox' };
+const sandboxName = (provider: string, providerName: string) => SANDBOX[provider] ?? `the ${providerName} sandbox`;
+
 /** "3 people" or, when someone has more than one week in it, "4 payments for 3 people". */
 function whoText(b: Pick<PaymentBatch, 'items' | 'count'>): string {
   const n = personCount(b);
@@ -57,8 +67,8 @@ export function PaymentBatchPage() {
         title={b ? <span className="flex flex-wrap items-center gap-3"><ProviderLogo iconKey={provider?.iconKey ?? 'bank'} size="md" />Payment #{b.id}</span> : <Skeleton className="h-9 w-56" />}
         description={b ? (
           <span className="flex flex-wrap items-center gap-2">
-            <PaymentBatchStatusBadge status={b.status} kind={b.kind} mode={b.mode} />
-            {b.kind === 'api' && <Badge tone={b.mode === 'live' ? 'danger' : 'info'}>{b.mode === 'live' ? 'Live: real money' : 'Test mode: nobody is paid'}</Badge>}
+            <PaymentBatchStatusBadge status={b.status} kind={b.kind} mode={b.mode} allQueued={allQueued(b)} />
+            {(b.kind === 'api' || b.mode === 'test') && <Badge tone={b.mode === 'live' ? 'danger' : 'info'}>{b.mode === 'live' ? 'Live: real money' : 'Test mode: nobody is paid'}</Badge>}
             <span>{b.connectionName} · made {payDayLabel(b.createdAt.slice(0, 10))}{b.createdByName ? ` by ${b.createdByName}` : ''}{b.approvedAt ? ` · approved ${formatDateTime(b.approvedAt)}${b.approvedByName ? ` by ${b.approvedByName}` : ''}` : ''}</span>
           </span>
         ) : undefined}
@@ -78,16 +88,21 @@ function BatchBody({ b, provider, providerName, available }: { b: PaymentBatch; 
   const cancel = useCancelBatch();
   const [confirmCancel, setConfirmCancel] = useState(false);
   const draft = b.status === 'draft';
-  const test = b.kind === 'api' && b.mode === 'test';
+  // (a bank file is in test mode only for the test bank file, which pays nobody either)
+  const test = b.mode === 'test';
   const persons = personCount(b);
   const peopleHint = [persons !== b.count ? `${formatNumber(b.count)} payments` : '', b.skipped.length ? `${formatNumber(b.skipped.length)} left out` : ''].filter(Boolean).join(' · ');
   // review fix: a bank file just made is waiting for Matt's bank, not on its way
-  const fourth = draft ? 'To approve' : b.failedCount ? 'Failed' : b.kind === 'file' ? 'In the file' : 'On the way';
+  const fourth = draft ? 'To approve' : b.failedCount ? 'Failed' : b.kind === 'file' ? 'In the file' : allQueued(b) ? 'Waiting to send' : 'On the way';
   const queued = b.items.some((i) => i.status === 'queued');
+  // review fix (UI-1): what the bank file holds — a line the bank format refused is not in it (no file reference)
+  const inFilePence = b.kind === 'file' && !draft ? b.items.filter((i) => i.providerRef && i.status !== 'cancelled').reduce((sum, i) => sum + i.amountPence, 0) : null;
+  // review fix (UI-2): the provider's note about payments on their way, only once one really is (and never in test mode)
+  const sentSome = b.items.some((i) => i.status === 'submitted' || i.status === 'processing');
   return (
     <div className="space-y-6">
       <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
-        <KpiTile label="Total" value={formatPence(b.totalPence)} tone="primary" />
+        <KpiTile label="Total" value={formatPence(b.totalPence)} tone="primary" hint={inFilePence !== null && inFilePence !== b.totalPence ? `In the file ${formatPence(inFilePence)}` : undefined} />
         <KpiTile label="People" value={formatNumber(persons)} hint={peopleHint || undefined} />
         <KpiTile label={test ? 'Test, not paid' : 'Paid'} value={formatNumber(b.paidCount)} tone={b.paidCount && !test ? 'success' : 'default'} />
         <KpiTile label={fourth} value={formatNumber(draft ? b.waitingCount : b.failedCount || b.waitingCount)} tone={b.failedCount ? 'danger' : 'default'} />
@@ -104,7 +119,7 @@ function BatchBody({ b, provider, providerName, available }: { b: PaymentBatch; 
 
       {draft && <ApproveCard b={b} provider={provider} providerName={providerName} available={available} />}
 
-      {!draft && b.kind === 'api' && b.waitingCount > 0 && provider?.waitingNote && (
+      {!draft && b.kind === 'api' && b.mode === 'live' && sentSome && provider?.waitingNote && (
         <Card tone="info" data-waiting-note="">
           <p className="flex items-start gap-2 text-sm text-fg"><Info className="mt-0.5 h-4 w-4 shrink-0 text-info" aria-hidden />
             <span>{provider.waitingNote}</span>
@@ -132,7 +147,14 @@ function BatchBody({ b, provider, providerName, available }: { b: PaymentBatch; 
                 {draft ? 'Cancel draft' : 'Cancel the rest'}
               </Button>
             )}
+            {/* review fix (UI-9): shown, but waiting, while Linear Hub does not know whether the provider made them */}
+            {!b.actions.cancel && b.actions.cancelBlocked && (
+              <Button size="sm" variant="ghost" className="h-10 sm:h-8" leftIcon={<X aria-hidden />} disabled aria-describedby={`cancel-blocked-${b.id}`}>
+                Cancel the rest
+              </Button>
+            )}
           </div>
+          {!b.actions.cancel && b.actions.cancelBlocked && <p id={`cancel-blocked-${b.id}`} className="w-full text-xs text-muted" data-cancel-blocked="">{b.actions.cancelBlocked}</p>}
         </div>
         {/* Release 1.4 (P): which bank file this is and where to upload it */}
         {b.kind === 'file' && b.status !== 'cancelled' && <BankFileHelp connectionId={b.connectionId} className="mx-5 mb-4" />}
@@ -228,15 +250,20 @@ function ApproveCard({ b, provider, providerName, available }: { b: PaymentBatch
   const needs2fa = !me.twoFactorEnabled || (err instanceof ApiError && err.status === 403);
   // Wise: approving only creates the transfers; Matt pays them in Wise
   const createsOnly = b.kind === 'api' && provider?.abilities.paysFromApp === false;
-  const approveNote = b.kind === 'api' && provider?.approveNote ? ` ${provider.approveNote}` : '';
+  // review fix (UI-12): in test mode nobody is paid anyway, so the provider's "nobody is paid until…" note is left out
+  const approveNote = b.kind === 'api' && b.mode === 'live' && provider?.approveNote ? ` ${provider.approveNote}` : '';
   const submit = (e: FormEvent) => {
     e.preventDefault();
     approve.mutate({ id: b.id, body: { code: code.replace(/\s+/g, '') } }, {
       onSuccess: (next) => {
         setCode('');
-        toast.success(next.kind === 'file' ? 'Bank file ready' : 'Payment approved', next.kind === 'file'
-          ? 'Download it, upload it to your bank and approve it there. Then mark it paid here.'
-          : next.mode === 'test' ? 'Test mode: nobody is paid.' : createsOnly ? `Now open ${providerName} and pay the transfers there.` : `${whoText(next)}, ${formatPence(next.totalPence)}.`);
+        if (next.kind === 'file') return toast.success('Bank file ready', 'Download it, upload it to your bank and approve it there. Then mark it paid here.');
+        // review fix (UI-2): say what really happened — the provider may not have been reached yet
+        const live = next.items.filter((i) => i.status !== 'cancelled');
+        const waiting = live.filter((i) => i.status === 'queued').length;
+        if (waiting && waiting === live.length) return toast.warning('Payment approved', `Approved, but ${providerName} could not be reached yet: Linear Hub keeps trying every 5 minutes.`);
+        if (waiting) return toast.warning('Payment approved', `${formatNumber(live.length - waiting)} sent; ${providerName} could not be reached for the other ${formatNumber(waiting)} yet: Linear Hub keeps trying every 5 minutes.`);
+        toast.success('Payment approved', next.mode === 'test' ? 'Test mode: nobody is paid.' : createsOnly ? `Now open ${providerName} and pay the transfers there.` : `${whoText(next)}, ${formatPence(next.totalPence)}.`);
       },
     });
   };
@@ -249,7 +276,7 @@ function ApproveCard({ b, provider, providerName, available }: { b: PaymentBatch
         description={b.kind === 'file'
           ? `Linear Hub makes the file for ${whoText(b)} (${formatPence(b.totalPence)}). Nothing moves until you upload it to your bank and approve it there.`
           : b.mode === 'test'
-            ? `Test mode: ${providerName}'s sandbox gets the payments and nobody is paid. The runs stay on Runs to pay.${approveNote}`
+            ? `Test mode: ${sandboxName(b.provider, providerName)} gets the payments and nobody is paid. The runs stay on Runs to pay.`
             : createsOnly
               ? `${providerName} gets transfers for ${whoText(b)} (${formatPence(b.totalPence)}) when you approve.${approveNote}`
               : `${providerName} pays ${whoText(b)}, ${formatPence(b.totalPence)} in all, as soon as you approve. This cannot be undone from Linear Hub.`}
@@ -265,7 +292,8 @@ function ApproveCard({ b, provider, providerName, available }: { b: PaymentBatch
           <Link to="/settings" className="focus-ring inline-flex h-10 shrink-0 items-center justify-center rounded-lg bg-primary px-4 text-sm font-medium text-primary-fg shadow-card hover:bg-primary-hover">Open Settings → Security</Link>
         </p>
       ) : !b.actions.approve ? (
-        <p className="text-sm text-muted">This connection needs a working test first (Settings → Payments).</p>
+        // review fix (UI-7): the server's reason (e.g. made in test mode, but the connection is live now)
+        <p className="text-sm text-muted" data-approve-blocked="">{b.actions.approveBlocked ?? 'Test the connection first (Settings → Payments).'}</p>
       ) : (
         <form onSubmit={submit} className="flex flex-col gap-3 sm:flex-row sm:items-end" noValidate>
           {/* review fix: the server's message once (errorMessage would repeat it with its field detail) */}

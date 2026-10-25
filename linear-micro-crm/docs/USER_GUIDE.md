@@ -32,8 +32,8 @@ two-step verification**.
 
 1. Tap **Set up now**.
 2. In your authenticator app, add an account and scan the code Linear Hub shows. If you cannot scan it, type the key
-   shown under **Can’t scan? Enter this key instead**.
-3. Type the 6 digits the app shows and tap **Turn on**.
+   shown under **Can’t scan? Enter this key instead**. Then tap **Next**.
+3. Type the 6 digits the app shows. Linear Hub checks them as soon as the sixth digit is in (**Turn on** does the same).
 4. Save your 10 recovery codes somewhere safe, away from your phone (**Copy all** or **Download .txt**), then tick **I
    have saved these codes**.
 
@@ -98,9 +98,9 @@ you need to set it up** and **Good to know**. Logos belong to their owners and o
 | Works with any UK business bank | ✓ | — | — | — |
 | Fees | none from Linear Hub; your bank's bulk payment charges | Revolut's transfer fees and your plan | Wise's fee per transfer, shown before you pay | per payout: check your TrueLayer agreement |
 
-**1. Connect a way to pay.** In Settings → **Payments**, choose **Connect** on the card. The form starts with **How to
-connect**: the steps in order, including the ones you do outside Linear Hub (in Revolut, Wise, the TrueLayer Console or
-on a computer). Every field says where to find the value. Keys and tokens are stored encrypted and never shown again:
+**1. Connect a way to pay.** In Settings → **Payments**, choose **Connect** on the card. For Revolut, Wise and TrueLayer
+the form starts with **How to connect**: the steps in order, including the ones you do outside Linear Hub (in Revolut,
+Wise, the TrueLayer Console or on a computer). Every field says where to find the value. Keys and tokens are stored encrypted and never shown again:
 when you **Edit** a connection, leave a key empty to keep the one stored.
 - **Bank payment file**: under **File format** choose **Starling Bank bulk payments (CSV)**, **Revolut Business bulk
   transfer (CSV)**, or the **General Faster Payments file (CSV)** for any other UK bank, then **Save connection**.
@@ -125,14 +125,17 @@ and **Test** tries it again. Make a payment in test mode first: it says **Test d
 REAL**. Your sandbox details do not work live, so then choose **Edit**, enter your live details (for Revolut, a new code
 too) and **Test** again; the card then says **Live: real money**. Pay one person a small amount first (yourself, for
 example) before you pay the team. **Switch to live** and **Switch to test mode** wait while a payment through that
-connection is on its way.
+connection is on its way. **Edit** on a live connection says so: approving a payment through it moves real money, and
+after you change its details you test it again. A draft made in test mode cannot be approved once the connection is
+live: its page says so; cancel it and make a new payment.
 
 **3. Choose who to pay.** In **Finance → Company → Runs to pay**, tick the weeks you want to pay and choose **Pay N from
 Linear Hub** (or **Pay from Linear Hub** with nothing ticked). On **Pay people**, check **1. Who to pay** (pending weeks
 and failed transfers), choose the connection under **2. How to pay**, look at **3. Review** and choose **Review
 payment**. Nothing is sent yet. **3. Review** counts people, runs and the **Total before checks**, leaving out ticked
 runs whose invoice is not accepted yet or is disputed; a run already in a draft payment says **In a draft payment**,
-and a connection that has not passed its test says "Test it in Settings → Payments first".
+and a connection that has not passed its test is listed greyed out, below the ones that work, with "Test it in
+Settings → Payments first".
 
 **4. Check and approve.** The payment's page shows the total, each person with the last four digits of their account,
 and who was left out and why: no bank details yet, details changed and not yet checked, an invoice not accepted yet or
@@ -140,7 +143,8 @@ disputed, the week not over, already paid or already in a payment. Type the **Co
 choose the button:
 - bank payment file: **Approve and make the bank file**;
 - Revolut and TrueLayer: **Approve and pay £…** (in test mode **Approve test payment of £…**);
-- Wise: **Approve and create the transfers (£…)**: nobody is paid until you pay them in Wise.
+- Wise: **Approve and create the transfers (£…)** (in test mode **Approve test payment of £…**): nobody is paid until
+  you pay them in Wise.
 
 Every payment needs a fresh code, and each code works once.
 
@@ -153,10 +157,12 @@ and the reason, and you can pay it again in a new payment.
 Bulk Payments → New bulk payment; Revolut: Payments → Transfers → Bulk, in the web app). Upload the file as it is: if you
 open it in Excel and save it again, Excel can drop the zeros at the start of sort codes and account numbers. Approve it
 in your online banking. When the bank has paid it, come back to **Mark as paid**: everyone is ticked; untick anyone the
-bank rejected and say why in **Why the bank did not pay them**, check **Paid on**, and choose **Mark N paid**. Each line
+bank rejected and say why in **Why the bank did not pay them**, check **Paid on**, and choose **Mark N paid** (or
+**Mark N paid, M not paid** with someone unticked). Each line
 shows the reference written in the file (like "LINEAR 05OCT JL"), so you can find it on your statement. Someone the bank
 would refuse (Revolut needs a first and last name, for example) is left out of the file with the reason: fix their bank
-details, then pay that week again. Delete downloaded files from your computer once the bank has paid them: they hold
+details, then pay that week again. The payment's **Total** is what you approved; when someone was left out, it also
+says **In the file £…**, the amount your bank will show, and Needs attention gives the people and the money in the file. Delete downloaded files from your computer once the bank has paid them: they hold
 full account numbers.
 
 **With Wise.** After approving, open Wise and pay the transfers Linear Hub made. They wait there until you do, and Wise
@@ -177,11 +183,17 @@ attention say so ("Jordan Lee's pay changed while payment #3 was on its way"), a
 week as an adjustment, saying which week it corrects. If the payment fails or is cancelled instead, the week is brought
 up to date before you pay it again.
 
-**If a provider does not answer**, the payment says why (for example "TrueLayer did not answer within 15 seconds").
-Linear Hub sends the rest at the next check, or when you press **Check now**, to the account each payment was approved
-with and with the same references, so the provider never makes them twice. **Cancel the rest** stops what has not been
-paid yet; if Linear Hub is still finding out whether the provider made a payment, it asks you to press **Check now**
-first. The message after cancelling says how many were stopped and how many are still on their way.
+**If a provider does not answer**, the payment says why (for example "TrueLayer did not answer within 15 seconds", or
+"Linear Hub could not reach Wise: check this computer’s internet connection, or Wise may be down.") and reads
+**Waiting to send** until something reaches the provider. Linear Hub sends the rest at the next check, or when you press
+**Check now**, to the account each payment was approved with and with the same references, so the provider does not
+make them twice. Providers only recognise a resent payment for a while, so Linear Hub stops resending in time:
+TrueLayer payouts approved more than 5 hours ago fail with "Not sent: …" instead (check the TrueLayer Console before
+paying that week again), and Revolut looks a payment up instead of resending after 13 days. **Cancel the rest** stops
+what has not been paid yet. While Linear Hub is still finding out whether the provider made a payment, **Cancel the
+rest** is greyed out with the reason and **Mark paid** by hand waits: press **Check now** first. During an outage the
+week stays held until the provider answers. The message after cancelling says how many were stopped and how many are
+still on their way.
 
 **A payment that bounces back after it was paid** (the receiving bank returns it days later) is not undone in Linear
 Hub: the week stays paid. The provider tells you; pay the person again by hand and put it on a later week as an
@@ -189,7 +201,9 @@ adjustment.
 
 **Changed bank details.** When someone changes their bank details, Needs attention says "Thomas Grainger changed their
 bank details". Check the new details with them in person or by phone, then open **Team → the person → Bank details**
-and choose **Confirm details**. Details you type in for someone there count as checked by you.
+and choose **Confirm details**. If they changed them again in the meantime, Linear Hub says "They changed their bank
+details again since you looked: check the new ones before confirming." and shows the new ones, still waiting. Details
+you type in for someone there count as checked by you.
 
 **Signed out while paying?** Being signed out 14 hours after signing in never stops a payment you already approved:
 Linear Hub keeps checking it on its own and marks the weeks paid. A bank file you approved is still there to download
@@ -201,7 +215,8 @@ and mark paid after you sign in again.
   for administrators" is gone.
 - **Sign out after**: 4 to 24 hours from sign-in (14 hours by default). A shorter time applies at once, to everyone
   already signed in too; a longer one from each person's next sign-in (anyone signed in now is still signed out at the
-  old time, and the sign-in page names it).
+  old time, and the sign-in page names it). The demo sign-in accounts are left out while Linear Hub is still the demo,
+  and the hint under the setting says so.
 - **Sign out after inactivity**: unchanged (12 hours by default).
 
 Adding someone (**Team → Add person**) or inviting a charity contact (the campaign page's **Client accounts** card →
@@ -450,7 +465,8 @@ videos the server holds, how big they are and the folder they are in.
 
 **For clients (the client portal).** Sign in with your email and the access code from your invite (CL-0002…). The
 first time, create a PIN of 4 to 6 digits; you type it after your email and access code every time (a client account
-always keeps a PIN: you can change it, not remove it). Since 1.4 you then set up two-step verification too, and type
+always keeps a PIN: you can change it, not remove it). Forgotten it? Ask Linear MCR to reset your PIN, then sign in
+with your email and access code and create a new one. Since 1.4 you then set up two-step verification too, and type
 the code from your authenticator app after your PIN at every sign-in (see [What's new in 1.4](#whats-new-in-14)). **Updates** has one form: choose **Update** or **Announcement**
 (published to the Linear MCR team's Announcements straight away, with your organisation's name on it) or **Commission
 change** (a new rate per sub to the fundraiser and / or the payout per sub to Linear, and the date it starts — it waits
@@ -1649,7 +1665,7 @@ From the repository root, `npm run seed` rebuilds the database with the determin
 | "That code is not right. Codes change every 30 seconds and each one works once…" when approving a payment or saving bank details | The code was old, mistyped or already used for something else. | Wait for the next code in your app and try again. |
 | **Payment failed** on a run in Runs to pay | The provider or your bank did not pay it; the reason is in the badge's tooltip and on the payment's page. | Fix what the reason says (bank details, a top-up), then pay that week again in a new payment, or **Mark paid** once you have paid it another way. |
 | "Test it in Settings → Payments first" on Pay people | The connection's last test did not work, or it has not been tested since its details changed or it was switched to live. | Open Settings → **Payments** and choose **Test**; the card says what went wrong. |
-| A payment says a provider "did not answer" | The provider was slow or offline when Linear Hub sent it. | Nothing is paid twice: press **Check now** later, or wait for the 5-minute check. |
+| A payment says a provider "did not answer" (or "could not reach") | The provider was slow or offline, or this computer's internet was down, when Linear Hub sent it. | Press **Check now** later, or wait for the 5-minute check: Linear Hub resends with the same references, which the provider recognises as the same payment for a while (TrueLayer 6 hours, Revolut 2 weeks). A TrueLayer payout not answered within 5 hours fails with "Not sent: …": check the TrueLayer Console before paying that week again. |
 | "This area isn't available on your account" | Your role cannot open that page (recruiters and the Gauges page, for example). | Use **Back to dashboard**; speak to your crew leader or the office if you think you should have access. |
 | **Not saved.** "Invalid funnel" | One stage is larger than the one before it. | Fix the stage named in the message. |
 | **Not saved.** "Gauges are recorded against the event's date" or "Gauges cannot be recorded before the event takes place" | The entry was for a date other than the event's, or the event is in the future. | Pick the right event; log it on or after the day it runs. |

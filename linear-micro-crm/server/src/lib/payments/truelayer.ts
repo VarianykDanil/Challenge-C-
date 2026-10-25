@@ -17,7 +17,8 @@
  *    signature at POST /test-signature (its signing examples) — the connection test uses it in test mode.
  *  - Idempotency: an `Idempotency-Key` (a UUID) per payout, https://docs.truelayer.com/docs/sign-your-payments-requests ;
  *    the same key and body answers the first payout; the same key with a different body is 422 "Idempotency-Key
- *    Reuse"; 409 while the first is still being handled.
+ *    Reuse"; 409 while the first is still being handled. TrueLayer remembers a key for a limited time (6 hours,
+ *    https://docs.truelayer.com/docs/idempotency): past TRUELAYER_REPEAT_HOURS a queued payout is failed, not resent.
  *  - The payout, https://docs.truelayer.com/docs/make-a-payout-to-an-external-account : {merchant_account_id,
  *    amount_in_minor, currency GBP, beneficiary {type external_account, account_holder_name, account_identifier
  *    {type sort_code_account_number, sort_code, account_number}, reference}} → 202 {id}.
@@ -54,6 +55,17 @@ export const TRUELAYER_URLS = {
 } as const;
 
 const TOKEN_SKEW_MS = 60_000;
+/**
+ * Release 1.4 (review fix cross:X-1): TrueLayer recognises a repeated Idempotency-Key only for a limited time — 6 hours
+ * on its general idempotency page (https://docs.truelayer.com/docs/idempotency), 30 days on its Payments v3 page
+ * (https://docs.truelayer.com/docs/idempotency-for-payment-requests). Linear Hub keeps to the shorter one with an hour
+ * to spare: a payout approved longer ago than this is never sent again blind (there is no lookup by key for payouts),
+ * it fails with a reason that says to check the TrueLayer Console first. OWNER_NOTES_1.4.md asks Matt to confirm the
+ * window with TrueLayer.
+ */
+export const TRUELAYER_REPEAT_HOURS = 5;
+const HOUR_MS = 3_600_000;
+export const MSG_TOO_OLD = `Not sent: this payout was approved more than ${TRUELAYER_REPEAT_HOURS} hours ago and TrueLayer only recognises a repeated payout for 6 hours, so Linear Hub will not send it again. Check the payouts in the TrueLayer Console, then pay this week again if it was not paid.`;
 export const MSG_BAD_CLIENT = 'TrueLayer did not accept the client ID or client secret. Copy them again from the TrueLayer Console (the sandbox ones in test mode, the live ones when live).';
 export const MSG_BAD_SIGNATURE = 'TrueLayer did not accept the signature. Check that the Signing key ID is the one the Console shows next to the public key you uploaded (Payments → Settings), and that the private key here is the one that goes with it.';
 const MSG_SCOPE = 'TrueLayer does not allow payments for this app yet (the “payments” scope). Ask TrueLayer to switch on payouts for your account.';
@@ -258,7 +270,12 @@ export function createTrueLayerProvider(opts: TrueLayerOptions = {}): PaymentPro
       }
     },
 
-    async submit(conn, _batch, items, ctx): Promise<SubmitResult> {
+    async submit(conn, batch, items, ctx): Promise<SubmitResult> {
+      // review fix (cross:X-1): past TrueLayer's idempotency window a resend could be a second payout: never send blind
+      const approved = new Date(batch.approvedAt ?? batch.createdAt);
+      if (ctx.now().getTime() - approved.getTime() > TRUELAYER_REPEAT_HOURS * HOUR_MS) {
+        return { items: items.map((item) => ({ itemId: item.id, status: 'failed' as const, failureReason: MSG_TOO_OLD })) };
+      }
       const s = session(conn, ctx);
       const results: ProviderItemResult[] = [];
       let account: MerchantAccount | null = null;

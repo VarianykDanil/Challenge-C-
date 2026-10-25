@@ -105,6 +105,11 @@ export interface PaymentProviderInfo {
   approveNote?: string;
   /** Package A: what happens while payments are on their way, and anything Matt does in the provider's app meanwhile. */
   waitingNote?: string;
+  /**
+   * Review fix (cross:X-3): a way to pay that never pays anyone (the test providers LM_PAYMENTS_FAKE=1 adds). Its
+   * connections stay in test mode — a test bank file too — so nothing it does marks a run paid, and it has no live mode.
+   */
+  testOnly?: boolean;
 }
 
 /** One field of a connection form (driven by the provider's configFields). */
@@ -266,6 +271,11 @@ export interface PaymentBatchSummary {
   failedCount: number;
   /** Queued, submitted or processing. */
   waitingCount: number;
+  /**
+   * Review fix (UI-2): items still waiting to be sent ('queued': not handed to the provider yet, or no answer yet).
+   * When it equals every item not cancelled, nothing has reached the provider: the payment reads "Waiting to send".
+   */
+  queuedCount?: number;
   /** The last error talking to the provider (plain words, secrets redacted). */
   lastError?: string | null;
 }
@@ -282,6 +292,16 @@ export interface PaymentBatch extends PaymentBatchSummary {
     refresh: boolean;
     download: boolean;
     markPaid: boolean;
+    /**
+     * Review fix (UI-7): a draft that cannot be approved now, why — e.g. "This draft was made in test mode, but the
+     * connection is now live: cancel it and make a new payment." (null or absent: nothing in the way).
+     */
+    approveBlocked?: string | null;
+    /**
+     * Review fix (UI-9): items Linear Hub does not know about yet (sent, no answer back): why Cancel the rest waits —
+     * "Linear Hub is still finding out whether Wise made them: press Check now first." (null or absent otherwise).
+     */
+    cancelBlocked?: string | null;
   };
 }
 

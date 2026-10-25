@@ -28,12 +28,15 @@ export interface MarkPaidOptions {
 /**
  * Release 1.4 (F): a run whose payment from Linear Hub is approved and still on its way cannot be marked paid by hand
  * (it would be paid twice): 409 until the payment finishes or is cancelled. Drafts do not hold a run (approving a draft
- * checks again).
+ * checks again). While Linear Hub does not know whether the provider made it (the same "unsure" rule as Cancel,
+ * lib/payments/batches.ts cancelPlan) the 409 says to wait for the provider's answer instead of offering Cancel.
  */
 export function assertNotInPayment(db: Db, run_: PayrollRunWithUser, exceptItemId?: number): void {
-  const live = get<{ batchId: number }>(
+  const live = get<{ batchId: number; provider: string | null; unsure: number }>(
     db,
-    `SELECT i.batch_id AS batchId FROM payment_items i JOIN payment_batches b ON b.id = i.batch_id
+    `SELECT i.batch_id AS batchId, c.name AS provider,
+            ((i.status = 'queued' AND i.attempted_at IS NOT NULL) OR (i.status <> 'queued' AND i.provider_ref IS NULL)) AS unsure
+     FROM payment_items i JOIN payment_batches b ON b.id = i.batch_id LEFT JOIN payment_connections c ON c.id = b.connection_id
      WHERE i.live = 1 AND i.status IN ('queued', 'submitted', 'processing') AND b.status <> 'draft' AND i.id <> ?
        AND (i.payroll_run_id = ? OR (i.user_id = ? AND i.week_start = ?))
      LIMIT 1`,
@@ -41,7 +44,12 @@ export function assertNotInPayment(db: Db, run_: PayrollRunWithUser, exceptItemI
   );
   if (live) {
     const first = run_.userName.split(' ')[0] ?? run_.userName;
-    throw new HttpError(409, `${first}'s pay for ${payWeekLabel(run_.weekStart)} is in payment #${live.batchId}, which is still on its way. Wait for it to finish, or cancel it, before marking the week paid by hand.`, { code: 'in_payment', batchId: live.batchId });
+    // review fix (UI-9): while Linear Hub does not know whether the provider made it (sent, no answer back), Cancel
+    // cannot help either: say what to wait for
+    const advice = live.unsure
+      ? `Wait until Linear Hub hears back from ${live.provider ?? 'the provider'} (Check now on the payment) before marking the week paid by hand.`
+      : 'Wait for it to finish, or cancel it, before marking the week paid by hand.';
+    throw new HttpError(409, `${first}'s pay for ${payWeekLabel(run_.weekStart)} is in payment #${live.batchId}, which is still on its way. ${advice}`, { code: 'in_payment', batchId: live.batchId });
   }
 }
 

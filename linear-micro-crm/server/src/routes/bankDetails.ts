@@ -4,7 +4,8 @@
  *  - myBankDetailsRouter, mounted at /me: GET /me/bank-details and PUT /me/bank-details — every staff role, their own
  *    (client accounts never reach it: the client guard answers 403 first).
  *  - userBankDetailsRouter, mounted at /users before the users router (it answers only these paths):
- *    GET / PUT /users/:id/bank-details and POST /users/:id/bank-details/confirm — administrators only.
+ *    GET / PUT /users/:id/bank-details and POST /users/:id/bank-details/confirm — administrators only. Confirm takes
+ *    the `changedAt` of the details the admin checked (optional): changed again since → 409, nothing confirmed.
  * A change needs the changer's current two-step code when they have two-step verification on. Audit specs:
  * lib/audit/paymentSpecs.ts (never the numbers). Write limit: middleware/writeLimit.ts.
  */
@@ -58,7 +59,10 @@ export function userBankDetailsRouter(db: Db): Router {
     const me = currentUser(req);
     const id = idParam(req);
     assertBankDetailsAccess(db, me, id);
-    res.json(confirmBankDetails(db, me, id).view);
+    // review fix (cross:X-2): the client sends the changedAt of the details it showed; changed again since → 409
+    const raw = (req.body && typeof req.body === 'object' && !Array.isArray(req.body) ? (req.body as { changedAt?: unknown }).changedAt : undefined) ?? undefined;
+    if (raw !== undefined && typeof raw !== 'string') throw badRequest('changedAt must be the time the details were changed, as text');
+    res.json(confirmBankDetails(db, me, id, raw).view);
   });
   return router;
 }

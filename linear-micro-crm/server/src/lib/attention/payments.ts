@@ -5,7 +5,8 @@
  *    details" (warning; up to three by name, then one line for all), linking to Team → person → Bank details;
  *  - live payments that failed and whose run is still unpaid with no newer payment (one line: danger), linking to the
  *    payment (or Runs to pay when several payments are involved);
- *  - a bank file approved but not yet marked paid (info, one per payment, newest two);
+ *  - a bank file approved but not yet marked paid (info, one per payment, newest two), with the people and the money
+ *    still waiting for the bank (review fix UI-1: a line the bank format refused is not in the file, so not counted);
  *  - a connection whose last test or payment failed (warning);
  *  - review fix: a run whose figures changed after its payment was approved (the run is frozen while the money is on
  *    its way, and paid as approved): "Jordan Lee's pay changed while payment #3 was on its way" (warning; one line
@@ -55,7 +56,8 @@ export const provider: AttentionProvider = {
          AND NOT EXISTS (SELECT 1 FROM pay_adjustments a WHERE a.user_id = i.user_id AND a.source_week_start = i.week_start AND a.created_at >= p.adjusted_at)
        UNION ALL
        SELECT 'file', b.id, c.name, COALESCE(b.approved_at, b.created_at),
-              (SELECT COUNT(*) FROM payment_items x WHERE x.batch_id = b.id AND x.status IN ('submitted', 'processing')), b.total_pence, NULL, b.id
+              (SELECT COUNT(*) FROM payment_items x WHERE x.batch_id = b.id AND x.status IN ('submitted', 'processing')),
+              (SELECT COALESCE(SUM(x.amount_pence), 0) FROM payment_items x WHERE x.batch_id = b.id AND x.status IN ('submitted', 'processing')), NULL, b.id
        FROM payment_batches b JOIN payment_connections c ON c.id = b.connection_id
        WHERE b.status IN ('submitted', 'processing') AND b.provider IN (${placeholders(Math.max(1, fileProviders.length))})
        UNION ALL
@@ -103,7 +105,8 @@ export const provider: AttentionProvider = {
         kind: 'payments',
         severity: 'danger',
         title: failed.length === 1 ? `A payment to ${first.name ?? 'someone'} failed` : `${failed.length} payments failed`,
-        body: `${first.name ?? 'Someone'}, ${formatPence(first.amount ?? 0)}: ${first.reason ?? 'not paid'}. ${failed.length === 1 ? 'Their week' : 'These weeks'} stay${failed.length === 1 ? 's' : ''} on Runs to pay.`,
+        // review fix (UI-4): one full stop, also when the reason already ends with one
+        body: `${first.name ?? 'Someone'}, ${formatPence(first.amount ?? 0)}: ${(first.reason ?? 'not paid').trim().replace(/\.+$/, '')}. ${failed.length === 1 ? 'Their week' : 'These weeks'} stay${failed.length === 1 ? 's' : ''} on Runs to pay.`,
         href: batches.size === 1 ? `/finance/pay/batches/${first.batchId}` : '/finance?tab=company#runs',
         actionLabel: batches.size === 1 ? 'Open the payment' : 'Open Runs to pay',
         at: first.at ?? undefined,

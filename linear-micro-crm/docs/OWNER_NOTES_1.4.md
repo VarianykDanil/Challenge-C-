@@ -91,7 +91,9 @@ These are the two open questions from the build. Nothing needs to change until y
   off the laptop. If it is lost, bank details cannot be read (everyone types them in again) and every connection has
   to be connected again.
 - `LM_PAYMENTS_FAKE=1` adds a "Test provider" and a "Test bank file" that pay nobody, for trying the screens on a demo.
-  **Never set it on the server people are paid from.** `LM_PAYMENTS_JOB=0` turns off the 5-minute check of payments on
+  Both stay in test mode (neither can be switched to live), so **Mark as paid** on a test bank file marks no week paid:
+  the weeks stay on Runs to pay with "Test mode: nobody was paid". **Never set it on the server people are paid
+  from.** `LM_PAYMENTS_JOB=0` turns off the 5-minute check of payments on
   their way (Check now still works); leave it on.
 - **Being signed out never stops a payment you approved.** Linear Hub keeps checking it every 5 minutes on its own and
   marks the weeks paid; sign in again to see it finished. A bank file you approved is still there to download.
@@ -178,6 +180,12 @@ What each one can do is on its card in **Settings → Payments** (✓ and ✗), 
 - **Good to know**: TrueLayer asks non-regulated businesses for each person's date of birth and address for sanctions
   screening. Its API accepts payouts without them and Linear Hub does not send them. If TrueLayer refuses payouts for
   that reason, the payout says so; sending them would be a later change and a data-sharing decision for you.
+- **A payout TrueLayer did not answer is resent for 5 hours only.** TrueLayer recognises a resent payout (the same
+  Idempotency-Key) for a limited time: 6 hours on its general idempotency page, 30 days on its Payments v3 page. Linear
+  Hub keeps to the shorter one: a payout approved more than 5 hours ago is never sent again, it fails with "Not sent:
+  … Check the payouts in the TrueLayer Console, then pay this week again if it was not paid." Check the Console before
+  paying that week again: the first send may have arrived. **Ask TrueLayer** which window applies to payouts; if it is
+  30 days, the 5 hours can be raised in a later release.
 
 ## While a payment is on its way, and after
 
@@ -187,10 +195,13 @@ What each one can do is on its card in **Settings → Payments** (✓ and ✗), 
 - **Mark paid by hand waits** on a week whose payment from Linear Hub is on its way, so nobody is paid twice.
 - **A very long outage**: if a provider stays unreachable while a payment is being sent, Linear Hub keeps resending
   with the same reference, which the provider recognises as the same payment. Revolut recognises repeats for 2 weeks
-  (Linear Hub stops after 13 days); Wise's and TrueLayer's documentation does not say how long. Check the provider's own
-  list before paying that week another way.
-- **Cancel the rest** stops what has not been paid. If Linear Hub is still finding out whether a provider made a
-  payment, it asks you to press **Check now** first.
+  (after 13 days Linear Hub looks the payment up instead of resending); TrueLayer for 6 hours (after 5 hours Linear Hub
+  fails the payout with a reason instead of resending); Wise's documentation does not say how long. Check the
+  provider's own list before paying that week another way.
+- **During an outage the week stays held until the provider answers.** While Linear Hub does not know whether a
+  provider made a payment, **Cancel the rest** shows greyed out with the reason, Cancel answers "press Check now, then
+  cancel", and Mark paid by hand waits: paying that week another way could pay it twice. **Cancel the rest** works
+  again, and stops what has not been paid, once **Check now** gets an answer.
 
 ## What was tested, and what was not
 
@@ -201,7 +212,8 @@ What each one can do is on its card in **Settings → Payments** (✓ and ✗), 
   providers' official GitHub files (Revolut's OpenAPI file, TrueLayer's signing and PHP libraries). Key points were
   checked again on 25 Oct 2026: Revolut's addresses, its 40-character request id recognised for 2 weeks, the 2-minute
   code and 40-minute tokens; Wise's new sandbox address (the old one was retired on 30 June 2026) and that a personal
-  token cannot fund transfers for UK businesses; TrueLayer's payout shape and statuses. **A sandbox run with your own
+  token cannot fund transfers for UK businesses; TrueLayer's payout shape and statuses, and its idempotency window
+  (6 hours on one page, 30 days on another: Linear Hub uses the shorter). **A sandbox run with your own
   credentials is the first real check.** The least certain points: the exact Revolut consent step and whether the
   code shows in the redirect address as `?code=`; the name Wise gives the token permission ("full access"); how
   TrueLayer's live service checks the signature.

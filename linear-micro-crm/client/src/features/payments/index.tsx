@@ -30,7 +30,8 @@ const BATCH_TONE: Record<PaymentBatchStatus, 'neutral' | 'info' | 'success' | 'd
  * (a provider's sandbox) nobody is paid, so a "paid" item reads "Test: not paid".
  */
 export function PaymentItemStatusBadge({ status, kind, mode }: { status: PaymentItemStatus; kind?: 'file' | 'api'; mode?: PaymentMode }) {
-  if (mode === 'test' && kind !== 'file' && status === 'paid') return <Badge tone="info" size="sm">Test: not paid</Badge>;
+  // (a bank file is only ever in test mode for the test bank file, which pays nobody either)
+  if (mode === 'test' && status === 'paid') return <Badge tone="info" size="sm">Test: not paid</Badge>;
   const label = kind === 'file' && (status === 'submitted' || status === 'processing') ? 'In the file' : PAYMENT_ITEM_STATUS_LABELS[status];
   return <Badge tone={ITEM_TONE[status]} size="sm" dot={status === 'paid'}>{label}</Badge>;
 }
@@ -38,12 +39,14 @@ export function PaymentItemStatusBadge({ status, kind, mode }: { status: Payment
 /**
  * "File ready" for a bank file not yet marked paid (release 1.4, P: also when someone was left out of the file, which
  * makes the batch 'processing'), else the shared label. Review fix: a test-mode payment that went through reads
- * "Test done: nobody paid", never "Paid".
+ * "Test done: nobody paid", never "Paid". Review fix (UI-2): `allQueued` — nothing has reached the provider yet (it
+ * could not be reached) — reads "Waiting to send", never "Sent".
  */
-export function PaymentBatchStatusBadge({ status, kind, mode }: { status: PaymentBatchStatus; kind?: 'file' | 'api'; mode?: PaymentMode }) {
-  if (mode === 'test' && kind !== 'file' && (status === 'completed' || status === 'partly_failed')) {
+export function PaymentBatchStatusBadge({ status, kind, mode, allQueued }: { status: PaymentBatchStatus; kind?: 'file' | 'api'; mode?: PaymentMode; allQueued?: boolean }) {
+  if (mode === 'test' && (status === 'completed' || status === 'partly_failed')) {
     return <Badge tone="info">{status === 'completed' ? 'Test done: nobody paid' : 'Test partly done: nobody paid'}</Badge>;
   }
+  if (allQueued && (status === 'submitted' || status === 'processing')) return <Badge tone="warning">{PAYMENT_ITEM_STATUS_LABELS.queued}</Badge>;
   const label = kind === 'file' && (status === 'submitted' || status === 'processing') ? 'File ready' : PAYMENT_BATCH_STATUS_LABELS[status];
   return <Badge tone={BATCH_TONE[status]} dot={status === 'completed'}>{label}</Badge>;
 }

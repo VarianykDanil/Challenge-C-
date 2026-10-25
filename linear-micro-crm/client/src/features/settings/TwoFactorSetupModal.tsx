@@ -183,7 +183,7 @@ function SetupFlow({ onClose }: { onClose: () => void }) {
               {setup.data && (
                 <a
                   href={setup.data.otpauthUrl}
-                  className="focus-ring mt-2 inline-flex items-center gap-1.5 rounded-md text-sm font-medium text-primary underline-offset-4 hover:underline"
+                  className="focus-ring mt-2 inline-flex min-h-10 items-center gap-1.5 rounded-md text-sm font-medium text-primary underline-offset-4 hover:underline"
                 >
                   <ExternalLink className="h-4 w-4" aria-hidden />
                   {t.openInApp}

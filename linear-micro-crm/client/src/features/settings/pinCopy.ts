@@ -38,6 +38,8 @@ export const PIN_COPY = {
     /** Release 1.4: a client account signs in with an access code. */
     backClient: 'Back to email and access code',
     forgot: 'Forgotten it? An administrator can reset your PIN, then you sign in with your email and employee ID.',
+    /** Review fix (UI-5): a client account signs in with an access code, and Linear MCR resets its PIN. */
+    forgotClient: 'Forgotten it? Ask Linear MCR to reset your PIN, then sign in with your email and access code and create a new one.',
     wrong: 'That PIN isn’t right. Check it and try again.',
     triesLeft: (n: number) => `${plural(n, 'try', 'tries')} left before your PIN locks for a while.`,
     /** Only when the server's own sentence (with the unlock time) is missing. */
@@ -110,7 +112,7 @@ export const PIN_COPY = {
       'Everyone, charity and client accounts included, signs in with a 6-digit code from an authenticator app. Anyone without it sets it up at their next sign-in. The demo sign-in accounts are left out while Linear Hub is still the demo.',
     maxAge: 'Sign out after',
     maxAgeHint: (hours: number) =>
-      `Everyone is signed out ${plural(hours, 'hour', 'hours')} after signing in, whatever they are doing, and signs in again with their code. A shorter time applies at once; a longer one from each person’s next sign-in.${hours === SESSION_MAX_HOURS_DEFAULT ? '' : ` The default is ${SESSION_MAX_HOURS_DEFAULT} hours.`}`,
+      `Everyone is signed out ${plural(hours, 'hour', 'hours')} after signing in, whatever they are doing, and signs in again with their code. A shorter time applies at once; a longer one from each person’s next sign-in.${hours === SESSION_MAX_HOURS_DEFAULT ? '' : ` The default is ${SESSION_MAX_HOURS_DEFAULT} hours.`} The demo sign-in accounts are left out while Linear Hub is still the demo.`,
     turnOn: 'Turn on',
     idle: 'Sign out after inactivity',
     idleHint: (hours: number) =>

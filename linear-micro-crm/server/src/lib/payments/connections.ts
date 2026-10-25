@@ -182,11 +182,13 @@ export function createConnection(db: Db, me: UserWithTeam, input: PaymentConnect
   const name = cleanName(input.name, adapter.info.name);
   const config = validated(adapter, { settings: stringMap(input.settings, 'settings'), secrets: stringMap(input.secrets, 'secrets') });
   const file = adapter.info.kind === 'file';
+  // a bank file has no test mode (nothing moves until Matt uploads it) — except a test-only one, which never pays anyone
+  const live = file && !adapter.info.testOnly;
   const id = run(
     db,
     `INSERT INTO payment_connections (provider, name, mode, settings_json, secrets_enc, status, created_at, created_by)
      VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-    [provider, name, file ? 'live' : 'test', JSON.stringify(config.settings), encryptSecrets(config.secrets), file ? 'connected' : 'not_connected', nowISO(), me.id],
+    [provider, name, live ? 'live' : 'test', JSON.stringify(config.settings), encryptSecrets(config.secrets), file ? 'connected' : 'not_connected', nowISO(), me.id],
   ).lastInsertRowid;
   return getConnection(db, id);
 }
@@ -221,6 +223,7 @@ export function updateConnection(db: Db, me: UserWithTeam, id: number, patch: Pa
   }
   if (p.mode !== undefined && p.mode !== r.mode) {
     if (p.mode !== 'live' && p.mode !== 'test') throw badRequest('Mode is test or live');
+    if (adapter.info.testOnly) throw badRequest('The test providers never pay anyone: they have no live mode.');
     if (adapter.info.kind === 'file') throw badRequest('A bank file has no test mode: nothing is paid until you upload the file to your bank and approve it there.');
     // a payment on its way finishes in the mode it was made in (drafts are refused at approval instead)
     const waiting = get<{ id: number }>(

@@ -52,20 +52,35 @@ Details: [docs/USER_GUIDE.md](docs/USER_GUIDE.md) ("What's new in 1.4"), [docs/L
   - **Wise Business**: Linear Hub creates the transfers and you pay them in Wise (Wise does not let an API token pay them
     for UK businesses); each week is marked paid once Wise has sent the money, and transfers not yet paid can be
     cancelled from Linear Hub.
-  - **Open Banking through TrueLayer**: signed payouts from your TrueLayer merchant account.
+  - **Open Banking through TrueLayer**: signed payouts from your TrueLayer merchant account. A payout TrueLayer did not
+    answer is sent again for 5 hours at most (TrueLayer recognises a repeat for 6); after that it fails with "Not sent:
+    … Check the payouts in the TrueLayer Console, then pay this week again if it was not paid.", never sent blind.
 - **Test mode first.** Revolut, Wise and TrueLayer connections start in the provider's sandbox; **Switch to live** needs
-  PAY FOR REAL typed and a new test against the live service. Each Connect form starts with **How to connect**, every
-  field says where to find its value, and **Save and test** tests an API connection straight away. A test-mode payment
+  PAY FOR REAL typed and a new test against the live service. Each API provider's Connect form starts with **How to
+  connect**, every field says where to find its value, and **Save and test** tests an API connection straight away;
+  **Edit** on a live connection says it moves real money. A draft made in test mode says plainly that it cannot be
+  approved once the connection is live. A test-mode payment
   reads "Test done: nobody paid".
 - **Bank details**: everyone adds their own in **Settings → Bank details** (a code from their app to change them);
   administrators see them masked on Team → the person, can type them in, and confirm changed ones with **Confirm
-  details**. A payment to changed details waits until an administrator confirms them, and Needs attention says so.
+  details**, which confirms exactly the details on screen (if the person changed them again meanwhile, it says so and
+  they stay waiting). A payment to changed details waits until an administrator confirms them, and Needs attention says
+  so.
 - **Needs attention → Payments** (administrators): changed bank details to check, failed payments, bank files waiting
-  for your bank, a connection whose test failed, and a week whose pay changed while its payment was on its way.
+  for your bank (with the people and the money in the file), a connection whose test failed, and a week whose pay
+  changed while its payment was on its way. A bank file that left someone out shows **In the file £…** under its total,
+  and its download is audited with what the file holds.
+- **A payment that has not reached the provider says so**: **Waiting to send** (not "Sent"), the approve message says
+  the provider could not be reached yet and that Linear Hub keeps trying, and the provider's "pay the transfers now"
+  note waits until something was really sent. While Linear Hub does not know whether the provider made a payment,
+  **Cancel the rest** shows greyed out with the reason and **Mark paid** by hand says what to wait for. A network
+  failure reads "Linear Hub could not reach Wise: check this computer’s internet connection, or Wise may be down."
+  instead of "fetch failed".
 - **Every payment is safe to send again**: each carries the provider's idempotency key and the account it was approved
   with, so a payment resent after a timeout is never made twice; Linear Hub checks payments on their way every 5
-  minutes on its own (`LM_PAYMENTS_JOB=0` turns that off). `LM_PAYMENTS_FAKE=1` adds test providers that pay nobody, for
-  trying the screens — never on a real server.
+  minutes on its own (`LM_PAYMENTS_JOB=0` turns that off). `LM_PAYMENTS_FAKE=1` adds test providers that pay nobody (they
+  stay in test mode, so Mark as paid on the test bank file marks no week paid), for trying the screens — never on a
+  real server.
 - Bank and payment logos from the CC0 `simple-icons` package (16.34.0); TrueLayer, which it lacks, shows a "TL"
   monogram. Logos belong to their owners and only identify the service.
 
@@ -78,7 +93,8 @@ Details: [docs/USER_GUIDE.md](docs/USER_GUIDE.md) ("What's new in 1.4"), [docs/L
   in without it). An administrator's own reset points at a recovery code or `npm run 2fa:reset`.
 - The sign-in instructions for a new person (Team → **Add person**) and a client invite (**Client accounts** →
   **Invite**) end with setting up two-step verification and keeping the recovery codes safe; the **Invite** and **Turn
-  on** dialogs say so too. A charity or client account's code and PIN steps say "Back to email and access code".
+  on** dialogs say so too. A charity or client account's code and PIN steps say "Back to email and access code", and a
+  forgotten client PIN points at Linear MCR and the access code.
 - Sessions last 14 hours from sign-in (they lasted 14 days), with the cookie's lifetime the same; sessions from before
   1.4 that are older than 14 hours end at their next request. The demo sign-in accounts keep 14 days while it is the
   demo.
