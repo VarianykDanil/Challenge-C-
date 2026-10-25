@@ -274,7 +274,10 @@ function ConnectModal({ provider: p, connection: c, onClose }: { provider: Payme
       size="lg"
       icon={<ProviderLogo iconKey={p.iconKey} size="sm" />}
       title={c ? `Edit ${c.name}` : `Connect ${p.name}`}
-      description={p.kind !== 'api'
+      // review fix (SD-4): a test provider (LM_PAYMENTS_FAKE=1) has no live mode and no bank to upload to
+      description={p.testOnly
+        ? 'A test provider: it never pays anyone and has no live mode.'
+        : p.kind !== 'api'
         ? 'Linear Hub makes the file; you upload and approve it in your online banking.'
         // review fix (UI-3): an existing live connection is not "in test mode"
         : c?.mode === 'live'

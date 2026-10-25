@@ -3731,8 +3731,12 @@ interface PaymentProviderAdapter {
   `demoFakeProviders`): they pay nobody, for trying the screens on a demo — never on a server people are paid from.
   Both are `testOnly` (`PaymentProviderInfo.testOnly`, review fix): their connections stay in test mode — the test bank
   file too — so Mark as paid or a "paid" answer marks no run paid ("Test mode: nobody was paid"), and switching them to
-  live answers 400 "The test providers never pay anyone: they have no live mode.". The test suite's own fake is not
-  test-only: it stands in for a real provider that goes live.
+  live answers 400 "The test providers never pay anyone: they have no live mode.". Review fix (money:3): the test bank
+  file starts with "TEST FILE: for looking at only. Do not upload it to a bank." and masks the bank details
+  (`**-**-12`, `****5678`), so no bank can pay from it; Needs attention never lists it (live files only); the payment
+  page, the approve message and Mark as paid say it is a test that pays nobody. A server started with
+  `LM_PAYMENTS_FAKE=1` is checked to register exactly these (a child process in payments-final.test.ts). The test
+  suite's own fake is not test-only: it stands in for a real provider that goes live.
 - **Connections** (`lib/payments/connections.ts`): settings stored as JSON, secrets as one encrypted blob; no answer,
   audit row, log line or error carries a secret (a connection answers only the NAMES of the secrets stored,
   `secretsSet`); an empty secret on PATCH keeps the stored one. An API connection starts `mode: 'test'`,
@@ -3773,13 +3777,20 @@ interface PaymentProviderAdapter {
    from the job, by Linear Hub on the approver's behalf.
 4. **Refresh** (**Check now**, `POST …/refresh`, and `lib/payments/job.ts` every 5 minutes while an approved API
    payment has items waiting (a payment and the list answer `queuedCount`, the items still waiting to be sent; when it
-   is every item not cancelled, nothing has reached the provider and the screens say **Waiting to send**, not
-   **Sent**); `LM_PAYMENTS_JOB=0` turns the job off, Check now still works): resends queued items after
+   is every item not cancelled, nothing is confirmed by the provider yet — a payment sent without an answer may still
+   exist there — and the screens say **Waiting to send**, not **Sent**); `LM_PAYMENTS_JOB=0` turns the job off, Check
+   now still works): resends queued items after
    a submit that threw or timed out (same keys, to the account each was approved with), then asks the provider about
    submitted and processing items. A provider recognises a repeated key only for a while, so the adapters stop
    resending in time (Revolut after 13 days looks the payment up, §17.11; TrueLayer after 5 hours fails it, §17.13);
    the batch's `createdAt` and `approvedAt` reach them on the real clock, so a pinned `LM_BUSINESS_NOW` never makes a
-   fresh approval look old. One conversation per batch at a time (409 "Linear Hub is talking to the provider
+   fresh approval look old. Wise documents no window, so a queued Wise transfer is resent with the same
+   `customerTransactionId` for as long as it stays queued (OWNER_NOTES_1.4 asks Matt to ask Wise).
+   The message after **Approve** comes from the statuses the approval answered (shared `approvalOutcome`, review fixes
+   UI-2, SD-3): sent = submitted, processing or paid; a refused item is counted as failed, never as sent; every item
+   refused → "Payment not made"; queued items → "… has not confirmed … yet: Linear Hub tries again every 5 minutes"
+   (never "could not be reached": a timeout may still have reached it); the provider's next step or "who, how much"
+   only when every item was sent. One conversation per batch at a time (409 "Linear Hub is talking to the provider
    about this payment right now"). The job is unref'd, needs no session, and does nothing when nothing is waiting (one
    cheap query).
 5. **Test mode** (a provider's sandbox) moves no money: items can come back paid but never mark a run paid ("Test
@@ -3846,9 +3857,17 @@ flagged run is brought up to date at once (`lib/payRule.ts syncPersonWeek`) befo
 at once, through any provider. It answers 409 "Linear Hub is still finding out whether Wise Business made the transfer
 for …: press Check now, then cancel. If Wise Business cannot be reached, the week stays held until Wise Business
 answers." while an item was sent but has no provider reference yet (it may exist at the provider), and changes nothing
-then; the payment's `actions.cancelBlocked` says the same and the page shows **Cancel the rest** greyed out with it. The rest are asked to stop only when the adapter can (Wise); otherwise, with nothing else to stop, 409 "Payments
-already sent to … cannot be stopped from Linear Hub. Check them with the provider." `cancelled_at` is set only when something actually stopped, nothing is sent once a cancel
-was recorded, and the page's toast says how many stopped and how many are still on their way.
+then; the payment's `actions.cancelBlocked` says the same. Review fixes (SD-1, SD-2, money:1) keep those words true
+(`unsureReason`): "press Check now (first / then cancel)" only when the adapter can stop a payment (Wise; then
+`actions.cancelWaits` is true and the page shows **Cancel the rest** greyed out with the reason); otherwise "… Payments
+sent to Revolut Business cannot be stopped from Linear Hub." and no greyed button, since Check now never brings Cancel
+back. The second sentence says what happens meanwhile: a live payment "the week stays held until … answers"; TrueLayer
+"If TrueLayer has still not answered 5 hours after the approval, Linear Hub stops trying and the week goes back to Runs
+to pay: check the TrueLayer Console before paying it again." (§17.13); a test-mode payment "Test mode: nobody is paid,
+so the week is not held." (test items never hold a run). The rest are asked to stop only when the adapter can (Wise);
+otherwise, with nothing else to stop, 409 "Payments already sent to … cannot be stopped from Linear Hub. Check them
+with the provider." `cancelled_at` is set only when something actually stopped, nothing is sent once a cancel was
+recorded, and the page's toast says how many stopped and how many are still on their way.
 
 ### 17.10 The bank payment file (P: `shared/src/logic/bankFiles.ts`, adapter `server/src/lib/payments/bankFile.ts`)
 
@@ -3886,7 +3905,10 @@ If nobody can go in it, no file is made and the payment is `failed`.
 money; making the file again from the same items gives the same bytes. `testConnection` answers ok with a sentence
 saying which files it makes; `refresh` is never called. The file is named
 `linear-hub-payment-<id>-<YYYY-MM-DD>-<faster-payments|starling|revolut>.csv`. Nothing secret is stored for a bank
-file connection (any secrets sent are dropped); changing the format keeps it connected.
+file connection (any secrets sent are dropped); changing the format keeps it connected. What is "in the file" has one
+definition (review fix money:4): every line with a file reference — the download's audit row counts them, and so does
+the payment page's **In the file £…** hint under the total (shown only when it differs from the total), including a
+line cancelled after the file was made, because the downloaded file still holds it.
 
 ### 17.11 Revolut Business (A: `server/src/lib/payments/revolut.ts`)
 
@@ -3958,9 +3980,10 @@ Hosts (from TrueLayer's own PHP library): auth `https://auth.truelayer-sandbox.c
 - **Never resent blind** (review fix): TrueLayer recognises a key for a limited time (6 hours on
   docs.truelayer.com/docs/idempotency, 30 days on /docs/idempotency-for-payment-requests) and has no lookup by key for
   payouts, so a queued payout approved more than `TRUELAYER_REPEAT_HOURS` (5) hours ago is not sent again: it fails
-  with "Not sent: this payout was approved more than 5 hours ago and TrueLayer only recognises a repeated payout for 6
-  hours, so Linear Hub will not send it again. Check the payouts in the TrueLayer Console, then pay this week again if
-  it was not paid." and its run goes back to Runs to pay.
+  with "Linear Hub does not know whether TrueLayer made this payout: it was approved more than 5 hours ago and TrueLayer
+  only recognises a repeated payout for 6 hours, so Linear Hub will not send it again. Check the payouts in the
+  TrueLayer Console before paying this week again." and its run goes back to Runs to pay. Review fix (money:1): never
+  "Not sent" — every payout that gets here was sent at least once with no answer back, so TrueLayer may have made it.
 - **Statuses** (`GET /v3/payouts/{id}`): `executed` → paid; `failed` → failed (`insufficient_funds`, `blocked`,
   `invalid_scan`, `invalid_iban`, `returned`, `scheme_error` in plain words); `pending`, `authorized` → processing.
 - TrueLayer asks non-regulated businesses for each payee's date of birth and address for sanctions screening; the API
@@ -4004,7 +4027,8 @@ Hub; the week stays paid and is sorted out by hand with an adjustment on a later
   `UNION ALL` statement): changed bank details to check (by name up to three, then one line), failed live payments whose
   run is still unpaid with no newer payment (one line, danger; one full stop after a reason that ends with one), bank
   files approved but not marked paid (info, the newest two: "Payment #12 is waiting for your bank", with the people and
-  the money still in the file — a line the bank format refused is not counted), connections whose last test failed (warning: "… needs a look"),
+  the money still in the file — a line the bank format refused is not counted; live files only, never the test bank
+  file), connections whose last test failed (warning: "… needs a look"),
   and runs whose figures changed after their payment was approved (one line, warning, 30 days, gone once a correction
   for that week is added).
 - **Audit** (`lib/audit/paymentSpecs.ts`, `lib/audit/securitySpecs.ts`): every payments and bank-details write route

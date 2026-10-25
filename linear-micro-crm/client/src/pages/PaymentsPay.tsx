@@ -173,31 +173,34 @@ export function PaymentsPayPage() {
                 </Link>
               </div>
             ) : (
-              <div role="radiogroup" aria-label="How to pay" className="grid gap-2">
-                {usable.map((c) => {
-                  const p = info(c);
-                  const on = connection?.id === c.id;
-                  return (
-                    <button
-                      key={c.id}
-                      type="button"
-                      role="radio"
-                      aria-checked={on}
-                      onClick={() => { setConnectionId(c.id); setSkipped(null); }}
-                      className={`flex min-h-14 items-center gap-3 rounded-lg border p-3 text-left transition focus:outline-none focus-visible:ring-2 focus-visible:ring-ring ${on ? 'border-primary bg-primary/10' : 'border-border hover:bg-surface-2'}`}
-                    >
-                      <ProviderLogo iconKey={p?.iconKey ?? 'bank'} size="sm" />
-                      <span className="min-w-0 flex-1">
-                        <span className="block truncate text-sm font-medium text-fg">{c.name}</span>
-                        <span className="block text-xs text-muted">{p?.kind === 'file' ? (bankFileFormatLabel(c.settings) ?? 'Bank payment file') : PAYMENT_MODE_LABELS[c.mode]}{p && !p.available ? ' · not switched on in this version yet' : ''}</span>
-                      </span>
-                      {(p?.kind === 'api' || p?.testOnly) && c.mode === 'test' && <Badge tone="info" size="sm">Test</Badge>}
-                    </button>
-                  );
-                })}
-                {/* review fix (UI-8): a connection that needs a (new) test stays listed, greyed, below the ones that work */}
-                {untested.length > 0 && <UntestedList connections={untested} info={info} className="mt-1" />}
-              </div>
+              <>
+                <div role="radiogroup" aria-label="How to pay" className="grid gap-2">
+                  {usable.map((c) => {
+                    const p = info(c);
+                    const on = connection?.id === c.id;
+                    return (
+                      <button
+                        key={c.id}
+                        type="button"
+                        role="radio"
+                        aria-checked={on}
+                        onClick={() => { setConnectionId(c.id); setSkipped(null); }}
+                        className={`flex min-h-14 items-center gap-3 rounded-lg border p-3 text-left transition focus:outline-none focus-visible:ring-2 focus-visible:ring-ring ${on ? 'border-primary bg-primary/10' : 'border-border hover:bg-surface-2'}`}
+                      >
+                        <ProviderLogo iconKey={p?.iconKey ?? 'bank'} size="sm" />
+                        <span className="min-w-0 flex-1">
+                          <span className="block truncate text-sm font-medium text-fg">{c.name}</span>
+                          <span className="block text-xs text-muted">{p?.kind === 'file' ? (bankFileFormatLabel(c.settings) ?? 'Bank payment file') : PAYMENT_MODE_LABELS[c.mode]}{p && !p.available ? ' · not switched on in this version yet' : ''}</span>
+                        </span>
+                        {(p?.kind === 'api' || p?.testOnly) && c.mode === 'test' && <Badge tone="info" size="sm">Test</Badge>}
+                      </button>
+                    );
+                  })}
+                </div>
+                {/* review fix (UI-8): a connection that needs a (new) test stays listed below the ones that work — outside the
+                    radio group, which holds only the choices (review fix SD-6) */}
+                {untested.length > 0 && <UntestedList connections={untested} info={info} className="mt-3" />}
+              </>
             )}
           </Card>
           <Card>
@@ -229,8 +232,10 @@ function UntestedList({ connections, info, className }: { connections: PaymentCo
   return (
     <ul className={`grid gap-2 ${className ?? ''}`} aria-label="Connections to test first" data-untested="">
       {connections.map((c) => (
-        <li key={c.id} className="flex min-h-14 items-center gap-3 rounded-lg border border-dashed border-border p-3 opacity-80" aria-disabled="true">
-          <ProviderLogo iconKey={info(c)?.iconKey ?? 'bank'} size="sm" />
+        // review fix (SD-5): no opacity on the row — its instruction must stay readable (4.5:1); the dashed border, no radio
+        // and aria-disabled already say it cannot be chosen. Only the logo is dimmed.
+        <li key={c.id} className="flex min-h-14 items-center gap-3 rounded-lg border border-dashed border-border p-3" aria-disabled="true">
+          <span className="opacity-60"><ProviderLogo iconKey={info(c)?.iconKey ?? 'bank'} size="sm" /></span>
           <span className="min-w-0 flex-1">
             <span className="block text-sm font-medium text-fg">{c.name}</span>
             <span className="block text-xs text-muted">Test it in Settings → Payments first{c.status === 'error' && c.lastError ? `. Last time: ${c.lastError}` : ''}</span>

@@ -6,7 +6,8 @@
  *  - live payments that failed and whose run is still unpaid with no newer payment (one line: danger), linking to the
  *    payment (or Runs to pay when several payments are involved);
  *  - a bank file approved but not yet marked paid (info, one per payment, newest two), with the people and the money
- *    still waiting for the bank (review fix UI-1: a line the bank format refused is not in the file, so not counted);
+ *    still waiting for the bank (review fix UI-1: a line the bank format refused is not in the file, so not counted).
+ *    Live only (review fix money:3): a test bank file (LM_PAYMENTS_FAKE=1) is never to be uploaded to a bank;
  *  - a connection whose last test or payment failed (warning);
  *  - review fix: a run whose figures changed after its payment was approved (the run is frozen while the money is on
  *    its way, and paid as approved): "Jordan Lee's pay changed while payment #3 was on its way" (warning; one line
@@ -59,7 +60,7 @@ export const provider: AttentionProvider = {
               (SELECT COUNT(*) FROM payment_items x WHERE x.batch_id = b.id AND x.status IN ('submitted', 'processing')),
               (SELECT COALESCE(SUM(x.amount_pence), 0) FROM payment_items x WHERE x.batch_id = b.id AND x.status IN ('submitted', 'processing')), NULL, b.id
        FROM payment_batches b JOIN payment_connections c ON c.id = b.connection_id
-       WHERE b.status IN ('submitted', 'processing') AND b.provider IN (${placeholders(Math.max(1, fileProviders.length))})
+       WHERE b.status IN ('submitted', 'processing') AND b.mode = 'live' AND b.provider IN (${placeholders(Math.max(1, fileProviders.length))})
        UNION ALL
        SELECT 'conn', c.id, c.name, c.last_checked_at, NULL, NULL, c.last_error, NULL
        FROM payment_connections c WHERE c.status = 'error' AND c.disconnected_at IS NULL

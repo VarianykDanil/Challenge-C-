@@ -9,6 +9,8 @@ rules are in [LOGIC.md §17](LOGIC.md#17-release-14).
 ## Two decisions for you
 
 These are the two open questions from the build. Nothing needs to change until you answer; both are small changes.
+Two questions for the providers are in their sections: **ask TrueLayer** which repeat window applies to payouts, and
+**ask Wise** how long it recognises a repeated transfer (see "A very long outage" below).
 
 1. **Should changing a connection's account also wait while a payment through it is on its way?** Today **Switch to
    live** and **Switch to test mode** wait until a payment through that connection has finished (or is cancelled), but
@@ -92,9 +94,10 @@ These are the two open questions from the build. Nothing needs to change until y
   to be connected again.
 - `LM_PAYMENTS_FAKE=1` adds a "Test provider" and a "Test bank file" that pay nobody, for trying the screens on a demo.
   Both stay in test mode (neither can be switched to live), so **Mark as paid** on a test bank file marks no week paid:
-  the weeks stay on Runs to pay with "Test mode: nobody was paid". **Never set it on the server people are paid
-  from.** `LM_PAYMENTS_JOB=0` turns off the 5-minute check of payments on
-  their way (Check now still works); leave it on.
+  the weeks stay on Runs to pay (the payment's page says "Test mode: nobody was paid"). The test bank file says "TEST
+  FILE" on its first line and shows only the last digits of each account, so no bank can pay from it, and Needs
+  attention never asks you to upload it. **Never set it on the server people are paid from.** `LM_PAYMENTS_JOB=0`
+  turns off the 5-minute check of payments on their way (Check now still works); leave it on.
 - **Being signed out never stops a payment you approved.** Linear Hub keeps checking it every 5 minutes on its own and
   marks the weeks paid; sign in again to see it finished. A bank file you approved is still there to download.
 
@@ -182,9 +185,10 @@ What each one can do is on its card in **Settings → Payments** (✓ and ✗), 
   that reason, the payout says so; sending them would be a later change and a data-sharing decision for you.
 - **A payout TrueLayer did not answer is resent for 5 hours only.** TrueLayer recognises a resent payout (the same
   Idempotency-Key) for a limited time: 6 hours on its general idempotency page, 30 days on its Payments v3 page. Linear
-  Hub keeps to the shorter one: a payout approved more than 5 hours ago is never sent again, it fails with "Not sent:
-  … Check the payouts in the TrueLayer Console, then pay this week again if it was not paid." Check the Console before
-  paying that week again: the first send may have arrived. **Ask TrueLayer** which window applies to payouts; if it is
+  Hub keeps to the shorter one: a payout approved more than 5 hours ago is never sent again, it fails with "Linear Hub
+  does not know whether TrueLayer made this payout: … Check the payouts in the TrueLayer Console before paying this
+  week again." and its week goes back to Runs to pay. Check the Console before paying that week again: the first send
+  may have arrived. **Ask TrueLayer** which window applies to payouts; if it is
   30 days, the 5 hours can be raised in a later release.
 
 ## While a payment is on its way, and after
@@ -196,12 +200,18 @@ What each one can do is on its card in **Settings → Payments** (✓ and ✗), 
 - **A very long outage**: if a provider stays unreachable while a payment is being sent, Linear Hub keeps resending
   with the same reference, which the provider recognises as the same payment. Revolut recognises repeats for 2 weeks
   (after 13 days Linear Hub looks the payment up instead of resending); TrueLayer for 6 hours (after 5 hours Linear Hub
-  fails the payout with a reason instead of resending); Wise's documentation does not say how long. Check the
-  provider's own list before paying that week another way.
-- **During an outage the week stays held until the provider answers.** While Linear Hub does not know whether a
-  provider made a payment, **Cancel the rest** shows greyed out with the reason, Cancel answers "press Check now, then
-  cancel", and Mark paid by hand waits: paying that week another way could pay it twice. **Cancel the rest** works
-  again, and stops what has not been paid, once **Check now** gets an answer.
+  fails the payout with a reason instead of resending); Wise's documentation does not say how long, so Linear Hub keeps
+  resending Wise transfers with the same reference for as long as Wise does not answer. Each resend relies on Wise
+  still recognising the reference: if it has forgotten it, a second transfer can appear. Wise transfers wait for you to
+  pay them, so after a long Wise outage check **Wise → Transfers** for a transfer made twice before you pay any.
+  **Ask Wise** how long a repeated `customerTransactionId` is recognised; Linear Hub could then stop resending in time,
+  as it does for Revolut and TrueLayer. Check the provider's own list before paying that week another way.
+- **During an outage a live payment holds the week until the provider answers** (TrueLayer: for 5 hours after the
+  approval at most, then the payout fails and the week is freed, as above). While Linear Hub does not know whether a
+  provider made a payment, Cancel waits and says why, and Mark paid by hand waits: paying that week another way could
+  pay it twice. With Wise, **Cancel the rest** shows greyed out and works again once **Check now** gets an answer;
+  Revolut and TrueLayer payments cannot be stopped from Linear Hub once sent, so while it waits the page explains that
+  instead of showing a greyed-out Cancel. A test-mode payment never holds the week.
 
 ## What was tested, and what was not
 

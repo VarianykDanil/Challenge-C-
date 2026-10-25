@@ -60,12 +60,16 @@ const TOKEN_SKEW_MS = 60_000;
  * on its general idempotency page (https://docs.truelayer.com/docs/idempotency), 30 days on its Payments v3 page
  * (https://docs.truelayer.com/docs/idempotency-for-payment-requests). Linear Hub keeps to the shorter one with an hour
  * to spare: a payout approved longer ago than this is never sent again blind (there is no lookup by key for payouts),
- * it fails with a reason that says to check the TrueLayer Console first. OWNER_NOTES_1.4.md asks Matt to confirm the
- * window with TrueLayer.
+ * it fails with a reason that says Linear Hub does not know whether TrueLayer made it: check the TrueLayer Console
+ * first. OWNER_NOTES_1.4.md asks Matt to confirm the window with TrueLayer.
  */
 export const TRUELAYER_REPEAT_HOURS = 5;
 const HOUR_MS = 3_600_000;
-export const MSG_TOO_OLD = `Not sent: this payout was approved more than ${TRUELAYER_REPEAT_HOURS} hours ago and TrueLayer only recognises a repeated payout for 6 hours, so Linear Hub will not send it again. Check the payouts in the TrueLayer Console, then pay this week again if it was not paid.`;
+/**
+ * Review fix (money:1): never "Not sent" — every payout that gets here was sent at least once with no answer back
+ * (sendQueued stamps attempted_at first), so TrueLayer may well have made it.
+ */
+export const MSG_TOO_OLD = `Linear Hub does not know whether TrueLayer made this payout: it was approved more than ${TRUELAYER_REPEAT_HOURS} hours ago and TrueLayer only recognises a repeated payout for 6 hours, so Linear Hub will not send it again. Check the payouts in the TrueLayer Console before paying this week again.`;
 export const MSG_BAD_CLIENT = 'TrueLayer did not accept the client ID or client secret. Copy them again from the TrueLayer Console (the sandbox ones in test mode, the live ones when live).';
 export const MSG_BAD_SIGNATURE = 'TrueLayer did not accept the signature. Check that the Signing key ID is the one the Console shows next to the public key you uploaded (Payments → Settings), and that the private key here is the one that goes with it.';
 const MSG_SCOPE = 'TrueLayer does not allow payments for this app yet (the “payments” scope). Ask TrueLayer to switch on payouts for your account.';

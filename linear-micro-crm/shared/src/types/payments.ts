@@ -273,7 +273,8 @@ export interface PaymentBatchSummary {
   waitingCount: number;
   /**
    * Review fix (UI-2): items still waiting to be sent ('queued': not handed to the provider yet, or no answer yet).
-   * When it equals every item not cancelled, nothing has reached the provider: the payment reads "Waiting to send".
+   * When it equals every item not cancelled, nothing is confirmed by the provider yet (review fix SD-3: a payment sent
+   * without an answer may still exist there): the payment reads "Waiting to send".
    */
   queuedCount?: number;
   /** The last error talking to the provider (plain words, secrets redacted). */
@@ -299,9 +300,18 @@ export interface PaymentBatch extends PaymentBatchSummary {
     approveBlocked?: string | null;
     /**
      * Review fix (UI-9): items Linear Hub does not know about yet (sent, no answer back): why Cancel the rest waits —
-     * "Linear Hub is still finding out whether Wise made them: press Check now first." (null or absent otherwise).
+     * "Linear Hub is still finding out whether Wise made them: press Check now first." — and what happens meanwhile
+     * (null or absent otherwise). Review fixes SD-1, SD-2, money:1: "press Check now first" only when the provider can
+     * stop a payment (Wise; elsewhere "Payments sent to … cannot be stopped from Linear Hub."); the week is said to be
+     * held only by a live payment ("Test mode: nobody is paid, so the week is not held."); TrueLayer is waited for 5
+     * hours after the approval at most.
      */
     cancelBlocked?: string | null;
+    /**
+     * Review fix (SD-1): true when Cancel the rest comes back once Check now gets an answer (the provider can stop a
+     * payment: Wise), so the page shows it greyed out with `cancelBlocked`. Absent otherwise.
+     */
+    cancelWaits?: boolean;
   };
 }
 

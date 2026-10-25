@@ -39,8 +39,8 @@ export function PaymentItemStatusBadge({ status, kind, mode }: { status: Payment
 /**
  * "File ready" for a bank file not yet marked paid (release 1.4, P: also when someone was left out of the file, which
  * makes the batch 'processing'), else the shared label. Review fix: a test-mode payment that went through reads
- * "Test done: nobody paid", never "Paid". Review fix (UI-2): `allQueued` — nothing has reached the provider yet (it
- * could not be reached) — reads "Waiting to send", never "Sent".
+ * "Test done: nobody paid", never "Paid". Review fix (UI-2): `allQueued` — nothing is confirmed by the provider yet
+ * (review fix SD-3: one sent without an answer may still exist there) — reads "Waiting to send", never "Sent".
  */
 export function PaymentBatchStatusBadge({ status, kind, mode, allQueued }: { status: PaymentBatchStatus; kind?: 'file' | 'api'; mode?: PaymentMode; allQueued?: boolean }) {
   if (mode === 'test' && (status === 'completed' || status === 'partly_failed')) {

@@ -134,8 +134,8 @@ Linear Hub** (or **Pay from Linear Hub** with nothing ticked). On **Pay people**
 and failed transfers), choose the connection under **2. How to pay**, look at **3. Review** and choose **Review
 payment**. Nothing is sent yet. **3. Review** counts people, runs and the **Total before checks**, leaving out ticked
 runs whose invoice is not accepted yet or is disputed; a run already in a draft payment says **In a draft payment**,
-and a connection that has not passed its test is listed greyed out, below the ones that work, with "Test it in
-Settings → Payments first".
+and a connection that has not passed its test is listed below the ones that work, with a dashed border and "Test it in
+Settings → Payments first" (it cannot be chosen).
 
 **4. Check and approve.** The payment's page shows the total, each person with the last four digits of their account,
 and who was left out and why: no bank details yet, details changed and not yet checked, an invoice not accepted yet or
@@ -162,8 +162,10 @@ bank rejected and say why in **Why the bank did not pay them**, check **Paid on*
 shows the reference written in the file (like "LINEAR 05OCT JL"), so you can find it on your statement. Someone the bank
 would refuse (Revolut needs a first and last name, for example) is left out of the file with the reason: fix their bank
 details, then pay that week again. The payment's **Total** is what you approved; when someone was left out, it also
-says **In the file £…**, the amount your bank will show, and Needs attention gives the people and the money in the file. Delete downloaded files from your computer once the bank has paid them: they hold
-full account numbers.
+says **In the file £…**, the amount your bank will show, and Needs attention gives the people and the money in the file.
+Someone you cancel later is still in the file you downloaded, so they still count in **In the file £…**: never upload
+that file again. Delete downloaded files from your computer once the bank has paid them: they hold full account
+numbers.
 
 **With Wise.** After approving, open Wise and pay the transfers Linear Hub made. They wait there until you do, and Wise
 cancels any that are not paid in time (those weeks go back to Runs to pay). **Cancel the rest** stops transfers you
@@ -185,15 +187,22 @@ up to date before you pay it again.
 
 **If a provider does not answer**, the payment says why (for example "TrueLayer did not answer within 15 seconds", or
 "Linear Hub could not reach Wise: check this computer’s internet connection, or Wise may be down.") and reads
-**Waiting to send** until something reaches the provider. Linear Hub sends the rest at the next check, or when you press
-**Check now**, to the account each payment was approved with and with the same references, so the provider does not
-make them twice. Providers only recognise a resent payment for a while, so Linear Hub stops resending in time:
-TrueLayer payouts approved more than 5 hours ago fail with "Not sent: …" instead (check the TrueLayer Console before
-paying that week again), and Revolut looks a payment up instead of resending after 13 days. **Cancel the rest** stops
-what has not been paid yet. While Linear Hub is still finding out whether the provider made a payment, **Cancel the
-rest** is greyed out with the reason and **Mark paid** by hand waits: press **Check now** first. During an outage the
-week stays held until the provider answers. The message after cancelling says how many were stopped and how many are
-still on their way.
+**Waiting to send** until the provider confirms one of them. A payment sent without an answer may still have been made,
+so the message after approving says the provider "has not confirmed" it yet, and counts a refused payment as failed,
+never as sent. Linear Hub sends the rest at the next check, or when you press **Check now**, to the account each payment
+was approved with and with the same references, so the provider does not make them twice. Providers only recognise a
+resent payment for a while: Revolut for 2 weeks (after 13 days Linear Hub looks the payment up instead of resending)
+and TrueLayer for 6 hours (a payout approved more than 5 hours ago is not sent again: it fails with "Linear Hub does not
+know whether TrueLayer made this payout: …", and its week goes back to Runs to pay; check the TrueLayer Console before
+paying it again). Wise does not say how long it recognises one, so Linear Hub keeps resending Wise transfers: after a
+long outage, check Wise → Transfers for a transfer made twice before you pay any.
+
+**Cancel the rest** stops what Linear Hub has not sent yet and, with Wise, transfers you have not paid yet; payments
+already sent to Revolut or TrueLayer cannot be stopped from Linear Hub. While Linear Hub is still finding out whether
+the provider made a payment, Cancel waits and the page says why, and **Mark paid** by hand waits too. With Wise,
+**Cancel the rest** is greyed out until **Check now** gets an answer, then works again. During an outage a live payment
+holds the week until the provider answers (TrueLayer: for 5 hours after the approval at most); a test-mode payment never
+holds it. The message after cancelling says how many were stopped and how many are still on their way.
 
 **A payment that bounces back after it was paid** (the receiving bank returns it days later) is not undone in Linear
 Hub: the week stays paid. The provider tells you; pay the person again by hand and put it on a later week as an
@@ -1665,7 +1674,7 @@ From the repository root, `npm run seed` rebuilds the database with the determin
 | "That code is not right. Codes change every 30 seconds and each one works once…" when approving a payment or saving bank details | The code was old, mistyped or already used for something else. | Wait for the next code in your app and try again. |
 | **Payment failed** on a run in Runs to pay | The provider or your bank did not pay it; the reason is in the badge's tooltip and on the payment's page. | Fix what the reason says (bank details, a top-up), then pay that week again in a new payment, or **Mark paid** once you have paid it another way. |
 | "Test it in Settings → Payments first" on Pay people | The connection's last test did not work, or it has not been tested since its details changed or it was switched to live. | Open Settings → **Payments** and choose **Test**; the card says what went wrong. |
-| A payment says a provider "did not answer" (or "could not reach") | The provider was slow or offline, or this computer's internet was down, when Linear Hub sent it. | Press **Check now** later, or wait for the 5-minute check: Linear Hub resends with the same references, which the provider recognises as the same payment for a while (TrueLayer 6 hours, Revolut 2 weeks). A TrueLayer payout not answered within 5 hours fails with "Not sent: …": check the TrueLayer Console before paying that week again. |
+| A payment says a provider "did not answer" (or "could not reach") | The provider was slow or offline, or this computer's internet was down, when Linear Hub sent it. | Press **Check now** later, or wait for the 5-minute check: Linear Hub resends with the same references, which the provider recognises as the same payment for a while (TrueLayer 6 hours, Revolut 2 weeks, Wise not documented). A TrueLayer payout not answered within 5 hours of the approval fails with "Linear Hub does not know whether TrueLayer made this payout: …": check the TrueLayer Console before paying that week again. After a long Wise outage, check Wise → Transfers for a transfer made twice. |
 | "This area isn't available on your account" | Your role cannot open that page (recruiters and the Gauges page, for example). | Use **Back to dashboard**; speak to your crew leader or the office if you think you should have access. |
 | **Not saved.** "Invalid funnel" | One stage is larger than the one before it. | Fix the stage named in the message. |
 | **Not saved.** "Gauges are recorded against the event's date" or "Gauges cannot be recorded before the event takes place" | The entry was for a date other than the event's, or the event is in the future. | Pick the right event; log it on or after the day it runs. |

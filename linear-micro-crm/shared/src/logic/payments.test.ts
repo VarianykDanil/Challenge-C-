@@ -1,12 +1,13 @@
 // Release 1.4 — package F (payments foundation): the pure rules, with hand-computed fixtures.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { PAYMENT_LIVE_CONFIRMATION, PAYMENT_PROVIDER_IDS } from '../types/payments.ts';
+import { PAYMENT_LIVE_CONFIRMATION, PAYMENT_PROVIDER_IDS, type PaymentItemStatus, type PaymentMode } from '../types/payments.ts';
 import {
   PAYMENT_BATCH_STATUS_LABELS,
   PAYMENT_ITEM_STATUS_LABELS,
   PAYMENT_PROVIDERS,
   abilityChecklist,
+  approvalOutcome,
   batchStatusFromItems,
   defaultPaymentReference,
   formatPence,
@@ -162,4 +163,35 @@ test('default payment reference: LINEAR, the week and initials, within 18 charac
     assert.ok(r.length <= 18, r);
     assert.match(r, /^[A-Z0-9 ]+$/);
   }
+});
+
+test('approvalOutcome (review fixes UI-2, SD-3, money:3): the message after Approve says what really happened', () => {
+  const api = (statuses: PaymentItemStatus[], mode: PaymentMode = 'live') => ({ kind: 'api' as const, mode, items: statuses.map((status) => ({ status })) });
+  const o = { providerName: 'Wise Business', createsOnly: true, success: '2 people, £600.00.' };
+  // every item refused: never a success (Wise with payment approvals switched on refuses every transfer)
+  assert.deepEqual(approvalOutcome(api(['failed', 'failed']), o), {
+    tone: 'error', title: 'Payment not made', body: 'Wise Business did not take any of the 2: the reasons are on this page. The weeks stay on Runs to pay.',
+  });
+  assert.equal(approvalOutcome(api(['failed']), o).body, 'Wise Business did not take it: the reason is on this page. The week stays on Runs to pay.');
+  // a refused item is never counted as sent
+  const mixed = approvalOutcome(api(['failed', 'queued']), o);
+  assert.equal(mixed.tone, 'warning');
+  assert.equal(mixed.body, '1 failed (the reason is on this page); Wise Business has not confirmed the other 1 yet: Linear Hub tries again every 5 minutes.');
+  assert.doesNotMatch(mixed.body, /sent/);
+  assert.equal(approvalOutcome(api(['processing', 'failed']), o).body, '1 sent; 1 failed (the reason is on this page).');
+  assert.equal(approvalOutcome(api(['processing', 'processing', 'queued']), o).body, '2 sent; Wise Business has not confirmed the other 1 yet: Linear Hub tries again every 5 minutes.');
+  // nothing confirmed yet: neutral words (a timeout may still have reached the provider)
+  const none = approvalOutcome(api(['queued', 'queued']), o);
+  assert.deepEqual(none, { tone: 'warning', title: 'Payment approved', body: 'Approved, but Wise Business has not confirmed them yet: Linear Hub tries again every 5 minutes.' });
+  assert.doesNotMatch(none.body, /could not be reached/);
+  // every item sent: the provider's own next step, test mode, or who and how much
+  assert.deepEqual(approvalOutcome(api(['processing', 'cancelled']), o), { tone: 'success', title: 'Payment approved', body: 'Now open Wise Business and pay the transfers there.' });
+  assert.equal(approvalOutcome(api(['processing'], 'test'), o).body, 'Test mode: nobody is paid.');
+  assert.equal(approvalOutcome(api(['paid']), { ...o, createsOnly: false }).body, '2 people, £600.00.');
+  // a bank file: live says upload it; the test bank file says never upload it
+  const file = (mode: PaymentMode) => ({ kind: 'file' as const, mode, items: [{ status: 'submitted' as const }] });
+  assert.deepEqual(approvalOutcome(file('live'), o), { tone: 'success', title: 'Bank file ready', body: 'Download it, upload it to your bank and approve it there. Then mark it paid here.' });
+  const testFile = approvalOutcome(file('test'), o);
+  assert.equal(testFile.title, 'Test bank file ready');
+  assert.equal(testFile.body, 'For looking at only: do not upload it to your bank. Nobody is paid.');
 });

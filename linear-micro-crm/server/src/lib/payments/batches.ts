@@ -74,6 +74,7 @@ import { adapterFor, connectionRow, providerConnection, providerContext, type Co
 import { redactSecrets } from './http.ts';
 import { ProviderError, type PaymentProviderAdapter, type ProviderItem, type ProviderItemResult } from './provider.ts';
 import { notReadyError } from './stubs.ts';
+import { TRUELAYER_REPEAT_HOURS } from './truelayer.ts';
 
 /** At most this many runs in one batch. */
 export const BATCH_MAX_RUNS = 500;
@@ -257,9 +258,26 @@ function approveBlockedReason(b: Pick<BatchRow, 'mode'>, conn: ConnectionRow | u
   return null;
 }
 
-/** Review fix (UI-9): why Cancel the rest waits while Linear Hub does not know whether the provider made some items. */
-function cancelBlockedReason(unsure: number, providerName: string): string {
-  return `Linear Hub is still finding out whether ${providerName} made ${unsure === 1 ? 'it' : 'them'}: press Check now first. If ${providerName} cannot be reached, the week stays held until it answers.`;
+/**
+ * Review fixes (UI-9, SD-1, SD-2, money:1): why Cancel the rest waits while Linear Hub does not know whether the
+ * provider made some items (`what`: "made it", "made the transfers for Remy Rep"), saying only what is true:
+ *  - "press Check now first" only when the provider can stop a payment (Wise): elsewhere a sent payment cannot be
+ *    stopped from Linear Hub, so Cancel never comes back;
+ *  - the week is held only by a live payment (assertNotInPayment): test mode holds nothing;
+ *  - TrueLayer is not waited for past TRUELAYER_REPEAT_HOURS: the payout fails with a reason and the week is freed.
+ * `then` is the advice for the cancel 409 ("press Check now, then cancel") rather than the page's.
+ */
+function unsureReason(p: { what: string; providerName: string; provider: string | null; canCancel: boolean; mode: PaymentMode; then?: boolean }): string {
+  const X = p.providerName;
+  const first = p.canCancel
+    ? `Linear Hub is still finding out whether ${X} ${p.what}: press Check now${p.then ? ', then cancel' : ' first'}.`
+    : `Linear Hub is still finding out whether ${X} ${p.what}. Payments sent to ${X} cannot be stopped from Linear Hub.`;
+  const meanwhile = p.mode === 'test'
+    ? 'Test mode: nobody is paid, so the week is not held.'
+    : p.provider === 'truelayer'
+      ? `If TrueLayer has still not answered ${TRUELAYER_REPEAT_HOURS} hours after the approval, Linear Hub stops trying and the week goes back to Runs to pay: check the TrueLayer Console before paying it again.`
+      : `If ${X} cannot be reached, the week stays held until ${X} answers.`;
+  return `${first} ${meanwhile}`;
 }
 
 /**
@@ -347,7 +365,12 @@ export function batchDetail(db: Db, id: number): PaymentBatch {
   const approve = b.status === 'draft' && !!adapter?.ready && connected;
   // review fixes UI-7 / UI-9: why, when the button is missing (only when there is something to say)
   const approveBlocked = b.status === 'draft' && !approve ? approveBlockedReason(b, conn) : null;
-  const cancelBlocked = !cancel && approved && kind === 'api' && plan.unsure.length ? cancelBlockedReason(plan.unsure.length, conn?.name ?? 'the provider') : null;
+  const unsureBlocks = !cancel && approved && kind === 'api' && plan.unsure.length > 0;
+  const cancelBlocked = unsureBlocks
+    ? unsureReason({ what: plan.unsure.length === 1 ? 'made it' : 'made them', providerName: conn?.name ?? 'the provider', provider: b.provider, canCancel: !!adapter?.cancel, mode: b.mode })
+    : null;
+  // review fix (SD-1): Cancel the rest is shown greyed out only when Check now can bring it back
+  const cancelWaits = unsureBlocks && !!adapter?.cancel;
   return {
     ...toSummary(b),
     items,
@@ -361,6 +384,7 @@ export function batchDetail(db: Db, id: number): PaymentBatch {
       markPaid: kind === 'file' && approved && items.some((i) => i.status === 'submitted' || i.status === 'processing'),
       ...(approveBlocked ? { approveBlocked } : {}),
       ...(cancelBlocked ? { cancelBlocked } : {}),
+      ...(cancelWaits ? { cancelWaits } : {}),
     },
   };
 }
@@ -873,8 +897,9 @@ export async function cancelBatch(db: Db, me: UserWithTeam, id: number): Promise
   if (plan.unsure.length) {
     const names = [...new Set(plan.unsure.map((i) => i.userName || i.payeeName))];
     const noun = conn?.provider === 'wise' ? 'transfer' : 'payment';
-    // review fix (UI-9): and what happens while the provider cannot be reached
-    throw conflict(`Linear Hub is still finding out whether ${providerName} made the ${noun}${plan.unsure.length === 1 ? '' : 's'} for ${names.slice(0, 3).join(', ')}${names.length > 3 ? ` and ${names.length - 3} more` : ''}: press Check now, then cancel. If ${providerName} cannot be reached, the week stays held until ${providerName} answers.`);
+    // review fixes (UI-9, SD-1, SD-2, money:1): and what happens meanwhile, the same words as the page's
+    const what = `made the ${noun}${plan.unsure.length === 1 ? '' : 's'} for ${names.slice(0, 3).join(', ')}${names.length > 3 ? ` and ${names.length - 3} more` : ''}`;
+    throw conflict(unsureReason({ what, providerName, provider: b.provider, canCancel: !!adapter?.cancel, mode: b.mode, then: true }));
   }
   const canStop = !!adapter?.cancel && !!conn && !conn.disconnectedAt && conn.mode === b.mode;
   if (plan.provider.length && !canStop && !plan.local.length) {

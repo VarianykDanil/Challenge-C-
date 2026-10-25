@@ -10,7 +10,7 @@
 import { useEffect, useId, useState, type FormEvent } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import { ArrowLeft, Download, Info, RefreshCw, ShieldCheck, TriangleAlert, X } from 'lucide-react';
-import { formatPence, payDayLabel, payWeekLabel, type PaymentBatch, type PaymentItem, type PaymentProviderView } from '@lm/shared';
+import { approvalOutcome, formatPence, payDayLabel, payWeekLabel, type PaymentBatch, type PaymentItem, type PaymentProviderView } from '@lm/shared';
 import { ApiError } from '@/api/client';
 import { paymentFileUrl, useApproveBatch, useCancelBatch, useMarkBatchPaid, usePaymentBatch, usePaymentProviders, useRefreshBatch } from '@/api/payments';
 import { useCurrentUser } from '@/auth/AuthProvider';
@@ -95,8 +95,9 @@ function BatchBody({ b, provider, providerName, available }: { b: PaymentBatch; 
   // review fix: a bank file just made is waiting for Matt's bank, not on its way
   const fourth = draft ? 'To approve' : b.failedCount ? 'Failed' : b.kind === 'file' ? 'In the file' : allQueued(b) ? 'Waiting to send' : 'On the way';
   const queued = b.items.some((i) => i.status === 'queued');
-  // review fix (UI-1): what the bank file holds — a line the bank format refused is not in it (no file reference)
-  const inFilePence = b.kind === 'file' && !draft ? b.items.filter((i) => i.providerRef && i.status !== 'cancelled').reduce((sum, i) => sum + i.amountPence, 0) : null;
+  // review fix (UI-1): what the bank file holds — a line the bank format refused is not in it (no file reference). Review
+  // fix (money:4): a line cancelled later is still in the file, so it counts (the server's download audit does the same)
+  const inFilePence = b.kind === 'file' && !draft ? b.items.filter((i) => i.providerRef).reduce((sum, i) => sum + i.amountPence, 0) : null;
   // review fix (UI-2): the provider's note about payments on their way, only once one really is (and never in test mode)
   const sentSome = b.items.some((i) => i.status === 'submitted' || i.status === 'processing');
   return (
@@ -147,8 +148,9 @@ function BatchBody({ b, provider, providerName, available }: { b: PaymentBatch; 
                 {draft ? 'Cancel draft' : 'Cancel the rest'}
               </Button>
             )}
-            {/* review fix (UI-9): shown, but waiting, while Linear Hub does not know whether the provider made them */}
-            {!b.actions.cancel && b.actions.cancelBlocked && (
+            {/* review fix (UI-9): shown, but waiting, while Linear Hub does not know whether the provider made them —
+                only when Check now can bring it back (review fix SD-1: the provider can stop a payment, Wise) */}
+            {!b.actions.cancel && b.actions.cancelBlocked && b.actions.cancelWaits && (
               <Button size="sm" variant="ghost" className="h-10 sm:h-8" leftIcon={<X aria-hidden />} disabled aria-describedby={`cancel-blocked-${b.id}`}>
                 Cancel the rest
               </Button>
@@ -205,10 +207,13 @@ function BatchBody({ b, provider, providerName, available }: { b: PaymentBatch; 
   );
 }
 
-/** When an item was paid: a bank file's is the day chosen in Mark as paid; a test item was never paid at all. */
+/**
+ * When an item was paid: a bank file's is the day chosen in Mark as paid; a test item (a sandbox, or the test bank
+ * file: review fix SD-4) was never paid at all.
+ */
 function paidText(i: PaymentItem, kind: 'file' | 'api', mode: PaymentBatch['mode']): string {
   if (i.status !== 'paid' || !i.paidAt) return '';
-  if (kind === 'api' && mode === 'test') return '';
+  if (mode === 'test') return '';
   if (kind === 'file' && i.runPaidDate) return ` · paid ${payDayLabel(i.runPaidDate)} · marked ${formatDateTime(i.paidAt)}`;
   return ` · paid ${formatDateTime(i.paidAt)}`;
 }
@@ -257,24 +262,24 @@ function ApproveCard({ b, provider, providerName, available }: { b: PaymentBatch
     approve.mutate({ id: b.id, body: { code: code.replace(/\s+/g, '') } }, {
       onSuccess: (next) => {
         setCode('');
-        if (next.kind === 'file') return toast.success('Bank file ready', 'Download it, upload it to your bank and approve it there. Then mark it paid here.');
-        // review fix (UI-2): say what really happened — the provider may not have been reached yet
-        const live = next.items.filter((i) => i.status !== 'cancelled');
-        const waiting = live.filter((i) => i.status === 'queued').length;
-        if (waiting && waiting === live.length) return toast.warning('Payment approved', `Approved, but ${providerName} could not be reached yet: Linear Hub keeps trying every 5 minutes.`);
-        if (waiting) return toast.warning('Payment approved', `${formatNumber(live.length - waiting)} sent; ${providerName} could not be reached for the other ${formatNumber(waiting)} yet: Linear Hub keeps trying every 5 minutes.`);
-        toast.success('Payment approved', next.mode === 'test' ? 'Test mode: nobody is paid.' : createsOnly ? `Now open ${providerName} and pay the transfers there.` : `${whoText(next)}, ${formatPence(next.totalPence)}.`);
+        // review fixes (UI-2, SD-3, money:3): say what really happened, from the statuses that came back — a refused
+        // item is not "sent", one not confirmed yet may still have reached the provider, a test file is never uploaded
+        const out = approvalOutcome(next, { providerName, createsOnly, success: `${whoText(next)}, ${formatPence(next.totalPence)}.` });
+        toast[out.tone](out.title, out.body);
       },
     });
   };
-  const label = b.kind === 'file' ? 'Approve and make the bank file' : b.mode === 'test' ? `Approve test payment of ${formatPence(b.totalPence)}` : createsOnly ? `Approve and create the transfers (${formatPence(b.totalPence)})` : `Approve and pay ${formatPence(b.totalPence)}`;
+  const label = b.kind === 'file' ? (b.mode === 'test' ? 'Approve and make the test file' : 'Approve and make the bank file') : b.mode === 'test' ? `Approve test payment of ${formatPence(b.totalPence)}` : createsOnly ? `Approve and create the transfers (${formatPence(b.totalPence)})` : `Approve and pay ${formatPence(b.totalPence)}`;
   return (
     <Card tone={b.mode === 'live' && b.kind === 'api' ? 'warning' : 'default'}>
       <CardHeader
         title="Approve"
         icon={<ShieldCheck aria-hidden />}
         description={b.kind === 'file'
-          ? `Linear Hub makes the file for ${whoText(b)} (${formatPence(b.totalPence)}). Nothing moves until you upload it to your bank and approve it there.`
+          // review fix (money:3): the test bank file is for looking at only
+          ? b.mode === 'test'
+            ? `Test mode: Linear Hub makes a test file for ${whoText(b)} (${formatPence(b.totalPence)}), for looking at only. Do not upload it to your bank: nobody is paid.`
+            : `Linear Hub makes the file for ${whoText(b)} (${formatPence(b.totalPence)}). Nothing moves until you upload it to your bank and approve it there.`
           : b.mode === 'test'
             ? `Test mode: ${sandboxName(b.provider, providerName)} gets the payments and nobody is paid. The runs stay on Runs to pay.`
             : createsOnly
@@ -319,16 +324,25 @@ function MarkPaidCard({ b }: { b: PaymentBatch }) {
   const [date, setDate] = useState(todayISO());
   useEffect(() => setPaid(new Set(waiting.map((i) => i.id))), [b.id, waiting.length]); // eslint-disable-line react-hooks/exhaustive-deps
   const failed = waiting.filter((i) => !paid.has(i.id));
+  const test = b.mode === 'test';
   const submit = (e: FormEvent) => {
     e.preventDefault();
     mark.mutate({ id: b.id, body: { paid: [...paid], failed: failed.map((i) => i.id), reason: reason.trim() || undefined, paidDate: date } }, {
-      onSuccess: () => toast.success('Marked', failed.length ? `${people(paid.size)} paid, ${people(failed.length)} not paid: they stay on Runs to pay.` : `${people(paid.size)} paid.`),
+      // review fix (SD-4): a test file paid nobody, whatever is ticked
+      onSuccess: () => toast.success('Marked', test
+        ? 'Test: nobody was paid; the weeks stay on Runs to pay.'
+        : failed.length ? `${people(paid.size)} paid, ${people(failed.length)} not paid: they stay on Runs to pay.` : `${people(paid.size)} paid.`),
       onError: (er) => toast.error('Could not mark it', errorMessage(er)),
     });
   };
   return (
     <Card>
-      <CardHeader title="Mark as paid" description="Once your bank has paid the file, tick who it paid. Untick anyone the bank rejected: their week stays on Runs to pay with your reason." />
+      <CardHeader
+        title="Mark as paid"
+        description={test
+          ? 'Test mode: nobody is paid, so this marks no week paid. Try it out: the weeks stay on Runs to pay.'
+          : 'Once your bank has paid the file, tick who it paid. Untick anyone the bank rejected: their week stays on Runs to pay with your reason.'}
+      />
       <form onSubmit={submit} className="space-y-4">
         <ul className="divide-y divide-border rounded-lg border border-border">
           {waiting.map((i) => (

@@ -292,7 +292,8 @@ test('Needs attention: admin gets a warning for the change to approve and info f
 });
 
 test('Needs attention: a change to approve is never pushed out by newer unread posts; the info items stay capped at 8', async () => {
-  const base = Date.now();
+  // the business clock, the one client posts made through the API are stamped with (LM_BUSINESS_NOW)
+  const base = businessNow().getTime();
   const flood: number[] = [];
   for (let i = 0; i < 9; i++) {
     flood.push(run(

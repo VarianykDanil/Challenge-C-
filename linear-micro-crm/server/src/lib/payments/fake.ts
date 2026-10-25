@@ -12,13 +12,15 @@
  * when `failFor` says so), refresh answers `refreshStatus` ('paid'). `throwSubmit: n` makes the next n submits throw a
  * ProviderError (a timeout) AFTER recording the payments, as a real network failure might — so a test can prove that
  * a resubmit with the same keys pays nobody twice. `kind: 'file'` makes a CSV and answers 'submitted' (a bank file
- * stands in for package P's until it lands). The connection form has one optional field, `label`, and one optional
- * secret, `token`.
+ * stands in for package P's until it lands; a `testOnly` one starts with TEST_FILE_LINE and masks the bank details).
+ * The connection form has one optional field, `label`, and one optional secret, `token`.
  */
 import { formatSortCode, type PaymentAbilities, type PaymentProviderKind } from '@lm/shared';
 import { ProviderError, validateConfigFields, type ConnectionTestResult, type PaymentProviderAdapter, type ProviderItem, type ProviderItemResult, type ProviderItemStatus } from './provider.ts';
 
 export const FAKE_PROVIDER_ID = 'fake';
+/** The first line of a test-only provider's bank file (review fix money:3). */
+export const TEST_FILE_LINE = 'TEST FILE: for looking at only. Do not upload it to a bank.';
 
 export interface FakeProviderOptions {
   id?: string;
@@ -127,11 +129,16 @@ export function createFakeProvider(options: FakeProviderOptions = {}): FakeProvi
         opts.throwSubmit = (opts.throwSubmit ?? 0) - 1;
         throw new ProviderError('The test provider did not answer within 15 seconds');
       }
+      // review fix (money:3): a test-only provider's file is for looking at only — marked so, with the bank details
+      // masked, so it cannot pay anyone if it were uploaded to a bank (Linear Hub would record nothing)
+      const line = (i: ProviderItem) => opts.testOnly
+        ? `"${i.payeeName.replace(/"/g, '""')}",**-**-${i.sortCode.slice(-2)},****${i.accountNumber.slice(-4)},${(i.amountPence / 100).toFixed(2)},${i.reference}`
+        : `"${i.payeeName.replace(/"/g, '""')}",${formatSortCode(i.sortCode)},${i.accountNumber},${(i.amountPence / 100).toFixed(2)},${i.reference}`;
       const file = kind === 'file'
         ? {
             name: `linear-hub-test-payment-${batch.id}-${batch.today}.csv`,
             contentType: 'text/csv; charset=utf-8',
-            body: ['Name,Sort code,Account number,Amount,Reference', ...items.map((i) => `"${i.payeeName.replace(/"/g, '""')}",${formatSortCode(i.sortCode)},${i.accountNumber},${(i.amountPence / 100).toFixed(2)},${i.reference}`)].join('\r\n') + '\r\n',
+            body: [...(opts.testOnly ? [TEST_FILE_LINE] : []), 'Name,Sort code,Account number,Amount,Reference', ...items.map(line)].join('\r\n') + '\r\n',
           }
         : undefined;
       return { items: results, providerRef: `FAKE-BATCH-${batch.id}`, file };

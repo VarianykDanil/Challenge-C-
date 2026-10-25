@@ -543,8 +543,11 @@ describe('TrueLayer payouts adapter (sandbox fake)', () => {
     const old = new Date(Date.now() - 6 * 3_600_000).toISOString();
     const out = await tl.submit(stored.conn('truelayer'), batch({ createdAt: old, approvedAt: old }), [item(1), item(2)], stored.ctx(fake.url));
     assert.deepEqual(out.items.map((r) => r.status), ['failed', 'failed']);
-    assert.match(out.items[0].failureReason ?? '', /^Not sent: this payout was approved more than 5 hours ago and TrueLayer only recognises a repeated payout for 6 hours/);
-    assert.match(out.items[0].failureReason ?? '', /Check the payouts in the TrueLayer Console, then pay this week again if it was not paid\.$/);
+    // review fix (money:1): every item that gets here was sent at least once, so TrueLayer may well have made it
+    assert.match(out.items[0].failureReason ?? '', /^Linear Hub does not know whether TrueLayer made this payout: it was approved more than 5 hours ago and TrueLayer only recognises a repeated payout for 6 hours, so Linear Hub will not send it again\./);
+    assert.match(out.items[0].failureReason ?? '', /Check the payouts in the TrueLayer Console before paying this week again\.$/);
+    assert.doesNotMatch(out.items[0].failureReason ?? '', /Not sent/);
+    assert.ok((out.items[0].failureReason ?? '').length <= 300, 'fits a failure reason (300 characters)');
     assert.equal(posts(), 0, 'nothing sent');
     assert.equal(fake.payouts.size, 0);
     // inside the window it is sent as usual
@@ -751,6 +754,13 @@ describe('through Linear Hub: connect, test, live, approve with a code, checked,
     const draft = (await admin.post('/payments/batches', { connectionId: id, runIds: [runId] })).json;
     const approved = await admin.post(`/payments/batches/${draft.id}/approve`, { code: code() });
     assert.equal(approved.json.items[0].status, 'queued');
+    // review fix (money:1): while unsure, the page says what really happens — not "held until it answers"
+    const waitText = /^Linear Hub is still finding out whether .+ made it\. Payments sent to .+ cannot be stopped from Linear Hub\. If TrueLayer has still not answered 5 hours after the approval, Linear Hub stops trying and the week goes back to Runs to pay: check the TrueLayer Console before paying it again\.$/;
+    assert.match(approved.json.actions.cancelBlocked ?? '', waitText);
+    const cancel = await admin.post(`/payments/batches/${draft.id}/cancel`);
+    assert.equal(cancel.status, 409);
+    assert.match(cancel.json.error, /If TrueLayer has still not answered 5 hours after the approval, Linear Hub stops trying and the week goes back to Runs to pay: check the TrueLayer Console before paying it again\.$/);
+    assert.doesNotMatch(cancel.json.error, /stays held until/);
     const posts = () => tlFake.requests.filter((r) => r.method === 'POST' && r.path === '/v3/payouts').length;
     const sentBefore = posts();
     // a MacBook closed for the afternoon: the approval was 6 hours ago (approved_at is on the business clock)
@@ -761,7 +771,7 @@ describe('through Linear Hub: connect, test, live, approve with a code, checked,
     assert.equal(checked.status, 200, JSON.stringify(checked.json));
     assert.equal(posts(), sentBefore, 'POST /v3/payouts sent again: 0');
     assert.equal(checked.json.items[0].status, 'failed');
-    assert.match(checked.json.items[0].failureReason, /Not sent: this payout was approved more than 5 hours ago/);
+    assert.match(checked.json.items[0].failureReason, /^Linear Hub does not know whether TrueLayer made this payout: it was approved more than 5 hours ago/);
     assert.equal(runStatus(runId), 'failed', 'back on Runs to pay with the reason');
   });
 

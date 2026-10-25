@@ -16,6 +16,7 @@ import type {
   PaymentItemStatus,
   PaymentMode,
   PaymentProviderInfo,
+  PaymentProviderKind,
 } from '../types/payments.ts';
 import { PAYMENT_LIVE_CONFIRMATION } from '../types/payments.ts';
 import { payMoney } from './payRule.ts';
@@ -167,6 +168,57 @@ export function batchStatusFromItems(statuses: readonly PaymentItemStatus[]): Pa
   if (paid === live.length) return 'completed';
   if (paid === 0) return 'failed';
   return 'partly_failed';
+}
+
+/** The message straight after Approve (the client shows it as a toast). */
+export interface ApprovalOutcome {
+  tone: 'success' | 'warning' | 'error';
+  title: string;
+  body: string;
+}
+
+/**
+ * Review fixes (UI-2, SD-3, money:3): what an approval did, from the item statuses it answered with. Sent: submitted,
+ * processing or paid; failed: refused, never counted as sent; waiting: still queued — the provider has not confirmed
+ * it yet, either because it was not reached or because its answer was lost (a payment sent without an answer may still
+ * exist there), so the words stay neutral. The provider's next step (`createsOnly`: Wise, pay the transfers there) or
+ * `success` (who and how much) only when every item was really sent. A test bank file is never to be uploaded.
+ */
+export function approvalOutcome(
+  b: { kind: PaymentProviderKind; mode: PaymentMode; items: readonly { status: PaymentItemStatus }[] },
+  o: { providerName: string; createsOnly: boolean; success: string },
+): ApprovalOutcome {
+  if (b.kind === 'file') {
+    return b.mode === 'test'
+      ? { tone: 'success', title: 'Test bank file ready', body: 'For looking at only: do not upload it to your bank. Nobody is paid.' }
+      : { tone: 'success', title: 'Bank file ready', body: 'Download it, upload it to your bank and approve it there. Then mark it paid here.' };
+  }
+  const live = b.items.filter((i) => i.status !== 'cancelled');
+  const failed = live.filter((i) => i.status === 'failed').length;
+  const waiting = live.filter((i) => i.status === 'queued').length;
+  const sent = live.length - failed - waiting;
+  const X = o.providerName;
+  if (live.length && failed === live.length) {
+    return {
+      tone: 'error',
+      title: 'Payment not made',
+      body: failed === 1
+        ? `${X} did not take it: the reason is on this page. The week stays on Runs to pay.`
+        : `${X} did not take any of the ${failed}: the reasons are on this page. The weeks stay on Runs to pay.`,
+    };
+  }
+  if (live.length && waiting === live.length) {
+    return { tone: 'warning', title: 'Payment approved', body: `Approved, but ${X} has not confirmed ${waiting === 1 ? 'it' : 'them'} yet: Linear Hub tries again every 5 minutes.` };
+  }
+  if (failed || waiting) {
+    const parts = [
+      sent ? `${sent} sent` : '',
+      failed ? `${failed} failed (${failed === 1 ? 'the reason is' : 'the reasons are'} on this page)` : '',
+      waiting ? `${X} has not confirmed the other ${waiting} yet: Linear Hub tries again every 5 minutes` : '',
+    ].filter(Boolean);
+    return { tone: 'warning', title: 'Payment approved', body: `${parts.join('; ')}.` };
+  }
+  return { tone: 'success', title: 'Payment approved', body: b.mode === 'test' ? 'Test mode: nobody is paid.' : o.createsOnly ? `Now open ${X} and pay the transfers there.` : o.success };
 }
 
 /** The live switch: PAYMENT_LIVE_CONFIRMATION typed exactly (surrounding spaces ignored). */

@@ -53,8 +53,9 @@ Details: [docs/USER_GUIDE.md](docs/USER_GUIDE.md) ("What's new in 1.4"), [docs/L
     for UK businesses); each week is marked paid once Wise has sent the money, and transfers not yet paid can be
     cancelled from Linear Hub.
   - **Open Banking through TrueLayer**: signed payouts from your TrueLayer merchant account. A payout TrueLayer did not
-    answer is sent again for 5 hours at most (TrueLayer recognises a repeat for 6); after that it fails with "Not sent:
-    … Check the payouts in the TrueLayer Console, then pay this week again if it was not paid.", never sent blind.
+    answer is sent again for 5 hours at most (TrueLayer recognises a repeat for 6); after that it fails with "Linear Hub
+    does not know whether TrueLayer made this payout: … Check the payouts in the TrueLayer Console before paying this
+    week again.", never sent blind.
 - **Test mode first.** Revolut, Wise and TrueLayer connections start in the provider's sandbox; **Switch to live** needs
   PAY FOR REAL typed and a new test against the live service. Each API provider's Connect form starts with **How to
   connect**, every field says where to find its value, and **Save and test** tests an API connection straight away;
@@ -67,20 +68,24 @@ Details: [docs/USER_GUIDE.md](docs/USER_GUIDE.md) ("What's new in 1.4"), [docs/L
   they stay waiting). A payment to changed details waits until an administrator confirms them, and Needs attention says
   so.
 - **Needs attention → Payments** (administrators): changed bank details to check, failed payments, bank files waiting
-  for your bank (with the people and the money in the file), a connection whose test failed, and a week whose pay
-  changed while its payment was on its way. A bank file that left someone out shows **In the file £…** under its total,
-  and its download is audited with what the file holds.
-- **A payment that has not reached the provider says so**: **Waiting to send** (not "Sent"), the approve message says
-  the provider could not be reached yet and that Linear Hub keeps trying, and the provider's "pay the transfers now"
-  note waits until something was really sent. While Linear Hub does not know whether the provider made a payment,
-  **Cancel the rest** shows greyed out with the reason and **Mark paid** by hand says what to wait for. A network
-  failure reads "Linear Hub could not reach Wise: check this computer’s internet connection, or Wise may be down."
-  instead of "fetch failed".
+  for your bank (with the people and the money in the file; never the test bank file), a connection whose test failed,
+  and a week whose pay changed while its payment was on its way. A bank file that left someone out shows **In the file
+  £…** under its total, and its download is audited with what the file holds (a line cancelled later is still in the
+  downloaded file, so it still counts).
+- **A payment the provider has not confirmed says so**: **Waiting to send** (not "Sent"); the approve message says
+  what really happened ("has not confirmed it yet: Linear Hub tries again every 5 minutes", a refused payment counted
+  as failed and never as sent, "Payment not made" when every one was refused), and the provider's "pay the transfers
+  now" note waits until something was really sent. While Linear Hub does not know whether the provider made a
+  payment, Cancel and **Mark paid** by hand wait and say why: with Wise, **Cancel the rest** shows greyed out until
+  **Check now** gets an answer; Revolut and TrueLayer payments cannot be stopped from Linear Hub once sent. A live
+  payment holds the week meanwhile (TrueLayer for 5 hours after the approval at most); a test-mode one never does. A
+  network failure reads "Linear Hub could not reach Wise: check this computer’s internet connection, or Wise may be
+  down." instead of "fetch failed".
 - **Every payment is safe to send again**: each carries the provider's idempotency key and the account it was approved
   with, so a payment resent after a timeout is never made twice; Linear Hub checks payments on their way every 5
   minutes on its own (`LM_PAYMENTS_JOB=0` turns that off). `LM_PAYMENTS_FAKE=1` adds test providers that pay nobody (they
-  stay in test mode, so Mark as paid on the test bank file marks no week paid), for trying the screens — never on a
-  real server.
+  stay in test mode, so Mark as paid on the test bank file marks no week paid; the test file says TEST FILE, masks the
+  bank details and is never to be uploaded), for trying the screens — never on a real server.
 - Bank and payment logos from the CC0 `simple-icons` package (16.34.0); TrueLayer, which it lacks, shows a "TL"
   monogram. Logos belong to their owners and only identify the service.
 
@@ -118,8 +123,9 @@ Details: [docs/USER_GUIDE.md](docs/USER_GUIDE.md) ("What's new in 1.4"), [docs/L
   seeds as of the Saturday before.
 - **Tests no longer fail when the business clock is pinned** (`LM_BUSINESS_NOW`, for example to a Saturday): the
   client portal's 30-day read check aged a post by the real clock while the unread count uses the business clock
-  (it failed on 1.3.1 already), and the payments tests dated bank-detail changes by the real clock. Both now use the
-  business clock, as the app does. No product code changed.
+  (it failed on 1.3.1 already), the client portal's "a change to approve is never pushed out" check stamped its unread
+  posts by the real clock (it failed with the business clock ahead of real time), and the payments tests dated
+  bank-detail changes by the real clock. All now use the business clock, as the app does. No product code changed.
 
 ## [1.3.1] - 2026-10-23
 
