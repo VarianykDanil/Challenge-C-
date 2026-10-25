@@ -3,7 +3,8 @@
 Package A builds the three API ways to pay on package F's contract (`server/src/lib/payments/provider.ts`):
 **Revolut Business** pays each person from Linear Hub, **Wise Business** creates each transfer and Matt pays it in
 Wise, **Open Banking via TrueLayer** pays out from a TrueLayer merchant account. Each was built from the provider's
-current official documentation (checked 23 Oct 2026; the URLs are in the header of each adapter file). Every
+current official documentation (read 23 Oct 2026 and the key points checked again on 25 Oct 2026; the URLs are in
+the header of each adapter file). Every
 connection starts in the provider's sandbox (test mode). Nothing in the test suite calls the internet: each adapter is
 tested against a local fake server that follows the documented request, answer and error shapes.
 
@@ -16,7 +17,16 @@ No new endpoints. The `/payments/*` endpoints from package F (docs/r4/payments-f
   documentation, and `configFields` are each provider's real connection form. Two new optional fields on
   `PaymentProviderInfo` / `PaymentProviderView` (additive):
   - `connectSteps?: string[]`: how to connect, in order, including the steps done outside Linear Hub;
-  - `liveNote?: string`: what switching to live needs (live has its own keys).
+  - `liveNote?: string`: what switching to live needs (live has its own keys);
+  - `approveNote?: string`: what approving does not do yet (Wise: "Nobody is paid until you open Wise and pay the
+    transfers there."), shown on the payment's Approve card;
+  - `waitingNote?: string`: what happens while payments are on their way, and what Matt does in the provider's app
+    meanwhile (Wise: pay the transfers; Revolut: approve them there if his account needs an approver), shown on the
+    payment page while anything is on its way.
+
+  And one on `PaymentConfigField`: `requiredUnless?: string`, a field needed unless the connection already holds that
+  secret. Revolut's `authCode` has `requiredUnless: 'refreshToken'`, so the form marks the code required until Linear
+  Hub holds Revolut's sign-in (the adapter's own check is the rule).
 - `POST /payments/connections/:id/test` now reaches the provider (in its sandbox, or live when switched). It answers
   `ok: false` with a plain message rather than an error status when the provider refuses the details.
 - `POST /payments/batches/:id/approve`, `/refresh` and `/cancel` send to, check with, and (Wise only) cancel at the
@@ -119,6 +129,13 @@ A Wise profile ID must be digits.
   `connections.ts` (`providerContext(db, connectionId)`, `saveConnectionSecrets`).
 - `ProviderBatch.approvedAt`.
 - `SubmitResult.error`: stored as the batch's `lastError`, redacted.
+- `PaymentProviderInfo.approveNote` / `waitingNote` and `PaymentConfigField.requiredUnless` (shared types).
+
+**The payment page** (`client/src/pages/PaymentBatch.tsx`) reads the provider's abilities. When the provider does not
+pay from Linear Hub (`paysFromApp: false`, i.e. Wise), a live Approve card says "Wise Business gets transfers for 4
+people (£996.00) when you approve. Nobody is paid until you open Wise and pay the transfers there.", and its button is
+**Approve and create the transfers (£996.00)** instead of "Approve and pay". While anything is on its way, the
+provider's `waitingNote` shows above the list.
 
 ## User guide
 
@@ -149,6 +166,12 @@ Linear Hub (in Revolut, Wise or the TrueLayer Console, or on a computer). Every 
      TrueLayer Console (Payments → Settings).
   3. Paste the client ID, client secret, key ID and private key.
 
+**Paying through Wise.** On the payment page the button says **Approve and create the transfers**, and the card says
+nobody is paid until you pay them in Wise. After approving, the page says: "Now open Wise and pay the transfers Linear
+Hub made: they wait there until you do, and Wise cancels any that are not paid in time." Revolut's and TrueLayer's
+payment pages say what happens while payments are on their way (Revolut: approve them in Revolut too if your account
+needs an approver; TrueLayer: top up the merchant account if a payout fails for lack of money).
+
 **Switch to live** (type PAY FOR REAL) says what live needs. Your sandbox details do not work live, so choose **Edit**,
 enter your live details (for Revolut, a new code too), then **Test**.
 
@@ -168,6 +191,9 @@ you press Check now, without ever paying anyone twice.
 - Settings → Payments: each Connect form begins with **How to connect**, including the steps done in the provider's app
   or on a computer. Saving an API connection tests it straight away (**Save and test**). Switch to live says what live
   needs.
+- The payment page says what each provider still needs from you: for Wise the button is **Approve and create the
+  transfers** and the page reminds you to pay them in Wise; Revolut and TrueLayer say what happens while payments are
+  on their way.
 
 ## Owner notes
 
@@ -220,8 +246,14 @@ What Matt must set up, decide or know:
   - TrueLayer and Wise: their documentation does not say how long a repeat is recognised. Check the provider's own
     list before paying that week another way.
 - **Not verified against the real services.** Everything was built from the documentation and tested against local
-  fakes of it. No real sandbox call was made from here (the providers' sites were not reachable from this build
-  machine; the docs were read through search and the providers' official GitHub files).
+  fakes of it. No real sandbox call was made from here: the build machine's network refuses the providers' sites
+  (developer.revolut.com, docs.wise.com, docs.truelayer.com and their APIs). The docs were read through web search and
+  the providers' official GitHub files (Revolut's OpenAPI file, TrueLayer's signing and PHP libraries). On 25 Oct 2026
+  these points were checked again: Revolut's hosts, `request_id` (at most 40 characters, repeats spotted for 2 weeks,
+  code 3020), `GET /transactions?request_id=` needing `from` within 14 days, the client assertion (iss = the redirect
+  domain, aud `https://revolut.com`), 40-minute tokens and the 2-minute code; Wise's sandbox V2 host
+  (`api.wise-sandbox.com`; the old `api.sandbox.transferwise.tech` was retired on 30 June 2026) and that a personal
+  token cannot fund transfers for UK businesses; TrueLayer's `external_account` payout shape and its statuses.
   - A sandbox run with your own credentials is the first real check.
   - The least certain points: the exact Revolut consent step and whether the code shows in the redirect address as
     `?code=`; Wise token permission names ("full access"); TrueLayer's production signature behaviour.
@@ -232,5 +264,8 @@ What Matt must set up, decide or know:
   - `server/src/lib/payments/registry.ts`: the three adapters.
   - `shared/src/types/payments.ts`: `connectSteps`, `liveNote`.
   - `shared/src/logic/payments.ts`: the three providers' abilities.
-  - `client/src/features/payments/PaymentsSettingsSection.tsx`: How to connect, Save and test, live note.
+  - `client/src/features/payments/PaymentsSettingsSection.tsx`: How to connect, Save and test, live note, a field
+    required until a secret is held (`requiredUnless`).
+  - `client/src/pages/PaymentBatch.tsx`: the Approve card and button for a provider that does not pay from Linear Hub
+    (Wise), and the provider's note while payments are on their way.
   - `server/src/test/payments.test.ts`: F's three tests that assumed the stubs.

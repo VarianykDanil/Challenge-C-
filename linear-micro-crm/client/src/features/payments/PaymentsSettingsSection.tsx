@@ -284,6 +284,7 @@ function ConnectModal({ provider: p, connection: c, onClose }: { provider: Payme
             field={f}
             value={values[f.name] ?? ''}
             saved={!!c?.secretsSet.includes(f.name)}
+            neededNow={!!f.requiredUnless && !c?.secretsSet.includes(f.requiredUnless)}
             error={errs[f.name]}
             onChange={(v) => setValues((prev) => ({ ...prev, [f.name]: v }))}
           />
@@ -294,10 +295,12 @@ function ConnectModal({ provider: p, connection: c, onClose }: { provider: Payme
   );
 }
 
-function ConfigInput({ id, field: f, value, saved, error, onChange }: { id: string; field: PaymentConfigField; value: string; saved: boolean; error?: string; onChange: (v: string) => void }) {
+function ConfigInput({ id, field: f, value, saved, neededNow, error, onChange }: { id: string; field: PaymentConfigField; value: string; saved: boolean; neededNow?: boolean; error?: string; onChange: (v: string) => void }) {
   const hint = [f.help, f.secret && saved ? 'Saved. Leave it empty to keep the one stored.' : null].filter(Boolean).join(' ');
+  // package A: `requiredUnless` — e.g. Revolut's code is needed until Linear Hub holds Revolut's sign-in
+  const required = (!!f.required && !(f.secret && saved)) || !!neededNow;
   return (
-    <Field label={f.label} htmlFor={id} hint={hint || undefined} error={error} required={f.required && !(f.secret && saved)} optional={!f.required}>
+    <Field label={f.label} htmlFor={id} hint={hint || undefined} error={error} required={required} optional={!f.required && !neededNow}>
       {f.type === 'select' ? (
         <Select id={id} value={value} onChange={(e) => onChange(e.target.value)} options={(f.options ?? []).map((o) => ({ value: o.value, label: o.label }))} invalid={!!error} />
       ) : f.type === 'textarea' ? (

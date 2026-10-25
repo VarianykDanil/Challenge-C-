@@ -88,6 +88,7 @@ export const REVOLUT_FIELDS: readonly PaymentConfigField[] = [
     name: 'authCode',
     label: 'Code from Revolut',
     secret: true,
+    requiredUnless: 'refreshToken',
     maxLength: 2000,
     placeholder: 'https://example.com/?code=oa_…',
     help: 'In Revolut Business choose Enable access for the certificate and allow it. Revolut then opens your redirect address: copy that whole address (or just the code after “code=”), paste it here and save straight away, because the code only works for 2 minutes. You need it the first time, and again only if Revolut stops accepting Linear Hub.',

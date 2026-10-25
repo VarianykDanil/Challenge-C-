@@ -147,6 +147,8 @@ describe('Revolut Business adapter (sandbox fake)', () => {
     assert.equal(revolut.ready, true);
     assert.deepEqual(revolut.configFields.map((f) => f.name), ['clientId', 'redirectUri', 'privateKey', 'authCode', 'accountId']);
     for (const f of revolut.configFields) assert.ok(f.help && f.help.length > 20, `${f.name} has plain help`);
+    // the code is needed until Linear Hub holds Revolut's sign-in: the form marks it required until then
+    assert.equal(revolut.configFields.find((f) => f.name === 'authCode')?.requiredUnless, 'refreshToken');
     const ok = revolut.validateConfig({ settings: { clientId: ' abc ', redirectUri: 'https://example.com/back' }, secrets: { privateKey: RSA_PEM, authCode: 'https://example.com/back?code=oa_sand_123&state=x' } });
     assert.equal(ok.settings.clientId, 'abc');
     assert.equal(ok.secrets.authCode, 'oa_sand_123', 'the code is taken out of the address');
@@ -639,7 +641,16 @@ describe('through Linear Hub: connect, test, live, approve with a code, checked,
 
   test('the three API providers are available now', async () => {
     const r = await admin.get('/payments/providers');
-    for (const id of ['revolut', 'wise', 'truelayer']) assert.equal(r.json.find((p: Json) => p.id === id).available, true, id);
+    for (const id of ['revolut', 'wise', 'truelayer']) {
+      const p = r.json.find((x: Json) => x.id === id);
+      assert.equal(p.available, true, id);
+      // what is done outside Linear Hub, what live needs and what happens while payments are on their way
+      assert.ok(p.connectSteps.length >= 3 && p.liveNote && p.waitingNote, id);
+    }
+    const wise = r.json.find((x: Json) => x.id === 'wise');
+    assert.equal(wise.abilities.paysFromApp, false);
+    assert.match(wise.approveNote, /pay the transfers there/);
+    assert.equal(r.json.find((x: Json) => x.id === 'revolut').configFields.find((f: Json) => f.name === 'authCode').requiredUnless, 'refreshToken');
   });
 
   test('Revolut: the refresh token is stored encrypted (never answered); paid when Revolut completes it; once', async () => {

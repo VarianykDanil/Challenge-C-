@@ -256,6 +256,7 @@ export const PAYMENT_PROVIDERS: readonly PaymentProviderInfo[] = [
       'Test mode uses the Revolut sandbox (sandbox-business.revolut.com), which has its own certificate and client ID.',
     ],
     liveNote: 'Your sandbox certificate does not work live. After switching, choose Edit and enter the client ID, private key and a new code from your real Revolut Business account, then test.',
+    waitingNote: 'Revolut sends each payment as soon as you approve. If your Revolut Business makes payments wait for an approver, approve them in Revolut too. Linear Hub checks with Revolut every 5 minutes and marks each week paid when Revolut has completed the payment.',
   },
   {
     id: 'wise',
@@ -286,6 +287,8 @@ export const PAYMENT_PROVIDERS: readonly PaymentProviderInfo[] = [
       'Test mode uses the Wise sandbox (wise-sandbox.com), which needs its own account and token.',
     ],
     liveNote: 'Your sandbox token does not work live. After switching, choose Edit and paste a token from your real Wise Business account, then test.',
+    approveNote: 'Nobody is paid until you open Wise and pay the transfers there.',
+    waitingNote: 'Now open Wise and pay the transfers Linear Hub made: they wait there until you do, and Wise cancels any that are not paid in time. Linear Hub checks with Wise every 5 minutes and marks each week paid once Wise has sent the money.',
   },
   {
     id: 'truelayer',
@@ -316,6 +319,7 @@ export const PAYMENT_PROVIDERS: readonly PaymentProviderInfo[] = [
       'Test mode uses the TrueLayer sandbox, which has its own client ID, secret and signing key.',
     ],
     liveNote: 'Sandbox details do not work live. After switching, choose Edit and enter the live client ID, secret, signing key ID and private key from the TrueLayer Console, then test.',
+    waitingNote: 'TrueLayer pays each person from your merchant account. A payout fails if the merchant account runs short: top it up and pay that week again. Linear Hub checks with TrueLayer every 5 minutes and marks each week paid when TrueLayer has sent the money.',
   },
 ];
 
