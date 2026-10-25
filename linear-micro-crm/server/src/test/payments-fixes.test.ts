@@ -21,7 +21,7 @@ import { all, get, run, type Db } from '../db/connection.ts';
 import { extension as paymentsExtension } from '../db/extensions/payments.ts';
 import { syncPayrollForEntry } from '../db/maintenance.ts';
 import { encrypt } from '../lib/crypto.ts';
-import { addDays, mondayOf } from '../lib/dates.ts';
+import { addDays, businessNow, mondayOf } from '../lib/dates.ts';
 import { refreshWaitingBatches } from '../lib/payments/batches.ts';
 import { createFakeProvider } from '../lib/payments/fake.ts';
 import type { PaymentProviderAdapter } from '../lib/payments/provider.ts';
@@ -46,7 +46,8 @@ function addRun(db: Db, p: { userId: number; weekStart: string; gross: number })
 
 /** Confirmed bank details (sort code 00-00-00: obviously fake). */
 function setBank(db: Db, userId: number, account: string, holder = `Person ${userId} Test`): void {
-  const at = new Date(Date.now() - 86_400_000).toISOString();
+  // a day before now on the business clock, the clock payments compare bank details changes with (LM_BUSINESS_NOW)
+  const at = new Date(businessNow().getTime() - 86_400_000).toISOString();
   run(
     db,
     `INSERT INTO bank_accounts (user_id, holder_name, sort_code_enc, account_number_enc, last4, sort_code_last2, changed_at, changed_by, confirmed_by_admin_at, confirmed_by)

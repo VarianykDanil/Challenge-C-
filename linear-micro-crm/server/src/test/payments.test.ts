@@ -11,7 +11,7 @@ import { generateKeyPairSync } from 'node:crypto';
 import { PAYMENT_LIVE_CONFIRMATION, paydayForWeek } from '@lm/shared';
 import { all, get, run, type Db } from '../db/connection.ts';
 import { decrypt, encrypt } from '../lib/crypto.ts';
-import { addDays, mondayOf } from '../lib/dates.ts';
+import { addDays, businessNow, mondayOf } from '../lib/dates.ts';
 import { createFakeProvider, type FakeProvider } from '../lib/payments/fake.ts';
 import { providerFetch, redactSecrets } from '../lib/payments/http.ts';
 import { validateConfigFields } from '../lib/payments/provider.ts';
@@ -52,7 +52,8 @@ function freshCode(db: Db, userId: number, secret: string): string {
 /** Bank details straight into the table (sort code 00-00-00 is obviously fake). */
 function setBank(db: Db, userId: number, opts: { account?: string; confirmed?: boolean; holder?: string } = {}): void {
   const account = opts.account ?? `0000${String(userId).padStart(4, '0')}`;
-  const at = new Date(Date.now() - 86_400_000).toISOString();
+  // a day before now on the business clock, the clock payments compare bank details changes with (LM_BUSINESS_NOW)
+  const at = new Date(businessNow().getTime() - 86_400_000).toISOString();
   run(
     db,
     `INSERT INTO bank_accounts (user_id, holder_name, sort_code_enc, account_number_enc, last4, sort_code_last2, changed_at, changed_by, confirmed_by_admin_at, confirmed_by)
@@ -550,7 +551,7 @@ describe('payment batches with the fake provider', () => {
     assert.equal(changed.status, 409);
     assert.match(changed.json.error, /pay for w\/c .* changed: now £101\.00, was £100\.00/);
     run(srv.db, `UPDATE payroll_runs SET gross = 100 WHERE id = ?`, [a]);
-    run(srv.db, `UPDATE bank_accounts SET changed_at = ?, confirmed_by_admin_at = ? WHERE user_id = ?`, [new Date(Date.now() + 60_000).toISOString(), new Date(Date.now() + 60_000).toISOString(), fx.users.rep]);
+    run(srv.db, `UPDATE bank_accounts SET changed_at = ?, confirmed_by_admin_at = ? WHERE user_id = ?`, [new Date(businessNow().getTime() + 60_000).toISOString(), new Date(businessNow().getTime() + 60_000).toISOString(), fx.users.rep]);
     const bank = await admin.post(`/payments/batches/${draft.id}/approve`, { code });
     assert.equal(bank.status, 409);
     assert.match(bank.json.error, /bank details changed after this payment was made/);

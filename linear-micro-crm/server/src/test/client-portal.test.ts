@@ -7,7 +7,7 @@
  */
 import { after, before, test } from 'node:test';
 import assert from 'node:assert/strict';
-import { addDays, todayISO } from '../lib/dates.ts';
+import { addDays, businessNow, todayISO } from '../lib/dates.ts';
 import { get, run } from '../db/connection.ts';
 import { createApp } from '../app.ts';
 import { listApiRoutes } from '../lib/routeTable.ts';
@@ -330,8 +330,8 @@ test('read receipts: per person, idempotent; the sidebar count and the attention
   is(await admin.post(`/client-posts/${commissionId}/read`), 204, 'read the change');
   assert.ok((await attentionKeys(admin)).some((i) => i.key === `client:commission:${commissionId}`), 'still waiting for a decision');
   assert.equal(auditRows(`action LIKE '%/read'`).length, 0, 'read receipts write no audit rows');
-  // a post older than 30 days counts as read
-  run(srv.db, `UPDATE client_posts SET created_at = ? WHERE id = ?`, [new Date(Date.now() - 31 * 86_400_000).toISOString(), updateId]);
+  // a post older than 30 days counts as read (30 days on the business clock, which the unread count uses: LM_BUSINESS_NOW)
+  run(srv.db, `UPDATE client_posts SET created_at = ? WHERE id = ?`, [new Date(businessNow().getTime() - 31 * 86_400_000).toISOString(), updateId]);
   const l = (await leader.get('/client-posts/unread')).json.count;
   assert.equal(l, leaderBefore - 1);
   run(srv.db, `UPDATE client_posts SET created_at = ? WHERE id = ?`, [new Date().toISOString(), updateId]);
