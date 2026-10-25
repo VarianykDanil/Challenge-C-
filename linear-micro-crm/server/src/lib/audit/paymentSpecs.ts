@@ -1,0 +1,276 @@
+/**
+ * Release 1.4 — OWNED BY F payments-foundation: the audit specs of every payments and bank-details write route,
+ * registered through ./registry.ts. Snapshots never hold a secret, a token, a sort code or an account number: a
+ * connection shows the NAMES of its stored secrets, bank details only the masked last digits (and shared
+ * AUDIT_REDACTED_KEYS redacts those keys again before anything is stored).
+ *
+ * The rows for the payroll runs a payment marks paid or failed are written by lib/payments/batches.ts itself (the
+ * same rows whether the admin's request or the 5-minute job settled them); these specs write the batch's own row.
+ * A wrong two-step code on a payment approval or a bank details change is recorded (kind sign_in) like one at sign-in.
+ */
+import { formatPence, maskAccountNumber, maskSortCode, PAYMENT_MODE_LABELS, type PaymentMode } from '@lm/shared';
+import { get, type Db } from '../../db/connection.ts';
+import type { AuditCall, AuditDone, AuditDraft, AuditRouteSpec } from '../auditSpecs.ts';
+import { WRONG_PAYMENT_CODE_MESSAGE } from '../payments/code.ts';
+
+type Snap = Record<string, unknown>;
+
+const toId = (v: unknown): number | null => {
+  const n = typeof v === 'string' && v.trim() !== '' ? Number(v) : v;
+  return typeof n === 'number' && Number.isInteger(n) && n > 0 ? n : null;
+};
+const isRecord = (v: unknown): v is Record<string, unknown> => v !== null && typeof v === 'object' && !Array.isArray(v);
+const responseOf = (done: AuditDone): Record<string, unknown> => (isRecord(done.response) ? done.response : {});
+const errorOf = (done: AuditDone): string => String(responseOf(done).error ?? '');
+const people = (n: number) => `${n} ${n === 1 ? 'person' : 'people'}`;
+const modeText = (m: unknown) => (m === 'live' || m === 'test' ? PAYMENT_MODE_LABELS[m as PaymentMode].toLowerCase() : String(m ?? ''));
+
+// ───────────────────────────── snapshots ─────────────────────────────
+
+/** A connection without its secrets: provider, name, mode, status, its non-secret settings and the secrets' NAMES. */
+function connectionSnap(db: Db, id: number | null): Snap | null {
+  if (!id) return null;
+  const r = get<Snap & { settingsJson: string; hasSecrets: number }>(
+    db,
+    `SELECT id, provider, name, mode, status, settings_json AS settingsJson, (secrets_enc IS NOT NULL) AS hasSecrets, live_confirmed_at AS liveConfirmedAt,
+            disconnected_at AS disconnectedAt, last_error AS lastError
+     FROM payment_connections WHERE id = ?`,
+    [id],
+  );
+  if (!r) return null;
+  const { settingsJson, hasSecrets, ...rest } = r;
+  let settings: unknown = {};
+  try {
+    settings = JSON.parse(settingsJson);
+  } catch {
+    settings = {};
+  }
+  return { ...rest, settings, secretsStored: Boolean(hasSecrets) };
+}
+
+function batchSnap(db: Db, id: number | null): Snap | null {
+  if (!id) return null;
+  return get<Snap>(
+    db,
+    `SELECT b.id, b.provider, c.name AS connectionName, b.mode, b.status, b.count, b.total_pence AS totalPence, b.approved_at AS approvedAt,
+            b.file_name AS fileName, b.cancelled_at AS cancelledAt,
+            (SELECT COUNT(*) FROM payment_items i WHERE i.batch_id = b.id AND i.status = 'paid') AS paid,
+            (SELECT COUNT(*) FROM payment_items i WHERE i.batch_id = b.id AND i.status = 'failed') AS failed,
+            (SELECT COUNT(*) FROM payment_items i WHERE i.batch_id = b.id AND i.status IN ('queued', 'submitted', 'processing')) AS waiting
+     FROM payment_batches b JOIN payment_connections c ON c.id = b.connection_id WHERE b.id = ?`,
+    [id],
+  ) ?? null;
+}
+
+/** Masked bank details (never the numbers). */
+function bankSnap(db: Db, userId: number | null): Snap | null {
+  if (!userId) return null;
+  const r = get<{ userId: number; name: string; holderName: string; last4: string; last2: string; changedAt: string; changedBy: number | null; confirmedAt: string | null }>(
+    db,
+    `SELECT b.user_id AS userId, TRIM(u.first_name || ' ' || u.last_name) AS name, b.holder_name AS holderName, b.last4, b.sort_code_last2 AS last2,
+            b.changed_at AS changedAt, b.changed_by AS changedBy, b.confirmed_by_admin_at AS confirmedAt
+     FROM bank_accounts b JOIN users u ON u.id = b.user_id WHERE b.user_id = ?`,
+    [userId],
+  );
+  if (!r) return null;
+  return {
+    userId: r.userId, name: r.name, holderName: r.holderName, account: maskAccountNumber(r.last4), sortCodeMask: maskSortCode(r.last2),
+    changedAt: r.changedAt, changedBy: r.changedBy, confirmedAt: r.confirmedAt,
+  };
+}
+
+const personName = (db: Db, id: number | null) =>
+  (id ? get<{ name: string }>(db, `SELECT TRIM(first_name || ' ' || last_name) AS name FROM users WHERE id = ?`, [id])?.name : null) ?? 'someone';
+
+const batchText = (s: Snap | null) => (s ? `${people(Number(s.count))}, ${formatPence(Number(s.totalPence))}` : '');
+
+/** A wrong (or missing-but-needed) two-step code, or the code limiter. */
+function wrongCode(doing: string, entity: AuditDraft['entity'], entityId: (done: AuditDone) => number | null) {
+  return (_db: Db, done: AuditDone): AuditDraft[] => {
+    if (!done.me) return [];
+    if (done.status === 429) return [{ entity, entityId: entityId(done), summary: `Two-step code refused while ${doing}: too many attempts`, kind: 'sign_in', after: { reason: 'too_many_attempts' } }];
+    if (done.status === 400 && errorOf(done) === WRONG_PAYMENT_CODE_MESSAGE) {
+      return [{ entity, entityId: entityId(done), summary: `Wrong two-step code while ${doing}`, kind: 'sign_in', after: { reason: 'wrong_code' } }];
+    }
+    return [];
+  };
+}
+
+// ───────────────────────────── connections ─────────────────────────────
+
+const connectionCreate: AuditRouteSpec = {
+  method: 'POST',
+  pattern: '/payments/connections',
+  after(db, done) {
+    const id = toId(responseOf(done).id);
+    const after = connectionSnap(db, id);
+    if (!after) return [];
+    return [{ entity: 'payment_connection', entityId: id, summary: `Connected ${String(after.name)} (${modeText(after.mode)})`, before: null, after }];
+  },
+};
+
+const connectionPatch: AuditRouteSpec<Snap | null> = {
+  method: 'PATCH',
+  pattern: '/payments/connections/:id',
+  before: (db, call: AuditCall) => connectionSnap(db, toId(call.params.id)),
+  after(db, done, before) {
+    const id = toId(done.params.id);
+    const after = connectionSnap(db, id);
+    if (!after || !before) return [];
+    const parts: string[] = [];
+    if (before.mode !== after.mode) parts.push(after.mode === 'live' ? `switched to live (${String((isRecord(done.body) && done.body.confirm) || '').trim()} typed)` : 'switched back to test mode');
+    if (before.name !== after.name) parts.push(`renamed from ${String(before.name)}`);
+    if (JSON.stringify(before.settings) !== JSON.stringify(after.settings)) parts.push('settings changed');
+    if (isRecord(done.body) && isRecord(done.body.secrets) && Object.values(done.body.secrets).some((v) => typeof v === 'string' && v.trim())) parts.push('keys replaced');
+    if (!parts.length) return [];
+    return [{ entity: 'payment_connection', entityId: id, summary: `${String(after.name)}: ${parts.join(', ')}`, before, after }];
+  },
+};
+
+const connectionDelete: AuditRouteSpec<Snap | null> = {
+  method: 'DELETE',
+  pattern: '/payments/connections/:id',
+  before: (db, call) => connectionSnap(db, toId(call.params.id)),
+  after(db, done, before) {
+    const id = toId(done.params.id);
+    const after = connectionSnap(db, id);
+    return [{ entity: 'payment_connection', entityId: id, summary: `Disconnected ${String(after?.name ?? before?.name ?? 'a payment connection')} (its keys were deleted)`, before, after }];
+  },
+};
+
+const connectionTest: AuditRouteSpec = {
+  method: 'POST',
+  pattern: '/payments/connections/:id/test',
+  after(db, done) {
+    const id = toId(done.params.id);
+    const r = responseOf(done);
+    const after = connectionSnap(db, id);
+    const name = String(after?.name ?? 'a payment connection');
+    return [{ entity: 'payment_connection', entityId: id, summary: r.ok ? `Tested ${name}: it works` : `Tested ${name}: it did not work (${String(r.message ?? '').slice(0, 200)})`, before: null, after }];
+  },
+};
+
+// ───────────────────────────── batches ─────────────────────────────
+
+const batchCreate: AuditRouteSpec = {
+  method: 'POST',
+  pattern: '/payments/batches',
+  after(db, done) {
+    const r = responseOf(done);
+    const id = toId(r.id);
+    const after = batchSnap(db, id);
+    if (!after) return [];
+    const skipped = Array.isArray(r.skipped) ? r.skipped.length : 0;
+    return [{ entity: 'payment_batch', entityId: id, summary: `Made draft payment #${id} through ${String(after.connectionName)}: ${batchText(after)}${skipped ? ` (${skipped} left out)` : ''}`, before: null, after }];
+  },
+};
+
+function outcome(s: Snap | null): string {
+  if (!s) return '';
+  const bits = [Number(s.paid) ? `${Number(s.paid)} paid` : '', Number(s.failed) ? `${Number(s.failed)} failed` : '', Number(s.waiting) ? `${Number(s.waiting)} on the way` : ''].filter(Boolean);
+  return bits.length ? ` — ${bits.join(', ')}` : '';
+}
+
+const batchApprove: AuditRouteSpec<Snap | null> = {
+  method: 'POST',
+  pattern: '/payments/batches/:id/approve',
+  before: (db, call) => batchSnap(db, toId(call.params.id)),
+  after(db, done, before) {
+    const id = toId(done.params.id);
+    const after = batchSnap(db, id);
+    if (!after) return [];
+    return [{ entity: 'payment_batch', entityId: id, summary: `Approved payment #${id} through ${String(after.connectionName)} (${modeText(after.mode)}): ${batchText(after)}${outcome(after)}`, before, after }];
+  },
+  failed: wrongCode('approving a payment', 'payment_batch', (done) => toId(done.params.id)),
+};
+
+const batchRefresh: AuditRouteSpec<Snap | null> = {
+  method: 'POST',
+  pattern: '/payments/batches/:id/refresh',
+  before: (db, call) => batchSnap(db, toId(call.params.id)),
+  after(db, done, before) {
+    const id = toId(done.params.id);
+    const after = batchSnap(db, id);
+    if (!after || !before) return [];
+    // checking without news writes nothing
+    if (before.paid === after.paid && before.failed === after.failed && before.waiting === after.waiting && before.status === after.status) return [];
+    return [{ entity: 'payment_batch', entityId: id, summary: `Checked payment #${id} with ${String(after.connectionName)}${outcome(after)}`, before, after }];
+  },
+};
+
+const batchCancel: AuditRouteSpec<Snap | null> = {
+  method: 'POST',
+  pattern: '/payments/batches/:id/cancel',
+  before: (db, call) => batchSnap(db, toId(call.params.id)),
+  after(db, done, before) {
+    const id = toId(done.params.id);
+    const after = batchSnap(db, id);
+    if (!after) return [];
+    return [{ entity: 'payment_batch', entityId: id, summary: `Cancelled payment #${id} through ${String(after.connectionName)}: ${batchText(before ?? after)}${outcome(after)}`, before, after }];
+  },
+};
+
+const batchMarkPaid: AuditRouteSpec<Snap | null> = {
+  method: 'POST',
+  pattern: '/payments/batches/:id/mark-paid',
+  before: (db, call) => batchSnap(db, toId(call.params.id)),
+  after(db, done, before) {
+    const id = toId(done.params.id);
+    const after = batchSnap(db, id);
+    if (!after) return [];
+    const paid = Number(after.paid) - Number(before?.paid ?? 0);
+    const failed = Number(after.failed) - Number(before?.failed ?? 0);
+    const reason = isRecord(done.body) && typeof done.body.reason === 'string' && done.body.reason.trim() ? `: ${done.body.reason.trim().slice(0, 200)}` : '';
+    const parts = [paid ? `${people(paid)} paid by the bank` : '', failed ? `${people(failed)} not paid${reason}` : ''].filter(Boolean);
+    return [{ entity: 'payment_batch', entityId: id, summary: `Marked bank file payment #${id}: ${parts.join('; ') || 'no change'}`, before, after }];
+  },
+};
+
+// ───────────────────────────── bank details ─────────────────────────────
+
+function bankChange(pattern: string, target: (call: AuditCall) => number | null): AuditRouteSpec<Snap | null> {
+  return {
+    method: 'PUT',
+    pattern,
+    before: (db, call) => bankSnap(db, target(call)),
+    after(db, done, before) {
+      const userId = target(done);
+      const after = bankSnap(db, userId);
+      if (!after) return [];
+      if (before && before.changedAt === after.changedAt) return []; // the same details again
+      const self = done.me?.id === userId;
+      const who = self ? 'their own' : `${personName(db, userId)}'s`;
+      const hold = after.confirmedAt ? '' : ' — payments wait until an administrator confirms them';
+      return [{ entity: 'bank_account', entityId: userId, summary: `${before ? 'Changed' : 'Added'} ${who} bank details: account ${String(after.account)}, sort code ${String(after.sortCodeMask)}${hold}`, before, after }];
+    },
+    failed: wrongCode('changing bank details', 'bank_account', (done) => target(done)),
+  };
+}
+
+const bankConfirm: AuditRouteSpec<Snap | null> = {
+  method: 'POST',
+  pattern: '/users/:id/bank-details/confirm',
+  before: (db, call) => bankSnap(db, toId(call.params.id)),
+  after(db, done, before) {
+    const userId = toId(done.params.id);
+    const after = bankSnap(db, userId);
+    if (!after || (before && before.confirmedAt === after.confirmedAt)) return [];
+    return [{ entity: 'bank_account', entityId: userId, summary: `Confirmed ${personName(db, userId)}'s bank details (account ${String(after.account)})`, before, after }];
+  },
+};
+
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+export const AUDIT_SPECS: readonly AuditRouteSpec<any>[] = [
+  connectionCreate,
+  connectionPatch,
+  connectionDelete,
+  connectionTest,
+  batchCreate,
+  batchApprove,
+  batchRefresh,
+  batchCancel,
+  batchMarkPaid,
+  bankChange('/me/bank-details', (call) => call.me?.id ?? null),
+  bankChange('/users/:id/bank-details', (call) => toId(call.params.id)),
+  bankConfirm,
+];

@@ -4,9 +4,6 @@ import {
   avgDaysLate,
   marginAmount,
   onTimeRate,
-  payMoney,
-  payWeekLabel,
-  payrollStatusFor,
   round2,
   type CampaignFinance,
   type Expense,
@@ -20,9 +17,11 @@ import { all, get, placeholders, run, type Db } from '../db/connection.ts';
 import { ensurePayrollMaterialised } from '../db/maintenance.ts';
 import { EXPENSE_SELECT, PAY_PLAN_SELECT, Where, getExpense, getPayPlan, getPayroll, getUser, listGauges, listPayroll } from '../db/queries.ts';
 import { addDays, eachMonday, mondayOf, sundayOf, todayISO } from '../lib/dates.ts';
-import { badRequest, conflict, forbidden, notFound } from '../lib/errors.ts';
+import { badRequest, forbidden, notFound } from '../lib/errors.ts';
 import { GAUGE_COMMISSION_SQL, GAUGE_FROM, GAUGE_PAYOUT_SQL, MONDAY_SQL, mondayOfSql } from '../lib/metrics.ts';
-import { assertInvoicePayable, withInvoiceSummaries } from '../lib/invoices.ts';
+import { withInvoiceSummaries } from '../lib/invoices.ts';
+import { markPayrollRunPaid } from '../lib/markPaid.ts';
+import { withPaymentStatus } from '../lib/payments/batches.ts';
 import { estimateWeekPayroll, nextPay } from '../lib/pay.ts';
 import { payRuleSettings, rateOnSql } from '../lib/payWeek.ts';
 import { redactPayroll } from '../lib/scope.ts';
@@ -101,7 +100,8 @@ export function financeRouter(db: Db): Router {
       if (teamId) where.add('u.team_id = ?', teamId);
     }
     // Release 1.3 (P2): each run carries its self-billing invoice summary once one is issued (lib/invoices.ts).
-    res.json(withInvoiceSummaries(db, withPayrollFlags(db, listPayroll(db, `${where}`, where.params).map((r) => redactPayroll(me, r)), me), me));
+    // Release 1.4 (F): unpaid runs carry their latest payment from Linear Hub for the admin (lib/payments/batches.ts).
+    res.json(withPaymentStatus(db, withInvoiceSummaries(db, withPayrollFlags(db, listPayroll(db, `${where}`, where.params).map((r) => redactPayroll(me, r)), me), me), me));
   });
 
   // ── my earnings ── (declared before /payroll/:id so the literal path wins)
@@ -152,28 +152,8 @@ export function financeRouter(db: Db): Router {
   });
 
   router.post('/payroll/:id/pay', requireRole('admin'), (req, res) => {
-    const id = idParam(req);
-    const existing = getPayroll(db, id);
-    if (!existing) throw notFound('Payroll run');
-    // pending AND failed runs can be paid; only money that already landed is refused
-    if (existing.status === 'paid' || existing.status === 'late') throw conflict(`Payroll run ${existing.reference} was already paid on ${existing.paidDate}`);
-    const { paidDate } = z.object({ paidDate: isoDate.optional() }).parse(req.body ?? {});
-    const today = todayISO();
-    const date = paidDate ?? today;
-    // money cannot land before the pay week has ended, nor on a day that has not happened yet
-    if (date > today) throw badRequest('paidDate cannot be in the future');
-    if (date < existing.weekEnd) throw badRequest(`paidDate cannot be before the pay week ends (${existing.weekEnd})`);
-    const status = payrollStatusFor(existing.dueDate, date, today); // 'paid' or 'late'
-    // Release 1.3 (P1): corrections bigger than the week's pay leave a run below £0 — money is owed, not paid
-    if (existing.gross < 0) {
-      const first = existing.userName.split(' ')[0] ?? existing.userName;
-      throw conflict(`${first}'s pay for ${payWeekLabel(existing.weekStart)} comes to ${payMoney(existing.gross)}, below £0, so it cannot be marked paid. Add an adjustment to carry part of a correction to a later week first.`);
-    }
-    // Release 1.3 (P2): Mark paid needs the self-billing invoice accepted or deemed accepted, else an admin override with
-    // a reason (lib/invoices.ts; allows everything until P2 lands).
-    assertInvoicePayable(db, existing, currentUser(req), req.body);
-    run(db, `UPDATE payroll_runs SET paid_date = ?, status = ? WHERE id = ?`, [date, status, id]);
-    res.json(getPayroll(db, id));
+    // Release 1.4 (F): the same path a payment made from Linear Hub uses (lib/markPaid.ts), unchanged
+    res.json(markPayrollRunPaid(db, idParam(req), { actor: currentUser(req), body: req.body ?? {} }));
   });
 
   // ── summary ──

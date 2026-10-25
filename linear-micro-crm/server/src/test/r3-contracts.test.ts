@@ -28,6 +28,8 @@ const R2_EXTENSIONS = ['learning', 'pitches', 'pin', 'audit', 'checkins'];
 const R3_EXTENSIONS = ['pay', 'invoices', 'statements', 'videos', 'client', 'recruitment', 'venues'];
 /** Release 1.3.1: team Sapiens' blank demo accounts on an existing demo database (no seed; sapiens.test.ts). */
 const R31_EXTENSIONS = ['sapiens'];
+/** Release 1.4: appended after them (F payments-foundation). */
+const R4_EXTENSIONS = ['payments'];
 
 /** The tables and core-table columns the 1.3 extensions lay down (STABLE: owners may add, never rename or drop). */
 const R3_TABLES = [
@@ -46,8 +48,8 @@ const R3_CORE_COLUMNS: Record<string, string[]> = {
   candidates: ['date_of_birth'], // P7
 };
 
-test('extensions: the 1.2 five, then the seven 1.3 ones in package order (and 1.3.1 after them), unique names, the DbExtension shape', () => {
-  assert.deepEqual(EXTENSIONS.map((e) => e.name), [...R2_EXTENSIONS, ...R3_EXTENSIONS, ...R31_EXTENSIONS]);
+test('extensions: the 1.2 five, then the seven 1.3 ones in package order (and 1.3.1, then 1.4 after them), unique names, the DbExtension shape', () => {
+  assert.deepEqual(EXTENSIONS.map((e) => e.name), [...R2_EXTENSIONS, ...R3_EXTENSIONS, ...R31_EXTENSIONS, ...R4_EXTENSIONS]);
   assert.equal(new Set(EXTENSIONS.map((e) => e.name)).size, EXTENSIONS.length);
   for (const e of EXTENSIONS) {
     assert.equal(typeof e.sql, 'string', `${e.name}.sql`);
@@ -230,8 +232,8 @@ test('audit registry: package specs first, every 1.2 spec kept, POST /audit/even
   assert.equal(matchAuditSpec('GET', '/finance/payroll/12'), null);
 });
 
-test('attention providers: three, and with no extra items the 1.1 feed passes through unchanged', () => {
-  assert.deepEqual(ATTENTION_PROVIDERS.map((p) => p.name), ['invoices', 'statements', 'client-posts']);
+test('attention providers: the three 1.3 ones (and 1.4 payments after them), and with no extra items the 1.1 feed passes through unchanged', () => {
+  assert.deepEqual(ATTENTION_PROVIDERS.map((p) => p.name), ['invoices', 'statements', 'client-posts', 'payments']);
   const core = [{ key: 'a', kind: 'pay' as const, severity: 'info' as const, title: 't', body: 'b', href: '/' }];
   assert.equal(withProviderItems(core, []), core);
   const merged = withProviderItems(core, [{ key: 'client:post:1', kind: 'client', severity: 'warning', title: 'New update', body: 'b', href: '/campaigns/1' }]);

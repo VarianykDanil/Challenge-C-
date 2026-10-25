@@ -12,6 +12,8 @@
  *   PUT  /events/:id/roster                 Edit bookings (release 1.3.1 fix)
  *   PUT  /recruitment/interviews/:id/answers   the interview sheet's autosave (release 1.3.1 fix)
  *   POST /client-accounts/:id/reset-2fa         an admin resets a client account's two-step verification (release 1.4)
+ *   POST, PATCH, DELETE /payments/*   every payments write (release 1.4, F)
+ *   PUT  /me/bank-details, /users/:id/bank-details   bank details changes (release 1.4, F)
  * The next one inside the minute is refused with 429 and a plain sentence (WRITE_LIMIT_MESSAGE, `Retry-After: 60`);
  * a refused request does not count. Reads, other writes and signed-out requests pass straight through (a signed-out
  * write still gets its 401 from requireAuth). Paths match case-insensitively and with or without a trailing slash,
@@ -57,7 +59,7 @@ export function isAuditEventReport(method: string, path: string): boolean {
  * The limited writes: the method and either a path prefix relative to /api (a string: the path itself, or anything
  * below it) or a pattern for the whole path (a RegExp, tried on the lower-case path without its trailing slash).
  */
-export const WRITE_LIMITED_ROUTES: readonly { method: 'POST' | 'PUT' | 'DELETE'; path: string | RegExp }[] = [
+export const WRITE_LIMITED_ROUTES: readonly { method: 'POST' | 'PUT' | 'PATCH' | 'DELETE'; path: string | RegExp }[] = [
   { method: 'POST', path: '/learning' },
   { method: 'PUT', path: '/pitches' },
   { method: 'POST', path: '/checkins' },
@@ -72,6 +74,13 @@ export const WRITE_LIMITED_ROUTES: readonly { method: 'POST' | 'PUT' | 'DELETE';
   { method: 'PUT', path: /^\/recruitment\/interviews\/[^/]+\/answers$/ },
   // Release 1.4 (package S)
   { method: 'POST', path: /^\/client-accounts\/[^/]+\/reset-2fa$/ },
+  // Release 1.4 (F): every payments write and every bank details change (POST /users/:id/bank-details/confirm is
+  // under POST /users above)
+  { method: 'POST', path: '/payments' },
+  { method: 'PATCH', path: '/payments' },
+  { method: 'DELETE', path: '/payments' },
+  { method: 'PUT', path: '/me/bank-details' },
+  { method: 'PUT', path: /^\/users\/[^/]+\/bank-details$/ },
 ];
 
 /** Does the per-person write limit cover this request? `path` is relative to /api, e.g. "/checkins". */

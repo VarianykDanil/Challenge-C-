@@ -18,6 +18,9 @@ import { QuestionBankSection } from '@/features/recruitment/QuestionBankSection'
 import { IntegrationsSection } from '@/features/statements/IntegrationsSection';
 import { VideoSettingsSection } from '@/features/videos/VideoSettingsSection';
 import { TwoFactorSection } from '@/features/settings/TwoFactorSection';
+// Release 1.4 (F): Bank details (every staff role, their own) and Settings → Payments (admin, loaded lazily).
+import { BankDetailsCard } from '@/features/payments/BankDetailsCard';
+import { LazyPaymentsSettingsSection } from '@/features/payments';
 import { formatDate, formatDateTime, formatRelative, fullName, pluralise } from '@/lib/format';
 import { useTheme, type Theme } from '@/components/layout';
 import { usePageTitle } from '@/lib/usePageTitle';
@@ -78,6 +81,7 @@ export function SettingsPage() {
 
           {/* Release 1.3 slots (nothing until the packages land) */}
           <ErrorBoundary name="settings-invoices" fallback={null}><InvoiceSettingsSection /></ErrorBoundary>
+          {user.role !== 'client' && <ErrorBoundary name="settings-bank-details" fallback={null}><BankDetailsCard /></ErrorBoundary>}
           {(user.role === 'admin' || user.role === 'recruiter') && <ErrorBoundary name="settings-questions" fallback={null}><QuestionBankSection /></ErrorBoundary>}
 
           {user.role === 'admin' && <BackupsCard />}
@@ -86,6 +90,7 @@ export function SettingsPage() {
             <>
               <ErrorBoundary name="settings-pay" fallback={null}><PaySettingsSection /></ErrorBoundary>
               <ErrorBoundary name="settings-company" fallback={null}><CompanySettingsSection /></ErrorBoundary>
+              <ErrorBoundary name="settings-payments" fallback={null}><LazyPaymentsSettingsSection /></ErrorBoundary>
               <ErrorBoundary name="settings-integrations" fallback={null}><IntegrationsSection /></ErrorBoundary>
               <ErrorBoundary name="settings-videos" fallback={null}><VideoSettingsSection /></ErrorBoundary>
             </>

@@ -12,6 +12,8 @@ import { ChartSkeleton, ColourChip, ConfirmDialog, ErrorBoundary, ErrorState, Ex
 import { PayExportButton } from '@/features/office/PayExportButton';
 // Release 1.3 slot (P2): disputed self-billing invoices, at the top of Company.
 import { DisputesCard } from '@/features/invoices/DisputesCard';
+// Release 1.4 (F): Runs to pay → Pay people (the selection comes along).
+import { PayFromHubLink } from '@/features/payments';
 import { AddExpenseModal, FlaggedRunsList, LazyBulkPayBar, PayrollRunsTable, PayslipModal, campaignFinanceCsvColumns, expenseCsvColumns, financeWeekCsvColumns, payrollRunCsvColumns, payrollRunsRange, useBulkMarkPaid, warningFlags, type PayrollRunSelection } from '@/features/finance';
 import { FORECAST_LABEL, bonusLine, forecastMethod, forecastNoRangeReason, forecastRange, forecastRule, ruleLine } from '@/features/smart/weekPayCopy';
 // Release 1.3 (P1): the base-or-commission rule — the week's breakdown, bonuses and corrections
@@ -490,6 +492,7 @@ function Company({ onOpen, scrollToRuns = false, onScrolled }: { onOpen: (r: Pay
                   <PayExportButton runs={toPay} />
                 </ErrorBoundary>
                 <ExportButton filename={csvFilename('runs-to-pay')} rows={sortRows(toPay, (r) => r.weekStart, 'desc')} columns={payrollRunCsvColumns(true)} disabled={pending.isLoading} />
+                <PayFromHubLink runIds={payableSelected.map((r) => r.id)} />
               </>
             }
           />

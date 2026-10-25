@@ -21,6 +21,8 @@ export const STATEMENT_ROLES: Role[] = ['admin'];
 export const CAMPAIGN_PAGE_ROLES: Role[] = STAFF_ROLES_ALL;
 /** Release 1.3: /client, /client/security (P6) — client portal accounts only. */
 export const CLIENT_ROLES: Role[] = ['client'];
+/** Release 1.4: /finance/pay, /finance/pay/batches/:id (F payments). */
+export const PAYMENT_ROLES: Role[] = ['admin'];
 
 export function RequireRole({ roles, children }: { roles: Role[]; children: ReactNode }) {
   const { user } = useAuth();

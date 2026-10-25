@@ -16,6 +16,7 @@ import { purgeAuditLog } from './lib/audit.ts';
 // Release 1.3: background jobs (invoices: issue on week close and deem accepted; statements: the Gmail check).
 import { startInvoiceJobs } from './lib/invoices.ts';
 import { startStatementJob } from './lib/statements/job.ts';
+import { startPaymentsJob } from './lib/payments/job.ts';
 import { purgeExpiredSessions } from './middleware/auth.ts';
 
 const dbPath = process.env.DB_PATH ? path.resolve(process.env.DB_PATH) : DEFAULT_DB_PATH;
@@ -80,6 +81,8 @@ setInterval(guarded(purgeAudit), 86_400_000).unref();
 // start is logged and the server carries on.
 guarded(() => void startInvoiceJobs(db))();
 guarded(() => void startStatementJob(db))();
+// Release 1.4 (F): payments still on their way are checked every 5 minutes (LM_PAYMENTS_JOB=0 turns it off).
+guarded(() => void startPaymentsJob(db))();
 
 // Backups (p10): dated copies of the database in <data dir>/backups (LM_BACKUP_DIR relocates it): 10 minutes after
 // start-up when the last one is over 24 h old, and nightly from LM_BACKUP_HOUR (default 02:00 London) when none is

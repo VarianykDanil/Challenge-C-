@@ -79,6 +79,11 @@ export function payRuleSettings(db: Db): PayRuleSettings {
 export interface PayCalcContext {
   settings: PayRuleSettings;
   plans: Map<number, PayPlan | undefined>;
+  /**
+   * Release 1.4 (review fix): the payroll runs in an approved payment from Linear Hub still on its way, read once per
+   * context by db/maintenance.ts syncPayrollRun (which leaves them as they are).
+   */
+  inPayment?: Set<number>;
 }
 
 export function payCalcContext(db: Db, settings: PayRuleSettings = payRuleSettings(db)): PayCalcContext {

@@ -35,7 +35,11 @@ export type AuditEntity =
   | 'client_account' // P6
   | 'interview_question' // P7
   | 'event_roster' // P8: bookings, filed under the event id
-  | 'export'; // P9: client-side exports (CSV / PDF), no entity id
+  | 'export' // P9: client-side exports (CSV / PDF), no entity id
+  // Release 1.4 (F): paying people from Linear Hub
+  | 'payment_connection'
+  | 'payment_batch'
+  | 'bank_account'; // filed under the person's user id
 
 export interface AuditEntry {
   id: number;

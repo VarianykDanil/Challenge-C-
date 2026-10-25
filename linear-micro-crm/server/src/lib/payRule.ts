@@ -49,7 +49,7 @@ import {
   personName,
 } from '@lm/shared';
 import { all, get, placeholders, run, type Db, type Param } from '../db/connection.ts';
-import { applyRatesInEffect, ensurePayrollMaterialised, syncPayrollRun } from '../db/maintenance.ts';
+import { IN_PAYMENT_FROM, applyRatesInEffect, ensurePayrollMaterialised, paymentOnItsWay, syncPayrollRun } from '../db/maintenance.ts';
 import { getUser } from '../db/queries.ts';
 import { bumpDataVersion } from './cache.ts';
 import { addDays, isISODate, mondayOf, nowISO, sundayOf, todayISO } from './dates.ts';
@@ -209,11 +209,17 @@ export function recalculateUnpaidRuns(db: Db, scope: RecalcScope, today = todayI
 /**
  * The week a correction for `sourceMonday` goes on: the person's earliest PENDING run after that week, else the
  * current pay week (its run is created when the week closes and includes the correction). A failed transfer is owed
- * money already in flight, so it is not reused.
+ * money already in flight, so it is not reused; nor (release 1.4) is a pending run in a payment from Linear Hub on its
+ * way (it is paid as approved).
  */
 export function nextUnpaidWeek(db: Db, userId: number, sourceMonday: string, today = todayISO()): string {
   const floor = addDays(mondayOf(sourceMonday), 7);
-  const pending = get<{ w: string | null }>(db, `SELECT MIN(week_start) AS w FROM payroll_runs WHERE user_id = ? AND week_start >= ? AND status = 'pending'`, [userId, floor])!.w;
+  const pending = get<{ w: string | null }>(
+    db,
+    `SELECT MIN(p.week_start) AS w FROM payroll_runs p WHERE p.user_id = ? AND p.week_start >= ? AND p.status = 'pending'
+       AND NOT EXISTS (SELECT 1 ${IN_PAYMENT_FROM} AND pi.payroll_run_id = p.id)`,
+    [userId, floor],
+  )!.w;
   if (pending) return pending;
   const current = mondayOf(today);
   return floor > current ? floor : current;
@@ -223,6 +229,14 @@ export function nextUnpaidWeek(db: Db, userId: number, sourceMonday: string, tod
 function syncWeek(db: Db, userId: number, monday: string, today: string, ctx?: PayCalcContext): void {
   const u = runUsers(db, [userId]).get(userId);
   if (u) syncPayrollRun(db, u, monday, today, { ctx });
+}
+
+/**
+ * Release 1.4 (review fix): brings one person's unpaid run for a week up to date with the pay rules — for
+ * lib/payments/batches.ts, when a payment that held the run (its figures frozen while on its way) fails or is cancelled.
+ */
+export function syncPersonWeek(db: Db, userId: number, monday: string, today = todayISO()): void {
+  syncWeek(db, userId, monday, today);
 }
 
 // ───────────────────────────── the breakdown ─────────────────────────────
@@ -851,10 +865,12 @@ export function listPayAdjustments(db: Db, f: AdjustmentFilter = {}): PayAdjustm
     .map((r) => ({ ...mapAdjustment({ ...r, targetPaid: undefined }), targetPaid: Boolean(r.targetPaid) }));
 }
 
-/** 409 unless the person's week is still unpaid. */
+/** 409 unless the person's week is still unpaid (release 1.4: and not in a payment from Linear Hub on its way). */
 export function assertWeekUnpaid(db: Db, userId: number, monday: string): void {
   const s = storedRun(db, userId, monday);
   if (isPaidStatus(s?.status)) throw conflict(`The week ${payWeekLabel(monday)} has already been paid. Choose the next unpaid week.`);
+  const batch = paymentOnItsWay(db, userId, monday);
+  if (batch !== null) throw conflict(`The pay for ${payWeekLabel(monday)} is in payment #${batch}, which is on its way, so it is paid as approved. Choose the next unpaid week.`);
 }
 
 /**

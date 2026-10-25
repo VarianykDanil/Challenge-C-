@@ -6,6 +6,8 @@ import { OnTimeBadge, PayrollStatusBadge, StopRowEvents } from '@/features/commo
 import { ErrorBoundary } from '@/features/common/ErrorBoundary';
 // Release 1.3 slot (P2): the self-billing invoice's status on each run.
 import { InvoiceStatusBadge } from '@/features/invoices/InvoiceStatusBadge';
+// Release 1.4 (F): a run's payment from Linear Hub (admin: on its way, or failed with the reason).
+import { PaymentRunBadge } from '@/features/payments';
 import { todayISO } from '@/lib/dates';
 import { formatDate, formatDateTime, formatGBP, formatNumber, formatRangeLabel } from '@/lib/format';
 import { runAdjustedAt, warningFlags } from './PayslipModal';
@@ -154,6 +156,7 @@ export function PayrollRunsTable({ rows, loading, showUser, onRowClick, onMarkPa
           <span className="flex flex-wrap items-center gap-1.5">
             <PayrollStatusBadge status={r.status} />
             <ErrorBoundary name="invoice-status" fallback={null}><InvoiceStatusBadge run={r} /></ErrorBoundary>
+            {owed && <PaymentRunBadge payment={r.payment} />}
             {/* Pending runs and failed transfers past their due date are both overdue money. */}
             {owed && r.dueDate < today ? <Badge tone="danger">Overdue</Badge> : <OnTimeBadge value={r.onTime} labels={{ yes: 'On time', no: 'Late', none: r.status === 'pending' ? 'Awaiting' : 'Unpaid' }} />}
             {adjustedAt && <Badge tone="warning" title={`Recalculated ${formatDateTime(adjustedAt)}`}>Adjusted after payment</Badge>}

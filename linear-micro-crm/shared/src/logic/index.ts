@@ -88,3 +88,6 @@ export * from './recruitmentPlus.ts';
 export * from './venues.ts';
 // Release 1.3.1
 export * from './people.ts';
+// Release 1.4
+export * from './payments.ts';
+export * from './bankFiles.ts';

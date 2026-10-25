@@ -63,7 +63,8 @@ test('seed data: the seven accounts and team Sapiens as the owner listed them (i
   assert.deepEqual(DEMO_TEAM_ACCOUNTS.map((a) => [a.employeeId, a.firstName, a.role, a.position]), SEVEN.map((s) => [...s]));
   assert.ok(DEMO_TEAM_ACCOUNTS.every((a) => a.team === 'Sapiens' && a.email === emailOf(a.firstName)));
   assert.equal(DEMO_TEAM_ACCOUNTS.filter((a) => a.leadsTeam).map((a) => a.firstName).join(), 'Theo');
-  assert.ok(EXTENSIONS.at(-1)?.name === 'sapiens' && sapiensExtension.seed === undefined, 'appended last; its seed does nothing');
+  // appended after the 1.3 ones (release 1.4's payments comes after it); its seed does nothing
+  assert.ok(EXTENSIONS[EXTENSIONS.findIndex((e) => e.name === 'venues') + 1]?.name === 'sapiens' && sapiensExtension.seed === undefined, 'appended after 1.3; its seed does nothing');
 });
 
 test('fresh demo seed: team Sapiens (its own colour, Theo leads) with seven active, blank accounts at the very end', () => {
