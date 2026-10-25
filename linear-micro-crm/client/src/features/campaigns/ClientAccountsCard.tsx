@@ -84,7 +84,7 @@ function AccountConfirm({ confirm: { account, action }, onClose }: { confirm: Co
       done: 'Two-step verification reset',
     },
     off: { title: `Turn off ${name}’s account?`, body: 'They are signed out at once and cannot sign in until you turn it back on. Their posts stay.', label: 'Turn off', done: 'Account turned off' },
-    on: { title: `Turn on ${name}’s account?`, body: 'They can sign in again with their email, access code and PIN.', label: 'Turn on', done: 'Account turned on' },
+    on: { title: `Turn on ${name}’s account?`, body: 'They can sign in again with their email, access code, PIN and the code from their authenticator app.', label: 'Turn on', done: 'Account turned on' },
   }[action];
   const busy = reset.isPending || reset2fa.isPending || update.isPending;
   return (
@@ -235,7 +235,7 @@ function InviteModal({ campaignId, campaignName, onClose }: { campaignId: number
       open
       onClose={onClose}
       title="Invite a client"
-      description={`They get an access code for the ${campaignName} client portal and create their own PIN when they first sign in.`}
+      description={`They get an access code for the ${campaignName} client portal, and create their own PIN and set up two-step verification when they first sign in.`}
       size="md"
       footer={
         <>

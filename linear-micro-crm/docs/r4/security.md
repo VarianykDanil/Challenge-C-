@@ -14,19 +14,24 @@ All additive: no field renamed or removed; the new fields are optional in the sh
   `{ signedInAt, endsAt, maxHours }` (`maxHours: null` for a demo sign-in account, whose session lasts 14 days). The
   `Set-Cookie` Max-Age equals the session: `sessionMaxHours` hours (default 14 h = 50400 s), 14 days for a demo account.
   `user.twoFactorSetupRequired` is now true for **every** account without two-step, except the demo sign-in accounts.
-- **`GET /auth/me`** → `{ user, session }` (the same `SessionInfo`).
+- **`GET /auth/me`** → `{ user, session }` (the same `SessionInfo`). `endsAt` is when this session really ends and
+  `maxHours` the hours that end it: the current setting, or — for a session signed in under a shorter limit than
+  today's (the admin raised it since) — the session's own hours, since its expiry and cookie were fixed at sign-in.
 - **The session limit's 401.** The request that finds a session past its hours-from-sign-in limit answers
   `401 { error: "For security you are signed out 14 hours after signing in. Sign in again to carry on.", details: {
   sessionEnded: "max_age", maxHours: 14 } }` (shared `SessionEndedDetails`, `sessionMaxAgeMessage(hours)`), deletes
   the session and clears the cookie; every later request is a plain 401. Any route behind `requireAuth` /
-  `requireRole` answers it, `/auth/me` included.
+  `requireRole` answers it, `/auth/me` included. The same goes for a session that still sends its cookie after its own
+  4–24-hour expiry (signed in before the admin raised the limit): `maxHours` is then the shorter of its own hours and
+  the current setting.
 - **`GET /auth/2fa`** → `TwoFactorStatus` plus `required: boolean` (true for every account but the demo sign-in ones).
 - **`POST /auth/2fa/disable`** → `409 "Two-step verification is required for every account, so it cannot be turned
   off. If you have lost your phone, ask an administrator to reset it."` for an account that must use it (checked
   before any code, so no code is spent or recorded). The demo sign-in accounts may still switch it off with a code.
 - **`GET/PUT /auth/security-settings`** (admin) — `SecuritySettings` gains `sessionMaxHours` (whole hours 4–24, default
   14; 400 outside that, for a fraction or a string). It applies at once (a session already older than a shorter limit
-  ends at its next request) and to every sign-in from then on. `requireAdminTwoFactor` is still read, returned and
+  ends at its next request) and to every sign-in from then on; a longer one applies from each person's next sign-in
+  (a session's expiry and cookie are fixed when it starts). `requireAdminTwoFactor` is still read, returned and
   accepted (no data loss) but decides nothing: no lock-out check, nobody signed out. Leader, recruiter, rep → 403;
   client → 403 (client guard); anonymous → 401.
 - **New: `POST /client-accounts/:id/reset-2fa`** (admin) → `ClientAccount`. A lost or new phone: clears the client
@@ -48,6 +53,13 @@ All additive: no field renamed or removed; the new fields are optional in the sh
   only `twoFactor`, never a secret). The PIN is left alone. Honours `DB_PATH`; exit 0 when done or nothing to reset, 1
   for no email, no database, a file that is not a Linear Hub database, or no one with that email. Works while the
   server runs.
+- **`POST /users` `signInInstructions`** and **`POST /campaigns/:id/client-accounts` `instructions`** (shared
+  `staffSignInInstructions`, `clientInviteInstructions`) end with the two-step setup step, after the PIN step when
+  there is one: "The first time, set up two-step verification. You need an authenticator app on your phone (Google
+  Authenticator, Microsoft Authenticator, 1Password or Authy): scan the code Linear Hub shows, type the 6-digit code
+  from the app and keep your recovery codes somewhere safe. Each time you sign in after that, you type a new code from
+  the app." ("Then set up …" after a PIN step), and the closing line names the recovery codes and what to do about a
+  lost phone. Neither text is ever for a demo sign-in account (a new person or a new client account never is one).
 - **`ClientAccount`** (`GET /campaigns/:id/client-accounts`, the campaign page, the client account routes) gains
   `twoFactorEnabled`.
 - **The client guard** now lets a client session reach `/auth/2fa` and `/auth/2fa/*` (its own two-step: status,
@@ -86,6 +98,13 @@ unchanged. Every sign-in of an account with two-step on asks for the code: there
   a shorter setting applies at once and a session from before 1.4 (14-day `expires_at`) older than 14 hours ends at its
   next request. That request gets the 401 with the reason, the session is deleted and the cookie cleared. When a
   session is both idle and over the limit, the limit is named.
+- **A longer setting applies from the next sign-in.** A session keeps the `expires_at` and cookie it got at sign-in, so
+  after the admin raises the limit (say 14 → 24) a session signed in under 14 still ends at 14 hours. Its own lifetime
+  (`expires_at − created_at`, rounded to whole hours) is what `/auth/me` reports as `maxHours` while it is shorter than
+  the current limit, so the sign-in page's sentence names the 14 hours that really applied. A request that still
+  carries the cookie after that expiry — a session 1.4 made with a limit (own lifetime 4–24 hours, never a demo
+  account's or a 1.3 session's 14 days) — is ended as the limit too: the 401 with the reason and one audit row, naming
+  the shorter of its own hours and the current setting (as the sweep does).
 - **Audit**: each automatic sign-out is one row, action `SESSION max-age`, kind `sign_in`, filed under the person, no
   actor needed: "Signed out 14 hours after signing in (signed in 07:02 Fri 23 Oct)" (London time). Written by the
   request that ends the session, and by the start-up / 15-minute sweep (`purgeExpiredSessions`) for sessions whose limit
@@ -138,6 +157,12 @@ it as **Required**, with **New recovery codes**.
 
 Charity and client accounts see the same in the client portal's **Security** page.
 
+### Adding someone or inviting a charity contact
+
+The sign-in instructions Linear Hub gives you to send a new person (Team › **Add person**) or a new charity or client
+contact (the campaign page's **Client accounts** card › **Invite**) now include the last step: set up two-step
+verification with an authenticator app at the first sign-in, and keep the recovery codes safe.
+
 ### Signed out 14 hours after signing in
 
 For security, everyone is signed out 14 hours after signing in, however busy they are, and signs in again with their
@@ -154,7 +179,8 @@ The demo sign-in buttons on the sign-in page work as before (no code, 14-day ses
 - **Two-step verification is required for everyone** — a plain line now; the old switch "Require two-step
   verification for administrators" is gone.
 - **Sign out after** — 4 to 24 hours from sign-in (default 14 hours). A shorter time applies at once, to everyone
-  already signed in too.
+  already signed in too; a longer one from each person's next sign-in (anyone signed in now is still signed out at the
+  old time, and the sign-in page names it).
 - **Sign out after inactivity** — unchanged (default 12 hours).
 
 ## Changelog
@@ -187,6 +213,9 @@ The demo sign-in buttons on the sign-in page work as before (no code, 14-day ses
 - Resetting someone's two-step verification now means they set it up again at their next sign-in (not that they sign
   in without it).
 - The sign-in code and PIN steps of a charity or client account say "Back to email and access code".
+- The sign-in instructions for a new person (Team › **Add person**) and a client invite (**Client accounts** ›
+  **Invite**) end with setting up two-step verification with an authenticator app; the **Invite** and **Turn on**
+  dialogs say so too.
 
 ## Owner notes
 
@@ -194,7 +223,8 @@ The demo sign-in buttons on the sign-in page work as before (no code, 14-day ses
   you invited — is asked to set it up at their next sign-in, and anyone signed in at the moment of the upgrade meets the
   setup step at their next tap. Tell the team before you upgrade: they need an authenticator app on their phone
   (Google Authenticator, Microsoft Authenticator, 1Password or Authy) and about two minutes. Charity contacts need the
-  same; their invite instructions are unchanged, so tell them separately.
+  same: the instructions Linear Hub gives you when you add a person or invite a client now include that step, but
+  people you added or invited before 1.4 got the old text, so tell them.
 - **Existing sessions older than 14 hours end at their next request** (sessions made before 1.4 lasted 14 days), with
   the same sentence on the sign-in page. Younger ones carry on until they are 14 hours old.
 - **Until someone has set it up, their email and employee ID (and PIN, if they have one) still open the setup step.**
@@ -212,13 +242,15 @@ The demo sign-in buttons on the sign-in page work as before (no code, 14-day ses
   The same command is the way back if the app secret (`LM_APP_SECRET`, or the `server/data/app-secret` file) is ever lost: the
   authenticator secrets are encrypted with it, so no code would match (recovery codes still work).
 - **The 14 hours** can be changed in Settings → Security → Sign-in rules → **Sign out after** (4 to 24 hours). It counts
-  from sign-in on the real clock, whatever `LM_BUSINESS_NOW` says. The idle sign-out (default 12 hours) still applies
-  on its own.
+  from sign-in on the real clock, whatever `LM_BUSINESS_NOW` says. A shorter time applies at once; a longer one only
+  from each person's next sign-in (a session's end is fixed when it starts). The idle sign-out (default 12 hours) still
+  applies on its own.
 - **The demo sign-in accounts** (the four, team Sapiens' seven, Hannah Price) need no code and keep 14-day sessions while
   Linear Hub is the demo. The demo charity account stays exempt even if it sets a PIN (it is recognised by the demo
   seed's marker, the same as for the PIN rule), though the sign-in page lists it only while it has no PIN.
 - **What was tested**: route tests for every rule and role (admin, leader, recruiter, rep, client, anonymous), the 14-hour
-  boundary at ±1 minute, a session used a minute ago still ending at 14 hours, the setting's range, the audit rows, the
+  boundary at ±1 minute, a session used a minute ago still ending at 14 hours, the setting's range, a raised limit (a
+  session signed in under 14 still reports and ends at 14, with the reason and one audit row), the audit rows, the
   demo database against one in real use and `LM_DEMO_ACCOUNTS=0`, `npm run 2fa:reset` on a copied database; Playwright on the demo seed at 375 and 1440 px (768
   and 1024 for Log gauges), light and dark. Not tested on a real phone's authenticator app (codes were computed to the
   same RFC 6238 standard).

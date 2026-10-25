@@ -120,13 +120,28 @@ test('staffSignInInstructions: the address, the email, the employee ID and the P
   assert.match(text, /1\. Open http:\/\/192\.168\.1\.20:4000\/login\./);
   assert.match(text, /2\. Enter your email \(sam\.smith@linear-mcr\.co\.uk\) and your employee ID: LM-0108\./);
   assert.doesNotMatch(text, /PIN/);
-  assert.match(text, /Keep your employee ID to yourself/);
+  assert.match(text, /Keep your employee ID and recovery codes to yourself/);
   const withPin = staffSignInInstructions({ firstName: ' ', email: 'a@b.example', employeeId: 'LM-0109', pinRequired: true });
   assert.match(withPin, /^Hello there,/);
   assert.match(withPin, /Linear Hub account with Linear MCR\./);
   assert.match(withPin, /1\. Open the Linear Hub sign-in page\./);
   assert.match(withPin, /3\. The first time, create a PIN of 4 to 6 digits\./);
   assert.ok(!withPin.includes('  '), 'no double spaces');
+});
+
+test('staffSignInInstructions: release 1.4 — every new account sets up two-step verification at its first sign-in, after the PIN', () => {
+  const text = staffSignInInstructions({ firstName: 'Nia', email: 'nia@b.example', employeeId: 'LM-0112', pinRequired: false });
+  assert.match(text, /\n3\. The first time, set up two-step verification\. You need an authenticator app on your phone \(Google Authenticator, Microsoft Authenticator, 1Password or Authy\)/);
+  assert.match(text, /scan the code Linear Hub shows, type the 6-digit code from the app and keep your recovery codes somewhere safe\./);
+  assert.match(text, /Each time you sign in after that, you type a new code from the app\./);
+  assert.match(text, /If you lose your phone, sign in with a recovery code, or ask an administrator to reset two-step verification\./);
+  assert.doesNotMatch(text, /\n4\./);
+  const withPin = staffSignInInstructions({ firstName: 'Nia', email: 'nia@b.example', employeeId: 'LM-0112', pinRequired: true });
+  assert.match(withPin, /\n3\. The first time, create a PIN/);
+  assert.match(withPin, /\n4\. Then set up two-step verification\. You need an authenticator app on your phone/);
+  assert.match(withPin, /Keep your employee ID, PIN and recovery codes to yourself\./);
+  assert.ok(withPin.indexOf('create a PIN') < withPin.indexOf('two-step'), 'the PIN comes first, as at sign-in');
+  assert.ok(!withPin.includes('  ') && !text.includes('  '), 'no double spaces');
 });
 
 test('shareableSignInUrl: an address only this computer can open (localhost, 127.x, [::1]) is no use to someone else', () => {

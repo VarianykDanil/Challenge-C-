@@ -132,7 +132,8 @@ export function clearSessionCookie(req: Request, res: Response): void {
  * whatever the activity (the demo sign-in accounts aside). That request learns why: `req.sessionEnded` makes the 401
  * of requireAuth / requireRole carry the sentence and `details: { sessionEnded: 'max_age', maxHours }`; the cookie is
  * cleared and the sign-out recorded in the audit trail, like the idle one. `req.sessionInfo` says when a live session
- * ends (GET /auth/me answers it).
+ * ends (GET /auth/me answers it). A longer setting applies from the next sign-in: a session signed in under a shorter
+ * one keeps its own expires_at and cookie, so its `maxHours` and its ending name its own hours.
  */
 export function authenticate(db: Db): RequestHandler {
   return (req, res, next) => {
@@ -154,15 +155,23 @@ export function authenticate(db: Db): RequestHandler {
     const left = row.status === 'left';
     const demoSignIn = !left && isDemoSignInAccount(db, row);
     const expired = row.expiresAt < new Date(now).toISOString();
+    // The session's own lifetime, fixed at sign-in (expires_at and the cookie's Max-Age): 4–24 hours for a session 1.4
+    // made with a limit, 14 days for a demo account's or a 1.3 session.
+    const ownHours = Math.round((Date.parse(row.expiresAt) - signedInMs) / 3_600_000);
     const idle = Number.isFinite(seenMs) && isSessionIdle(seenMs, now, settings.sessionIdleHours);
-    // Release 1.4: the hours-from-sign-in limit, whatever the activity (last_seen_at never moves it).
-    const maxAged = !demoSignIn && isSessionPastMaxAge(signedInMs, now, settings.sessionMaxHours);
+    // Release 1.4: the hours-from-sign-in limit, whatever the activity (last_seen_at never moves it) — the current
+    // setting, or the session's own 4–24 hours when it was signed in under a shorter limit than today's (the admin raised
+    // it since) and has run out; never a demo account's or a 1.3 session's 14 days.
+    const ranOutOwnLimit = !demoSignIn && expired && ownHours > 0 && ownHours <= SESSION_MAX_HOURS_MAX;
+    const maxAged = !demoSignIn && (isSessionPastMaxAge(signedInMs, now, settings.sessionMaxHours) || ranOutOwnLimit);
     if (expired || left || !Number.isFinite(seenMs) || idle || maxAged) {
       destroySession(db, token);
       if (!left && maxAged) {
         // The 14 hours come first: a session both idle and past the limit is said to have ended for the limit.
-        recordMaxAgeSignOut(db, { userId: row.id, signedInAt: row.createdAt, maxHours: settings.sessionMaxHours, ip: req.ip ?? null });
-        req.sessionEnded = { sessionEnded: 'max_age', maxHours: settings.sessionMaxHours };
+        // The hours named are the ones that ended it: the shorter of its own and the current setting (as the sweep does).
+        const hours = ranOutOwnLimit ? Math.min(ownHours, settings.sessionMaxHours) : settings.sessionMaxHours;
+        recordMaxAgeSignOut(db, { userId: row.id, signedInAt: row.createdAt, maxHours: hours, ip: req.ip ?? null });
+        req.sessionEnded = { sessionEnded: 'max_age', maxHours: hours };
         clearSessionCookie(req, res);
       } else if (idle && !expired && !left) {
         // Release 1.3 (P9, every sign-out is recorded): the idle timeout signed this person out
@@ -186,10 +195,13 @@ export function authenticate(db: Db): RequestHandler {
     });
     req.sessionToken = token;
     const limitEnd = new Date(sessionEndsAtMs(signedInMs, settings.sessionMaxHours)).toISOString();
+    // A session signed in under a shorter limit (the admin raised it since) still ends at its own expires_at and
+    // cookie: say its own hours, so the sign-in page's sentence names the hours that really applied.
+    const ownEnd = expiresAt < limitEnd;
     req.sessionInfo = {
       signedInAt: createdAt,
-      endsAt: demoSignIn || expiresAt < limitEnd ? expiresAt : limitEnd,
-      maxHours: demoSignIn ? null : settings.sessionMaxHours,
+      endsAt: demoSignIn || ownEnd ? expiresAt : limitEnd,
+      maxHours: demoSignIn ? null : ownEnd ? ownHours : settings.sessionMaxHours,
     };
     next();
   };

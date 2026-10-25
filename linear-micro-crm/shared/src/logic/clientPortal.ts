@@ -5,7 +5,7 @@
  * No I/O; every function is deterministic and en-GB.
  */
 import { PIN_MAX_LENGTH, PIN_MIN_LENGTH } from '../types/pin.ts';
-import { shareableSignInUrl } from './people.ts';
+import { shareableSignInUrl, twoFactorSetupStep } from './people.ts';
 import { CLIENT_ACCESS_CODE_PREFIX, type ClientPost, type ClientPostInput, type ClientPostKind, type ClientPostStatus } from '../types/client.ts';
 
 export const CLIENT_POST_KIND_LABELS: Record<ClientPostKind, string> = {
@@ -201,7 +201,10 @@ export interface ClientInviteText {
   signInUrl?: string | null;
 }
 
-/** The sign-in instructions the admin copies into an email after an invite (plain text, no secrets but the code). */
+/**
+ * The sign-in instructions the admin copies into an email after an invite (plain text, no secrets but the code). Release
+ * 1.4: with the two-step setup after the PIN (every invited client account must use it).
+ */
 export function clientInviteInstructions(t: ClientInviteText): string {
   const url = shareableSignInUrl(t.signInUrl);
   const where = url ? `Open ${url}` : 'Open the Linear Hub sign-in page';
@@ -213,7 +216,9 @@ export function clientInviteInstructions(t: ClientInviteText): string {
     `1. ${where}.`,
     `2. Enter your email (${t.email}) and your access code: ${t.accessCode}.`,
     `3. The first time, create a PIN of ${PIN_MIN_LENGTH} to ${PIN_MAX_LENGTH} digits. You will type it after your email and access code each time you sign in.`,
+    twoFactorSetupStep(4, true),
     '',
-    'Keep your access code and PIN to yourself. If you forget your PIN, ask Linear MCR to reset it.',
+    'Keep your access code, PIN and recovery codes to yourself. If you forget your PIN, ask Linear MCR to reset it. ' +
+      'If you lose your phone, sign in with a recovery code, or ask Linear MCR to reset two-step verification.',
   ].join('\n');
 }

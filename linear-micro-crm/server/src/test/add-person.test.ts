@@ -62,12 +62,16 @@ test('a leader adds a trainee to their own team: rep, active, the standard plan,
   assert.ok(u.signInInstructions.includes(`your employee ID: ${stored}.`));
   assert.ok(u.signInInstructions.includes(`(${u.email})`));
   assert.doesNotMatch(u.signInInstructions, /PIN/, 'no PIN step while the office does not require one');
+  // Release 1.4: every new account sets up two-step verification at its first sign-in, and the text says so
+  assert.match(u.signInInstructions, /\n3\. The first time, set up two-step verification\. You need an authenticator app on your phone/);
   // every later read hides it again from the leader
   assert.equal((await leader.get(`/users/${u.id}`)).json.employeeId, '');
   assert.equal(((await leader.get(`/users?teamId=${fx().teams.a}`)).json as { id: number; employeeId: string }[]).find((x) => x.id === u.id)!.employeeId, '');
   assert.equal((await leader.get(`/users/${u.id}/performance`)).json.user.employeeId, '');
   assert.equal((await admin.get(`/users/${u.id}`)).json.employeeId, stored, 'administrators still see it');
   // the new person can sign in with those details
+  const first = await srv.login({ email: u.email, employeeId: stored }, undefined, { twoFactor: false });
+  assert.equal((await first.get('/auth/me')).json.user.twoFactorSetupRequired, true, 'the two-step setup the instructions describe');
   const fresh = await srv.login({ email: u.email, employeeId: stored });
   assert.equal((await fresh.get('/auth/me')).json.user.employeeId, stored, 'and sees their own');
 });
@@ -205,6 +209,7 @@ test('the sign-in instructions add the PIN step while the office requires a PIN 
     const r = await leader.post('/users', person());
     assert.equal(r.status, 201);
     assert.match(r.json.signInInstructions, /3\. The first time, create a PIN of 4 to 6 digits\./);
+    assert.match(r.json.signInInstructions, /\n4\. Then set up two-step verification\./, 'after the PIN, as at sign-in');
     assert.match(r.json.signInInstructions, /1\. Open the Linear Hub sign-in page\./, 'no address given: the plain wording');
   } finally {
     writeSecuritySettings(srv.db, { requirePin: false });

@@ -390,6 +390,53 @@ test('the admin chooses 4–24 hours in Settings → Sign-in rules; nobody else 
   assert.match(audit!.summary, /sign out after \(hours from sign-in\) 24 → 8/i);
 });
 
+test('a longer limit applies from the next sign-in: a session signed in under 14 hours still says 14 and ends at 14 with the reason', async () => {
+  await start();
+  const admin = await srv!.login('admin');
+  const rep = await srv!.login('rep'); // two-step set up, as a real rep's would be
+  const id = userBy(FIXTURE_ACCOUNTS.rep).id;
+  assert.equal((await admin.put('/auth/security-settings', { sessionMaxHours: 24 })).json.sessionMaxHours, 24);
+
+  // Its expires_at and cookie were fixed at sign-in: /auth/me says when it really ends, and for how many hours.
+  const me = await rep.get('/auth/me');
+  assert.equal(me.status, 200);
+  assert.equal(Date.parse(me.json.session.endsAt) - Date.parse(me.json.session.signedInAt), 14 * HOUR);
+  assert.equal(me.json.session.maxHours, 14, 'its own 14 hours, not the new 24');
+
+  // A new sign-in gets the 24 hours.
+  const fresh = await signInSteps(FIXTURE_ACCOUNTS.leader);
+  assert.equal(maxAgeOf(fresh.last), 24 * 3600);
+  assert.equal((await fresh.client.get('/auth/me')).json.session.maxHours, 24);
+
+  // 14 hours and a minute on (its 14-hour expiry passed; the cookie is still sent): the reason and one audit row.
+  age(rep, 14 * HOUR + MIN, 0, -MIN);
+  const ended = await rep.get('/me/dashboard');
+  assert.equal(ended.status, 401);
+  assert.equal(ended.json.error, sessionMaxAgeMessage(14));
+  assert.deepEqual(ended.json.details, { sessionEnded: 'max_age', maxHours: 14 });
+  assert.match(ended.headers.get('set-cookie') ?? '', /lm_session=;/, 'the cookie is cleared');
+  const rows = maxAgeRows(id);
+  assert.equal(rows.length, 1);
+  assert.match(rows[0]!.summary, /^Signed out 14 hours after signing in/);
+  assert.equal((await rep.get('/auth/me')).json.details, undefined, 'later requests are simply signed out');
+
+  // Raised and then lowered below its own lifetime: the shorter setting is what ended it.
+  const recruiter = await srv!.login('recruiter'); // signed in under 24 hours
+  assert.equal((await admin.put('/auth/security-settings', { sessionMaxHours: 10 })).status, 200);
+  age(recruiter, 25 * HOUR, 0, -HOUR);
+  assert.deepEqual((await recruiter.get('/me/dashboard')).json.details, { sessionEnded: 'max_age', maxHours: 10 });
+});
+
+test('an expired session of a demo account or from before 1.4 still goes quietly at its 14 days', async () => {
+  await start(true);
+  const demo = await srv!.login('rep');
+  age(demo, 15 * 86_400_000, 0, -HOUR);
+  const r = await demo.get('/me/dashboard');
+  assert.equal(r.status, 401);
+  assert.equal(r.json.details, undefined);
+  assert.equal(maxAgeRows(userBy(DEMO_ACCOUNTS.rep).id).length, 0);
+});
+
 test('audit: a 14-hour sign-out is one automatic row filed under the person; the sweep writes one per person', async () => {
   await start();
   const c = await srv!.login('rep');

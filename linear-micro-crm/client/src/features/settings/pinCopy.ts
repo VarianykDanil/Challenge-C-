@@ -110,7 +110,7 @@ export const PIN_COPY = {
       'Everyone, charity and client accounts included, signs in with a 6-digit code from an authenticator app. Anyone without it sets it up at their next sign-in. The demo sign-in accounts are left out while Linear Hub is still the demo.',
     maxAge: 'Sign out after',
     maxAgeHint: (hours: number) =>
-      `Everyone is signed out ${plural(hours, 'hour', 'hours')} after signing in, whatever they are doing, and signs in again with their code.${hours === SESSION_MAX_HOURS_DEFAULT ? '' : ` The default is ${SESSION_MAX_HOURS_DEFAULT} hours.`}`,
+      `Everyone is signed out ${plural(hours, 'hour', 'hours')} after signing in, whatever they are doing, and signs in again with their code. A shorter time applies at once; a longer one from each person’s next sign-in.${hours === SESSION_MAX_HOURS_DEFAULT ? '' : ` The default is ${SESSION_MAX_HOURS_DEFAULT} hours.`}`,
     turnOn: 'Turn on',
     idle: 'Sign out after inactivity',
     idleHint: (hours: number) =>

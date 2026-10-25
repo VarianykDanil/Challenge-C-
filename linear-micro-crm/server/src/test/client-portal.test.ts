@@ -468,6 +468,8 @@ test('invite: the next access code (never a demo code), the instructions, and 40
   );
   assert.match(r.instructions, /1\. Open https:\/\/hub\.example\/login\./);
   assert.match(r.instructions, /\(jo\.bloggs@charity\.example\) and your access code: CL-0061/);
+  // Release 1.4: an invited client account must set up two-step verification after its PIN, and the text says so
+  assert.match(r.instructions, /\n4\. Then set up two-step verification\. You need an authenticator app on your phone/);
   const row = get<{ role: string; position: string; teamId: number | null; payPlanId: number }>(srv.db, `SELECT role, position, team_id AS teamId, pay_plan_id AS payPlanId FROM users WHERE id = ?`, [r.account.id])!;
   assert.deepEqual({ ...row }, { role: 'client', position: 'client', teamId: null, payPlanId: fx().plans.owner });
   is(await admin.post(`/campaigns/${cid}/client-accounts`, { firstName: 'Jo', lastName: 'Again', email: 'jo.bloggs@charity.example' }), 409, 'same email');
