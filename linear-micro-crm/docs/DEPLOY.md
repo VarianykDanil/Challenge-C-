@@ -29,7 +29,7 @@ to two machines.
    folders `server/data/media` (learning videos), `server/data/statements` (client statement PDFs) and
    `server/data/uploads` (the signature image on invoices) when you have them: they are in neither the database file
    nor its backups.
-2. **The app secret (the key for two-step secrets and sign-in PINs).**
+2. **The app secret (the key for two-step secrets, sign-in PINs and, since 1.4, bank details and payment keys).**
    - New install: generate a key once and keep it in your password manager: `openssl rand -hex 32`. Set it as
      `LM_APP_SECRET`.
    - Moving an existing database: keep using its `app-secret` file (set `LM_APP_SECRET_FILE` to where you put it and do
@@ -43,7 +43,13 @@ to two machines.
      to **encrypted** storage (step 7).
    - **Back the secret up with the database** (for an `app-secret` file the backups folder does this). If the secret is
      lost, two-step verification has to be set up again and every PIN has to be reset: `npm run pin:reset -- <email>`
-     on the server for the administrators, then the **Reset PIN** button (Team → person) for everyone else.
+     and `npm run 2fa:reset -- <email>` on the server for the administrators, then **Reset PIN** and **Reset two-step
+     verification** (Team → person → Edit profile) for everyone else. Since 1.4 the same key also encrypts everyone's
+     bank details, the payment connections' keys and tokens and the bank files: without it nobody's bank details can be
+     read (everyone types them in again) and every payment connection has to be connected again.
+   - **Backups now hold encrypted bank details and payment provider secrets** (1.4). They are useless without the app
+     secret, so keep the secret apart from the backups (in your password manager, with `LM_APP_SECRET`), and treat a
+     backups folder that holds the `app-secret` file like the bank details themselves.
 3. **Environment for a real deployment** (both routes):
 
    ```ini
@@ -57,7 +63,9 @@ to two machines.
    LM_APP_SECRET=…         # or LM_APP_SECRET_FILE=… (see step 2)
    ```
 
-   Never set `LM_BUSINESS_NOW` on a live server (it is for demos and screenshots).
+   Never set `LM_BUSINESS_NOW` on a live server (it is for demos and screenshots), and never `LM_PAYMENTS_FAKE` (1.4:
+   it adds test providers that pay nobody). Leave `LM_PAYMENTS_JOB` unset: the 5-minute check is what marks weeks
+   paid while nobody is signed in.
 
    `TRUST_PROXY=1` means "exactly one proxy in front of me". Linear Hub then takes each person's address from the
    proxy's `X-Forwarded-For`, so eight wrong sign-ins from one phone pause that phone, not everyone with that email.
@@ -344,7 +352,7 @@ and then the `media`, `statements` and `uploads` folders next to it, which no ba
 
 ---
 
-## If an administrator is locked out of their PIN
+## If an administrator is locked out (PIN or two-step verification)
 
 Ten wrong PINs in a row lock a PIN for 15 minutes (longer if it keeps happening), and the sign-in screen says when it
 unlocks. Another administrator can reset it at once (Team → person → **Reset PIN**). The only administrator cannot
@@ -361,6 +369,20 @@ sudo -u linear env DB_PATH=/var/lib/linear-hub/linear.sqlite npm run pin:reset -
 It clears that person's PIN and lock, signs them out everywhere and notes it in the audit trail; they sign in with
 their email and employee ID and choose a new PIN. The same command is the way back for everyone if the app secret was
 lost (no PIN matches without it).
+
+**Two-step verification (1.4).** Everyone signs in with a code from an authenticator app. If the only administrator
+loses both phone and recovery codes (or the app secret is lost, so no code matches), run the same way:
+
+```bash
+# Route A
+cd /opt/linear-hub/app/linear-micro-crm
+sudo -u linear env DB_PATH=/var/lib/linear-hub/linear.sqlite npm run 2fa:reset -- you@example.co.uk
+# Fly.io: fly ssh console -C "sh -c 'cd /app && npm run 2fa:reset -- you@example.co.uk'"
+# Render: the Shell tab, then: npm run 2fa:reset -- you@example.co.uk
+```
+
+It clears that person's two-step verification, signs them out everywhere and notes it in the audit trail; the PIN is
+left alone. They sign in with their email, employee ID and PIN and set two-step up again.
 
 ---
 
@@ -385,9 +407,25 @@ Tick every line before real people use it.
       the backups folder holds a copy, so nobody else can read that folder and it leaves the server only encrypted.
 - [ ] **PIN required**: you set your own PIN (Settings → Security → Sign-in PIN), then switched on **Require a PIN for
       everyone** under Sign-in rules. Everyone creates one at their next tap.
-- [ ] **Two-step for administrators**: your own two-step verification is on, then **Require two-step verification for
-      administrators** is on.
+- [ ] **Two-step for everyone** (1.4, no switch to turn on): your own two-step verification is set up (Settings →
+      Security) and your recovery codes are somewhere safe, away from your phone. Everyone is asked to set it up at
+      their next sign-in (charity and client accounts too): tell the team and your charity contacts beforehand that they
+      need an authenticator app (Google Authenticator, Microsoft Authenticator, 1Password or Authy) and about two
+      minutes. Once a demo staff account has left (the line above), the demo accounts are no longer exempt either.
+- [ ] **Sign out after** chosen (Settings → Security → Sign-in rules; 14 hours from sign-in by default, 4 to 24).
 - [ ] **Session idle timeout** chosen (Sign-in rules; 12 hours by default, shorter for shared phones).
+- [ ] **Payments (1.4), if you pay people from Linear Hub**: `LM_PAYMENTS_FAKE` is **not** set (`grep LM_PAYMENTS
+      /etc/linear-hub.env` shows nothing, or only `LM_PAYMENTS_JOB` you set on purpose); each Revolut, Wise or TrueLayer
+      connection was tested and used for one payment **in test mode first**, then switched to live (typing PAY FOR REAL),
+      given its live details and tested again; the first live payment was one person, a small amount, and you checked
+      it arrived. A bank payment file: the first file held one person and the bank took it. See
+      [OWNER_NOTES_1.4.md](OWNER_NOTES_1.4.md).
+- [ ] **Bank details checked**: everyone being paid has added theirs (Settings → Bank details) and you confirmed every
+      changed set with the person (Team → person → **Confirm details**). A database seeded fresh by 1.4 gives the demo
+      people obviously fake details (sort code 00-00-00, shown as "••-••-00"): never put a demo person in a payment.
+- [ ] **App secret safe**: the backups now hold encrypted bank details and payment keys, so the app secret
+      (`LM_APP_SECRET` or the `app-secret` file) is in your password manager and never sits unencrypted next to an
+      off-site copy.
 - [ ] **Backups tested**: the off-site copy runs every night, the `media`, `statements` and `uploads` folders are
       copied off the server too, and you restored one on a laptop (write the date here: ________).
 - [ ] **No demo data**: the dashboard shows your own people (you brought `linear.sqlite`), not the seeded demo.

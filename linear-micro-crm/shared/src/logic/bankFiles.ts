@@ -34,7 +34,7 @@
  * is published, but not the values of its "Bank account type" column — and Linear Hub does not know whether each
  * person's account is personal or business), NatWest / RBS Bankline, Barclays, HSBC, Lloyds and Santander (their
  * import specifications are PDFs or pages behind sign-in that could not be read). Use the general file and check it
- * with your bank (docs/r4/payments-file.md, Owner notes).
+ * with your bank (docs/OWNER_NOTES_1.4.md, "What was tested, and what was not").
  *
  * Every format: one payment per line, CRLF line ends, UTF-8 without a byte-order mark, a header row, sort codes as 6
  * digits and account numbers as 8, amounts in pounds with two decimals from whole pence (exact: no floating point),

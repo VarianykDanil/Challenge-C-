@@ -1,5 +1,5 @@
 /**
- * Release 1.4 — OWNED BY F payments-foundation: payment batches, from a draft to paid. LOGIC §17 (docs/r4/payments-foundation.md).
+ * Release 1.4 — OWNED BY F payments-foundation: payment batches, from a draft to paid. docs/LOGIC.md §17.6.
  *
  *  1. Draft (createDraftBatch): from the admin's selected payroll runs and a connection. A run goes in only when it can
  *     be paid this way — unpaid (pending or failed), its week over, more than £0, its self-billing invoice accepted or

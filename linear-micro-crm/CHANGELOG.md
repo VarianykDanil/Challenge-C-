@@ -9,6 +9,89 @@ response field is renamed or removed, and new fields are optional.
 
 What comes next is in [docs/ROADMAP.md](docs/ROADMAP.md).
 
+## [1.4.0] - 2026-10-25
+
+Two-step verification for everyone, a sign-out 14 hours after sign-in, and paying people from Linear Hub in four ways.
+Details: [docs/USER_GUIDE.md](docs/USER_GUIDE.md) ("What's new in 1.4"), [docs/LOGIC.md](docs/LOGIC.md) §17,
+[docs/API.md](docs/API.md) ("1.4 endpoints") and what the owner must set up or decide in
+[docs/OWNER_NOTES_1.4.md](docs/OWNER_NOTES_1.4.md).
+
+### Added
+
+- **Two-step verification for everyone.** Every account that signs in — administrators, team leaders, recruiters,
+  field reps, and charity and client accounts — uses a 6-digit code from an authenticator app at every sign-in (no
+  "remember this device", no email or text codes). Anyone without it sets it up at their next sign-in; a charity or
+  client account does it after its PIN. The demo sign-in accounts are left out while Linear Hub is still the demo, so
+  one-click demo sign-in keeps working; anyone added or invited is not, even on the demo.
+- **Signed out 14 hours after signing in**, whatever you are doing; you sign in again with your code, and the sign-in
+  page says why ("For security you are signed out 14 hours after signing in. Sign in again to carry on."). The
+  administrator can choose 4 to 24 hours in **Settings → Security → Sign-in rules → Sign out after**. Each automatic
+  sign-out is in the audit trail under the person.
+- **Nothing lost when you are signed out in the field.** **Log gauges** keeps counts typed but not saved for 24 hours
+  and offers them the next time; a save or a one-tap check-in answered "signed out" waits on the phone and sends after
+  the next sign-in; the gauge and check-in outboxes also wait while two-step is being set up.
+- **Two-step on the client portal**: the **Security** page shows it (status, recovery codes left, **New recovery
+  codes**, **Set up**), and the campaign page's **Client accounts** card shows whether each account has it, with
+  **Reset two-step** for a lost phone (`POST /client-accounts/:id/reset-2fa`).
+- **`npm run 2fa:reset -- <email>`** on the server switches off one person's two-step verification and signs them out
+  everywhere (they set it up again at their next sign-in), for when no administrator can do it in the app.
+- **Pay people from Linear Hub.** Finance → Company → Runs to pay → **Pay from Linear Hub** opens **Pay people**: choose
+  the weeks and how to pay, check the total, each person with the last four digits of their account and who is left out
+  and why, approve with a fresh code from your authenticator app, then follow each payment on its page (it updates by
+  itself; **Check now**, **Cancel the rest**). Runs to pay shows **In a draft payment**, **Payment on its way** or
+  **Payment failed** with the reason. Paid weeks are marked paid exactly as **Mark paid** marks them; failed ones stay
+  on Runs to pay.
+- **Four ways to pay**, each with its logo and what it can and cannot do, in **Settings → Payments**:
+  - **Bank payment file** for any UK business bank: Linear Hub makes the bulk payment file (Starling Bank bulk payments,
+    Revolut Business bulk transfer, or a general Faster Payments file); you upload and approve it in your online
+    banking, then tick who the bank paid in **Mark as paid** (anyone it rejected stays on Runs to pay with your reason).
+    References of at most 18 characters ("LINEAR 05OCT JL"), names folded to plain letters, no cell that a spreadsheet
+    could run as a formula, and anyone the bank would refuse left out with a plain reason.
+  - **Revolut Business**: Linear Hub pays each person from your GBP account and marks the week paid when Revolut
+    completes it.
+  - **Wise Business**: Linear Hub creates the transfers and you pay them in Wise (Wise does not let an API token pay them
+    for UK businesses); each week is marked paid once Wise has sent the money, and transfers not yet paid can be
+    cancelled from Linear Hub.
+  - **Open Banking through TrueLayer**: signed payouts from your TrueLayer merchant account.
+- **Test mode first.** Revolut, Wise and TrueLayer connections start in the provider's sandbox; **Switch to live** needs
+  PAY FOR REAL typed and a new test against the live service. Each Connect form starts with **How to connect**, every
+  field says where to find its value, and **Save and test** tests an API connection straight away. A test-mode payment
+  reads "Test done: nobody paid".
+- **Bank details**: everyone adds their own in **Settings → Bank details** (a code from their app to change them);
+  administrators see them masked on Team → the person, can type them in, and confirm changed ones with **Confirm
+  details**. A payment to changed details waits until an administrator confirms them, and Needs attention says so.
+- **Needs attention → Payments** (administrators): changed bank details to check, failed payments, bank files waiting
+  for your bank, a connection whose test failed, and a week whose pay changed while its payment was on its way.
+- **Every payment is safe to send again**: each carries the provider's idempotency key and the account it was approved
+  with, so a payment resent after a timeout is never made twice; Linear Hub checks payments on their way every 5
+  minutes on its own (`LM_PAYMENTS_JOB=0` turns that off). `LM_PAYMENTS_FAKE=1` adds test providers that pay nobody, for
+  trying the screens — never on a real server.
+- Bank and payment logos from the CC0 `simple-icons` package (16.34.0); TrueLayer, which it lacks, shows a "TL"
+  monogram. Logos belong to their owners and only identify the service.
+
+### Changed
+
+- "Require two-step verification for administrators" is replaced by the line "Two-step verification is required for
+  everyone"; its stored setting is kept but no longer decides anything. Two-step can no longer be turned off (except
+  on the demo sign-in accounts): **Settings → Security** marks it **Required**.
+- Resetting someone's two-step verification now means they set it up again at their next sign-in (not that they sign
+  in without it). An administrator's own reset points at a recovery code or `npm run 2fa:reset`.
+- The sign-in instructions for a new person (Team → **Add person**) and a client invite (**Client accounts** →
+  **Invite**) end with setting up two-step verification and keeping the recovery codes safe; the **Invite** and **Turn
+  on** dialogs say so too. A charity or client account's code and PIN steps say "Back to email and access code".
+- Sessions last 14 hours from sign-in (they lasted 14 days), with the cookie's lifetime the same; sessions from before
+  1.4 that are older than 14 hours end at their next request. The demo sign-in accounts keep 14 days while it is the
+  demo.
+- `POST /auth/login`, `POST /auth/login/2fa` and `GET /auth/me` add `session { signedInAt, endsAt, maxHours }`;
+  `GET /auth/2fa` adds `required`; `SecuritySettings` adds `sessionMaxHours`; `ClientAccount` adds `twoFactorEnabled`
+  (all additive).
+- **Mark paid** by hand waits while a week is in a payment from Linear Hub that is on its way (409), so nobody is paid
+  twice. Such a week is paid as approved: a change to it meanwhile goes on a later week as an adjustment.
+- With two-step required for everyone, every bank details change and every payment approval needs a current code from
+  the authenticator app; the demo admin sets two-step up in **Settings → Security** before paying anyone.
+- The app secret (`LM_APP_SECRET` or `server/data/app-secret`) now also encrypts bank details, payment keys, tokens and
+  bank files: back it up with the database, and keep it apart from off-site copies.
+
 ### Fixed
 
 - **Two server tests no longer fail at weekends.** The demo seed could give an interview that had already happened an
@@ -17,6 +100,10 @@ What comes next is in [docs/ROADMAP.md](docs/ROADMAP.md).
   since the candidate entered the stage instead (interviews still to come move on to Monday as before). The check-ins
   test seeded the demo on a Sunday, when the demo has no shifts (it works Monday to Saturday); on a Sunday it now
   seeds as of the Saturday before.
+- **Tests no longer fail when the business clock is pinned** (`LM_BUSINESS_NOW`, for example to a Saturday): the
+  client portal's 30-day read check aged a post by the real clock while the unread count uses the business clock
+  (it failed on 1.3.1 already), and the payments tests dated bank-detail changes by the real clock. Both now use the
+  business clock, as the app does. No product code changed.
 
 ## [1.3.1] - 2026-10-23
 

@@ -2,8 +2,11 @@
 
 All endpoints are prefixed with `/api`, speak JSON, and use the types in `shared/src/types.ts`.
 Authentication is a session cookie (`lm_session`, httpOnly) created by `POST /api/auth/login`.
-Every endpoint except `/auth/login`, `/auth/demo-accounts` and `/health` requires a session and returns `401 {error}` without one.
-A session whose user has since been set to status `left` is also rejected with `401` (and deleted).
+Every endpoint except `/auth/login`, `/auth/login/2fa`, `/auth/demo-accounts` and `/health` requires a session and returns `401 {error}` without one.
+A session whose user has since been set to status `left` is also rejected with `401` (and deleted). Since 1.4 a session
+ends 14 hours after sign-in (the admin's `sessionMaxHours`); the request that finds it over the limit gets a `401` that
+says so, and until an account has set up two-step verification the setup gate answers `403 { twoFactorSetupRequired:
+true }` (see [1.4 endpoints](#14-endpoints)).
 
 Errors: `{ "error": string, "details?": unknown }` with 400 (validation), 401 (no session),
 403 (forbidden for role), 404 (not found), 409 (conflict), 410 (a sign-in challenge is gone), 429 (rate limited).
@@ -42,18 +45,22 @@ of the current week, `to` = today, unless stated otherwise. Every range is bound
 | `rep` | own gauges, own payroll, own team's leaderboard, directory, and every event detail / profile performance read-only (other people's check-in times and notes hidden; no employee IDs) | own gauges for events of own team |
 | `leader` | everything a rep can + full gauges/payroll summary for own team (check-in times and notes of own team) + recruitment read (without employee IDs) | gauges for team members at own team's events, events for own team, candidate stage changes |
 | `recruiter` | directory, recruitment (all), own payroll (without employee IDs) | candidates, interviews, stage changes |
-| `admin` | everything, including every employee ID | everything (users, campaigns, events, payroll pay, expenses) |
+| `admin` | everything, including every employee ID | everything (users, campaigns, events, payroll pay, expenses; 1.4: payment connections and payments, anyone's bank details) |
 
 **Employee IDs are credentials** (email + employee ID is the login). Every payload that embeds a user — `GET /users`,
 `GET /users/:id`, `GET /users/:id/performance`, `GET /finance/payroll` rows, the payslip — returns `employeeId: ''`
 unless the requester is an `admin` or the row is the requester themselves. `GET /auth/me` and the `user` inside
 `Dashboard` always carry the caller's own ID. The type keeps `employeeId: string`; `''` means "hidden".
 
+**Bank details** (1.4) follow the same rule more strictly: every staff member reads and changes only their own
+(`/me/bank-details`, always masked); administrators see anyone's masked and can type them in; leaders, recruiters and
+reps see nobody else's; client accounts have none.
+
 ## Auth
 - `POST /auth/login` body `LoginInput { email, employeeId }` → `AuthResponse`. Case-insensitive match on both. Sets cookie. **`401 { error: 'Invalid email or employee ID' }`** for an unknown email, a wrong ID *and* a deactivated (`left`) account alike — the response never confirms whether a credential exists. **Rate limit:** failed attempts are counted per **source address + email** (8 in 15 minutes → `429 { error: 'Too many attempts, try again in N minutes' }` for that address) and per **email from any address** (20 in 15 minutes). The source is the TCP peer address — never `X-Forwarded-For`, which a client can forge — so rotating headers does not bypass the limit. A successful sign-in resets both counters.
 - `POST /auth/logout` → `204`.
-- `GET /auth/me` → `AuthResponse` (`user.twoFactorEnabled` says whether two-step verification is on).
-- When the account has two-step verification on, `POST /auth/login` answers with a `TwoFactorChallenge` instead and no cookie; see *Two-step verification* at the end of this document for `POST /auth/login/2fa` and the `/auth/2fa*` settings endpoints.
+- `GET /auth/me` → `AuthResponse` (`user.twoFactorEnabled` says whether two-step verification is on). Since 1.4 it also carries `session: SessionInfo { signedInAt, endsAt, maxHours }`, and `user.twoFactorSetupRequired` is true for every account without two-step but the demo sign-in accounts (see [1.4 endpoints](#14-endpoints)).
+- When the account has two-step verification on, `POST /auth/login` answers with a `TwoFactorChallenge` instead and no cookie; see *Two-step verification* at the end of this document for `POST /auth/login/2fa` and the `/auth/2fa*` settings endpoints. Since 1.4 two-step verification is required for every account that signs in (client accounts included), except the demo sign-in accounts while Linear Hub is still the demo; an account without it signs in and meets the setup gate. The signed-in answer is `{ user, session }`, and the cookie lasts as long as the session (14 hours by default; 14 days for a demo sign-in account).
 - `GET /auth/demo-accounts` → `{ accounts: { label: string; role: Role; email: string; employeeId: string }[] }` for the demo "quick sign-in" buttons. Returns the four **seeded** demo accounts (LM-0001/0002/0003/0010, in role order admin, leader, recruiter, rep) only when all four exist with those roles and none has left; otherwise, or when the server runs with `LM_DEMO_ACCOUNTS=0`, `{ accounts: [] }`. There is no "one user per role" fallback: a non-demo database never publishes a login. Clients hide the buttons when the list is empty. Release 1.3 adds `clientAccounts?` (the seeded demo client) and 1.3.1 `demoTeams?: DemoTeamAccounts[]` (team Sapiens' seven blank accounts; see [1.3.1](#131-endpoints)). Since 1.3.1 a `clientAccounts` item is labelled with its organisation (`"Hannah Price (Breast Cancer Now)"`, was `"Hannah Price (Client)"`) and adds `name`, `organisation` and `sector` (additive).
 
 ## Dashboard
@@ -65,7 +72,8 @@ unless the requester is an `admin` or the row is the requester themselves. `GET 
 - `GET /users/:id/performance?from&to` → `{ user: UserWithTeam; totals: GaugeTotals; ratios: FunnelRatios; days: number; salesPerDay: number; trend: TrendPoint[]; byCampaign: GaugeSummaryRow[]; recentEntries: GaugeEntryWithMeta[]; punctualityRate: number | null }` (same `employeeId` rule on `user`). Readable by every signed-in user; `recentEntries[].checkedInAt` and `.notes` are `null` unless the requester is an admin, the person themselves or a leader of that person's team.
 - `POST /users` (admin, recruiter, leader) body: `Omit<User,'id'>` minus `avatarColor` optional → `UserWithTeam` (201). Release 1.3.1: recruiters and leaders may add field people, `employeeId` is optional for everyone, and the answer is an `AddPersonResult` — see [1.3.1 endpoints](#131-endpoints).
 - `PATCH /users/:id` (admin) partial `User` → `UserWithTeam`. Setting `status: 'left'` deletes every session of that user at once; an admin cannot set their own status to `left` (`400`).
-- `POST /users/:id/2fa/reset` (admin) → `204`. Switches that person's two-step verification off without a code (lost device) and signs them out everywhere; `400` for the admin's own account (use `POST /auth/2fa/disable`). See *Two-step verification*.
+- `POST /users/:id/2fa/reset` (admin) → `204`. Switches that person's two-step verification off without a code (lost device) and signs them out everywhere; since 1.4 they set it up again at their next sign-in. `400` for the admin's own account (the message points at a recovery code and `npm run 2fa:reset`). See *Two-step verification*.
+- Release 1.4: `GET` / `PUT /users/:id/bank-details` and `POST /users/:id/bank-details/confirm` (admin), and `GET` / `PUT /me/bank-details` (everyone's own) — see [1.4 endpoints](#14-endpoints).
 - `GET /teams` → `Team[]` (includes `memberCount`, `leaderName`).
 
 ## Campaigns
@@ -101,7 +109,7 @@ unless the requester is an `admin` or the row is the requester themselves. `GET 
 ## Finance
 - `GET /finance/payroll?userId&teamId&status&from&to` → `PayrollRunWithUser[]` newest first. Reps/recruiters: own only. Leaders: own team. Default range: last 12 weeks. `status` is one status or a comma list (`status=pending,failed` = everything still to pay). When `status` includes `failed` and neither `from` nor `to` is given, failed runs are listed **whatever their week** (a failed transfer is still owed) while every other status keeps the 12-week default; with `from`/`to` the range applies to all. Runs for every completed Mon–Sun week are materialised automatically (see *Payroll* below), so a week that has just closed always has its `pending` runs. `employeeId` is `''` on other people's rows unless the caller is an admin.
 - `GET /finance/payroll/:id` → `PayrollRunWithUser & { plan: PayPlan; entries: GaugeEntryWithMeta[] }` (the payslip; same `employeeId` rule). `adjustedAt` (also on every `PayrollRun`) is set when an admin changed the week's gauges after the run was paid; the stored figures are the ones that were paid, `entries` are the gauges as they are now.
-- `POST /finance/payroll/:id/pay` (admin) body `{ paidDate?: string }` → `PayrollRunWithUser`. Accepts `pending` **and** `failed` runs and sets status to `paid` or `late` based on due date; `409` only when the run is already `paid`/`late`. `paidDate` (default today) must lie between the pay week's end (`weekEnd`, inclusive) and today → otherwise `400`.
+- `POST /finance/payroll/:id/pay` (admin) body `{ paidDate?: string }` → `PayrollRunWithUser`. Accepts `pending` **and** `failed` runs and sets status to `paid` or `late` based on due date; `409` when the run is already `paid`/`late` (and, since 1.3, below £0 or held by its invoice; since 1.4, while it is in an approved payment from Linear Hub still on its way: `details: { code: 'in_payment', batchId }`). `paidDate` (default today) must lie between the pay week's end (`weekEnd`, inclusive) and today → otherwise `400`. Since 1.4 an unpaid run in `GET /finance/payroll` (admin) carries `payment?` — see [1.4 endpoints](#14-endpoints).
 - `GET /finance/summary?from&to` (admin; leader gets own-team payroll view only) → `FinanceSummary`. Default range: last 12 weeks. **The window is snapped to whole Mon–Sun pay weeks** (`from` back to its Monday, `to` forward to its Sunday) and the response's `from`/`to` are the snapped dates, so revenue, payroll and expenses — per week, in `totals`, `byCampaign` and `expensesByCategory` — always cover identical days and a run is never split or double-counted across adjacent months. A week that has started but has no runs yet (the week in progress) carries the live payroll estimate and `FinanceWeek.estimated: true`. Revenue is Σ sales × the **payout snapshotted on each entry** when it was logged, and `byCampaign.commission` Σ sales × the **pay-plan commission snapshotted on each entry** — what the reps actually earned on that campaign's sales (it reconciles with payroll for complete weeks), not the campaign's nominal rate; `margin` = revenue − that commission. Changing a campaign payout or a pay plan therefore never restates past weeks.
 - `GET /finance/pay-plans` → `PayPlan[]`: admins get every plan; everyone else gets only the plan they are on (an array of one).
 - `GET /finance/expenses?from&to&category&campaignId` (admin) → `Expense[]`. `POST /finance/expenses` (admin) → `Expense` (201). `DELETE /finance/expenses/:id` (admin) → 204.
@@ -716,9 +724,9 @@ All in `server/src/routes/auth.ts`; types in `shared/src/types/pin.ts`.
 | POST | `/auth/pin/remove` | signed in | `{ currentPin }` → `204`. `409` while a PIN is required for everyone, or when you have none; wrong PIN as above. |
 | GET | `/auth/pin/:userId` | admin | → `PinStatus` of anyone (never the PIN or hash); `404` unknown user, `400` bad id |
 | POST | `/auth/pin/reset/:userId` | admin | → `204`: clears the PIN and its lock, signs the person out everywhere. `400` for yourself (the message points at Settings and at `npm run pin:reset -- <your email>` on the server), `404` unknown. |
-| GET | `/auth/security-settings` | admin | → `SecuritySettings { requirePin, requireAdminTwoFactor, sessionIdleHours }` (defaults `false, false, 12`) |
-| PUT | `/auth/security-settings` | admin | `Partial<SecuritySettings>` (strict: unknown keys `400`; `sessionIdleHours` a whole number 1–72) → the full settings. `409` when switching on `requirePin` without your own PIN, or `requireAdminTwoFactor` without your own two-step verification. Switching `requireAdminTwoFactor` on signs out every other administrator who has not set up two-step verification. |
-| POST | `/auth/2fa/disable` | signed in | unchanged, plus `409` for an administrator while two-step verification is required for administrators |
+| GET | `/auth/security-settings` | admin | → `SecuritySettings { requirePin, requireAdminTwoFactor, sessionIdleHours }` (defaults `false, false, 12`); 1.4 adds `sessionMaxHours` (default 14) |
+| PUT | `/auth/security-settings` | admin | `Partial<SecuritySettings>` (strict: unknown keys `400`; `sessionIdleHours` a whole number 1–72; 1.4: `sessionMaxHours` a whole number 4–24) → the full settings. `409` when switching on `requirePin` without your own PIN. Until 1.4 also `409` for `requireAdminTwoFactor` without your own two-step verification, and switching it on signed out the other administrators without it; since 1.4 it is stored but decides nothing. |
+| POST | `/auth/2fa/disable` | signed in | unchanged, plus `409` for an administrator while two-step verification was required for administrators (1.2–1.3); since 1.4 `409` for every account but the demo sign-in ones |
 
 `LoginPinRequired` (401 / 423):
 
@@ -747,7 +755,8 @@ person with a PIN logs no failed request in the browser console.
 - While `pinSetupRequired`: every `/api` request answers `403 { "error": "Create your PIN to carry on", "pinSetupRequired": true }`
   except `/health`, `/auth/me`, `/auth/logout`, `/auth/login`, `/auth/login/2fa`, `/auth/demo-accounts` and
   `/auth/pin` (GET and POST). The client's `PIN_SETUP_REQUIRED_EVENT` fires on that body.
-- Then, while `twoFactorSetupRequired` (an admin, when required): the same list plus `/auth/2fa`, `/auth/2fa/setup`
+- Then, while `twoFactorSetupRequired` (an admin, when required, in 1.2–1.3; since 1.4 every account without two-step
+  but the demo sign-in ones, client accounts and `/client/*` included): the same list plus `/auth/2fa`, `/auth/2fa/setup`
   and `/auth/2fa/enable`; everything else answers `403 { "error": "Set up two-step verification to carry on", "twoFactorSetupRequired": true }`.
 - Anonymous requests pass through (requireAuth answers them). Paths are compared lower-cased without trailing slashes,
   and anything not listed stays closed.
@@ -765,7 +774,7 @@ Database (`server/src/db/extensions/pin.ts`, columns only): `users.pin_hash` (`s
 secret; 1.2.0's `scrypt$…` is still read and replaced at the next sign-in), `users.pin_set_at`,
 `users.pin_failed_attempts` (default 0), `users.pin_locked_until` (when the latest lock ends, or null),
 `sessions.last_seen_at`. Settings are the `meta` keys `ext:pin:require-pin`, `ext:pin:require-admin-2fa` and
-`ext:pin:session-idle-hours`, written only by the PUT above (absent → default). No seed rows: the demo accounts have no
+`ext:pin:session-idle-hours` (1.4 adds `ext:pin:session-max-hours`), written only by the PUT above (absent → default). No seed rows: the demo accounts have no
 PIN.
 
 ### Bulk gauge entry with WhatsApp paste (U2)
@@ -1421,7 +1430,7 @@ counts people. Snapshots never hold a file path.
 ### Client accounts and campaign pages (P6)
 
 Every route is behind `requireAuth` (anonymous → 401). A client session reaches **only** `/client/*` (and its own
-`/auth/me`, `/auth/pin(/*)`, `/auth/logout`, `/health`): the foundation's client guard answers 403
+`/auth/me`, `/auth/pin(/*)`, since 1.4 `/auth/2fa(/*)`, `/auth/logout`, `/health`): the foundation's client guard answers 403
 `{ error: 'This account can only use the client portal', clientPortalOnly: true }` everywhere else, `/client-posts`,
 `/client-accounts` and `/campaigns/:id/page` included (P6's test walks every route of the app).
 
@@ -1450,6 +1459,7 @@ when he approves or unpublishes is the office's own and is always `null` in `GET
 | `POST /client-posts/:id/unpublish` `{ note? }` | admin | `ClientPost` (`status: 'unpublished'`, `announcementId: null`): the Announcements row is deleted (its read receipts with it). The note stays in the office. 409 unless published. |
 | `PATCH /client-accounts/:id` `ClientAccountUpdateInput { status?, firstName?, lastName?, email? }` | admin | `ClientAccount`. `status: 'left'` signs the client out everywhere at once. 400 with nothing to change, 409 for an email in use, 404 for an unknown id **or a staff member**. |
 | `POST /client-accounts/:id/reset-pin` | admin | `ClientAccount` (`hasPin: false`): PIN, failed count and lock cleared, every session ended; they create a new PIN at the next sign-in. 404 for staff. |
+| `POST /client-accounts/:id/reset-2fa` (1.4) | admin | `ClientAccount` (`twoFactorEnabled: false`): two-step verification cleared, every session ended; they set it up again at the next sign-in, after the PIN. 404 for staff. |
 
 #### The campaign page (`routes/campaignPages.ts`, mounted before `/campaigns`)
 
@@ -1867,6 +1877,141 @@ last_name)` in SQL): "Theo", never "Theo " or a double space. `leaderName` on `G
 - **Invoice lines**: `InvoiceLine.note?` — the pay breakdown line's note, on new invoices and new versions only
   (Self-billing invoices, Line notes).
 
+## 1.4 endpoints
+
+Two-step verification for everyone, sign-out 14 hours after sign-in, and paying people from Linear Hub. Every change
+is additive: no response field was renamed or removed, and the new fields are optional in the shared types (a 1.4
+server always sends them). Types: `shared/src/types/pin.ts` (sessions), `shared/src/types/payments.ts` (payments).
+Rules: [LOGIC §17](LOGIC.md#17-release-14).
+
+### Two-step verification for everyone
+
+- **Who.** `user.twoFactorSetupRequired` (on `/auth/me` and the sign-in answers) is now true for **every** account
+  without two-step — admin, leader, recruiter, rep and client — except the demo sign-in accounts while Linear Hub is
+  still the demo (the accounts `GET /auth/demo-accounts` lists; LOGIC §17.1). Every sign-in of an account with two-step
+  on asks for the code; there is no "remember this device".
+- **The setup gate** (`middleware/auth.ts pinSetupGate`). After the PIN step (when a PIN is required), every API — the
+  client portal's `/client/*` included — answers `403 { "error": "Set up two-step verification to carry on",
+  "twoFactorSetupRequired": true }` until two-step is on. Open meanwhile: `/health`, `/auth/me`, `/auth/logout`,
+  `/auth/login`, `/auth/login/2fa`, `/auth/demo-accounts`, `/auth/pin`, `/auth/2fa`, `/auth/2fa/setup` and
+  `/auth/2fa/enable`. The gate answers before any role check, write limit or audit step.
+- **The client guard** now lets a client session reach `/auth/2fa` and `/auth/2fa/*` (its own status, setup, enable and
+  new recovery codes). Everything else outside the portal stays `403 { error, clientPortalOnly: true }`.
+- `GET /auth/2fa` → `TwoFactorStatus` plus `required: boolean` (true for every account but the demo sign-in ones).
+- `POST /auth/2fa/disable` → `409 "Two-step verification is required for every account, so it cannot be turned off. If
+  you have lost your phone, ask an administrator to reset it."` for an account that must use it, checked before any
+  code (no code is spent or recorded). The demo sign-in accounts may still turn it off with a code.
+- `POST /users/:id/2fa/reset` (admin, staff) is unchanged, but the person now sets two-step up again at their next
+  sign-in. Your own id is `400` "You cannot reset your own two-step verification here. Sign in with a recovery code and
+  make new codes in Settings → Security, or run "npm run 2fa:reset -- <your email>" on the server." (the message names
+  your own email).
+- **New: `POST /client-accounts/:id/reset-2fa`** (admin) → `ClientAccount`. A lost or new phone: clears the client
+  account's two-step verification (secret, half-done setup, recovery codes, open sign-in challenges) and signs it out
+  everywhere; it sets two-step up again at its next sign-in, after the PIN. `404` for an unknown id or a staff
+  member's id; leader, recruiter, rep `403`; a client session `403 clientPortalOnly`; anonymous `401`. Audited
+  ("Reset the two-step verification of Ivy Invite (Breast Cancer Now); they set it up again at their next sign-in",
+  entity `client_account`, never a secret); under the per-person write limit.
+- `ClientAccount` (`GET /campaigns/:id/client-accounts` and the client account routes) gains `twoFactorEnabled`.
+- `POST /users` `signInInstructions` and `POST /campaigns/:id/client-accounts` `instructions` end with the two-step
+  setup step, after the PIN step when there is one, and name the recovery codes and what to do about a lost phone.
+- `PUT /auth/security-settings`: `requireAdminTwoFactor` is still read, returned and accepted (no data loss) but decides
+  nothing: no lock-out check, nobody signed out.
+- **Server command** `npm run 2fa:reset -- <email>` (`server/src/twoFactorReset.ts`, honours `DB_PATH`): clears one
+  person's two-step verification, signs them out on every device and writes an audit row (no actor; action `npm run
+  2fa:reset`). The PIN is left alone. Exit code 0 when done or nothing to reset, 1 for no email, no database, a file
+  that is not a Linear Hub database, or no one with that email.
+
+### Sessions end 14 hours after sign-in
+
+- **`POST /auth/login`, `POST /auth/login/2fa`** — the same steps (credentials → PIN when the account has one → the
+  6-digit code when two-step is on). The signed-in answer is now `AuthResponse { user, session }` with `session:
+  SessionInfo { signedInAt, endsAt, maxHours }` (`maxHours: null` for a demo sign-in account, whose session lasts 14
+  days). The cookie's `Max-Age` equals the session: `sessionMaxHours` hours (default 14 h = 50,400 s).
+- **`GET /auth/me`** → `{ user, session }`. `endsAt` is when this session really ends and `maxHours` the hours that end
+  it: the current setting or, for a session signed in under a shorter limit than today's (the admin raised it since),
+  the session's own hours.
+- **The 401 at the limit.** The request that finds a session past its hours-from-sign-in limit answers `401 { "error":
+  "For security you are signed out 14 hours after signing in. Sign in again to carry on.", "details": {
+  "sessionEnded": "max_age", "maxHours": 14 } }` (shared `SessionEndedDetails`, `sessionMaxAgeMessage(hours)`), deletes
+  the session and clears the cookie; every later request is a plain `401`. Any route behind `requireAuth` /
+  `requireRole` answers it, `/auth/me` included. The same goes for a session that still sends its cookie after its own
+  4–24-hour expiry; `maxHours` is then the shorter of its own hours and the current setting. Recorded in the audit
+  trail as `SESSION max-age` (kind `sign_in`, one row per person).
+- **`GET` / `PUT /auth/security-settings`** (admin): `SecuritySettings` gains `sessionMaxHours` (whole hours 4–24,
+  default 14; `400` outside that, for a fraction or a string). A shorter value applies at once (a session already older
+  ends at its next request); a longer one from each person's next sign-in. Meta key `ext:pin:session-max-hours`.
+  Leader, recruiter, rep `403`; client `403` (client guard); anonymous `401`.
+
+### Ways to pay and connections (admin)
+
+All under `/payments`, administrators only: `401` signed out, `403` for leaders, recruiters and reps, `403
+clientPortalOnly` for client accounts, and the setup gate's `403` for an account still to set up two-step. Every write
+has an audit spec (`lib/audit/paymentSpecs.ts`) and the per-person write limit (60 a minute). No answer, audit row or
+log line ever carries a secret, a full sort code or a full account number.
+
+| Method | Path | Body | Answer |
+| --- | --- | --- | --- |
+| GET | `/payments/providers` | — | `PaymentProviderView[]`: the four (`bank_file`, `revolut`, `wise`, `truelayer`, in that order) with `abilities`, `configFields` (the connection form), `available: true`, and where they apply `connectSteps`, `liveNote`, `approveNote`, `waitingNote`. `PaymentConfigField` options carry `iconKey` and `hint`; `requiredUnless` names a stored secret that makes a field optional (Revolut's code once Linear Hub holds its refresh token). `abilities.anyUkBank` is set for the bank file |
+| GET | `/payments/connections` | — | `PaymentConnection[]`, active first. `secretsSet` lists the NAMES of the secrets stored, never their values; `balancePence` is the last test's balance when the provider shows one |
+| POST | `/payments/connections` | `{ provider, name?, settings?, secrets? }` | `201 PaymentConnection`. `400` with `details: [{ path, message }]` per wrong field (checked without a network call). An API connection starts `mode: 'test'`, `status: 'not_connected'`; a bank file `mode: 'live'`, `status: 'connected'` (it has no test mode, and any secrets sent are dropped). Bank file `settings.format`: `generic`, `starling` or `revolut` |
+| PATCH | `/payments/connections/:id` | `{ name?, settings?, secrets?, mode?, confirm? }` | `PaymentConnection`. An empty secret keeps the stored one. Changing an API connection's settings or secrets puts it back to `not_connected` and clears `balancePence` and `lastCheckedAt`. `mode: 'live'` needs `confirm: "PAY FOR REAL"` typed exactly (`400`) and a connected test (`409`), and leaves it `not_connected` until a live test works. `409` for a change of mode (either way) while an approved payment through it has items waiting. A bank file cannot change mode (`400`). `409` once disconnected |
+| DELETE | `/payments/connections/:id` | — | `PaymentConnection` with `disconnectedAt`: secrets wiped, drafts through it cancelled, history kept. `409` while a payment through it is on its way |
+| POST | `/payments/connections/:id/test` | — | `PaymentConnectionTestResult { ok, message, balancePence?, checkedAt, connection }`; stores `connected` or `error`. It reaches the provider (its sandbox in test mode) and answers `ok: false` with a plain message, not an error status, when the provider refuses the details. A bank file answers `ok: true` and says which files it makes |
+
+Connection forms (settings are stored as JSON, secrets encrypted):
+
+| Provider | Settings | Secrets |
+| --- | --- | --- |
+| `bank_file` | `format` (`generic`, `starling`, `revolut`) | none |
+| `revolut` | `clientId`, `redirectUri` (the OAuth redirect URI typed in Revolut), `accountId` (optional: the GBP account) | `privateKey` (RSA, PEM), `authCode` (the code from Revolut; the whole redirect address is accepted), then `refreshToken` (kept by Linear Hub itself) |
+| `wise` | `profileId` (optional, digits) | `apiToken` (a personal API token) |
+| `truelayer` | `clientId`, `signingKeyId`, `merchantAccountId` (optional) | `clientSecret`, `privateKey` (EC P-521, PEM) |
+
+### Payments (admin)
+
+| Method | Path | Body | Answer |
+| --- | --- | --- | --- |
+| GET | `/payments/batches` | `?limit=` (1–200, default 50) | `PaymentBatchSummary[]`, newest first, with `paidCount`, `failedCount`, `waitingCount` |
+| POST | `/payments/batches` | `{ connectionId, runIds }` (1–500 runs) | `201 PaymentBatch` (a draft). Runs that cannot be paid this way are left out with a plain reason (`skipped: PaymentSkip[]`, codes `not_found`, `already_paid`, `in_payment`, `week_not_ended`, `not_positive`, `invoice_not_accepted`, `invoice_disputed`, `no_bank_details`, `bank_details_unconfirmed`). `400 { error, details: { skipped } }` when none can; `409` when the connection is not connected or disconnected, or a run went into another payment a moment ago |
+| GET | `/payments/batches/:id` | — | `PaymentBatch { …summary, items, skipped, kind, actions { approve, cancel, refresh, download, markPaid } }`. Items show the payee name and `accountLast4` only, `providerRef` (for a bank file, the reference written in the file), `note`, and `runPaidDate` once a live item's run is paid. `actions.refresh` / `actions.cancel` are false while the connection is in the other mode, and cancel while an item may exist at the provider without a reference |
+| POST | `/payments/batches/:id/approve` | `{ code }` | `PaymentBatch` after submitting. In order: `409` unless a draft; `501` if the provider is not built (none in 1.4); `409` if the connection is not connected or changed mode; `409 { details: { code: 'batch_changed', problems } }` if anything changed since the draft (a run paid or in another payment, a run's pay changed, bank details changed or removed, an invoice no longer payable) — all before the code is used; `403 { details: { code: 'two_factor_required', twoFactorRequired: true } }` for an admin without two-step (only an exempt demo admin can get here); `400` for a missing or wrong code (a current authenticator code, not a recovery code; each accepted once; 6 wrong in 10 minutes → `429`); then one approval wins (`409` for the other). A bank file: the file is made and stored encrypted, each person in it is `submitted`, anyone the bank would refuse is `failed` with the reason (no file and the payment `failed` when nobody can go in). Wise: transfers are created and wait for Matt to pay them in Wise |
+| POST | `/payments/batches/:id/refresh` | — | `PaymentBatch`: sends again what a failed submit left queued (same idempotency keys, to the account each item was approved with) and asks the provider about the rest. `409` for a draft; `409` for a bank file ("A bank file is not checked automatically: mark it paid once your bank has paid it."); `409` (and `lastError` says why) when the connection is now in the other mode; `409` while Linear Hub is already talking to the provider about it |
+| POST | `/payments/batches/:id/cancel` | — | `PaymentBatch`: a draft; a bank file's people not yet marked; an API payment's queued items Linear Hub never sent (at once, through any provider); the rest only when the adapter can stop them (Wise), else `409` "Payments already sent to … cannot be stopped from Linear Hub. Check them with the provider.". `409` "Linear Hub is still finding out whether … made the payment for …: press Check now, then cancel." while an item was sent but has no provider reference yet; nothing changes then |
+| GET | `/payments/batches/:id/file` | — | The bank file: `text/csv; charset=utf-8`, `Content-Disposition: attachment; filename="linear-hub-payment-<id>-<YYYY-MM-DD>-<faster-payments\|starling\|revolut>.csv"`, `Cache-Control: no-store`. Recorded in the audit trail as an export. `404` before approval, once cancelled, or when no file was made |
+| POST | `/payments/batches/:id/mark-paid` | `{ paid?: itemId[], failed?: itemId[], reason?, paidDate? }` | Bank files only (`409` otherwise: "Linear Hub learns this from … by itself: use Check now."). `paid` items mark their runs paid on `paidDate` (default today; not in the future, not before the week ends), `failed` items fail with `reason` (at most 300 characters; default "The bank did not pay this one"). Neither list: everyone still waiting is paid. `400` for an item not waiting in this payment or in both lists; `409` before approval or with nobody waiting |
+
+A run a payment marks paid goes through `lib/markPaid.ts`, the same function `POST /finance/payroll/:id/pay` uses, with
+its own audit row ("Marked paid by payment #12: …", "Payment #12 failed: …"). Test-mode payments mark no run paid.
+`LM_PAYMENTS_JOB=0` turns off the 5-minute check of payments on their way (refresh still works); `LM_PAYMENTS_FAKE=1`
+adds a "Test provider" (`fake`) and a "Test bank file" (`fake_file`) that pay nobody — never on a server people are
+paid from.
+
+### Bank details
+
+| Method | Path | Who | Body → answer |
+| --- | --- | --- | --- |
+| GET | `/me/bank-details` | every staff role, their own | `BankDetailsView { details: BankDetails \| null, codeRequired }`, masked: `sortCodeMasked` "••-••-34", `accountNumberMasked` "••••5678", `needsConfirmation`, who changed and who confirmed them. `codeRequired` is true for every account with two-step on (every non-demo account past the setup gate). Client accounts `403` |
+| PUT | `/me/bank-details` | every staff role, their own | `{ holderName, sortCode, accountNumber, code? }` → `BankDetailsView`. Sort code 6 digits, account number 8 (spaces and dashes ignored), holder name 2–70 characters (letters, digits, spaces and `. , ' ’ & / -`); `400` with `details: [{ path, message }]`, checked before the code so a typo never uses one up. `code` (a current authenticator code) is required when you have two-step on. Your own change waits for an administrator (`needsConfirmation: true`) and puts an item in their Needs attention. Saving the same details again changes nothing |
+| GET | `/users/:id/bank-details` | admin | `BankDetailsView`. `400` for a client account, `404` unknown |
+| PUT | `/users/:id/bank-details` | admin | as above, with the admin's own code: details an admin types in count as confirmed by that admin |
+| POST | `/users/:id/bank-details/confirm` | admin | → `BankDetailsView`, confirmed now (no change and no audit row when already confirmed). `404` when there are none |
+
+Leaders and recruiters never see anyone else's bank details (`403`); anonymous `401`. Every change is audited without
+the numbers (masked digits only) and counts towards the write limit.
+
+### Changes to older answers
+
+- `GET /finance/payroll` (admin only): an unpaid run carries `payment?: PayrollRunPayment { batchId, itemId, status,
+  draft, failureReason, updatedAt }`, its latest live payment from Linear Hub (absent otherwise).
+- `POST /finance/payroll/:id/pay` answers `409 { error, details: { code: 'in_payment', batchId } }` while the run is in
+  an approved payment still on its way ("Jordan's pay for w/c 5 Oct is in payment #12, which is still on its way. Wait
+  for it to finish, or cancel it, before marking the week paid by hand."). Drafts do not hold a run.
+- While a week's payment is on its way, a bonus or line added to or removed from that week answers `409` ("The pay for
+  w/c 5 Oct is in payment #3, which is on its way, so it is paid as approved. Choose the next unpaid week."), and an
+  invoice reissue with a correction for it answers `409`.
+- `AttentionKind` gains `'payments'` (the bell's "Payments" group); `AuditEntity` gains `payment_connection`,
+  `payment_batch`, `bank_account` (labels "Payment connection", "Payment", "Bank details").
+
 ## Seed & demo accounts
 The server seeds `server/data/linear.sqlite` on first start (or `npm run seed` to reset) with deterministic
 sample data for the last 26 weeks. Demo logins (email / employee ID):
@@ -1895,6 +2040,11 @@ business date of the seed, Manchester, the default plan for the position, no PIN
 A fresh seed inserts them at its very end, after every extension seed; an existing demo database gains them once on
 start-up (`db/extensions/sapiens.ts`, docs/LOGIC.md §16.10). The next person added gets LM-0108.
 
+Release 1.4: these demo sign-in accounts (the four, Sapiens' seven and the demo client CL-0001) need no two-step code
+and keep 14-day sessions while the database is still the demo (LOGIC §17.1); every other account needs both. A fresh
+seed gives the people paid weekly obviously fake bank details (sort code 00-00-00, account number `0000` + their id;
+every ninth person none, one change waiting for the admin) and no payment connection.
+
 Teams: Northern Lights, Deansgate, Spinningfields, Ancoats (and Sapiens). Campaigns: Breast Cancer Now (fundraising, private sites),
 Children's Hospice North (fundraising, events), Volt Energy (B2B), FibreCity Broadband (residential).
 
@@ -1911,7 +2061,7 @@ also never has a zero-sales day this week), and an avatar palette with ≥ 4.5:1
 Behaviour that the contract above leaves open, as implemented in `server/`:
 
 - **Public endpoints.** `GET /auth/demo-accounts` is public (the login page needs it before a session exists), alongside `/auth/login` and `/health`. It only ever lists the four seeded demo accounts (all present, with their seeded roles, none `left`), plus the demo client (`clientAccounts`) and team Sapiens (`demoTeams`) that the seed recorded, and returns `{ accounts: [] }` otherwise or when the environment variable `LM_DEMO_ACCOUNTS=0` is set — set that on any deployment with real users. Unknown `/api/*` paths return `404 { "error": "Not found" }` whether or not a session is present.
-- **Login & sessions.** Email and employee ID are matched case-insensitively; an unknown email, a wrong ID and a user with status `left` all get the same `401 Invalid email or employee ID` (the distinction is never disclosed). Failed attempts are counted in memory (`lib/limiter.ts`, bounded LRU maps of 10,000 keys, expired entries swept every 5 minutes off the request path) under two keys: **source address + email** (8 in 15 minutes → `429`) and **email alone** (20 in 15 minutes → `429`, a backstop against rotating addresses). The source is `req.socket.remoteAddress`, never `req.ip`/`X-Forwarded-For`. Sessions live 14 days in the `sessions` table (32 random bytes, hex) behind the `lm_session` cookie (httpOnly, SameSite=Lax). **`TRUST_PROXY`** (env, default off): with it unset the app ignores `X-Forwarded-*` entirely, so `req.secure` is false behind a TLS terminator — set `TRUST_PROXY=1` (one proxy hop), the proxy's IP or CIDR (`10.0.0.0/8`, `loopback`) or a comma list, which makes `req.secure` follow `X-Forwarded-Proto` (Secure cookies, HSTS); the proxy must overwrite inbound `X-Forwarded-For`. `COOKIE_SECURE=1` forces the Secure flag regardless. `authenticate` rejects (and deletes) the session of any user whose status is `left`, and `PATCH /users/:id` with `status: 'left'` deletes all of that user's sessions, so deactivation revokes access immediately. An admin cannot deactivate their own account (`400`).
+- **Login & sessions.** Email and employee ID are matched case-insensitively; an unknown email, a wrong ID and a user with status `left` all get the same `401 Invalid email or employee ID` (the distinction is never disclosed). Failed attempts are counted in memory (`lib/limiter.ts`, bounded LRU maps of 10,000 keys, expired entries swept every 5 minutes off the request path) under two keys: **source address + email** (8 in 15 minutes → `429`) and **email alone** (20 in 15 minutes → `429`, a backstop against rotating addresses). The source is `req.socket.remoteAddress`, never `req.ip`/`X-Forwarded-For`. Sessions live in the `sessions` table (32 random bytes, hex) behind the `lm_session` cookie (httpOnly, SameSite=Lax): 14 days until 1.3.1; since 1.4, `sessionMaxHours` after sign-in (14 by default), with the cookie's Max-Age the same, and 14 days only for the demo sign-in accounts while Linear Hub is still the demo. **`TRUST_PROXY`** (env, default off): with it unset the app ignores `X-Forwarded-*` entirely, so `req.secure` is false behind a TLS terminator — set `TRUST_PROXY=1` (one proxy hop), the proxy's IP or CIDR (`10.0.0.0/8`, `loopback`) or a comma list, which makes `req.secure` follow `X-Forwarded-Proto` (Secure cookies, HSTS); the proxy must overwrite inbound `X-Forwarded-For`. `COOKIE_SECURE=1` forces the Secure flag regardless. `authenticate` rejects (and deletes) the session of any user whose status is `left`, and `PATCH /users/:id` with `status: 'left'` deletes all of that user's sessions, so deactivation revokes access immediately. An admin cannot deactivate their own account (`400`).
 - **Employee IDs.** Because the employee ID is half of the credential, `redactUser`/`redactPayroll` (`server/src/lib/scope.ts`) blank it (`''`) on every user or payroll payload unless the requester is an admin or the row is their own; `q` on `GET /users` searches employee IDs for admins only.
 - **Dates and times.** `from`/`to` are inclusive `BETWEEN` filters, so `from=to=<date>` is an exact-date match (used to prefill an existing gauge entry via `GET /gauges?eventId&userId&from&to`). `parseRange` rejects `from` before `2020-01-01` and spans over 400 days with `400`, so daily trends and weekly summaries are bounded; `limit` is capped at 500. Week keys (`groupBy=week`, `FinanceWeek.weekStart`, `RecruitmentSummary.weekly`) are Monday dates. Dashboard/leaderboard ranges end at **today** (`week` = Monday → today) and the comparison period is the **same to-date span of the previous period** (`previousToDateRange` in `server/src/lib/dates.ts`: week → the same weekdays last week, month → days 1..n of the previous month clamped to its length, quarter → the same day-offset into the previous quarter), returned as `Dashboard.previous`; `deltas` are null when the previous value is 0. Quarter trends are weekly points (the first point is keyed by the quarter's first day and holds that partial week), week/month trends are daily, all zero-filled.
 - **Check-in timestamps.** `checkedInAt` is stored and returned as a *naive wall-clock* timestamp with no zone suffix (`2026-10-15T10:03:00`), matching `isCheckInOnTime`, which reads the event start the same way. Clients should send the naive value the user typed (`YYYY-MM-DDTHH:mm[:ss]`); a zoned value (`…Z` / `±hh:mm`) is converted to **Europe/London** wall-clock time (`toBusinessISO`), never to the container's zone. The server scripts also pin `TZ=Europe/London` so `todayISO()` is the business date; the Dockerfile should set the same `TZ`. Other timestamps (`submittedAt`, `createdAt`, `appliedAt`, …) are full ISO 8601 UTC.
@@ -1931,8 +2081,10 @@ Behaviour that the contract above leaves open, as implemented in `server/`:
 
 ## Two-step verification (TOTP, authenticator apps) — contract v1
 
-Optional second factor using RFC 6238 TOTP (6 digits, 30-second step, SHA-1, ±1 step tolerance) compatible with
-Google Authenticator, Microsoft Authenticator, 1Password, Authy. Secrets are stored encrypted at rest
+Second factor using RFC 6238 TOTP (6 digits, 30-second step, SHA-1, ±1 step tolerance) compatible with
+Google Authenticator, Microsoft Authenticator, 1Password, Authy. Optional until 1.3.1 (except administrators when the
+admin rule was on); **since 1.4 required for every account that signs in**, client accounts included, except the demo
+sign-in accounts while Linear Hub is still the demo. Secrets are stored encrypted at rest
 (AES-256-GCM with a key derived from env `LM_APP_SECRET`, or from a random key the server generates once and keeps in
 `server/data/app-secret` when the variable is unset). Recovery codes are stored as SHA-256 hashes and are single use.
 
@@ -1940,7 +2092,7 @@ Google Authenticator, Microsoft Authenticator, 1Password, Authy. Secrets are sto
 - `GET /auth/2fa` → `TwoFactorStatus { enabled: boolean; enabledAt: string | null; recoveryCodesLeft: number; pendingSetup: boolean }`.
 - `POST /auth/2fa/setup` → `TwoFactorSetup { secret: string; otpauthUrl: string; qrSvg: string }` (201). Creates a *pending* secret (not active); calling it again replaces the pending secret. `qrSvg` is an inline SVG string of the otpauth URL (issuer "Linear Hub", label `Linear Hub:<email>`). 409 if 2FA is already enabled.
 - `POST /auth/2fa/enable` body `{ code: string }` → `TwoFactorEnabled { recoveryCodes: string[] }` (10 codes, format `xxxx-xxxx`, shown once). Verifies the code against the pending secret, activates it, and signs out every *other* session of the user. 400 `{error:'That code is not valid'}` on mismatch; 409 if nothing pending.
-- `POST /auth/2fa/disable` body `{ code?: string; recoveryCode?: string }` → `204`. Requires a valid current code or an unused recovery code. Admin may disable another user's 2FA with `POST /users/:id/2fa/reset` (no code; for lost devices) → `204`, which also signs that user out everywhere.
+- `POST /auth/2fa/disable` body `{ code?: string; recoveryCode?: string }` → `204`. Requires a valid current code or an unused recovery code. Since 1.4 `409` for every account but the demo sign-in ones (two-step cannot be turned off). Admin may disable another user's 2FA with `POST /users/:id/2fa/reset` (no code; for lost devices) → `204`, which also signs that user out everywhere; since 1.4 they set it up again at their next sign-in (client accounts: `POST /client-accounts/:id/reset-2fa`).
 - `POST /auth/2fa/recovery-codes` body `{ code: string }` → `{ recoveryCodes: string[] }` regenerates a fresh set (invalidates old ones). 400 `{error:'That code is not valid'}` on mismatch (an authenticator code is required here, not a recovery code); 409 while 2FA is off.
 - `POST /auth/2fa/disable` answers 400 `{error:'That code is not valid'}` on a mismatch, 400 `Validation failed` when neither field is sent, 409 while 2FA is off.
 - 2FA verification endpoints are rate limited: 6 failed codes per 10 minutes per **source address + user** → `429 { error: 'Too many attempts, try again in N minutes' }` (shared across `/auth/login/2fa`, `/auth/2fa/enable`, `/auth/2fa/disable`, `/auth/2fa/recovery-codes`; a correct code resets it), plus 30 per user from any address. An authenticator code is accepted **once**: presenting the same code again (within its validity window) is refused like a wrong code.
@@ -1952,5 +2104,5 @@ Google Authenticator, Microsoft Authenticator, 1Password, Authy. Secrets are sto
 - `AuthResponse.user` gains optional `twoFactorEnabled?: boolean`.
 
 ### Client (Settings → Security)
-- Card "Two-step verification" with status (On since <date> · N recovery codes left / Off). "Set up" opens a modal: step 1 QR code (the SVG) with the manual key and the otpauth link, step 2 six-digit input (auto-advance, paste-friendly) → "Turn on", step 3 recovery codes with Copy and Download (.txt) and a "I have saved these" confirmation. "Turn off" asks for a current code (or a recovery code). "New recovery codes" asks for a code. Admin view of a person (Team → person → Edit) gets "Reset two-step verification" with confirmation.
+- Card "Two-step verification" with status (On since <date> · N recovery codes left / Off; since 1.4 **Required** in place of "Turn off" for every account but the demo ones, and the same card on the client portal's Security page). "Set up" opens a modal: step 1 QR code (the SVG) with the manual key and the otpauth link, step 2 six-digit input (auto-advance, paste-friendly) → "Turn on", step 3 recovery codes with Copy and Download (.txt) and a "I have saved these" confirmation. "Turn off" asks for a current code (or a recovery code). "New recovery codes" asks for a code. Admin view of a person (Team → person → Edit) gets "Reset two-step verification" with confirmation.
 - Login page: after email + ID, if `requiresTwoFactor` show step two: "Enter the 6-digit code from your authenticator app", with "Use a recovery code instead", and "Back to email and employee ID" (step one); handle 401/410/429 messages.

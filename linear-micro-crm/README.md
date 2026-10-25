@@ -1,6 +1,6 @@
 # Linear Hub
 
-**Every stop counts.** The team platform for Linear MCR Limited: every rep sees their own gauges, pay and progression and their team's board; leaders read the whole company and run their own team; the recruiter runs the pipeline; the office sees finance — all behind one sign-in with a work email and employee ID.
+**Every stop counts.** The team platform for Linear MCR Limited: every rep sees their own gauges, pay and progression and their team's board; leaders read the whole company and run their own team; the recruiter runs the pipeline; the office sees finance — all behind one sign-in with a work email, employee ID and a code from an authenticator app.
 
 > Linear MCR runs face-to-face sales campaigns — B2B, B2C, private-site events and charity fundraising — from Manchester. The six gauges a rep records at every event (stops → to table → presentations → closes → taps → sales) are the heartbeat of the business. Linear Hub is built around them.
 
@@ -37,6 +37,8 @@ Linear Hub fixes those four things without asking the business to change how it 
 | **Field & office** (1.2) | One-tap **Check in** with a roll call; leader **Bulk entry** (or paste from WhatsApp); an optional sign-in **PIN**; the **Audit** trail and announcement read receipts; ⌘K search for people, events, candidates and campaigns; **Export for payroll** to Xero or Sage. See [What's new in 1.2](docs/USER_GUIDE.md#whats-new-in-12). |
 | **Pay you can check** (1.3) | Each week pays the base (£63.50 a day) or the commission, whichever is higher, with a full breakdown; the clients' PDF statements (read from Gmail) correct cancellations on the next week; a **self-billing invoice** each week to accept or query. See [What's new in 1.3](docs/USER_GUIDE.md#whats-new-in-13). |
 | **Clients, learning, data** (1.3) | **Client accounts** that post updates and commission changes; **learning videos**; **PDF** downloads everywhere; recruitment with date of birth, a schedule and interview sheets; **Venues** that prove the law of averages and plan each booked person's shift; an audit of **every action**. |
+| **Pay people from Linear Hub** (1.4) | **Pay people** (Finance → Company → Runs to pay → **Pay from Linear Hub**): choose the weeks, choose how to pay, check who is paid to which (masked) account and who is left out, approve with a fresh two-step code, then follow each payment. Four ways to pay, each with its logo and what it can and cannot do: a **bank payment file** for any UK business bank (Starling, Revolut or a general Faster Payments file; you upload and approve it in your bank), **Revolut Business** (pays from Linear Hub), **Wise Business** (Linear Hub creates the transfers, you pay them in Wise) and **Open Banking through TrueLayer** (payouts from your merchant account). The API ones start in test mode. Everyone adds their own **bank details** in Settings, stored encrypted and shown masked. See [What's new in 1.4](docs/USER_GUIDE.md#whats-new-in-14). |
+| **Two-step for everyone** (1.4) | Every account that signs in, charity and client accounts included, uses a 6-digit code from an authenticator app, and everyone is signed out 14 hours after signing in (4 to 24 hours, the administrator's choice). Nothing typed or saved in the field is lost when it happens. |
 
 ### Roles
 
@@ -45,9 +47,9 @@ Linear Hub fixes those four things without asking the business to change how it 
 | `rep` | Own gauges and pay; own team's events, leaderboard and gauges summary; the directory; any event or profile **read-only** (other people's check-in times and notes are hidden) | Own gauges, at own team's events |
 | `leader` | Company-wide reads — every team's events, the full leaderboard, any profile — plus the check-in times and notes of their own team, their own team's payroll, and recruitment | Events for own team; gauges for own team's members at own team's events; candidates, interviews and stage changes; announcements |
 | `recruiter` | The whole recruitment pipeline, the directory, own pay; events and the leaderboard read-only | Candidates, interviews, stage changes (hiring creates the rep's account) |
-| `admin` | Everything, including every employee ID | Everything — people, campaigns, events, any gauges, payroll payments, expenses, announcements |
+| `admin` | Everything, including every employee ID; everyone's bank details, masked | Everything — people, campaigns, events, any gauges, payroll payments and paying people from Linear Hub, expenses, announcements |
 
-**Signing in and security, honestly.** Sign-in is a work email plus an employee ID — there is no password yet, so the employee ID is half of the credential and the API only returns it to administrators and to the person themselves (everyone else sees it blank on the Team page, payslips and profiles). Sessions are httpOnly cookies that last 14 days; after eight failed attempts for the same email in fifteen minutes the login is paused for that window; setting a person's status to **Left** deletes their sessions at once, so they are signed out everywhere. Anyone can turn on optional two-step verification with an authenticator app, and (1.2) a personal sign-in PIN, in **Settings → Security**; an administrator can require a PIN for everyone, require two-step for administrators and set the sign-out time. Single sign-on is on the [roadmap](docs/ROADMAP.md); putting it online is in [docs/DEPLOY.md](docs/DEPLOY.md).
+**Signing in and security, honestly.** Sign-in is a work email plus an employee ID (client accounts: email and access code), then a PIN if there is one, then (1.4) a 6-digit code from an authenticator app — there is no password yet, so the employee ID is half of the credential and the API only returns it to administrators and to the person themselves (everyone else sees it blank on the Team page, payslips and profiles). Since 1.4 two-step verification is required for every account that signs in, and a session ends 14 hours after sign-in whatever the activity (the administrator can choose 4 to 24 hours) or after 12 hours unused; sessions are httpOnly cookies that last exactly as long. The demo sign-in accounts are left out of both while Linear Hub is still the demo, so one-click demo sign-in keeps working. After eight failed attempts for the same email in fifteen minutes the login is paused for that window; setting a person's status to **Left** deletes their sessions at once, so they are signed out everywhere. Bank details, payment keys and tokens are encrypted at rest with the app secret and never returned by the API; every payment needs a fresh two-step code. Single sign-on is on the [roadmap](docs/ROADMAP.md); putting it online is in [docs/DEPLOY.md](docs/DEPLOY.md).
 
 ### Smart features (1.1)
 
@@ -141,6 +143,8 @@ Every command below exists in `package.json` (root) or `server/package.json`.
 | `npm run backup` | Back the database up now (fine while the server runs) into `server/data/backups/` |
 | `npm run backups` | List the backup files with size and age |
 | `npm run restore -- <file> [--yes]` | Put a backup back as the live database (stop the server first). `<file>` is a path or a file name from the backups folder; it shows what changes and asks first |
+| `npm run pin:reset -- <email>` | Clear one person's sign-in PIN and its lock and sign them out everywhere (for the only administrator, or after losing the app secret). Honours `DB_PATH`; works while the server runs |
+| `npm run 2fa:reset -- <email>` | Clear one person's two-step verification and sign them out everywhere; they set it up again at their next sign-in (1.4: for the only administrator who lost phone and recovery codes, or after losing the app secret). Recorded in the audit trail. Honours `DB_PATH`; works while the server runs |
 | `npm run service:install` | Run Linear Hub in the background and start it at log-in (macOS LaunchAgent, Linux systemd user unit; on Windows it prints the Task Scheduler steps) |
 | `npm run service:uninstall` | Remove the background service and free the port |
 | `npm run service:status` | Is the service loaded and answering; its last 20 log lines; whether it still points at this Node |
@@ -165,8 +169,10 @@ Every command below exists in `package.json` (root) or `server/package.json`.
 | `LM_BUSINESS_NOW` | unset (real time) | Pins the business clock — "today" and "now" for events, gauges, pay and the demo seed — to this instant, e.g. `2026-10-19T15:00:00`, for demos and screenshots out of hours (use a fresh `DB_PATH` so the seed is built around it). The clock keeps ticking from there; sessions, rate limits, two-step codes and backups stay on the real clock. The server warns at start-up while it is set. Never set it for real use |
 | `LM_STATEMENTS_JOB` | on | `0` stops the 15-minute check of the Gmail inbox for client statements (uploading a statement by hand still works) |
 | `LM_STATEMENTS_DIR` | `server/data/statements` | Where the statement PDFs are kept (never committed) |
+| `LM_PAYMENTS_JOB` | on | `0` stops the 5-minute check of payments on their way through Revolut, Wise or TrueLayer (**Check now** on a payment's page still works). Leave it on: it is what marks the weeks paid while nobody is signed in |
+| `LM_PAYMENTS_FAKE` | unset | `1` adds a "Test provider" and a "Test bank file" that pay nobody, for trying the payment screens on a demo. **Never set it on the server people are paid from** |
 | `LM_UPLOADS_DIR` | `server/data/uploads` | Where the office's signature image is kept (never committed; back it up with the database). Learning videos live in `media/videos` next to the database and are not in the nightly backup: copy that folder yourself |
-| `LM_APP_SECRET` | unset (generated key file) | Key material for encrypting two-step verification secrets at rest (AES-256-GCM, key = SHA-256 of the value) and for peppering sign-in PINs (HMAC-SHA256 before scrypt). When unset, a random key is generated on first start into `server/data/app-secret` (mode 600, next to the database). Back that file up with the database (the backups folder keeps a copy of it, so keep that folder private), or set the variable to manage the key yourself |
+| `LM_APP_SECRET` | unset (generated key file) | Key material for encrypting two-step verification secrets and (1.4) bank details, payment keys, tokens and bank files at rest (AES-256-GCM, key = SHA-256 of the value) and for peppering sign-in PINs (HMAC-SHA256 before scrypt). When unset, a random key is generated on first start into `server/data/app-secret` (mode 600, next to the database). Back that file up with the database (the backups folder keeps a copy of it, so keep that folder private), or set the variable to manage the key yourself |
 | `LM_APP_SECRET_FILE` | `<data dir>/app-secret` | Where the generated key file lives when `LM_APP_SECRET` is unset |
 | `TRUST_PROXY` | unset (off) | Behind a TLS-terminating reverse proxy: `1` (one hop), the proxy's address or CIDR, or a comma list, so `X-Forwarded-Proto` is honoured (Secure cookies, HSTS). Leave unset otherwise |
 | `COOKIE_SECURE` | unset | Set to `1` to force the `Secure` flag on the session cookie; it is set automatically when the request arrived over HTTPS (`X-Forwarded-Proto: https`, `trust proxy` is on) |
@@ -211,7 +217,8 @@ npm run service:uninstall    # stop it for good and free the port
   `TZ=Europe/London`, plus `PORT`, `HOST`, `DB_PATH`, `LM_APP_SECRET_FILE`, `LM_BACKUP`, `LM_BACKUP_DIR`,
   `LM_BACKUP_HOUR`, `TRUST_PROXY`, `COOKIE_SECURE`, `LM_SMART`, `LM_COMPRESSION`, `LM_DEMO_ACCOUNTS`,
   `LM_STATEMENTS_JOB`, `LM_STATEMENTS_DIR` and `LM_UPLOADS_DIR` if they are set in that terminal (folders resolved from
-  `server/`, as `npm start` resolves them). `LM_APP_SECRET` is never written into the file (it would sit there in plain
+  `server/`, as `npm start` resolves them). The 1.4 `LM_PAYMENTS_JOB` and `LM_PAYMENTS_FAKE` are not passed on: under
+  the service the 5-minute payments check always runs and the test providers never appear. `LM_APP_SECRET` is never written into the file (it would sit there in plain
   text): use `LM_APP_SECRET_FILE` instead.
 - It refuses to install without a built client (`npm run build` first), stops a copy running in a terminal, then loads
   the agent and waits up to 20 seconds for it to answer.
@@ -263,6 +270,7 @@ parses, `KeepAlive` and `RunAtLoad` are true, and the environment and log path a
 | New features do not appear after updating | Either the pull did not happen or the screens were not rebuilt. Use `npm run latest`, which does both. `npm start` also rebuilds stale screens, and the server warns at start-up when they are out of date. `curl -s localhost:4000/api/health` shows the running version |
 | `git pull` says "Your local changes to package-lock.json would be overwritten" | npm rewrote that file during an install. It is generated, so discard it: `git restore package-lock.json`, then `git pull` (or just `npm run latest`, which does this for you). Installs now use `npm ci`, which never rewrites it |
 | `npm start` serves the API but the page is empty or stale | Rebuild the client: `npm run build` (the server serves `client/dist`) |
+| The only administrator lost their phone and recovery codes, or no authenticator code works after the `app-secret` file or `LM_APP_SECRET` was lost | On the computer that runs Linear Hub: `npm run 2fa:reset -- danil@linear-mcr.co.uk` (their sign-in email; set `DB_PATH` as you do for `npm start`). It clears that person's two-step verification and signs them out everywhere; they sign in with their email, employee ID and PIN and set two-step up again. Everyone else: an administrator resets it in Team → the person → **Edit profile** (charity and client accounts: **Reset two-step** on the campaign page's **Client accounts** card) |
 | "Too many wrong PINs. Try again after …" and nobody else can reset that PIN (the only administrator), or no PIN works after the `app-secret` file or `LM_APP_SECRET` was lost | Wait for the time shown, or on the computer that runs Linear Hub: `npm run pin:reset -- danil@linear-mcr.co.uk` (their sign-in email; set `DB_PATH` as you do for `npm start`). It clears that person's PIN and lock and signs them out everywhere; they sign in with their email and employee ID and set a new PIN |
 
 ### Backups and restore
@@ -303,8 +311,9 @@ videos uploaded after the backup stay in `media/videos` with no row; delete them
 Linear Hub runs as a background service, stop it with `npm run service:uninstall` instead of `npm run stop` (macOS
 would only start it again), restore, then `npm run service:install`.
 
-**Keep the folder private and copy it off the laptop.** It holds everyone's names and pay. It also holds
-`app-secret`, a copy of the key that encrypts two-step sign-in secrets and is mixed into every sign-in PIN (mode 600):
+**Keep the folder private and copy it off the laptop.** It holds everyone's names and pay, and since 1.4 their bank
+details and the payment connections' keys (encrypted). It also holds `app-secret`, a copy of the key that encrypts
+two-step sign-in secrets, bank details and payment keys and is mixed into every sign-in PIN (mode 600):
 without it, after restoring on a new laptop people with two-step sign-in could not finish signing in and no PIN would
 match (restore puts it in place when the new laptop has none, and warns when there is no key anywhere or a different
 one). Because the key travels with the database copies, anyone with the whole folder could try every 4-digit PIN in
@@ -330,6 +339,13 @@ The image builds the client, installs production dependencies only, sets `TZ=Eur
 ### Demo accounts
 
 Sign in with the email and employee ID (matching is case-insensitive). On a freshly seeded database the sign-in page also has one-click buttons for these four.
+
+**Two-step and the demo (1.4).** The demo sign-in accounts below — the four, the charity account and the Sapiens
+seven — need no two-step code and keep 14-day sessions **while the database is still the demo** (the four demo staff
+are all there with their roles and none has left, and `LM_DEMO_ACCOUNTS` is not `0`). Anyone you add, and every client
+you invite, uses two-step even on the demo. To approve a payment the demo admin sets up two-step first (Settings →
+Security): every payment needs a fresh code. A fresh demo gives most of the people paid weekly obviously fake bank
+details (sort code 00-00-00); an existing demo database gets none.
 
 | Role | Name | Email | Employee ID |
 |---|---|---|---|
@@ -397,6 +413,7 @@ linear-micro-crm/
 │       │   ├── dashboard/           #   announcements, company section, recruiter section, upcoming events
 │       │   ├── events/              #   event form, event row, forecast chip
 │       │   ├── finance/             #   payroll runs table, payslip, add expense, bulk Mark paid
+│       │   ├── payments/            #   1.4: Settings → Payments, bank details card, provider logos, bank file formats
 │       │   ├── gauges/              #   Log gauges modal, outbox, tally, summary and entries tables, performance panel, coaching
 │       │   ├── recruitment/         #   candidate card, "Move to…" control, schedule interview, stage stepper, Record the outcome
 │       │   ├── settings/            #   two-step verification set-up and recovery codes
@@ -413,6 +430,7 @@ linear-micro-crm/
 │       │   └── maintenance.ts       # payroll materialisation, event status roll-forward
 │       ├── lib/                     # dates (business clock), pay rules, metrics, scope (role rules + redaction), validation,
 │       │   │                        #   errors, response cache, compression, backups, two-step verification
+│       │   ├── payments/            # 1.4: provider contract and registry, bank file, Revolut, Wise, TrueLayer, batches, job
 │       │   └── smart/               # 1.1 builders (pace, streaks, pay forecast, payroll checks, check-ins, event forecasts,
 │       │                            #   digest) behind the LM_SMART switch
 │       ├── middleware/              # session authentication
@@ -440,11 +458,12 @@ linear-micro-crm/
 - [`docs/USER_GUIDE.md`](docs/USER_GUIDE.md) — step-by-step for reps, leaders, recruiters and administrators, using the app's own button and tab names
 - [`docs/PITCH.md`](docs/PITCH.md) — the business case and rollout plan for Linear MCR
 - [`docs/ROADMAP.md`](docs/ROADMAP.md) — what comes next
+- [`docs/OWNER_NOTES_1.4.md`](docs/OWNER_NOTES_1.4.md) — what the owner needs to set up or decide for 1.4 (two-step for everyone, each way to pay, test mode first, what was and was not tested, two open questions)
 - [`docs/OWNER_NOTES_1.3.md`](docs/OWNER_NOTES_1.3.md) — what the owner needs to set up or decide for 1.3 (Gmail app password, company details, client accounts, videos)
 - [`docs/DEPLOY.md`](docs/DEPLOY.md) — putting Linear Hub online (HTTPS, backups off the server, a go-live checklist)
-- [`CHANGELOG.md`](CHANGELOG.md) — what changed in each release (1.3.1: the Sapiens demo logins, leaders and recruiters add people, invoice lines that say why; 1.3.0: pay, invoices, statements, clients; 1.2.0: learning, field and office; 1.1.0: the smart release)
+- [`CHANGELOG.md`](CHANGELOG.md) — what changed in each release (1.4.0: two-step for everyone, the 14-hour sign-out, paying people from Linear Hub; 1.3.1: the Sapiens demo logins, leaders and recruiters add people, invoice lines that say why; 1.3.0: pay, invoices, statements, clients; 1.2.0: learning, field and office; 1.1.0: the smart release)
 - [`docs/API.md`](docs/API.md) — the API contract and implementation notes
-- [`docs/LOGIC.md`](docs/LOGIC.md) and [`docs/DESIGN.md`](docs/DESIGN.md) — the maths (section 14: the smart release, backups and what loads when; section 15: release 1.2; section 16: release 1.3) and the design system
+- [`docs/LOGIC.md`](docs/LOGIC.md) and [`docs/DESIGN.md`](docs/DESIGN.md) — the maths (section 14: the smart release, backups and what loads when; section 15: release 1.2; section 16: release 1.3; section 17: release 1.4) and the design system
 - [`docs/LOAD_TEST.md`](docs/LOAD_TEST.md) — the load and robustness report (§10: 1.1 against 1.0 on the same machine)
 - [`docs/TEAM.md`](docs/TEAM.md) and [`docs/TEAM_CONTRACT.md`](docs/TEAM_CONTRACT.md) — who built it and how
 
@@ -469,5 +488,7 @@ A five-person squad, each owning one slice of the codebase, merged by an integra
 All sample data is **illustrative**. People, candidates, events, gauges, pay runs and expenses are generated deterministically for the last 26 weeks — but anchored to the date the seed runs, so a fresh install always looks like "this week" and every chart has something to show. Regenerate it with `npm run seed`; the figures will differ from an earlier run only because the calendar has moved. The demo names are not real employees, and the figures are not Linear MCR's actual results. Facts about the company itself (what it does, where it is registered, how its ladder works) come from public sources.
 
 ---
+
+The bank and payment logos come from the CC0 `simple-icons` package (it has no TrueLayer mark, so TrueLayer shows a "TL" monogram). Logos belong to their owners and only identify the service.
 
 © Linear MCR Limited — internal use.

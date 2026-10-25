@@ -2,6 +2,7 @@
 
 Step-by-step for everyone at Linear MCR, by role. Start with **Everyone**, then jump to your section. Buttons, tabs and fields are named exactly as they appear in the app, in **bold**.
 
+- [What's new in 1.4](#whats-new-in-14) — two-step verification for everyone, signed out 14 hours after signing in, your bank details, and paying people from Linear Hub
 - [What's new in 1.3.1](#whats-new-in-131) — the Sapiens team's demo sign-ins, leaders and recruiters can add people, and invoice lines that say why
 - [What's new in 1.3](#whats-new-in-13) — pay you can check, client accounts, learning videos, PDFs, venues and the audit
 - [What's new in 1.2](#whats-new-in-12) — learning the COD pack and your pitch, and field and office upgrades
@@ -9,10 +10,203 @@ Step-by-step for everyone at Linear MCR, by role. Start with **Everyone**, then 
 - [Everyone](#everyone) — signing in, what your role can do, your dashboard, the six gauges, logging a day, ratios and benchmarks, the Gauges page, pay and punctuality, the leaderboard, events, the team directory, settings
 - [Leaders](#leaders) — scheduling events, logging for your team, the team view, announcements
 - [Recruiters](#recruiters) — your dashboard, the pipeline, adding and moving candidates, interviews, hiring, your pay
-- [Administrators](#administrators) — campaigns, people, gauges and events for anyone, payroll, expenses, company finance
+- [Administrators](#administrators) — campaigns, people, gauges and events for anyone, payroll and paying people, expenses, company finance
 - [If something goes wrong](#if-something-goes-wrong)
 
 ---
+
+## What's new in 1.4
+
+Linear Hub 1.4 does three things. Everyone who signs in now uses **two-step verification**: a 6-digit code from an
+authenticator app on their phone. Everyone is **signed out 14 hours after signing in**. And the office can **pay
+people from Linear Hub**, in four ways, once each person has added their **bank details**.
+
+### Two-step verification for everyone
+
+Linear Hub now asks everyone who signs in for a 6-digit code from an authenticator app (Google Authenticator,
+Microsoft Authenticator, 1Password or Authy). That means administrators, team leaders, recruiters, field reps, and
+charity and client accounts alike. There are no codes by email or text message.
+
+**Setting it up (once, about two minutes).** If you have not set it up, the next time you sign in you see **Set up
+two-step verification**.
+
+1. Tap **Set up now**.
+2. In your authenticator app, add an account and scan the code Linear Hub shows. If you cannot scan it, type the key
+   shown under **Can’t scan? Enter this key instead**.
+3. Type the 6 digits the app shows and tap **Turn on**.
+4. Save your 10 recovery codes somewhere safe, away from your phone (**Copy all** or **Download .txt**), then tick **I
+   have saved these codes**.
+
+**Every sign-in from then on.** Staff: your work email and employee ID, your PIN if you have one, then the code from
+your app. Charity and client accounts: your email and access code, your PIN, then the code. There is no "remember this
+device": each sign-in asks for a new code. Codes change every 30 seconds and each one works once.
+
+**Settings → Security** (the client portal's **Security** page for charity and client accounts) shows two-step
+verification as **Required**, how many recovery codes you have left, and **New recovery codes**. It cannot be turned
+off.
+
+**If you lose your phone or get a new one.**
+- On the code screen, choose **Use a recovery code instead** and type one of your recovery codes. Each works once.
+  Then make a fresh set with **New recovery codes**.
+- No recovery codes left? Ask an administrator to reset your two-step verification. They do it in **Team → the
+  person → Edit profile → Reset two-step verification** (staff) or on the campaign page's **Client accounts** card with **Reset
+  two-step** (charity and client accounts). You are signed out everywhere, and at your next sign-in you set it up again
+  on the new phone.
+- If the only administrator loses both phone and codes, whoever looks after the computer Linear Hub runs on types
+  `npm run 2fa:reset -- <their email>` there (see [If something goes wrong](#if-something-goes-wrong)).
+
+**The demo sign-in buttons** on the sign-in page work as before (no code) while Linear Hub is still the demo. Anyone
+the office adds, and every invited charity contact, uses two-step even on the demo.
+
+### Signed out 14 hours after signing in
+
+For security, everyone is signed out 14 hours after signing in, however busy they are, and signs in again with their
+code. The sign-in page then says: "For security you are signed out 14 hours after signing in. Sign in again to carry
+on." Sign in at the start of a shift and you are fine for the whole day. The sign-out after inactivity (12 hours unless
+your administrator changed it) still applies too.
+
+Nothing is lost when it happens:
+- gauges saved without signal, or as you were signed out, wait on your phone and send after you sign in again;
+- counts you had typed into **Log gauges** but not saved are there the next time you open it for that event ("These
+  are the counts you had typed but not saved. Check them, then save."), for 24 hours;
+- a **Check in** tap that was refused because you had just been signed out is kept on the phone and sent after you
+  sign in.
+
+### Your bank details
+
+**Settings → Bank details** is where your pay goes. Choose **Add bank details** (or **Change**) and fill in **Name on
+the account**, **Sort code** (6 digits) and **Account number** (8 digits), then the **Code from your authenticator
+app**, and choose **Save bank details**. After that Linear Hub only ever shows the last digits ("••-••-34",
+"••••5678"), to you and to the administrators; leaders and recruiters never see anyone's.
+
+When you change them, the office checks the new details with you (in person or by phone) before the next payment goes
+there; until then your payment waits. That stops anyone who got into your account from sending your pay elsewhere.
+
+### Paying people from Linear Hub (administrators)
+
+**The four ways to pay.** Settings → **Payments** shows each with its logo, what it can do (✓ or ✗), its fees, **What
+you need to set it up** and **Good to know**. Logos belong to their owners and only identify the service.
+
+| | Bank payment file | Revolut Business | Wise Business | Open Banking (TrueLayer) |
+| --- | --- | --- | --- | --- |
+| How it works | Linear Hub makes a bulk payment file; you upload it to your online banking and approve it there, then mark who was paid | Linear Hub pays each person from your Revolut Business GBP account | Linear Hub creates each transfer in Wise; you pay (fund) them in Wise | Linear Hub pays each person from your TrueLayer merchant account, which you top up from your bank |
+| Pays from Linear Hub | ✗ | ✓ | ✗ | ✓ |
+| Confirms payment automatically | ✗ (you tick who the bank paid) | ✓ | ✓ | ✓ |
+| You approve the payments in your bank | ✓ | ✗ (unless your Revolut account needs an approver) | ✓ | ✗ |
+| Test mode | ✗ (a file moves nothing until you upload it) | ✓ | ✓ | ✓ |
+| Shows your balance | ✗ | ✓ | ✗ | ✓ |
+| Works with any UK business bank | ✓ | — | — | — |
+| Fees | none from Linear Hub; your bank's bulk payment charges | Revolut's transfer fees and your plan | Wise's fee per transfer, shown before you pay | per payout: check your TrueLayer agreement |
+
+**1. Connect a way to pay.** In Settings → **Payments**, choose **Connect** on the card. The form starts with **How to
+connect**: the steps in order, including the ones you do outside Linear Hub (in Revolut, Wise, the TrueLayer Console or
+on a computer). Every field says where to find the value. Keys and tokens are stored encrypted and never shown again:
+when you **Edit** a connection, leave a key empty to keep the one stored.
+- **Bank payment file**: under **File format** choose **Starling Bank bulk payments (CSV)**, **Revolut Business bulk
+  transfer (CSV)**, or the **General Faster Payments file (CSV)** for any other UK bank, then **Save connection**.
+  There is nothing to test.
+- **Revolut Business**: on a computer, make a key pair and add an API certificate in Revolut Business (Settings → APIs
+  → Business API) with any website address as the OAuth redirect URI. Copy the **Client ID**, the **OAuth redirect
+  URI** and the **Private key** into the form. Then in Revolut choose **Enable access** and allow it: Revolut opens your
+  redirect address with a code in it. Copy that whole address into **Code from Revolut** and press **Save and test**
+  straight away, because the code works for 2 minutes.
+- **Wise Business**: make a personal API token in Wise on a computer (Your account → Connect and manage apps → API
+  tokens) with full access, paste it into **API token** and press **Save and test**. Leave **Business profile ID**
+  empty unless you run more than one business in Wise.
+- **Open Banking (TrueLayer)**: ask TrueLayer to switch on payouts and open a GBP merchant account, then top it up.
+  Make a signing key on a computer with the two openssl commands shown under **Signing key ID**, upload the public key
+  in the TrueLayer Console (Payments → Settings), then paste the **Client ID**, **Client secret**, **Signing key ID**
+  and **Signing private key**, and press **Save and test**.
+
+**2. Test mode first, then live.** Revolut, Wise and TrueLayer connections start in **test mode**: they talk to the
+provider's sandbox, and nobody receives any money. The card shows **Connected**, **Not tested yet** or **Needs a look**,
+and **Test** tries it again. Make a payment in test mode first: it says **Test done: nobody paid**, each person reads
+**Test: not paid**, and the weeks stay on Runs to pay. When you are ready, choose **Switch to live** and type **PAY FOR
+REAL**. Your sandbox details do not work live, so then choose **Edit**, enter your live details (for Revolut, a new code
+too) and **Test** again; the card then says **Live: real money**. Pay one person a small amount first (yourself, for
+example) before you pay the team. **Switch to live** and **Switch to test mode** wait while a payment through that
+connection is on its way.
+
+**3. Choose who to pay.** In **Finance → Company → Runs to pay**, tick the weeks you want to pay and choose **Pay N from
+Linear Hub** (or **Pay from Linear Hub** with nothing ticked). On **Pay people**, check **1. Who to pay** (pending weeks
+and failed transfers), choose the connection under **2. How to pay**, look at **3. Review** and choose **Review
+payment**. Nothing is sent yet. **3. Review** counts people, runs and the **Total before checks**, leaving out ticked
+runs whose invoice is not accepted yet or is disputed; a run already in a draft payment says **In a draft payment**,
+and a connection that has not passed its test says "Test it in Settings → Payments first".
+
+**4. Check and approve.** The payment's page shows the total, each person with the last four digits of their account,
+and who was left out and why: no bank details yet, details changed and not yet checked, an invoice not accepted yet or
+disputed, the week not over, already paid or already in a payment. Type the **Code from your authenticator app** and
+choose the button:
+- bank payment file: **Approve and make the bank file**;
+- Revolut and TrueLayer: **Approve and pay £…** (in test mode **Approve test payment of £…**);
+- Wise: **Approve and create the transfers (£…)**: nobody is paid until you pay them in Wise.
+
+Every payment needs a fresh code, and each code works once.
+
+**5. Follow it.** The page updates by itself while payments are on their way, and **Check now** asks the provider at
+once. Linear Hub also checks every 5 minutes on its own, even when nobody is signed in, and marks each week paid when
+the provider says the money has gone. Paid weeks leave Runs to pay; a failed one stays there with **Payment failed**
+and the reason, and you can pay it again in a new payment.
+
+**With a bank payment file.** Choose **Download the bank file**; the page says where to upload it (Starling: Payments →
+Bulk Payments → New bulk payment; Revolut: Payments → Transfers → Bulk, in the web app). Upload the file as it is: if you
+open it in Excel and save it again, Excel can drop the zeros at the start of sort codes and account numbers. Approve it
+in your online banking. When the bank has paid it, come back to **Mark as paid**: everyone is ticked; untick anyone the
+bank rejected and say why in **Why the bank did not pay them**, check **Paid on**, and choose **Mark N paid**. Each line
+shows the reference written in the file (like "LINEAR 05OCT JL"), so you can find it on your statement. Someone the bank
+would refuse (Revolut needs a first and last name, for example) is left out of the file with the reason: fix their bank
+details, then pay that week again. Delete downloaded files from your computer once the bank has paid them: they hold
+full account numbers.
+
+**With Wise.** After approving, open Wise and pay the transfers Linear Hub made. They wait there until you do, and Wise
+cancels any that are not paid in time (those weeks go back to Runs to pay). **Cancel the rest** stops transfers you
+have not paid yet. If your Wise account needs payments approved by someone, Wise refuses transfers made with a token:
+switch that off for these payments, or use another way to pay.
+
+**With Revolut.** If your Revolut Business account makes payments wait for an approver, approve them in Revolut too;
+until then they show as processing. If Revolut stops accepting Linear Hub, the connection asks you to choose **Enable
+access** again in Revolut and paste the new code.
+
+**With TrueLayer.** Payouts come out of your merchant account: if one fails for lack of money, top it up and pay that
+week again.
+
+**While a payment is on its way**, **Mark paid** by hand on those weeks waits for it, so nobody is paid twice. The
+week's pay also stays as you approved it: if a gauge or a statement changes it meanwhile, the payment page and Needs
+attention say so ("Jordan Lee's pay changed while payment #3 was on its way"), and you add the difference on a later
+week as an adjustment, saying which week it corrects. If the payment fails or is cancelled instead, the week is brought
+up to date before you pay it again.
+
+**If a provider does not answer**, the payment says why (for example "TrueLayer did not answer within 15 seconds").
+Linear Hub sends the rest at the next check, or when you press **Check now**, to the account each payment was approved
+with and with the same references, so the provider never makes them twice. **Cancel the rest** stops what has not been
+paid yet; if Linear Hub is still finding out whether the provider made a payment, it asks you to press **Check now**
+first. The message after cancelling says how many were stopped and how many are still on their way.
+
+**A payment that bounces back after it was paid** (the receiving bank returns it days later) is not undone in Linear
+Hub: the week stays paid. The provider tells you; pay the person again by hand and put it on a later week as an
+adjustment.
+
+**Changed bank details.** When someone changes their bank details, Needs attention says "Thomas Grainger changed their
+bank details". Check the new details with them in person or by phone, then open **Team → the person → Bank details**
+and choose **Confirm details**. Details you type in for someone there count as checked by you.
+
+**Signed out while paying?** Being signed out 14 hours after signing in never stops a payment you already approved:
+Linear Hub keeps checking it on its own and marks the weeks paid. A bank file you approved is still there to download
+and mark paid after you sign in again.
+
+### For the administrator: Settings → Security → Sign-in rules
+
+- **Two-step verification is required for everyone**: a plain line now. The old switch "Require two-step verification
+  for administrators" is gone.
+- **Sign out after**: 4 to 24 hours from sign-in (14 hours by default). A shorter time applies at once, to everyone
+  already signed in too; a longer one from each person's next sign-in (anyone signed in now is still signed out at the
+  old time, and the sign-in page names it).
+- **Sign out after inactivity**: unchanged (12 hours by default).
+
+Adding someone (**Team → Add person**) or inviting a charity contact (the campaign page's **Client accounts** card →
+**Invite**) gives you sign-in instructions that now end with setting up two-step verification and keeping the recovery
+codes safe. People you added or invited before 1.4 got the old text, so tell them.
 
 ## What's new in 1.3.1
 
@@ -256,13 +450,15 @@ videos the server holds, how big they are and the folder they are in.
 
 **For clients (the client portal).** Sign in with your email and the access code from your invite (CL-0002…). The
 first time, create a PIN of 4 to 6 digits; you type it after your email and access code every time (a client account
-always keeps a PIN: you can change it, not remove it). **Updates** has one form: choose **Update** or **Announcement**
+always keeps a PIN: you can change it, not remove it). Since 1.4 you then set up two-step verification too, and type
+the code from your authenticator app after your PIN at every sign-in (see [What's new in 1.4](#whats-new-in-14)). **Updates** has one form: choose **Update** or **Announcement**
 (published to the Linear MCR team's Announcements straight away, with your organisation's name on it) or **Commission
 change** (a new rate per sub to the fundraiser and / or the payout per sub to Linear, and the date it starts — it waits
 for Linear MCR to approve it). If something is missing when you tap the button, the page scrolls to the first field to
 fix and puts the cursor in it. **Your posts** lists everything your
 organisation posted: Published, Waiting for Linear, Approved from Mon 2 Nov, Declined (with the reason) or Unpublished.
-**Security** shows your account and lets you change your PIN. Forgotten it? Ask Linear MCR to reset it.
+**Security** shows your account and lets you change your PIN and, since 1.4, your two-step verification (status,
+recovery codes left, **New recovery codes**). Forgotten your PIN or lost your phone? Ask Linear MCR to reset it.
 
 **For Matt (admin).** A new client post shows in **Needs attention** and the bell ("Client updates"), and as a count on
 **Campaigns** in the sidebar. **Campaigns** → a campaign → **Open page** shows the client's brief and contact, this
@@ -275,9 +471,9 @@ next to "From BCN"). The optional **Note for the office** on Approve and Unpubli
 and the audit trail); only a decline's reason reaches the client. **Edit brief** changes the description, the brief for
 the field team and the contact. **Client accounts** → **Invite** (name and email) shows the access code and the sign-in
 instructions to copy into an email (sent from the computer that runs Linear Hub, a `localhost` address, they say "Open
-the Linear Hub sign-in page": add the address the client should use); per account **Edit** (name or email; the access code stays), **Reset PIN** and
-**Turn off** / **Turn on**. "No PIN yet" means the account has not created its PIN (a new invite, after Reset PIN, or
-the demo client).
+the Linear Hub sign-in page": add the address the client should use); per account **Edit** (name or email; the access code stays), **Reset PIN**, **Reset two-step** (1.4, for a lost or new
+phone) and **Turn off** / **Turn on**. "No PIN yet" means the account has not created its PIN (a new invite, after Reset
+PIN, or the demo client); "No two-step yet" that it has not set up two-step verification.
 
 **For leaders.** The same campaign page and posts, read only (no decisions, no client accounts).
 
@@ -531,7 +727,7 @@ right PIN the count starts again from nothing. Forgotten it? Ask an administrato
 email and employee ID and choose a new PIN. If your PIN locks and you did not type the wrong PINs yourself, change it
 and tell an administrator. A 6-digit PIN is much harder to guess than a 4-digit one.
 If you are away from Linear Hub for longer than the sign-out time (12 hours unless your administrator changed it), you
-sign in again.
+sign in again. Since 1.4 you are also signed out 14 hours after signing in, whatever you are doing.
 
 **When your administrator requires a PIN.** The next time you open Linear Hub you see **Create your PIN** instead of the
 app. Type a PIN twice and tap **Save PIN**; you carry on where you were. **Sign out** is there if you are on someone
@@ -540,9 +736,8 @@ else's phone.
 **Administrators — Settings → Security → Sign-in rules.**
 - **Require a PIN for everyone.** Set your own PIN first (the switch says so). Everyone without a PIN, including people
   signed in right now, creates one before they can carry on. Demo accounts too.
-- **Require two-step verification for administrators.** Turn on your own two-step verification first. Other
-  administrators without it are signed out and set it up when they next sign in; while the rule is on, administrators
-  cannot turn their own two-step off.
+- **Require two-step verification for administrators** (1.2 to 1.3.1). Since 1.4 this switch is gone: two-step
+  verification is required for everyone (see [What's new in 1.4](#whats-new-in-14)).
 - **Sign out after inactivity.** 1 to 72 hours (12 by default). Shorter is safer for shared phones.
 
 **Administrators — resetting a PIN (Team → person → Edit profile → Sign-in PIN).** The badge shows **PIN set**, **No PIN**
@@ -1125,12 +1320,15 @@ and data (about a third of the bytes it sent before).
 ### Signing in
 
 1. Open Linear Hub at the address the office gave you. (Running it yourself: <http://localhost:5173> during `npm run dev`, or <http://localhost:4000> after `npm run build && npm start`.)
-2. Enter your **Work email** and your **Employee ID** — format `LM-0000`, e.g. `LM-0042`; it is on your welcome email and your payslip. Capital letters do not matter.
-3. Choose **Sign in**. You stay signed in on this device for up to fourteen days or until you sign out.
+2. Enter your **Work email** and your **Employee ID** — format `LM-0000`, e.g. `LM-0042`; it is on your welcome email and your payslip or invoice. Capital letters do not matter.
+3. Choose **Sign in**. If you have a PIN, type it next.
+4. Type the 6-digit code from your authenticator app and choose **Verify**. The first time, Linear Hub asks you to set two-step verification up instead (about two minutes; see [What's new in 1.4](#whats-new-in-14)).
 
-There is no password yet, so your employee ID is the second half of your credential — treat it like one. Linear Hub shows employee IDs only to administrators and to you: nobody else can read yours on the Team page, a payslip or your profile. After **eight failed attempts in fifteen minutes** the sign-in for that email is paused and the message says how many minutes to wait. If the office sets your status to **Left**, you are signed out on every device immediately.
+You stay signed in on this device for 14 hours from signing in (your administrator may choose 4 to 24 hours), or until you sign out or leave it unused for 12 hours.
 
-On a demo database the sign-in page also shows **Try a demo account** — one button per role, then **Sapiens team (7)**: open it for the seven blank Sapiens accounts (see [What's new in 1.3.1](#whats-new-in-131)). The office switches this off on the live database, so if you do not see it, that is why.
+There is no password yet, so your employee ID is half of your credential — treat it like one; the code from your app is what stops someone who knows your email and employee ID from signing in as you. Linear Hub shows employee IDs only to administrators and to you: nobody else can read yours on the Team page, a payslip or your profile. After **eight failed attempts in fifteen minutes** the sign-in for that email is paused and the message says how many minutes to wait. If the office sets your status to **Left**, you are signed out on every device immediately.
+
+On a demo database the sign-in page also shows **Try a demo account** — one button per role, then **Sapiens team (7)**: open it for the seven blank Sapiens accounts (see [What's new in 1.3.1](#whats-new-in-131)). These demo accounts need no code while Linear Hub is still the demo. The office switches this off on the live database, so if you do not see it, that is why.
 
 **Signing out:** open your avatar at the top right and choose **Sign out**.
 **Light or dark:** use the sun/moon toggle in the top bar, the **Light** / **Dark** / **Match system** entries in the same avatar menu, or **Settings → Appearance** (**Light**, **Dark**, **System**). The choice is remembered on this device.
@@ -1236,7 +1434,7 @@ Open **Finance**. Everyone lands on **My pay**:
 
 **Pay weeks run Monday to Sunday** and are **due on the Friday after the week ends** — a week ending Sunday 18 October is due Friday 23 October. When a week closes, its runs appear by themselves on the Monday as **Pending**.
 
-**Status** badges: **Pending** (not yet paid), **Paid** (on or before the due date), **Paid late**, **Failed** (the transfer bounced; the office will pay it again). A pending run past its due date also carries a red **Overdue** badge, and the **Next payday** tile on your dashboard turns red and keeps pointing at it until it is paid — money owed never drops off.
+**Status** badges: **Pending** (not yet paid), **Paid** (on or before the due date), **Paid late**, **Failed** (the transfer bounced or the payment did not go through; the office will pay it again). A pending run past its due date also carries a red **Overdue** badge, and the **Next payday** tile on your dashboard turns red and keeps pointing at it until it is paid — money owed never drops off.
 
 Leaders have a **Team pay** tab and administrators a **Company** tab; see their sections.
 
@@ -1264,7 +1462,7 @@ Open **Team**. Team chips at the top (member count and leader) filter by team; t
 
 ### Settings
 
-**Settings** shows your profile as the office holds it (**Employee ID**, **Email**, **Phone**, **Position**, **Role**, **Team**, **Pay plan**, **Start date**, **City** — ask an administrator to change anything), **Appearance**, **Security** (turn on **Two-step verification** with an authenticator app, so a six-digit code is needed after your email and employee ID) and **About this app** (version and when the sample data was seeded). Administrators also see **Backups** (see [What's new in 1.1](#backups-and-running-in-the-background-administrators)).
+**Settings** shows your profile as the office holds it (**Employee ID**, **Email**, **Phone**, **Position**, **Role**, **Team**, **Pay plan**, **Start date**, **City** — ask an administrator to change anything), **Appearance**, **Security** (**Two-step verification**, required for everyone since 1.4: your recovery codes left and **New recovery codes**; and your **Sign-in PIN**), **Bank details** (where your pay goes, since 1.4; see [Your bank details](#your-bank-details)) and **About this app** (version and when the sample data was seeded). Administrators also see **Backups** (see [What's new in 1.1](#backups-and-running-in-the-background-administrators)) and **Payments** (see [Paying people from Linear Hub](#paying-people-from-linear-hub-administrators)).
 
 ---
 
@@ -1308,7 +1506,7 @@ Team Leaders and Crew Leaders can add a new trainee or field representative to t
 4. **Sign-in details** opens: their name, team, email and **Employee ID**. Choose **Copy instructions** and paste them into
    a message to the new person — they say which address to open (the one your phone or laptop is using), and to enter the
    email and the employee ID. On the computer that runs Linear Hub (an address starting `localhost`), they say "Open the
-   Linear Hub sign-in page" instead, because that address would not open on their phone: add the address they use. The button changes to **Copied** once they are on your clipboard. This is the only time
+   Linear Hub sign-in page" instead, because that address would not open on their phone: add the address they use. Since 1.4 they also say to set up two-step verification with an authenticator app at the first sign-in. The button changes to **Copied** once they are on your clipboard. This is the only time
    you see their employee ID: afterwards only administrators (on the **Team** page) and the person themselves can. A tap
    beside the box does not close it; choose **Done** when you have sent them.
 
@@ -1369,8 +1567,9 @@ pipeline; a hire from the pipeline creates the account by itself).
 1. Open **Team** and choose **Add person**.
 2. Fill in **First name**, **Last name**, **Email**, **Phone** (optional), **Position** (**Trainee** or **Field
    Representative**), **Team** (choose one) and **Start date**, then **Add person**.
-3. In **Sign-in details**, choose **Copy instructions** and send them to the new person. Their employee ID is shown only
-   this once (if it gets lost, an administrator can find it on the **Team** page); then **Done**.
+3. In **Sign-in details**, choose **Copy instructions** and send them to the new person (they include setting up
+   two-step verification at the first sign-in). Their employee ID is shown only this once (if it gets lost, an
+   administrator can find it on the **Team** page); then **Done**.
 
 As for leaders, the role, pay plan, status, avatar colour and employee ID are the office's to set.
 
@@ -1392,6 +1591,8 @@ Open **Campaigns** (tabs **Active**, **Inactive**, **All**). Choose **New campai
 
 On **Team**, choose **Add person**: **First name**, **Last name**, **Work email**, **Employee ID** (format `LM-0000`; used with the email to sign in — leave it blank for the next free ID), **Role** (Administrator, Leader, Recruiter or Representative), **Position** (Trainee, Field Representative, Team Leader, Crew Leader, Assistant Owner, Owner or Recruiter), **Team**, **Pay plan**, **Start date**, **Status** (Active, On leave, Left), **Phone**, **City** and **Avatar colour**; then **Add person**. To change anything, open the person and choose **Edit profile**, then **Save changes**. Someone added without a surname (the Sapiens demo accounts) can be saved with **Last name** still empty until you add one; once given, a surname cannot be cleared. Recruiters and leaders can add trainees and field representatives too (see [Leaders](#adding-a-person-leaders)); each addition is in the audit trail under the person who made it.
 
+Each person's page (Team → the person) also shows their **Bank details**, masked: **Ready for payments**, waiting for your check (**Confirm details**, once you have checked the new details with them in person or by phone), or none yet (**Add bank details** lets you type them in for them). In **Edit profile**, **Reset two-step verification** is for a lost or new phone: they set it up again at their next sign-in.
+
 When someone leaves, set their **Status** to **Left**: they are signed out everywhere at that moment and can no longer sign in; their gauges, pay runs and history stay so the numbers still add up. You cannot set your own status to Left. Only administrators see other people's employee IDs — on the Team page, profiles and payslips — and the Team search finds people by ID for administrators only.
 
 ### Gauges and events for anyone
@@ -1405,6 +1606,11 @@ You can **Log gauges** at any team's event for any active member of that team (a
 3. Once the money has gone, choose **Mark paid**. The run is recorded as paid **today** and becomes **Paid** if today is on or before the due date, otherwise **Paid late**; you will see "Marked paid" or "Marked paid (late)". A run that is already paid cannot be paid twice. When the list is empty it says "Everyone is paid up".
 
 Make this a Friday routine: pay weeks close on Sunday, their pending runs appear on Monday, and they are due the following Friday. A **Failed** run (a transfer that bounced) stays in Runs to pay until you mark it paid again.
+
+4. Or pay them from Linear Hub (1.4): tick the runs and choose **Pay N from Linear Hub**, then follow
+   [Paying people from Linear Hub](#paying-people-from-linear-hub-administrators). A run in a payment shows **In a
+   draft payment**, **Payment on its way** or **Payment failed** (with the reason); while a payment is on its way,
+   **Mark paid** on that week waits for it, so nobody is paid twice.
 
 ### Expenses
 
@@ -1436,6 +1642,14 @@ From the repository root, `npm run seed` rebuilds the database with the determin
 | "We couldn’t match that email and employee ID." | One of them is wrong, or your status is Left. | Check both against your payslip, then ask the office. |
 | "Too many attempts, try again in N minutes" | Eight failed sign-ins for this email in fifteen minutes. | Wait the stated minutes; a successful sign-in resets the count. |
 | "Your session has ended" | Your sign-in expired or was revoked. | Sign in again; you return to where you were. |
+| "For security you are signed out 14 hours after signing in. Sign in again to carry on." | It is 14 hours (or the time your administrator chose) since you signed in. | Sign in again with your code. Anything waiting on your phone sends after you sign in. |
+| **Set up two-step verification** instead of the app | Two-step verification is required for everyone since 1.4, and you have not set it up yet. | Tap **Set up now** and follow the steps (about two minutes). **Sign out** if it is not your phone. |
+| "That code is not valid" when signing in | The code was mistyped, already used, or your phone's clock is wrong. | Wait for the next code and type it. Check your phone sets its time automatically. Or **Use a recovery code instead**. |
+| You lost your phone, or got a new one | Your authenticator app was on it. | Sign in with a recovery code, then **New recovery codes**. No codes left: ask an administrator to reset your two-step verification. The only administrator: `npm run 2fa:reset -- <your email>` on the computer Linear Hub runs on (in the `linear-micro-crm` folder). |
+| "That code is not right. Codes change every 30 seconds and each one works once…" when approving a payment or saving bank details | The code was old, mistyped or already used for something else. | Wait for the next code in your app and try again. |
+| **Payment failed** on a run in Runs to pay | The provider or your bank did not pay it; the reason is in the badge's tooltip and on the payment's page. | Fix what the reason says (bank details, a top-up), then pay that week again in a new payment, or **Mark paid** once you have paid it another way. |
+| "Test it in Settings → Payments first" on Pay people | The connection's last test did not work, or it has not been tested since its details changed or it was switched to live. | Open Settings → **Payments** and choose **Test**; the card says what went wrong. |
+| A payment says a provider "did not answer" | The provider was slow or offline when Linear Hub sent it. | Nothing is paid twice: press **Check now** later, or wait for the 5-minute check. |
 | "This area isn't available on your account" | Your role cannot open that page (recruiters and the Gauges page, for example). | Use **Back to dashboard**; speak to your crew leader or the office if you think you should have access. |
 | **Not saved.** "Invalid funnel" | One stage is larger than the one before it. | Fix the stage named in the message. |
 | **Not saved.** "Gauges are recorded against the event's date" or "Gauges cannot be recorded before the event takes place" | The entry was for a date other than the event's, or the event is in the future. | Pick the right event; log it on or after the day it runs. |
@@ -1450,4 +1664,4 @@ From the repository root, `npm run seed` rebuilds the database with the determin
 | **1 entry needs a look** | Linear Hub already had an entry for that day that this phone had not seen — someone else's correction, or your own earlier entry when the phone could not check for it before saving — or the entry you were changing was deleted while yours waited. | Tap **Review** to see both versions, then **Send mine anyway**, **Open** or **Discard**. |
 | A strip or card you expected is missing (pace note, pay estimate, **Needs attention**) | There is not enough history yet, or the office has switched the smart features off. | Nothing to do; the rest of the page works as before. |
 
-*Linear Hub v1.1.0 — © Linear MCR Limited, internal use.*
+*Linear Hub v1.4.0 — © Linear MCR Limited, internal use.*

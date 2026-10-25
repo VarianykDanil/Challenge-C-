@@ -15,6 +15,7 @@ no I/O, no React) and is unit-tested with `node:test` (`npm run test -w shared`)
 | `logic/insights.ts` | coaching messages |
 | `logic/stats.ts` | 1.1: mean, sample SD, z-scores, binomial and two-proportion z, Poisson tail, quantiles, weekly series |
 | `logic/baseline.ts` · `streaks.ts` · `payForecast.ts` · `payrollFlags.ts` · `signals.ts` · `attention.ts` · `eventForecast.ts` · `outbox.ts` · `digest.ts` | 1.1 smart release modules — see section 14 (recruitment SLAs and the outcome rule are in `logic/recruitment.ts`, §14.8) |
+| `logic/payments.ts` · `bankFiles.ts` (and the session limit in `logic/pin.ts`) | 1.4: pence, bank details, the four ways to pay and their abilities, batch statuses, bank file formats — see section 17 |
 
 ---
 
@@ -293,8 +294,9 @@ useful, and renders `EmptyChart` when there is nothing to plot.
 
 ## 13. Two-step verification (server-side, `server/src/lib/totp.ts`)
 
-Not domain logic, but rules worth stating once. The server implements RFC 4226 (HOTP) and RFC 6238 (TOTP)
-with Node's `crypto` only — no third-party OTP library:
+Not domain logic, but rules worth stating once. Since 1.4 two-step verification is required for every account that
+signs in, client accounts included, except the demo sign-in accounts while Linear Hub is still the demo (§17.1). The
+server implements RFC 4226 (HOTP) and RFC 6238 (TOTP) with Node's `crypto` only — no third-party OTP library:
 
 * **Secret**: 20 random bytes, shown as RFC 4648 base32 without padding (32 characters, `A–Z2–7`).
 * **Code**: `HOTP(secret, T)` where `T = floor(unixSeconds / 30)`; HMAC-SHA1, dynamic truncation
@@ -673,7 +675,7 @@ disappears.
 | `recruitment:today` | recruiter, leader, admin | info | My pending interviews in the next 24 h (I am the interviewer, or nobody is and I own the candidate), up to 3 listed. |
 | `payroll:to-pay` | admin | danger if any run is overdue, else warning | `inRunsToPay`: pending runs with `week_start` in GET /finance/payroll's default window (Monday of this week − 12 weeks … today) plus **failed runs of any age** (a failed transfer is wages still owed), so the number matches **Runs to pay** (`?status=pending,failed` with no range lists exactly these): "29 runs to pay · £24,540 · 6 failed transfers". Body: "1 is overdue: it was due Fri 28 Aug. Paying it first is the lever." / "3 are overdue: the oldest was due … Paying those first is the lever." / "The next one is due …". Pending runs older than the window are not counted here (they are not on Runs to pay either); their owner's `pay:overdue` says so. |
 | `payroll:due-today` | admin | warning | On a Friday with runs due that day. |
-| `security:2fa` | admin | info | The admin's own two-step verification is off. |
+| `security:2fa` | admin | info | The admin's own two-step verification is off. Since 1.4 only an exempt demo admin can see it: everyone else sets two-step up before they get past the sign-in (§17.1). |
 
 **Own-gap window (lead decision).** `gauges:event` covers THIS PAY WEEK: from `mondayOf(today)` to yesterday, and today
 once today's event has ended. An unlogged Monday is therefore still asked for on Thursday, Friday and over the weekend,
@@ -1732,13 +1734,16 @@ happens, which is the cue to change the PIN and tell an administrator.
 session's user row (no stale flag). Sign-in still succeeds for someone without a PIN; the gate then holds them at
 "Create your PIN". An open session meets the gate on its next request. Setting a PIN lifts it at once.
 
-**Require two-step for administrators.** `twoFactorSetupRequired = requireAdminTwoFactor && role = admin && two-step
-not on`. Switching it on needs your own two-step on (409 otherwise) and signs out the other administrators without it,
-so they meet the setup step at their next sign-in. While it holds, an administrator cannot turn two-step off (409); an
-administrator's lost-device reset (`POST /users/:id/2fa/reset`) still works and they set it up again at sign-in.
+**Require two-step for administrators** (1.2 and 1.3; replaced in 1.4). `twoFactorSetupRequired =
+requireAdminTwoFactor && role = admin && two-step not on`. Switching it on needed your own two-step on (409 otherwise)
+and signed out the other administrators without it. **Since 1.4** two-step is required for every account but the demo
+sign-in accounts (`twoFactorSetupRequired = !twoFactorEnabled && !demoSignIn`, §17.1); the stored switch is still
+read, returned and accepted but decides nothing, and Settings shows the plain line "Two-step verification is required
+for everyone" instead.
 
-**Sessions.** A session ends when it is 14 days old (unchanged) **or** idle for longer than the admin's
-`sessionIdleHours` (default 12, 1–72), measured on the real clock from `sessions.last_seen_at` (else `created_at`). The
+**Sessions.** A session ends when it is 14 days old (1.2 and 1.3; **since 1.4, `sessionMaxHours` after sign-in, 14 by
+default, whatever the activity**, except the demo sign-in accounts, which keep 14 days: §17.2) **or** idle for longer
+than the admin's `sessionIdleHours` (default 12, 1–72), measured on the real clock from `sessions.last_seen_at` (else `created_at`). The
 check is strict (exactly on the limit is still alive). `authenticate` deletes an idle session on sight (→ 401) and
 refreshes `last_seen_at` at most once a minute (`LAST_SEEN_RESOLUTION_MS`), so the timeout costs one small write a
 minute per active session, not one per request. The 15-minute sweep (`purgeExpiredSessions`) also deletes idle
@@ -1755,8 +1760,8 @@ it), so a change applies on the very next request and a read-only request costs 
   while" when 3 or fewer remain; locked → the server's own sentence with the unlock time; locked or `429` → the field
   stays disabled with the reason until Back.
 - `auth/PinSetupGate.tsx` (around the signed-in shell) shows the lazy full-screen steps from `auth/PinSetupStep.tsx`:
-  "Create your PIN" (PIN twice, the shared rules as you go) and, for administrators, "Set up two-step verification"
-  (the Settings setup modal). Once that modal opens, the step stays until it closes, so the recovery codes are never
+  "Create your PIN" (PIN twice, the shared rules as you go) and "Set up two-step verification" (the Settings setup
+  modal; for administrators when required in 1.2 and 1.3, for every account but the demo sign-in ones since 1.4). Once that modal opens, the step stays until it closes, so the recovery codes are never
   swept away when /auth/me stops asking. It listens for `PIN_SETUP_REQUIRED_EVENT` and re-reads /auth/me (one request
   at a time).
 - `auth/AuthProvider.tsx`: a signed-in tab coming back to the front re-reads /auth/me (at most once a minute), so an
@@ -1890,7 +1895,7 @@ funnel rule in plain English.
 - **Settings**: the before of a change is the settings as they are stored when the request arrives (U1's keys in
   `meta`), so a change made outside the app still reads true. Only when they cannot be read is it what the last
   recorded settings change left, or the documented defaults (PIN not required, two-step for administrators not
-  required, 12 hours).
+  required, 12 hours idle; since 1.4 also 14 hours from sign-in).
 - **Not recorded**: reads, failed requests, step one of a two-step sign-in (no session yet), announcement read
   receipts (their own table), and **writes that changed nothing**:
   - a check-in replay answered "already recorded" (the first check-in stands): the route's answer decides (`201` new,
@@ -2188,8 +2193,8 @@ Pay you can check (base or commission, cancellations from the clients' statement
 #### Database extensions (`server/src/db/extensions/`)
 
 `index.ts` (foundation) runs, in this fixed order: learning, pitches, pin, audit, checkins (1.2), then **pay (P1),
-invoices (P2), statements (P3), videos (P5), client (P6), recruitment (P7), venues (P8)**, and from 1.3.1
-**sapiens** (§16.10). P4 adds none; P9 owns the 1.2 `audit.ts`. The rules of `types.ts` stand (CREATE TABLE IF NOT EXISTS, `addColumnIfMissing`, data steps guarded with
+invoices (P2), statements (P3), videos (P5), client (P6), recruitment (P7), venues (P8)**, from 1.3.1
+**sapiens** (§16.10), and from 1.4 **payments** (§17.3). P4 adds none; P9 owns the 1.2 `audit.ts`. The rules of `types.ts` stand (CREATE TABLE IF NOT EXISTS, `addColumnIfMissing`, data steps guarded with
 meta flags and skipped on an empty database, INSERT OR IGNORE, report only real changes, rows both databases need in
 both `upgrade` and `seed`, `ctx.rng(salt)`, never gauge rows or payroll runs from an extension). 1.3 adds:
 
@@ -2645,7 +2650,9 @@ a team leader opening a team member's invoice sees the name, the VAT registratio
 **Mark paid.** Accepted, deemed accepted or resolved → paid. Issued and before its deadline → a reason is needed
 ("Mark paid anyway", in the invoice). Disputed → held: resolve it first (Keep as it is makes it payable at once). A
 version issued late (on payday, say) waits for the person like any other: they accept it, or the office pays it with a
-reason, or it counts as accepted 24 hours later.
+reason, or it counts as accepted 24 hours later. Since 1.4 the check lives in `lib/markPaid.ts`, which a payment made
+from Linear Hub uses too, and a run in an approved payment still on its way is refused (409 `in_payment`, §17.6); an
+invoice cannot be reissued with a correction while its week's payment is on its way (§17.8).
 
 **Bulk Mark paid.** Selected runs whose invoice is not accepted are not sent (`payableRuns`); the bar says how many
 ("18 invoices not accepted yet: skipped"), the confirm step for runs with checks counts and lists only the runs that
@@ -3010,7 +3017,8 @@ on an unpaid week is P1's: `applyConfirmedSales(…, { replacesStatementId })`.
   first sign-in (email + access code) lands on **Create your PIN** and the gate holds every other route until it is set;
   every later sign-in asks for the PIN. The seeded demo client (recognised by the marker the seed or the 1.3.1 step
   writes) is exempt unless the
-  admin requires a PIN for everyone. `pinStatusFor` reports `required: true` for client accounts, so neither Settings nor
+  admin requires a PIN for everyone. Since 1.4 a client account also sets up two-step verification after its PIN and
+  types a code at every sign-in (§17.1); the demo client is exempt while Linear Hub is still the demo. `pinStatusFor` reports `required: true` for client accounts, so neither Settings nor
   the portal offers **Remove**, and `POST /auth/pin/remove` refuses a client account (409 "A PIN is required for client
   accounts…"; a two-line check in the foundation's `routes/auth.ts`). Whole truth table in `client-portal-seed.test.ts`.
 - **Read receipts** (`client_post_reads`, new table of the client extension): one per (post, person), real clock. A
@@ -3484,3 +3492,515 @@ client's campaign is a charity; otherwise **Client accounts**) and shows "Hannah
 - **Invoice lines say why.** Each invoice line from the pay breakdown carries its note, shown in grey under the
   description on screen and in the PDF; stored invoices are never rewritten for it (§16.2, Line notes).
 - **The crypto test's key file.** `crypto.test.ts` no longer reads or creates `server/data/app-secret` (§16.0).
+
+## 17. Release 1.4
+
+Two decisions from the owner and one new ability. In his words: "charity must have 2fa and same as everyone who log
+ins" (two-step verification with an authenticator app for **every** account that signs in), "every 14 hours everyone
+gets signed out and they have to do log in and 2af" (a session ends 14 hours after sign-in, whatever the activity), and
+paying people from Linear Hub with "those different abilities of each bank api and also add their icons" (four ways to
+pay, each saying plainly what it can and cannot do, each with its logo). The packages were S (security, §17.1–17.2), F
+(the payments foundation, §17.3–17.9), P (the bank payment file, §17.10) and A (Revolut Business, Wise Business and
+TrueLayer, §17.11–17.13); §17.14 is how two-step and payments behave together. Pay maths does not change in 1.4:
+payments move the amounts the payroll runs already hold.
+
+### 17.1 Two-step verification for everyone (S)
+
+**Who must use it.** `lib/pin.ts accountFlags`: `twoFactorSetupRequired = !twoFactorEnabled && !demoSignIn`, for every
+role — admin, leader, recruiter, rep and client. The PIN rule (§15.3, §16.6) is unchanged. The 1.2 switch "Require
+two-step verification for administrators" no longer decides anything: its meta key `ext:pin:require-admin-2fa` is still
+read, returned and accepted by `PUT /auth/security-settings` (nothing stored is lost), but there is no lock-out check and
+nobody is signed out by it. Settings → Security → Sign-in rules shows the plain line **Two-step verification is
+required for everyone** in its place.
+
+**The demo exemption** (`lib/demoTeams.ts isDemoSignInAccount(db, user)`, next to `demoStepAllowed`, §16.10). True only
+while Linear Hub is still the demo — `LM_DEMO_ACCOUNTS` is not `0`, the database is one the demo seed built (meta
+`seeded_at` and `seed_today`), its core rows exist and the four demo staff are intact (present, with their roles, none
+left) — **and** the account is one the sign-in page's demo buttons list: one of the four by employee ID and role
+(`DEMO_STAFF`), a team Sapiens account by the seed's marker (`seed_demo_teams`: same id, employee ID and email; staff),
+or the demo charity account by its marker (`seed_demo_clients`, `matchesDemoClient`). Everyone else must use two-step:
+anyone Matt adds, every invited client, even on the demo database; and nobody is exempt once the database is in real
+use (a demo person left or changed role) or with `LM_DEMO_ACCOUNTS=0`. The database half is cached per data version
+(every write request moves it), so the check costs nothing per request. The demo charity account stays exempt if it
+sets a PIN (it is recognised by the marker, as for the PIN rule), though the sign-in page lists it only while it has
+no PIN.
+
+**The setup gate** (`middleware/auth.ts pinSetupGate`, after `authenticate`). The PIN step comes first, as before.
+Then, while `twoFactorSetupRequired`, every `/api` request — the client portal's `/client/*` included — answers
+`403 { error: "Set up two-step verification to carry on", twoFactorSetupRequired: true }`, except `/health`,
+`/auth/me`, `/auth/logout`, `/auth/login`, `/auth/login/2fa`, `/auth/demo-accounts`, `/auth/pin`, `/auth/2fa`,
+`/auth/2fa/setup` and `/auth/2fa/enable`. The gate answers before any role check, write limit or audit step. The
+client guard (`middleware/clientGuard.ts`) now also lets a client session reach `/auth/2fa` and `/auth/2fa/*` (its own
+status, setup, enable, new recovery codes); everything else outside the portal stays `403 clientPortalOnly`.
+
+**Every sign-in asks for the code.** An account with two-step on always gets the challenge after its email and
+employee ID (client accounts: email and access code) and its PIN when it has one; there is no "remember this device".
+A client account signs in as email + access code → PIN → code, and sets two-step up during sign-in after its PIN.
+`POST /auth/2fa/disable` answers `409` "Two-step verification is required for every account, so it cannot be turned
+off. If you have lost your phone, ask an administrator to reset it." for an account that must use it, checked before
+any code (so no code is spent or recorded); the demo sign-in accounts may still turn it off with a code.
+`GET /auth/2fa` adds `required`.
+
+**Resets.**
+- Staff: `POST /users/:id/2fa/reset` (Team › Edit › **Reset two-step verification**) is unchanged, but the person now
+  sets two-step up again at their next sign-in (before 1.4 they signed in without it). An admin's own id is still
+  `400`, now naming the way out (a recovery code, or `npm run 2fa:reset`).
+- Client accounts: `POST /client-accounts/:id/reset-2fa` (the campaign page's **Client accounts** card, **Reset
+  two-step**, shown while the account has two-step on and is active) clears the secret, the half-done setup, the
+  recovery codes and open sign-in challenges, and signs the account out everywhere. Audited (`lib/audit/securitySpecs.ts`,
+  entity `client_account`, `twoFactor` true → false, never a secret) and under the per-person write limit.
+- The server command `npm run 2fa:reset -- <email>` (`server/src/twoFactorReset.ts`, like `npm run pin:reset`) is the
+  way back when no administrator can do it in the app: the only administrator lost phone and recovery codes, or the
+  app secret was lost so no authenticator code matches (the secrets are encrypted with it; recovery codes are hashes
+  and still work). It clears that person's two-step, signs them out on every device and writes an audit row with no
+  actor (action `npm run 2fa:reset`, "Reset two-step verification from the server command: Danil Varianyk"; snapshots
+  say only `twoFactor`). The PIN is left alone. Honours `DB_PATH`; exit code 0 when done or nothing to reset, 1 for no
+  email, no database, a file that is not a Linear Hub database, or no one with that email. Works while the server runs.
+
+**Sign-in instructions.** `staffSignInInstructions` (`POST /users`) and `clientInviteInstructions`
+(`POST /campaigns/:id/client-accounts`) end with the two-step step, after the PIN step when there is one ("The first
+time, set up two-step verification. You need an authenticator app on your phone (Google Authenticator, Microsoft
+Authenticator, 1Password or Authy) …"), and the closing line names the recovery codes and what to do about a lost
+phone. Neither text is ever for a demo sign-in account (a new person or a new client account never is one).
+
+**Client.** `features/settings/TwoFactorSection.tsx` is the one card for staff (Settings → Security) and the client
+portal's **Security** page: status, recovery codes left, **New recovery codes**, **Set up**, and **Required** in place
+of **Turn off** for an account that must use it. The gate's setup step (`auth/PinSetupGate.tsx`) is the same modal for
+every role; an open session that meets the gate after the upgrade re-reads `/auth/me` and shows the step without a
+reload (`api/client.ts` announces `twoFactorSetupRequired` with the event `pinSetupRequired` already used).
+
+### 17.2 Sessions end 14 hours after sign-in (S)
+
+**The rule.** A session ends `sessionMaxHours` after sign-in (default **14**; the admin chooses whole hours from 4 to 24
+in Settings → Sign-in rules → **Sign out after**), whatever the activity: `last_seen_at`, the idle timeout's clock,
+never moves it. The idle timeout (`sessionIdleHours`, default 12, §15.3) still applies on its own. Real clock, like the
+idle timeout and the PIN lock; `LM_BUSINESS_NOW` never moves it. Shared `isSessionPastMaxAge(signedInMs, nowMs,
+hours)`: at exactly the limit the session has ended (13:59 alive, 14:00 and 14:01 ended); an unreadable sign-in time
+counts as ended. The demo sign-in accounts (§17.1) keep the old 14-day session.
+
+- **New sessions** (`createSession`) get `expires_at = sign-in + sessionMaxHours` and a cookie with the same Max-Age
+  (50,400 s by default; 14 days for a demo sign-in account). The sign-in answers and `GET /auth/me` carry `session:
+  SessionInfo { signedInAt, endsAt, maxHours }` (`maxHours: null` for a demo sign-in account).
+- **Every request** (`authenticate`) checks the limit against the session's `created_at` and the **current** setting,
+  so a shorter setting applies at once and a session made before 1.4 (14-day `expires_at`) that is older than 14 hours
+  ends at its next request. That request gets `401 { error: sessionMaxAgeMessage(hours), details: { sessionEnded:
+  "max_age", maxHours } }` — "For security you are signed out 14 hours after signing in. Sign in again to carry on." —
+  the session is deleted and the cookie cleared; later requests get a plain 401. When a session is both idle and over
+  the limit, the limit is named.
+- **A longer setting applies from each person's next sign-in.** A session keeps the `expires_at` and cookie it got at
+  sign-in, so after the admin raises the limit (say 14 → 24) a session signed in under 14 still ends at 14 hours. Its
+  own lifetime (`expires_at − created_at`, rounded to whole hours) is what `/auth/me` reports as `maxHours` while it is
+  shorter than the current limit, so the sign-in page names the hours that really applied. A request that still sends
+  the cookie after that expiry (a session 1.4 made with a limit: own lifetime 4–24 hours, never a demo account's or a
+  1.3 session's 14 days) is ended as the limit too, naming the shorter of its own hours and the current setting.
+- **Audit.** Each automatic sign-out is one row: action `SESSION max-age`, kind `sign_in`, filed under the person, no
+  actor: "Signed out 14 hours after signing in (signed in 07:02 Fri 23 Oct)" (London time). Written by the request
+  that ends the session, and by the start-up / 15-minute sweep (`purgeExpiredSessions`) for sessions whose limit and
+  cookie ran out unused — **one row per person**, however many devices (only sessions 1.4 made with a limit; a demo
+  account's or a 1.3 session's 14 days go quietly as before). It is not activity: `GET /audit/person` leaves it out of
+  `lastActiveAt`, and `signIns=0` leaves it out with the other sign-in rows.
+- **The sign-in page says why** (`client/src/api/sessionEnd.ts`): from the 401's reason, or — usually, because the
+  browser drops the cookie at the same moment — from the `session.endsAt` the server gave at sign-in and on `/auth/me`
+  (kept in localStorage per device; a plain 401 within 2 minutes of it, or after it, is the limit). Signing out by hand
+  forgets it. `/` goes to the sign-in page rather than the public landing page while there is something to say, and
+  the generic "Your session has ended" toast is skipped.
+
+**Nothing is lost in the field.**
+- **Gauge outbox** (`features/gauges/outbox.ts`): one localStorage key per person (`lm-gauge-outbox:<userId>`), kept
+  across a sign-out and replayed after the next sign-in. A 401 stops the replay with every item still waiting; new in
+  1.4, so does the setup gate's 403 (PIN or two-step still to set up), which used to mark an item failed.
+- **Check-in outbox**: already per person and stops on 401; the gate's 403 for two-step now keeps the item waiting too.
+- **Log gauges**: a save answered 401 (signed out as it was sent) is kept on the phone and sent after the next sign-in
+  ("Saved on this phone — it sends after you sign in again"). Counts typed but not saved when the form goes away
+  without a save or a close (the app moved to the sign-in page, the tab was hidden or dropped) are kept for 24 hours
+  (`features/gauges/gaugeDraft.ts`, `lm-gauge-draft:<userId>`) and the next **Log gauges** for that event (or with no
+  event chosen) starts from them: "These are the counts you had typed but not saved. Check them, then save." Saving or
+  closing forgets them. A one-tap check-in answered 401 is kept on the phone too.
+
+**Upgrade.** Sessions made before 1.4 that are older than 14 hours end at their next request, with the same sentence;
+younger ones carry on until they are 14 hours old. Everyone without two-step (staff and every invited client) meets
+the setup step at their next sign-in, or at their next tap if signed in at the upgrade.
+
+### 17.3 Payments: the tables (`server/src/db/extensions/payments.ts`, F)
+
+Appended after the 1.3 and 1.3.1 extensions. Packages P and A add nothing to the schema. An existing database gains
+the four tables (and the review-fix columns on a database that tried an earlier 1.4 build) and keeps its data.
+
+- `bank_accounts (user_id PK → users ON DELETE CASCADE, holder_name, sort_code_enc, account_number_enc, last4,
+  sort_code_last2, changed_at, changed_by, confirmed_by_admin_at, confirmed_by)` — one per person; the numbers
+  encrypted with `lib/crypto.ts`, only `last4` and `sort_code_last2` ever shown.
+- `payment_connections (id, provider 'bank_file'|'revolut'|'wise'|'truelayer', name, mode 'test'|'live',
+  settings_json, secrets_enc, status 'not_connected'|'connected'|'error', last_checked_at, last_error, balance_pence,
+  created_at, created_by, live_confirmed_at, live_confirmed_by, disconnected_at)` — `settings_json` holds the non-secret
+  settings (the file format, a profile or account id), `secrets_enc` ONE encrypted JSON of the secrets (NULL once
+  disconnected). Tests and `LM_PAYMENTS_FAKE=1` also use `fake` / `fake_file`.
+- `payment_batches (id, connection_id, provider, mode, created_at, created_by, approved_at, approved_by, total_pence,
+  count, status 'draft'|'submitted'|'processing'|'completed'|'partly_failed'|'failed'|'cancelled', file_name,
+  idempotency_key UNIQUE, provider_ref, skipped_json, file_enc, last_error, updated_at, cancelled_at, cancelled_by)` —
+  `provider` and `mode` are copied at creation; `file_enc` is the bank file, encrypted (it holds account numbers).
+- `payment_items (id, batch_id → payment_batches ON DELETE CASCADE, payroll_run_id, user_id, week_start, amount_pence
+  > 0, payee_name, account_last4, status 'queued'|'submitted'|'processing'|'paid'|'failed'|'cancelled', provider_ref,
+  failure_reason, submitted_at, paid_at, updated_at, note, live 0|1, payee_enc, attempted_at)`. `payee_enc` is the sort
+  code and account number the item was **approved** with (encrypted JSON); `attempted_at` is when it was first handed
+  to the provider (NULL: never sent). A partial UNIQUE index `idx_payment_items_live_run ON (payroll_run_id) WHERE
+  status NOT IN ('failed','cancelled') AND live = 1`: a run can never be in two live payments. No foreign key to
+  `payroll_runs` or `users` (the pay rules may remove and remake an unpaid run, and payment history outlives both), so a
+  run is also matched by (user, week).
+- Times are on the business clock (`nowISO()`), like pay adjustments; the code limiter is on the real clock.
+- **Demo seed** (fresh databases only): obviously fake bank details — sort code 00-00-00, account number `0000` + the
+  person's id — for the people paid weekly; every ninth person has none (to show "No bank details yet"), and one
+  changed theirs yesterday and waits for the admin's check. No connection and no payment. An existing demo database
+  gains no bank details (they would be fake details on real people Matt may have added).
+
+### 17.4 Money and bank details (`shared/src/logic/payments.ts`, F)
+
+- **Pence everywhere in payment code.** `poundsToPence(gross)` converts a run's two-decimal pounds once, exactly (1.15 →
+  115, never 114.99…), and throws on anything with more decimals; `sumPence` refuses anything that is not a whole
+  number; `formatPence` shows "£1,234.50". Revolut and Wise are sent pounds as a decimal made from those pence (6350 →
+  63.5), TrueLayer pence (`amount_in_minor`), a bank file pounds with two decimals by integer arithmetic.
+- **Bank details.** `normaliseSortCode` (6 ASCII digits) and `normaliseAccountNumber` (8), spaces and dashes ignored;
+  `validateBankDetails` gives one message per wrong field (holder name 2–70 characters of letters in any alphabet,
+  digits, spaces and `. , ' ’ & / -`); `maskSortCode` "••-••-34", `maskAccountNumber` "••••5678".
+- `defaultPaymentReference(weekStart, payeeName)` → "LINEAR 05OCT JL" (upper-case A–Z, 0–9 and spaces, at most 18
+  characters, the Faster Payments limit; the first and last initials when a name has more than two words). A bank
+  format may clean it further (§17.10).
+- `batchStatusFromItems`: anything waiting → `submitted` (nothing back yet) or `processing`; otherwise, ignoring
+  cancelled items, all paid → `completed`, all failed → `failed`, a mix → `partly_failed`; nothing left → `cancelled`.
+- `PAYMENT_PROVIDERS`: the four ways to pay with `PaymentAbilities { paysFromApp, confirmsAutomatically,
+  needsBankApproval, testMode, checksBalance, sameDay, anyUkBank?, fees, setup[], limits }`, plus `connectSteps`,
+  `liveNote`, `approveNote` and `waitingNote` where they apply. `abilityChecklist` turns the booleans into the checklist
+  Settings → Payments draws (✓ / ✗): Pays from Linear Hub, Confirms payment automatically, You approve the payments in
+  your bank, Test mode, Shows your balance, Usually arrives the same day, and (bank file only) Works with any UK
+  business bank.
+
+| | Bank payment file | Revolut Business | Wise Business | Open Banking (TrueLayer) |
+| --- | --- | --- | --- | --- |
+| Pays from Linear Hub | ✗ (you upload the file) | ✓ | ✗ (you pay each transfer in Wise) | ✓ (from the merchant account) |
+| Confirms payment automatically | ✗ (you mark it paid) | ✓ | ✓ | ✓ |
+| You approve in your bank | ✓ | ✗ (unless the account needs an approver) | ✓ (you fund each transfer) | ✗ |
+| Test mode | ✗ (a file moves nothing) | ✓ sandbox | ✓ sandbox | ✓ sandbox |
+| Shows your balance | ✗ | ✓ | ✗ | ✓ (merchant account) |
+| Works with any UK business bank | ✓ | — | — | — |
+
+**The hold on changed bank details** (`lib/payments/bankDetails.ts`). A person's own change leaves the details
+unconfirmed (`confirmed_by_admin_at` NULL or older than `changed_at`): the next payment to them is skipped ("Thomas
+changed their bank details on Thu 22 Oct: check them with Thomas, then confirm them in Team") and Needs attention says
+"Thomas Grainger changed their bank details" until an admin confirms them (`POST /users/:id/bank-details/confirm`,
+Team › person › **Confirm details**). Details an admin types in count as confirmed by that admin. Saving the same
+details again changes nothing. A change needs the changer's current authenticator code when they have two-step on
+(every non-demo account, §17.14); the fields are checked before the code, so a typing mistake never uses one up. A
+change of bank details after an approval holds **future** payments only (drafts and approvals); it never fails an
+approved item, because a payment that timed out may already have gone (§17.6).
+
+### 17.5 The provider contract (`server/src/lib/payments/provider.ts`, F)
+
+```ts
+interface PaymentProviderAdapter {
+  info: PaymentProviderInfo;                        // name, kind 'file' | 'api', abilities, iconKey, notes
+  configFields: readonly PaymentConfigField[];      // the connection form: name, label, secret?, required?,
+                                                    //   requiredUnless?, help, type, options (iconKey, hint)
+  ready: boolean;                                   // false: testing and paying answer 501
+  validateConfig(input, existing?): ProviderConfig; // throws ProviderConfigError([{ path, message }]); no network
+  testConnection(conn, ctx): Promise<{ ok, message, balancePence? }>;
+  submit(conn, batch, items, ctx): Promise<{ items: { itemId, status, providerRef?, failureReason? }[];
+                                             providerRef?; file?; error? }>;
+  refresh(conn, items, ctx): Promise<{ itemId, status, providerRef?, failureReason? }[]>;
+  cancel?(conn, items, ctx): Promise<…>;
+}
+```
+
+- `conn.secrets` are decrypted for the call only. `items` carry the full sort code and account number they were
+  approved with, the amount in pence, the reference and an `idempotencyKey` (`<batch key>:<item id>`), sent as the
+  provider's idempotency key or request id. `submit` must be idempotent per item key: Linear Hub resends queued items
+  after a submit that threw. `ctx.saveSecrets(patch)` merges into the one encrypted secrets blob (Revolut's refresh
+  token); `batch.approvedAt` lets an adapter refuse a blind resend after the provider's repeat window; `error` is stored
+  as the batch's `lastError`, redacted.
+- **Network** only through `lib/payments/http.ts providerFetch`: a 15-second timeout on every request; reads (GET, HEAD)
+  retried twice after a network error, a 429 or a 5xx; a money-moving request never retried unless it carries its
+  idempotency key; secrets and `Bearer …` tokens redacted from every error ("[redacted]"), failed bodies cut to 300
+  characters. Errors are `ProviderError` with plain words ("TrueLayer did not answer within 15 seconds"). Under
+  `node --test` the three API adapters refuse any host but 127.0.0.1 and localhost, so no test can reach a real provider.
+- **Registry** (`lib/payments/registry.ts`): the four built-in adapters in the order Settings → Payments shows them
+  (`bank_file`, `revolut`, `wise`, `truelayer`). The stubs (`lib/payments/stubs.ts`, `ready: false`, 501) stay for tests.
+  The fake (`lib/payments/fake.ts`: deterministic, scriptable failures and timeouts) is registered by tests, and by
+  `LM_PAYMENTS_FAKE=1` at start-up together with a fake bank file ("Test provider", "Test bank file"): they pay nobody,
+  for trying the screens on a demo — never on a server people are paid from.
+- **Connections** (`lib/payments/connections.ts`): settings stored as JSON, secrets as one encrypted blob; no answer,
+  audit row, log line or error carries a secret (a connection answers only the NAMES of the secrets stored,
+  `secretsSet`); an empty secret on PATCH keeps the stored one. An API connection starts `mode: 'test'`,
+  `status: 'not_connected'`; a successful test makes it `connected`, a failed one `error` with the reason. Changing
+  its settings or secrets puts it back to `not_connected` and forgets the last test and its balance. Switching to live
+  needs `confirm: "PAY FOR REAL"` typed exactly and a connected test, and then a new test against the live service
+  (`not_connected` again, balance forgotten). A bank file connection is `mode: 'live'`, `status: 'connected'` from the
+  start and has no test mode (nothing moves until Matt uploads the file). Disconnecting wipes the secrets, cancels the
+  drafts through it and keeps the history; not while a payment through it is on its way (409).
+
+### 17.6 A payment, from draft to paid (`server/src/lib/payments/batches.ts`, F)
+
+1. **Draft** (`createDraftBatch`, at most 500 runs). From the runs the admin ticked and a connected connection. A run
+   goes in when it is unpaid (pending or failed), its week is over, it is more than £0, its self-billing invoice is
+   accepted, deemed accepted or resolved (or it has none: the 1.2 rules; `isInvoicePayable`), it is not in another live
+   payment (by run id, or person + week), and its person has confirmed bank details. The rest are skipped, each with a
+   code and a plain reason kept on the batch (`not_found`, `already_paid`, `in_payment`, `week_not_ended`,
+   `not_positive`, `invoice_not_accepted`, `invoice_disputed`, `no_bank_details`, `bank_details_unconfirmed`). Items copy
+   the amount in pence, the holder name and the last four digits. Drafts do not hold a run.
+2. **Approve** (`approveBatch`). Everything is checked again **before** the code is used: still a draft, the provider
+   built, the connection connected and still in the draft's mode, and nothing changed since the draft (a run paid or
+   in another payment, a run's pay changed, bank details changed or removed, an invoice no longer payable → `409
+   batch_changed` with `details.problems`). Then the admin's fresh authenticator code (`lib/payments/code.ts`: a current
+   code from the app, not a recovery code; accepted once, like at sign-in; wrong codes count towards the same limiter,
+   6 per source and person in 10 minutes → 429; recorded in the audit trail like a wrong code at sign-in). Then one
+   conditional UPDATE claims the batch (one approval wins; the other gets 409) and stores each item's payee
+   (`payee_enc`). Then `submit` is called with every queued item.
+3. **Results.** `paid` → the run is marked paid through `lib/markPaid.ts markPayrollRunPaid`, the same function
+   `POST /finance/payroll/:id/pay` now calls (same checks, invoice hook and UPDATE), once. If a check refuses because
+   something changed after the approval (an invoice reissued, say), the run is marked paid anyway — the money has gone
+   — and the item carries a note; if the run's pay changed after the money went, the note says by how much ("Add an
+   adjustment for the difference on a later week"). A run already marked paid by hand is never marked again (the note
+   asks to check whether they were paid twice). `failed` → the run stays unpaid, `pending` becomes `failed` (a failed
+   transfer, on Runs to pay from any week), and Runs to pay shows **Payment failed** with the reason. Each run a
+   payment moves gets its own audit row ("Marked paid by payment #12: …" / "Payment #12 failed: …"), by the admin or,
+   from the job, by Linear Hub on the approver's behalf.
+4. **Refresh** (**Check now**, `POST …/refresh`, and `lib/payments/job.ts` every 5 minutes while an approved API
+   payment has items waiting; `LM_PAYMENTS_JOB=0` turns the job off, Check now still works): resends queued items after
+   a submit that threw or timed out (same keys, to the account each was approved with), then asks the provider about
+   submitted and processing items. One conversation per batch at a time (409 "Linear Hub is talking to the provider
+   about this payment right now"). The job is unref'd, needs no session, and does nothing when nothing is waiting (one
+   cheap query).
+5. **Test mode** (a provider's sandbox) moves no money: items can come back paid but never mark a run paid ("Test
+   mode: nobody was paid, so this week stays on Runs to pay."), and test items never hold a run (`live = 0`).
+6. **Bank files**: `submit` returns the file; it is stored encrypted and downloaded by the admin (`GET …/file`,
+   recorded as an export, `Cache-Control: no-store`); **Mark as paid** settles the items the bank paid (on the date
+   chosen: not in the future, not before the week ends) and fails the ones it rejected with a reason (default "The bank
+   did not pay this one"); **Cancel the rest** frees the others. A bank file is never checked automatically (409 on
+   refresh).
+
+`POST /finance/payroll/:id/pay` (Mark paid by hand) answers `409 { code: 'in_payment', batchId }` while the run is in an
+approved payment still on its way: "Jordan's pay for w/c 5 Oct is in payment #12, which is still on its way. Wait for
+it to finish, or cancel it, before marking the week paid by hand."
+
+**Never twice**, in layers: the partial unique index (a run in at most one live payment); the draft and approval
+checks; the conditional claim; per-item idempotency keys sent to the provider (a resend is the same request with the
+same key, so the provider answers the first payment); the payee kept with each item at approval (a resend never goes
+to details changed since); the in-payment hold on Mark paid by hand; `settlePaid` refusing a run already paid; and
+Cancel waiting while Linear Hub does not know whether the provider made an item (§17.9). A payment approved before items
+kept their payee (only on a database that tried an earlier 1.4 build) is resent only while the person's details are
+exactly those it was approved with; otherwise it waits with "Linear Hub did not send …'s payment again: it no longer has
+the bank details you approved it with. Check with … whether it was paid before you pay that week again."
+
+### 17.7 Test and live never mix (F, review fix)
+
+Linear Hub talks to a provider about a payment only in the payment's own mode (each adapter picks the sandbox or the
+live service from the connection's mode). `PATCH /payments/connections/:id` with a change of mode answers 409 while an
+approved payment through the connection has items waiting ("Payment #12 through this connection is still on its way in
+test mode. Wait until it has finished (or cancel it), then switch to live."). A payment whose connection is in the
+other mode anyway (data from before this check) is neither sent, checked nor cancelled through it: Check now answers
+409, the job skips it, and its `lastError` says "Payment #12 was made in test mode, but the connection is now live …:
+switch the connection back to test mode to finish it" (or the reverse). Approving a draft whose connection changed
+mode since is refused ("Cancel it and make a new one"). Settings and secrets can still be edited while a payment is on
+its way (to reconnect, e.g. a new Revolut code); see the open question in OWNER_NOTES_1.4.
+
+### 17.8 A week frozen while its payment is on its way (F, review fix)
+
+A pending or failed run with a live item queued, submitted or processing in an approved payment (`db/maintenance.ts
+IN_PAYMENT_FROM`, `paymentOnItsWay`) holds what is being paid: like a paid run it is never recomputed or removed and
+its lines never move (`syncPayrollRun` leaves it as it is). When the pay rules would give other figures (a gauge edit,
+a statement, a rate, a dispute correction):
+
+- the run is flagged `adjusted_at` (refreshed on each gauge write, cleared if the figures come back);
+- the payment page notes it on the item;
+- Needs attention says "Jordan Lee's pay changed while payment #3 was on its way" until a correction for that week is
+  added (a line whose "week it corrects" is that week);
+- once paid, the run is paid at the amount sent, with the existing **Adjusted after payment** badge and a note: "The
+  week's figures changed while the money was on its way: £240.00 was paid, as approved. Put any difference on a later
+  week as an adjustment."
+
+Corrections skip the week: a statement's correction goes to a later unpaid week (`nextUnpaidWeek`, `nextOpenWeek`); a
+bonus or line added to or removed from it answers 409 ("The pay for w/c 5 Oct is in payment #3, which is on its way,
+so it is paid as approved. Choose the next unpaid week."); an invoice cannot be reissued with a correction for it (409:
+"Reissue it without a correction, or choose Keep as it is and correct it in a later week"). Linear Hub never adds the
+adjustment line by itself (open question in OWNER_NOTES_1.4). A payment that fails or is cancelled frees the run: a
+flagged run is brought up to date at once (`lib/payRule.ts syncPersonWeek`) before it can be paid again.
+
+### 17.9 Cancel never claims what it did not do (F, review fix)
+
+`POST …/cancel`: a draft is cancelled at once (nothing was sent); a bank file's people not yet marked are cancelled
+(the file was not used); an API payment's queued items Linear Hub never handed over (`attempted_at` NULL) are cancelled
+at once, through any provider. It answers 409 "Linear Hub is still finding out whether Wise Business made the transfer
+for …: press Check now, then cancel" while an item was sent but has no provider reference yet (it may exist at the
+provider), and changes nothing then. The rest are asked to stop only when the adapter can (Wise); otherwise, with nothing else to stop, 409 "Payments
+already sent to … cannot be stopped from Linear Hub. Check them with the provider." `cancelled_at` is set only when something actually stopped, nothing is sent once a cancel
+was recorded, and the page's toast says how many stopped and how many are still on their way.
+
+### 17.10 The bank payment file (P: `shared/src/logic/bankFiles.ts`, adapter `server/src/lib/payments/bankFile.ts`)
+
+Linear Hub makes the bulk payment file in the format chosen on the connection (`settings.format`, the form's **File
+format**); Matt uploads it to his online banking and approves it there, then marks in Linear Hub who the bank paid.
+Nothing is paid from Linear Hub and nothing comes back from the bank by itself. Each format records its columns in
+order, its header row, the longest name and reference it takes, its limits, and the bank pages its layout comes from
+(URLs in a code comment next to each format).
+
+| Format (`format`) | Columns, in order (header row first) | Name | Reference | Limits | Source |
+| --- | --- | --- | --- | --- | --- |
+| General Faster Payments file (CSV) (`generic`) | Payee name, Sort code, Account number, Amount, Reference | 70 | 18 | none set | No bank publishes this exact layout: the five things every UK bulk upload asks for. Check it with your bank |
+| Starling Bank bulk payments (CSV) (`starling`) | Payee Sort Code, Payee Account Number, Payee Name, Payment Reference, Amount | 255 | 18 | £250,000 per payment | help.starlingbank.com (the payments file details, making bulk payments, the maximum value) |
+| Revolut Business bulk transfer (CSV) (`revolut`) | Name, Recipient type (`INDIVIDUAL`), Account number, Sort code, Recipient bank country (`GB`), Currency (`GBP`), Amount, Payment reference | 80, first and last name | 18 (Revolut takes 100; Faster Payments carry 18) | 1,000 payments per file | developer.revolut.com "Create a file payment"; help.revolut.com "What are bulk payments?" |
+
+**Every cell**: sort code 6 digits without dashes; account number 8 digits; amount in pounds with two decimals made
+from whole pence by integer arithmetic, no £ and no thousands separator (945.50); reference upper case, only A–Z, 0–9,
+space, full stop, slash and hyphen, starting with a letter or digit, cut to 18 characters without a trailing space
+(default "LINEAR 05OCT JL"; "LINEAR" when nothing is left); payee name = the account holder's name from their bank
+details with accents folded and other alphabets spelled in Latin letters, "&" → "and", only letters, digits, spaces,
+full stops and hyphens kept (so "O'Neill" → "ONeill"), starting with a letter or digit, cut to the format's limit.
+CRLF line ends with a final CRLF, UTF-8 without a byte-order mark; no cell ever needs quotes. **Formula guard**: no cell
+can start with `=`, `+`, `-`, `@`, a tab or a carriage return (not in the character sets, every cell starts with a
+letter or digit, and every cell also goes through the shared CSV guard `payExportCell`); tested with the classic
+payloads, including full-width "＝" and the minus sign "−", in every format and end to end through the route.
+
+**Lines a bank would refuse** are left out of the file and their item fails with a plain reason (never an account
+number), so the run is `failed` with that reason on Runs to pay: a name with no letters a bank accepts; a single-word
+name in the Revolut format (Revolut needs a first and last name for an individual); a wrongly shaped sort code or
+account number; an amount of £0 or less or over the format's limit; a file already at the format's maximum lines.
+If nobody can go in it, no file is made and the payment is `failed`.
+
+**The adapter.** On approval `submit` builds the file and answers `submitted` for each included line (the reference as
+`providerRef`, shown on each line of the payment page) and `failed` with the reason for each refused line. It moves no
+money; making the file again from the same items gives the same bytes. `testConnection` answers ok with a sentence
+saying which files it makes; `refresh` is never called. The file is named
+`linear-hub-payment-<id>-<YYYY-MM-DD>-<faster-payments|starling|revolut>.csv`. Nothing secret is stored for a bank
+file connection (any secrets sent are dropped); changing the format keeps it connected.
+
+### 17.11 Revolut Business (A: `server/src/lib/payments/revolut.ts`)
+
+Built from Revolut's documentation (the URLs are in the file's header; Revolut's OpenAPI file on GitHub was the main
+source). Hosts: sandbox `https://sandbox-b2b.revolut.com/api/1.0`, live `https://b2b.revolut.com/api/1.0`.
+
+- **Form**: Client ID, OAuth redirect URI, Private key (RSA, PEM; secret), Code from Revolut (secret; the whole redirect
+  address is accepted; `requiredUnless: 'refreshToken'`), GBP account to pay from (optional). The checks run without a
+  network call.
+- **Signing in.** The first test swaps the pasted code at `POST /auth/token` (grant `authorization_code`), signing in
+  with a client-assertion JWT (RS256, signed with the private key: iss = the redirect URI's domain, sub = the client ID,
+  aud = `https://revolut.com`, 5 minutes). The refresh token is stored encrypted through `ctx.saveSecrets` and the used
+  code is removed. Access tokens (40 minutes) are kept in memory and refreshed with less than a minute left; a 401
+  refreshes once and tries again. Revolut refusing the refresh token (`invalid_grant`) asks Matt to choose **Enable
+  access** again in Revolut and paste the new code.
+- **Paying**: the GBP account (`GET /accounts`: the only active GBP one, or the chosen one; the test shows its balance);
+  one counterparty per person, reused (`GET /counterparties?account_no=&sort_code=`, else `POST /counterparty` as a UK
+  individual, the holder name split into first names and last name); `POST /pay` with `request_id` (a name-based UUID
+  of the item's key, at most 40 characters).
+- **A repeat.** Revolut refuses a repeated `request_id` (400, code 3020); Linear Hub then finds the first payment with
+  `GET /transactions?request_id=&from=` (`from` within 14 days), so it never makes a second one. Revolut only spots
+  repeats for 2 weeks, so a payment approved more than 13 days ago is never sent again blind: Linear Hub looks it up,
+  and if Revolut has no such payment the item fails with a plain reason.
+- **Statuses**: `completed` → paid; `declined`, `failed`, `reverted` → failed with the reason code in words; `created`,
+  `pending` → processing (a payment waiting for an approver in Revolut shows as processing).
+- **Abilities**: pays from Linear Hub ✓, confirms automatically ✓, shows the balance ✓, test mode ✓. No Confirmation
+  of Payee.
+
+### 17.12 Wise Business (A: `server/src/lib/payments/wise.ts`)
+
+Hosts: sandbox `https://api.wise-sandbox.com` (Wise's sandbox V2; the old `api.sandbox.transferwise.tech` was retired on
+30 June 2026), live `https://api.wise.com`. Wise added dated API versions (2026Q3, 2026Q4) this year; they are opt-in
+and the endpoint-based versions used here remain available.
+
+- **Form**: API token (a personal API token; secret), Business profile ID (optional, digits).
+- **A personal token cannot fund transfers** for UK and EEA profiles (PSD2), so Linear Hub creates each transfer and
+  Matt pays (funds) it in Wise; Linear Hub never calls the funding endpoint (a test checks it). The payment page's
+  button reads **Approve and create the transfers (£…)** and the Approve card adds "Nobody is paid until you open Wise
+  and pay the transfers there." (`approveNote`); after approving, the `waitingNote` reminds him.
+- **Paying**: the business profile (`GET /v2/profiles`); a recipient (`POST /v1/accounts`, GBP, `sort_code`, legal type
+  PRIVATE; every payment makes a new recipient); a quote (`POST /v3/profiles/{id}/quotes`, GBP → GBP, `targetAmount`,
+  `targetAccount`); the transfer (`POST /v1/transfers` with `customerTransactionId` = the item's UUID; a repeat answers
+  the first transfer).
+- **Statuses** (`GET /v1/transfers/{id}`): `outgoing_payment_sent` → paid; `cancelled` (not paid in time, or cancelled
+  in Wise), `funds_refunded`, `charged_back` → failed in plain words; `incoming_payment_waiting` (waiting for Matt to pay
+  it in Wise), `processing`, `funds_converted`, `bounced_back` and the rest → processing.
+- **Cancel**: `PUT /v1/transfers/{id}/cancel` stops a transfer not yet paid in Wise, so the week goes back to Runs to
+  pay; one already on its way stays. Linear Hub can only stop a transfer it has Wise's id for (§17.9).
+- **Payment approvals**: Wise refuses transfers made with a personal token while approvals are switched on ("missing
+  approval"); the item fails with plain words.
+- **Abilities**: pays from Linear Hub ✗, confirms automatically ✓, you approve (fund) in Wise ✓, test mode ✓, balance ✗.
+
+### 17.13 Open Banking via TrueLayer (A: `server/src/lib/payments/truelayer.ts`)
+
+Hosts (from TrueLayer's own PHP library): auth `https://auth.truelayer-sandbox.com` / `https://auth.truelayer.com`, API
+`https://api.truelayer-sandbox.com` / `https://api.truelayer.com`.
+
+- **Form**: Client ID, Client secret (secret), Signing key ID, Signing private key (EC P-521 / ES512, PEM; secret; never
+  sent to TrueLayer), Merchant account ID (optional).
+- **Sign-in**: a client-credentials token (scope `payments`, JSON body), kept in memory.
+- **Signing** (request signing v2, node:crypto): every payout carries `Tl-Signature`, a detached JWS (ES512, header
+  `{ alg, kid, tl_version: "2", tl_headers: "Idempotency-Key" }`) over `POST /v3/payouts\nIdempotency-Key: …\n<body>`
+  (P-521, IEEE P1363). In test mode the connection test also checks the signature at the sandbox's `POST
+  /test-signature`; live has no documented test endpoint, so a live signature is first checked by the first payout.
+- **Paying**: the GBP merchant account (`GET /v3/merchant-accounts`; the test shows its available balance); `POST
+  /v3/payouts` to an `external_account` beneficiary (holder name, sort code and account number, reference) with an
+  `Idempotency-Key` (the item's UUID). The same key and body answer the first payout; the same key with a different body
+  (422 "Idempotency-Key Reuse") stays queued with a plain error to check the Console.
+- **Statuses** (`GET /v3/payouts/{id}`): `executed` → paid; `failed` → failed (`insufficient_funds`, `blocked`,
+  `invalid_scan`, `invalid_iban`, `returned`, `scheme_error` in plain words); `pending`, `authorized` → processing.
+- TrueLayer asks non-regulated businesses for each payee's date of birth and address for sanctions screening; the API
+  accepts payouts without them and Linear Hub does not send them.
+- **Abilities**: pays from Linear Hub ✓ (from the merchant account Matt tops up), confirms automatically ✓, balance ✓,
+  test mode ✓; fees per payout ("check your TrueLayer agreement").
+
+**When a provider does not answer** (all three, `lib/payments/apiCommon.ts`): if a call times out, or the provider
+answers 429, 5xx or 409, `submit` stops and returns what it knows, saying why in `error` (the batch's `lastError`, e.g.
+"TrueLayer did not answer within 15 seconds"); the rest stay queued and go again with the same ids at the next check. A
+refusal of one person (4xx) fails only that item, with the provider's words and never the full account number. A
+refused sign-in (401) stops the whole submit. **Paid means the provider says the money left**: a payment the receiving
+bank returns later (Wise "bounced back" after "sent", TrueLayer "returned" after "executed") is not undone in Linear
+Hub; the week stays paid and is sorted out by hand with an adjustment on a later week.
+
+### 17.14 Two-step and payments together (integration)
+
+- **Bank details always need a code** from every account that must use two-step: such an account is held at the setup
+  gate until two-step is on, so `GET /me/bank-details` answers `codeRequired: true` and `PUT /me/bank-details` (and an
+  admin's `PUT /users/:id/bank-details`) needs a current code. The no-code path is left only for a demo sign-in account
+  that has not chosen to set two-step up.
+- **Every payout needs a fresh code**, including from the demo admin, who is exempt from the sign-in rule but not from
+  the payment rule: approving answers `403 { twoFactorRequired: true }` ("Set up two-step verification in Settings →
+  Security first: every payment needs a code from your authenticator app.") only to an exempt demo admin without
+  two-step, and the page shows **Open Settings → Security**. Any other admin without it never gets past the gate. Once
+  the demo admin sets two-step up, each sign-in asks for the code, the session stays the demo's 14 days, and approving
+  works; turning it off again (only demo accounts may) puts the hold back.
+- **The 14-hour sign-out never interrupts a payment.** Approving is one request; once approved, a payment does not
+  depend on the admin's session. The 5-minute job (server-side, no session) resends what a timeout left queued and
+  checks statuses, marking runs paid as the approving admin. A bank file approved before the sign-out is still there
+  after signing in again, to download and mark paid.
+- **Client accounts** reach nothing of payments or bank details: the client guard answers `403 clientPortalOnly` first,
+  before the setup gate, set up or not; portal answers carry no payment or bank field; the client app never routes them
+  to Pay people, Bank details or Payments.
+
+### 17.15 Needs attention, audit, write limit and screens (F, P, A)
+
+- **Needs attention** (`lib/attention/payments.ts`, admin only, kind `payments`, the bell's "Payments" group, one
+  `UNION ALL` statement): changed bank details to check (by name up to three, then one line), failed live payments whose
+  run is still unpaid with no newer payment (one line, danger), bank files approved but not marked paid (info, the
+  newest two: "Payment #12 is waiting for your bank"), connections whose last test failed (warning: "… needs a look"),
+  and runs whose figures changed after their payment was approved (one line, warning, 30 days, gone once a correction
+  for that week is added).
+- **Audit** (`lib/audit/paymentSpecs.ts`, `lib/audit/securitySpecs.ts`): every payments and bank-details write route
+  has a spec; entities `payment_connection`, `payment_batch`, `bank_account` (labels "Payment connection", "Payment",
+  "Bank details"; bank details filed under the person). Snapshots never hold a secret, token, sort code or account
+  number (a connection shows its secrets' names; bank details only the masked digits), and `AUDIT_REDACTED_KEYS` redacts
+  those keys again. The bank file download is an `export` row. A wrong code at approval or on a bank details change is
+  a `sign_in` row.
+- **Write limit**: every `POST`, `PATCH` and `DELETE` under `/payments`, `PUT /me/bank-details`, `PUT
+  /users/:id/bank-details`, `POST /users/:id/bank-details/confirm` (under `POST /users`) and `POST
+  /client-accounts/:id/reset-2fa` count towards the per-person limit of 60 writes a minute.
+- **Screens.** Finance → Company → Runs to pay → **Pay from Linear Hub** (or **Pay N from Linear Hub** with runs ticked)
+  opens **Pay people** (`/finance/pay`: 1. Who to pay, 2. How to pay, 3. Review, Recent payments); **Review payment**
+  makes the draft and opens the payment's page (`/finance/pay/batches/:id`: the Approve card, the list, **Download the
+  bank file**, **Check now**, **Cancel draft** / **Cancel the rest**, **Mark as paid**; it updates itself while payments
+  are on their way). Runs to pay shows **Payment on its way**, **In a draft payment** or **Payment failed** on a run.
+  Settings → **Payments** (admin) lists the four ways to pay with logo, checklist, fees, what you need and **Good to
+  know**, then **Connect** / **Test** / **Switch to live** / **Edit** / **Disconnect**; the Connect form starts with
+  **How to connect** and saves an API connection with **Save and test**. Settings → **Bank details** (every staff role,
+  their own) and Team › person → **Bank details** (admin, masked, **Confirm details**). The payments screens, the bank
+  file formats and the logos are lazy chunks, so the main chunk does not carry them: `npm run build` at 1.4.0 gives a
+  main chunk of 488.2 kB (152.3 kB gzip), no Vite warning, against 481.9 kB measured at the 1.3 merge (§16.4) — still
+  over the 460 kB target of §14.11.
+- **Logos** come from `simple-icons` (CC0, pinned at 16.34.0): Revolut, Wise, Starling Bank, Monzo, Barclays, HSBC and
+  Tide, imported one by one. It has no TrueLayer mark, so TrueLayer is a neutral "TL" monogram; a bank file with the
+  general format shows a bank icon. Logos belong to their owners and only identify the service (said under the cards).
