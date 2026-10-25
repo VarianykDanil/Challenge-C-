@@ -193,7 +193,8 @@ describe('ways to pay and connections', () => {
     assert.equal(r.status, 200);
     assert.deepEqual(r.json.map((p: Json) => p.id), ['bank_file', 'revolut', 'wise', 'truelayer']);
     for (const p of r.json as Json[]) {
-      assert.equal(p.available, false, p.id);
+      // Release 1.4 (P): the bank payment file is built (paymentsFile.test.ts); the API providers wait for package A
+      assert.equal(p.available, p.id === 'bank_file', p.id);
       assert.ok(p.configFields.length > 0, p.id);
       assert.ok(typeof p.abilities.paysFromApp === 'boolean' && p.abilities.fees && p.abilities.setup.length, p.id);
     }
@@ -632,14 +633,17 @@ describe('payment batches with the fake provider', () => {
     adminSecret = enable2fa(srv.db, fx.users.admin);
     setBank(srv.db, fx.users.rep);
     const a = addRun(srv.db, { userId: fx.users.rep, weekStart: weeks.w3, gross: 10 });
-    const conn = (await admin.post('/payments/connections', { provider: 'bank_file', settings: { format: 'generic' } })).json.id;
+    // Release 1.4 (P): the bank file is built now, so this uses a not-yet-built API provider, marked connected by hand
+    // (its own test answers 501) to reach the approval
+    const conn = (await admin.post('/payments/connections', { provider: 'wise', secrets: { apiToken: 'wise-token-123456' } })).json.id;
+    run(srv.db, `UPDATE payment_connections SET status = 'connected' WHERE id = ?`, [conn]);
     const draft = await admin.post('/payments/batches', { connectionId: conn, runIds: [a] });
     assert.equal(draft.status, 201);
     assert.equal(draft.json.actions.approve, false);
     const code = freshCode(srv.db, fx.users.admin, adminSecret);
     const r = await admin.post(`/payments/batches/${draft.json.id}/approve`, { code });
     assert.equal(r.status, 501);
-    assert.match(r.json.error, /Paying through Bank payment file is not switched on in this version of Linear Hub yet/);
+    assert.match(r.json.error, /Paying through Wise Business is not switched on in this version of Linear Hub yet/);
     assert.equal((await admin.get(`/payments/batches/${draft.json.id}`)).json.status, 'draft');
     // the code still works (it was not used)
     assert.equal((await admin.put('/me/bank-details', { holderName: 'Ada Admin', sortCode: '000000', accountNumber: '00000001', code })).status, 200);

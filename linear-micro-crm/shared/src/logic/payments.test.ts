@@ -136,9 +136,12 @@ test('the four ways to pay, each with plain abilities and a logo key', () => {
     'Test mode',
     'Shows your balance',
     'Usually arrives the same day',
+    'Works with any UK business bank', // Release 1.4 (P): the bank file only
   ]);
   assert.equal(lines[0]!.ok, false);
   assert.equal(lines[2]!.ok, true);
+  assert.equal(lines[6]!.ok, true);
+  assert.equal(abilityChecklist(paymentProviderInfo('revolut')!.abilities).length, 6, 'the API providers keep their six lines');
 });
 
 test('switching to live needs the words typed exactly', () => {

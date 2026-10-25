@@ -205,6 +205,8 @@ export function defaultPaymentReference(weekStart: string, payeeName: string): s
  */
 export const PAYMENT_PROVIDERS: readonly PaymentProviderInfo[] = [
   {
+    // Release 1.4 — P (bank payment file) checked these against what the bank file does (lib/payments/bankFile.ts,
+    // logic/bankFiles.ts): nothing is paid from Linear Hub, and nothing comes back from the bank by itself.
     id: 'bank_file',
     name: 'Bank payment file',
     summary: 'Linear Hub makes a bulk payment file. You upload it to your online banking, approve it there, then mark the payment paid here.',
@@ -217,12 +219,13 @@ export const PAYMENT_PROVIDERS: readonly PaymentProviderInfo[] = [
       testMode: false,
       checksBalance: false,
       sameDay: true,
-      fees: 'No fees from Linear Hub. Your bank’s own charges for bulk payments apply.',
+      anyUkBank: true,
+      fees: 'No fees from Linear Hub. Your bank’s own charges for bulk payments apply (Starling, for one, charges a monthly fee for Bulk Payments).',
       setup: [
         'Online banking for your business account that takes a bulk payment file',
-        'Choose your bank’s file format, or the general Faster Payments file',
+        'Choose your bank’s file format: Starling Bank, Revolut Business, or the general Faster Payments file for any other bank',
       ],
-      limits: 'Works with any UK business bank that takes a payment file. Your bank’s daily limits apply, and you upload and approve every file yourself.',
+      limits: 'You upload and approve every file in your bank yourself, then mark who was paid here. Linear Hub keeps no passwords or keys for your bank: only the file, stored encrypted so you can download it again. Your bank’s own limits apply.',
     },
   },
   {
@@ -300,14 +303,17 @@ export function paymentProviderInfo(id: string): PaymentProviderInfo | null {
 }
 
 export interface AbilityLine {
-  key: 'paysFromApp' | 'confirmsAutomatically' | 'needsBankApproval' | 'testMode' | 'checksBalance' | 'sameDay';
+  key: 'paysFromApp' | 'confirmsAutomatically' | 'needsBankApproval' | 'testMode' | 'checksBalance' | 'sameDay' | 'anyUkBank';
   label: string;
   ok: boolean;
 }
 
-/** The checklist Settings → Payments shows for a way to pay (the page draws ✓ / ✗). */
+/**
+ * The checklist Settings → Payments shows for a way to pay (the page draws ✓ / ✗). Release 1.4 (P): "Works with any
+ * UK business bank" comes last, only for a way to pay that says (the bank payment file).
+ */
 export function abilityChecklist(a: PaymentAbilities): AbilityLine[] {
-  return [
+  const lines: AbilityLine[] = [
     { key: 'paysFromApp', label: 'Pays from Linear Hub', ok: a.paysFromApp },
     { key: 'confirmsAutomatically', label: 'Confirms payment automatically', ok: a.confirmsAutomatically },
     { key: 'needsBankApproval', label: 'You approve the payments in your bank', ok: a.needsBankApproval },
@@ -315,4 +321,6 @@ export function abilityChecklist(a: PaymentAbilities): AbilityLine[] {
     { key: 'checksBalance', label: 'Shows your balance', ok: a.checksBalance },
     { key: 'sameDay', label: 'Usually arrives the same day', ok: a.sameDay },
   ];
+  if (typeof a.anyUkBank === 'boolean') lines.push({ key: 'anyUkBank', label: 'Works with any UK business bank', ok: a.anyUkBank });
+  return lines;
 }
