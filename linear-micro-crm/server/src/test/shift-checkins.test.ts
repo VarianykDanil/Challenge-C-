@@ -234,10 +234,14 @@ test('pay integrity: check-ins never create a gauge row, a day worked or a payro
 });
 
 test('demo seed: today’s started events get the logged people’s check-ins at their recorded times, so punctuality reads as before', () => {
+  // The demo works Monday to Saturday, so a Sunday has no shifts and no check-ins: on a Sunday the demo is seeded as of
+  // the Saturday before (15:00, like every other day), so the test means the same thing on every day of the week.
+  const day = new Date(`${TODAY}T12:00:00`).getDay() === 0 ? addDays(TODAY, -1) : TODAY;
+  setBusinessClock(new Date(`${day}T15:00:00`));
   const db = openDb(':memory:');
   try {
     createSchema(db);
-    seed(db, TODAY);
+    seed(db, day);
     const rows = all<{ date: string; checkedInAt: string; createdAt: string; source: string; gaugeAt: string | null; hasGauge: number; status: string; role: string; sameTeam: number }>(
       db,
       `SELECT ci.date, ci.checked_in_at AS checkedInAt, ci.created_at AS createdAt, ci.source, g.checked_in_at AS gaugeAt, g.id IS NOT NULL AS hasGauge,
@@ -247,20 +251,21 @@ test('demo seed: today’s started events get the logged people’s check-ins at
     );
     assert.ok(rows.length > 0, 'the demo has check-ins for today');
     for (const r of rows) {
-      assert.equal(r.date, TODAY);
+      assert.equal(r.date, day);
       assert.ok(r.status === 'live' || r.status === 'completed', 'only started events');
       assert.ok(r.role === 'rep' || r.role === 'leader');
       assert.equal(Number(r.sameTeam), 1);
       assert.ok(r.source === 'button' || r.source === 'quick');
-      assert.ok(r.checkedInAt <= `${TODAY}T15:00:00`, 'never in the future');
+      assert.ok(r.checkedInAt <= `${day}T15:00:00`, 'never in the future');
       assert.equal(Number(r.hasGauge), 1, 'only people who worked today');
       assert.equal(r.checkedInAt, r.gaugeAt, 'a logged day’s tap is its recorded time');
     }
     // punctuality over every gauge row is exactly what the gauge entries alone give
-    const all1 = punctualityFor(db, new Where().add('g.date <= ?', TODAY));
+    const all1 = punctualityFor(db, new Where().add('g.date <= ?', day));
     run(db, `DELETE FROM check_ins`);
-    assert.equal(punctualityFor(db, new Where().add('g.date <= ?', TODAY)), all1);
+    assert.equal(punctualityFor(db, new Where().add('g.date <= ?', day)), all1);
   } finally {
     db.close();
+    setBusinessClock(new Date(`${TODAY}T15:00:00`));
   }
 });

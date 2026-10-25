@@ -7,7 +7,16 @@ response field is renamed or removed, and new fields are optional.
 
 ## [Unreleased]
 
-Nothing yet. What comes next is in [docs/ROADMAP.md](docs/ROADMAP.md).
+What comes next is in [docs/ROADMAP.md](docs/ROADMAP.md).
+
+### Fixed
+
+- **Two server tests no longer fail at weekends.** The demo seed could give an interview that had already happened an
+  outcome while moving it on to the next Monday (a weekend slot moves to Monday; seeded on a Saturday or Sunday, that
+  Monday is still to come), so its change log lacked the outcome. Such an interview now moves back to the last weekday
+  since the candidate entered the stage instead (interviews still to come move on to Monday as before). The check-ins
+  test seeded the demo on a Sunday, when the demo has no shifts (it works Monday to Saturday); on a Sunday it now
+  seeds as of the Saturday before.
 
 ## [1.3.1] - 2026-10-23
 

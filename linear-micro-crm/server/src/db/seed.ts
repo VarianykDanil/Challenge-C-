@@ -599,6 +599,17 @@ export function seed(db: Db, today: string = D.todayISO(), options: SeedOptions 
         d.setHours(rng.int(9, 16), rng.pick([0, 15, 30, 45]), 0, 0);
         if (d.getDay() === 0) d.setDate(d.getDate() + 1);
         else if (d.getDay() === 6) d.setDate(d.getDate() + 2);
+        // An interview with an outcome has happened, so it is never in the future. Moving a weekend day on to Monday (or
+        // the office hour above) puts it after now when the seed runs at a weekend or early on a Monday: it moves back
+        // to the last weekday before now after the candidate entered the stage, at the same time of day — or, when
+        // there is none (the stage began that weekend), halfway between the stage change and now (or the next change).
+        if (outcome !== 'pending' && d.getTime() > nowMs) {
+          const back = new Date(d);
+          do back.setDate(back.getDate() - 1);
+          while (back.getTime() > c.at && (back.getTime() > nowMs || back.getDay() === 0 || back.getDay() === 6));
+          const end = nextChange ? Math.min(nextChange.at, nowMs) : nowMs;
+          d.setTime(back.getTime() > c.at ? back.getTime() : c.at + Math.floor((end - c.at) / 2));
+        }
         const interviewNotes = outcome === 'passed' ? rng.pick(S.STAGE_NOTES.interview!) : outcome === 'no_show' ? 'Did not attend; left voicemail.' : null;
         insertInterview.run(candidateId, type, d.toISOString(), interviewer, outcome, interviewNotes);
         stats.interviews++;
