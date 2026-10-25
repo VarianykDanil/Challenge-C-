@@ -486,13 +486,15 @@ async function sendQueued(db: Db, id: number, actor: UserWithTeam | null, action
       const pc = providerConnection(conn);
       const secrets = [...Object.values(pc.secrets), ...send.map((s) => s.accountNumber)];
       try {
-        const out = await adapter.submit(pc, { id: b.id, mode: b.mode, idempotencyKey: b.idempotencyKey, createdAt: b.createdAt, today: todayISO() }, send, providerContext());
+        const out = await adapter.submit(pc, { id: b.id, mode: b.mode, idempotencyKey: b.idempotencyKey, createdAt: b.createdAt, today: todayISO(), approvedAt: b.approvedAt }, send, providerContext(db, conn.id));
         applyResults(db, b, out.items, actor, action);
         if (out.file) {
           const name = out.file.name.replace(/[^A-Za-z0-9._-]+/g, '-').slice(0, 120) || `linear-hub-payment-${b.id}.csv`;
           run(db, `UPDATE payment_batches SET file_enc = ?, file_name = ? WHERE id = ?`, [encrypt(JSON.stringify({ name, contentType: out.file.contentType, body: out.file.body })), name, id]);
         }
-        run(db, `UPDATE payment_batches SET provider_ref = COALESCE(?, provider_ref), last_error = NULL WHERE id = ?`, [out.providerRef ?? null, id]);
+        // package A: items the adapter could not send this time stay queued; its reason is the batch's last error
+        const notSent = typeof out.error === 'string' && out.error.trim() ? redactSecrets(out.error, secrets).slice(0, 500) : null;
+        run(db, `UPDATE payment_batches SET provider_ref = COALESCE(?, provider_ref), last_error = ? WHERE id = ?`, [out.providerRef ?? null, notSent, id]);
       } catch (err) {
         // the items stay queued: Try again (or the next job tick) sends them with the same keys
         run(db, `UPDATE payment_batches SET last_error = ?, updated_at = ? WHERE id = ?`, [plain(err, secrets), nowISO(), id]);
@@ -636,7 +638,7 @@ export async function refreshBatch(db: Db, id: number, actor: UserWithTeam | nul
     });
     const secrets = [...Object.values(pc.secrets), ...items.map((x) => x.accountNumber)];
     try {
-      const out = await adapter.refresh(pc, items, providerContext());
+      const out = await adapter.refresh(pc, items, providerContext(db, conn.id));
       applyResults(db, requireBatch(db, id), out, actor, action);
       run(db, `UPDATE payment_batches SET last_error = NULL WHERE id = ?`, [id]);
     } catch (err) {
@@ -710,7 +712,7 @@ export async function cancelBatch(db: Db, me: UserWithTeam, id: number): Promise
       sortCode: bank.get(i.userId)?.sortCode ?? '', accountNumber: bank.get(i.userId)?.accountNumber ?? '',
       reference: defaultPaymentReference(i.weekStart, i.payeeName), weekStart: i.weekStart, idempotencyKey: `${b.idempotencyKey}:${i.id}`, providerRef: i.providerRef,
     }));
-    const out = await adapter.cancel(pc, send, providerContext());
+    const out = await adapter.cancel(pc, send, providerContext(db, conn.id));
     applyResults(db, b, out, me, 'POST /payments/batches/:id/cancel');
     run(db, `UPDATE payment_batches SET cancelled_at = ?, cancelled_by = ? WHERE id = ?`, [at, me.id, id]);
     finalise(db, id);

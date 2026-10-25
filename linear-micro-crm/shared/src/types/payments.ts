@@ -91,6 +91,20 @@ export interface PaymentProviderInfo {
   abilities: PaymentAbilities;
   /** The client's logo key (features/payments/ProviderLogo): 'bank' | 'revolut' | 'wise' | 'truelayer' | 'test'. */
   iconKey: string;
+  /**
+   * Package A: how to connect, in order — including the steps done OUTSIDE Linear Hub (in the provider's app or
+   * console, or on a computer). Shown at the top of the Connect form.
+   */
+  connectSteps?: string[];
+  /** Package A: what switching to live means for this provider (e.g. live has its own keys). Shown with Switch to live. */
+  liveNote?: string;
+  /**
+   * Package A: what approving does NOT do yet, when the provider needs Matt outside Linear Hub afterwards (Wise: he
+   * pays the transfers in Wise). Added to the payment page's Approve card.
+   */
+  approveNote?: string;
+  /** Package A: what happens while payments are on their way, and anything Matt does in the provider's app meanwhile. */
+  waitingNote?: string;
 }
 
 /** One field of a connection form (driven by the provider's configFields). */
@@ -101,6 +115,11 @@ export interface PaymentConfigField {
   /** Stored encrypted, never returned (the form shows "Saved" and leaves the box empty). */
   secret?: boolean;
   required?: boolean;
+  /**
+   * Package A: needed unless the connection already holds this secret (Revolut's "Code from Revolut" is needed until
+   * Linear Hub holds a `refreshToken`). The form marks it required then; the adapter's validateConfig checks it.
+   */
+  requiredUnless?: string;
   /** "Where to find this", in plain words. */
   help?: string;
   /** Default 'text'. 'textarea' for keys and certificates; 'select' uses `options`. */

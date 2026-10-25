@@ -4,10 +4,13 @@
 //  - once approved: each person's status, live while anything is on its way (the page refreshes every 10 seconds and
 //    "Check now" asks the provider at once); for a bank file, Download the file and Mark as paid (untick the ones the
 //    bank rejected, with a reason). Lazy (App.tsx).
+// Package A: for an API provider the page says what the provider still needs from Matt (its `approveNote` on the
+// Approve card, its `waitingNote` while payments are on their way): Wise only creates the transfers, Matt pays them in
+// Wise, so its Approve button says "create the transfers" rather than "pay".
 import { useEffect, useId, useState, type FormEvent } from 'react';
 import { Link, useParams } from 'react-router-dom';
-import { ArrowLeft, Download, RefreshCw, ShieldCheck, TriangleAlert, X } from 'lucide-react';
-import { formatPence, payDayLabel, payWeekLabel, type PaymentBatch, type PaymentItem } from '@lm/shared';
+import { ArrowLeft, Download, Info, RefreshCw, ShieldCheck, TriangleAlert, X } from 'lucide-react';
+import { formatPence, payDayLabel, payWeekLabel, type PaymentBatch, type PaymentItem, type PaymentProviderView } from '@lm/shared';
 import { ApiError } from '@/api/client';
 import { paymentFileUrl, useApproveBatch, useCancelBatch, useMarkBatchPaid, usePaymentBatch, usePaymentProviders, useRefreshBatch } from '@/api/payments';
 import { useCurrentUser } from '@/auth/AuthProvider';
@@ -54,13 +57,13 @@ export function PaymentBatchPage() {
       {q.isError ? <ErrorState error={q.error} onRetry={() => void q.refetch()} /> : !b ? (
         <div className="space-y-4"><Skeleton className="h-24" /><Skeleton className="h-64" /></div>
       ) : (
-        <BatchBody b={b} providerName={provider?.name ?? b.connectionName} available={provider?.available ?? false} />
+        <BatchBody b={b} provider={provider} providerName={provider?.name ?? b.connectionName} available={provider?.available ?? false} />
       )}
     </>
   );
 }
 
-function BatchBody({ b, providerName, available }: { b: PaymentBatch; providerName: string; available: boolean }) {
+function BatchBody({ b, provider, providerName, available }: { b: PaymentBatch; provider?: PaymentProviderView; providerName: string; available: boolean }) {
   const toast = useToast();
   const refresh = useRefreshBatch();
   const cancel = useCancelBatch();
@@ -83,7 +86,15 @@ function BatchBody({ b, providerName, available }: { b: PaymentBatch; providerNa
         </Card>
       )}
 
-      {draft && <ApproveCard b={b} providerName={providerName} available={available} />}
+      {draft && <ApproveCard b={b} provider={provider} providerName={providerName} available={available} />}
+
+      {!draft && b.kind === 'api' && b.waitingCount > 0 && provider?.waitingNote && (
+        <Card tone="info" data-waiting-note="">
+          <p className="flex items-start gap-2 text-sm text-fg"><Info className="mt-0.5 h-4 w-4 shrink-0 text-info" aria-hidden />
+            <span>{provider.waitingNote}</span>
+          </p>
+        </Card>
+      )}
 
       <Card padded={false} className="min-w-0 overflow-hidden">
         <div className="flex flex-wrap items-start justify-between gap-3 p-5 pb-3">
@@ -172,7 +183,7 @@ function ItemList({ items, draft, kind }: { items: PaymentItem[]; draft: boolean
   );
 }
 
-function ApproveCard({ b, providerName, available }: { b: PaymentBatch; providerName: string; available: boolean }) {
+function ApproveCard({ b, provider, providerName, available }: { b: PaymentBatch; provider?: PaymentProviderView; providerName: string; available: boolean }) {
   const uid = useId();
   const me = useCurrentUser();
   const approve = useApproveBatch();
@@ -180,6 +191,9 @@ function ApproveCard({ b, providerName, available }: { b: PaymentBatch; provider
   const [code, setCode] = useState('');
   const err = approve.error;
   const needs2fa = !me.twoFactorEnabled || (err instanceof ApiError && err.status === 403);
+  // Wise: approving only creates the transfers; Matt pays them in Wise
+  const createsOnly = b.kind === 'api' && provider?.abilities.paysFromApp === false;
+  const approveNote = b.kind === 'api' && provider?.approveNote ? ` ${provider.approveNote}` : '';
   const submit = (e: FormEvent) => {
     e.preventDefault();
     approve.mutate({ id: b.id, body: { code: code.replace(/\s+/g, '') } }, {
@@ -187,11 +201,11 @@ function ApproveCard({ b, providerName, available }: { b: PaymentBatch; provider
         setCode('');
         toast.success(next.kind === 'file' ? 'Bank file ready' : 'Payment approved', next.kind === 'file'
           ? 'Download it, upload it to your bank and approve it there. Then mark it paid here.'
-          : next.mode === 'test' ? 'Test mode: nobody is paid.' : `${people(next.count)}, ${formatPence(next.totalPence)}.`);
+          : next.mode === 'test' ? 'Test mode: nobody is paid.' : createsOnly ? `Now open ${providerName} and pay the transfers there.` : `${people(next.count)}, ${formatPence(next.totalPence)}.`);
       },
     });
   };
-  const label = b.kind === 'file' ? 'Approve and make the bank file' : b.mode === 'test' ? `Approve test payment of ${formatPence(b.totalPence)}` : `Approve and pay ${formatPence(b.totalPence)}`;
+  const label = b.kind === 'file' ? 'Approve and make the bank file' : b.mode === 'test' ? `Approve test payment of ${formatPence(b.totalPence)}` : createsOnly ? `Approve and create the transfers (${formatPence(b.totalPence)})` : `Approve and pay ${formatPence(b.totalPence)}`;
   return (
     <Card tone={b.mode === 'live' && b.kind === 'api' ? 'warning' : 'default'}>
       <CardHeader
@@ -200,8 +214,10 @@ function ApproveCard({ b, providerName, available }: { b: PaymentBatch; provider
         description={b.kind === 'file'
           ? `Linear Hub makes the file for ${people(b.count)} (${formatPence(b.totalPence)}). Nothing moves until you upload it to your bank and approve it there.`
           : b.mode === 'test'
-            ? `Test mode: ${providerName}'s sandbox gets the payments and nobody is paid. The runs stay on Runs to pay.`
-            : `${providerName} pays ${people(b.count)} ${formatPence(b.totalPence)} as soon as you approve. This cannot be undone from Linear Hub.`}
+            ? `Test mode: ${providerName}'s sandbox gets the payments and nobody is paid. The runs stay on Runs to pay.${approveNote}`
+            : createsOnly
+              ? `${providerName} gets transfers for ${people(b.count)} (${formatPence(b.totalPence)}) when you approve.${approveNote}`
+              : `${providerName} pays ${people(b.count)} ${formatPence(b.totalPence)} as soon as you approve. This cannot be undone from Linear Hub.`}
       />
       {!available ? (
         <p className="flex items-start gap-2 rounded-lg bg-surface-2 px-3 py-2 text-sm text-muted">

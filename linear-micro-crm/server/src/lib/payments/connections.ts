@@ -119,8 +119,26 @@ export function providerConnection(r: ConnectionRow): ProviderConnection {
   return { id: r.id, provider: r.provider, name: r.name, mode: r.mode, settings: parseObject(r.settingsJson), secrets: connectionSecrets(r) };
 }
 
-export function providerContext(): ProviderContext {
-  return { today: todayISO(), now: () => new Date() };
+/**
+ * The context an adapter call gets. With a stored connection (`db` and `connectionId`), package A's adapters can keep
+ * secrets the provider hands back (Revolut's refresh token) through `saveSecrets`: merged into the ONE encrypted blob.
+ */
+export function providerContext(db?: Db, connectionId?: number): ProviderContext {
+  const ctx: ProviderContext = { today: todayISO(), now: () => new Date() };
+  if (db && connectionId) ctx.saveSecrets = (patch) => saveConnectionSecrets(db, connectionId, patch);
+  return ctx;
+}
+
+/** Merges `patch` into a connection's encrypted secrets (null or '' removes one). Never while disconnected. */
+export function saveConnectionSecrets(db: Db, id: number, patch: Record<string, string | null>): void {
+  const r = connectionRow(db, id);
+  if (!r || r.disconnectedAt) return;
+  const next = { ...connectionSecrets(r) };
+  for (const [k, v] of Object.entries(patch)) {
+    if (v === null || v === '') delete next[k];
+    else if (typeof v === 'string') next[k] = v;
+  }
+  run(db, `UPDATE payment_connections SET secrets_enc = ? WHERE id = ? AND disconnected_at IS NULL`, [encryptSecrets(next), id]);
 }
 
 function cleanName(raw: unknown, fallback: string): string {
@@ -232,7 +250,7 @@ export function disconnectConnection(db: Db, me: UserWithTeam, id: number): Paym
 }
 
 /** Tests the connection with its provider (501 until the adapter is built). Stores the outcome. */
-export async function testConnection(db: Db, id: number, ctx: ProviderContext = providerContext()): Promise<PaymentConnectionTestResult> {
+export async function testConnection(db: Db, id: number, ctx: ProviderContext = providerContext(db, id)): Promise<PaymentConnectionTestResult> {
   const r = activeRow(db, id);
   const adapter = adapterFor(r.provider);
   if (!adapter.ready) throw notReadyError(adapter.info.name);

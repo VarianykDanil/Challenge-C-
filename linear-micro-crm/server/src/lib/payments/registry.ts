@@ -3,7 +3,8 @@
  *
  * The four built-in ones, in the order Settings → Payments shows them: bank_file, revolut, wise, truelayer. F registers
  * a stub for each (./stubs.ts: `ready: false`). Package P replaced `stubProvider('bank_file')` with its adapter
- * (./bankFile.ts); package A replaces the other three. Nothing else changes when they do.
+ * (./bankFile.ts); package A replaced the other three (./revolut.ts, ./wise.ts, ./truelayer.ts). The stubs stay for
+ * tests (the 501 path) and for notReadyError.
  *
  * Tests register the fake (./fake.ts) with `registerPaymentProvider(createFakeProvider())` and remove it with
  * `unregisterPaymentProvider('fake')`. LM_PAYMENTS_FAKE=1 registers it at start-up too, with a fake bank file
@@ -13,13 +14,15 @@ import type { PaymentProviderView } from '@lm/shared';
 import { createBankFileProvider } from './bankFile.ts';
 import { createFakeProvider } from './fake.ts';
 import type { PaymentProviderAdapter } from './provider.ts';
-import { stubProvider } from './stubs.ts';
+import { createRevolutProvider } from './revolut.ts';
+import { createTrueLayerProvider } from './truelayer.ts';
+import { createWiseProvider } from './wise.ts';
 
 const BUILT_IN: readonly PaymentProviderAdapter[] = [
   createBankFileProvider(), // package P: the bank payment file (./bankFile.ts)
-  stubProvider('revolut'), // package A
-  stubProvider('wise'), // package A
-  stubProvider('truelayer'), // package A
+  createRevolutProvider(), // package A: ./revolut.ts
+  createWiseProvider(), // package A: ./wise.ts
+  createTrueLayerProvider(), // package A: ./truelayer.ts
 ];
 
 const adapters = new Map<string, PaymentProviderAdapter>(BUILT_IN.map((a) => [a.info.id, a]));

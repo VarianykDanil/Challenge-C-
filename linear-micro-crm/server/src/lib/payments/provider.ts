@@ -56,6 +56,11 @@ export interface ProviderBatch {
   createdAt: string;
   /** e.g. "2026-10-23" (business date): for a file name or a batch reference. */
   today: string;
+  /**
+   * Package A: when the admin approved it (real clock; null for a draft). An adapter whose provider only spots a
+   * repeated idempotency key for a limited time (Revolut: 2 weeks) uses it to never send a payment again blind.
+   */
+  approvedAt?: string | null;
 }
 
 /** One payment to make, with the payee's full details (decrypted for this call only). */
@@ -103,6 +108,12 @@ export interface SubmitResult {
   providerRef?: string | null;
   /** Bank file adapters: the file to download. */
   file?: ProviderFile;
+  /**
+   * Package A: plain words for why some items were not sent this time (e.g. "Revolut did not answer within 15
+   * seconds"). Those items are left out of `items`, stay queued and are sent again later with the same keys; the
+   * batch shows this as its last error.
+   */
+  error?: string | null;
 }
 
 export interface ConnectionTestResult {
@@ -127,6 +138,12 @@ export interface ProviderContext {
   now(): Date;
   /** Test hook: a local fake server instead of the provider's base URL. */
   baseUrl?: string;
+  /**
+   * Package A: keeps secrets the provider handed back during a call (Revolut's refresh token), merged into the
+   * connection's ONE encrypted secrets blob; a null or empty value removes that secret (a used authorisation code).
+   * Linear Hub provides it for every call on a stored connection (lib/payments/connections.ts providerContext).
+   */
+  saveSecrets?(patch: Record<string, string | null>): void;
 }
 
 export interface PaymentProviderAdapter {
