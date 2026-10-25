@@ -11,6 +11,7 @@ import { ApiError } from '@/api/client';
 import { useBankDetails, useConfirmBankDetails, useSaveBankDetails } from '@/api/payments';
 import { Badge, Button, Card, CardHeader, Field, Input, Skeleton, useToast } from '@/components/ui';
 import { ErrorState, errorMessage } from '@/features/common';
+import { useScrollToHash } from '@/lib/useScrollToHash';
 
 type FieldKey = 'holderName' | 'sortCode' | 'accountNumber' | 'code';
 
@@ -34,6 +35,8 @@ export interface BankDetailsCardProps {
 export function BankDetailsCard({ user, className }: BankDetailsCardProps) {
   const q = useBankDetails(user?.id ?? null);
   const [editing, setEditing] = useState(false);
+  // the Needs-attention link (Team → person#bank-details) lands here once the details have loaded
+  useScrollToHash('bank-details', !q.isLoading);
   const own = !user;
   const first = user?.firstName ?? '';
   return (

@@ -12,7 +12,8 @@ import { useCreateBatch, usePaymentBatches, usePaymentConnections, usePaymentPro
 import { Badge, Button, Card, CardHeader, EmptyState, PageHeader, Skeleton, useToast } from '@/components/ui';
 import { ErrorState, errorMessage } from '@/features/common';
 import { invoiceNotAccepted } from '@/features/finance';
-import { PaymentBatchStatusBadge } from '@/features/payments';
+import { PaymentBatchStatusBadge, PaymentRunBadge } from '@/features/payments';
+import { bankFileFormatLabel } from '@/features/payments/BankFileFormats';
 import { ProviderLogo } from '@/features/payments/ProviderLogo';
 import { todayISO } from '@/lib/dates';
 import { formatNumber } from '@/lib/format';
@@ -51,8 +52,12 @@ export function PaymentsPayPage() {
   const selectable = list.filter((r) => !blocked(r, today));
   const selected = picked ?? new Set(selectable.filter((r) => preset.has(r.id)).map((r) => r.id));
   const chosen = selectable.filter((r) => selected.has(r.id));
-  const totalPence = chosen.reduce((s, r) => s + poundsToPence(r.gross), 0);
+  // review fix: the counts leave out what the server will leave out for certain (invoice not accepted or disputed)
+  const counted = chosen.filter((r) => !invoiceNotAccepted(r));
+  const totalPence = counted.reduce((s, r) => s + poundsToPence(r.gross), 0);
   const usable = (connections.data ?? []).filter((c) => !c.disconnectedAt && c.status === 'connected');
+  // review fix: connections that exist but need a (new) test are listed, not "set one up first"
+  const untested = (connections.data ?? []).filter((c) => !c.disconnectedAt && c.status !== 'connected');
   const connection = usable.find((c) => c.id === connectionId) ?? (usable.length === 1 ? usable[0] : undefined);
   const info = (c: PaymentConnection) => providers.data?.find((p) => p.id === c.provider);
   const toggle = (id: number, on: boolean) => {
@@ -115,9 +120,11 @@ export function PaymentsPayPage() {
                           <span className="block text-xs text-muted">
                             {payWeekLabel(r.weekStart)}
                             {r.status === 'failed' ? ' · failed transfer' : ''}
-                            {why ? ` · ${why}` : held ? ' · invoice not accepted yet (left out)' : ''}
+                            {why ? ` · ${why}` : held ? (r.invoice?.status === 'disputed' ? ' · invoice disputed (left out)' : ' · invoice not accepted yet (left out)') : ''}
                             {r.payment?.status === 'failed' && r.payment.failureReason ? ` · last payment failed: ${r.payment.failureReason}` : ''}
                           </span>
+                          {/* review fix: a run already in a draft is left out of a new one (the server says "Already in payment #N") */}
+                          {r.payment?.draft && <span className="mt-1 block"><PaymentRunBadge payment={r.payment} /></span>}
                         </span>
                         <span className="shrink-0 text-sm font-semibold tabular-nums text-fg">{formatPence(poundsToPence(r.gross))}</span>
                       </label>
@@ -130,7 +137,7 @@ export function PaymentsPayPage() {
             {chosen.length > 0 && (
               <div className="sticky bottom-0 z-20 flex items-center gap-3 border-t border-border bg-surface/95 px-4 pt-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] shadow-pop backdrop-blur-md sm:px-5 xl:hidden" data-pay-bar="">
                 <span className="min-w-0 flex-1 text-sm">
-                  <span className="block font-medium text-fg">{formatNumber(chosen.length)} {chosen.length === 1 ? 'run' : 'runs'} · <span className="tabular-nums">{formatPence(totalPence)}</span></span>
+                  <span className="block font-medium text-fg">{formatNumber(counted.length)} {counted.length === 1 ? 'run' : 'runs'} · <span className="tabular-nums">{formatPence(totalPence)}</span></span>
                   {!connection && <span className="block text-xs text-muted">Choose how to pay below</span>}
                 </span>
                 {connection ? (
@@ -156,7 +163,22 @@ export function PaymentsPayPage() {
             <CardHeader title="2. How to pay" />
             {connections.isLoading ? <Skeleton className="h-16" /> : !usable.length ? (
               <div className="space-y-3 text-sm text-muted">
-                <p>Set up a way to pay first: a bank payment file, Revolut Business, Wise Business or Open Banking through TrueLayer.</p>
+                {untested.length ? (
+                  <ul className="grid gap-2" aria-label="Connections to test first" data-untested="">
+                    {untested.map((c) => (
+                      <li key={c.id} className="flex min-h-14 items-center gap-3 rounded-lg border border-dashed border-border p-3" aria-disabled="true">
+                        <ProviderLogo iconKey={info(c)?.iconKey ?? 'bank'} size="sm" />
+                        <span className="min-w-0 flex-1">
+                          <span className="block text-sm font-medium text-fg">{c.name}</span>
+                          <span className="block text-xs text-muted">Test it in Settings → Payments first{c.status === 'error' && c.lastError ? `. Last time: ${c.lastError}` : ''}</span>
+                        </span>
+                        {info(c)?.kind === 'api' && c.mode === 'test' && <Badge tone="info" size="sm">Test</Badge>}
+                      </li>
+                    ))}
+                  </ul>
+                ) : (
+                  <p>Set up a way to pay first: a bank payment file, Revolut Business, Wise Business or Open Banking through TrueLayer.</p>
+                )}
                 <Link to="/settings#payments" className="focus-ring inline-flex h-10 items-center gap-1.5 rounded-lg bg-primary px-4 text-sm font-medium text-primary-fg shadow-card hover:bg-primary-hover">
                   <SettingsIcon className="h-4 w-4" aria-hidden /> Open Settings → Payments
                 </Link>
@@ -178,7 +200,7 @@ export function PaymentsPayPage() {
                       <ProviderLogo iconKey={p?.iconKey ?? 'bank'} size="sm" />
                       <span className="min-w-0 flex-1">
                         <span className="block truncate text-sm font-medium text-fg">{c.name}</span>
-                        <span className="block text-xs text-muted">{p?.kind === 'file' ? 'Bank payment file' : PAYMENT_MODE_LABELS[c.mode]}{p && !p.available ? ' · not switched on in this version yet' : ''}</span>
+                        <span className="block text-xs text-muted">{p?.kind === 'file' ? (bankFileFormatLabel(c.settings) ?? 'Bank payment file') : PAYMENT_MODE_LABELS[c.mode]}{p && !p.available ? ' · not switched on in this version yet' : ''}</span>
                       </span>
                       {p?.kind === 'api' && c.mode === 'test' && <Badge tone="info" size="sm">Test</Badge>}
                     </button>
@@ -190,14 +212,19 @@ export function PaymentsPayPage() {
           <Card>
             <CardHeader title="3. Review" />
             <dl className="mb-4 space-y-1.5 text-sm">
-              <div className="flex justify-between gap-3"><dt className="text-muted">People</dt><dd className="tabular-nums text-fg">{formatNumber(new Set(chosen.map((r) => r.userId)).size)}</dd></div>
-              <div className="flex justify-between gap-3"><dt className="text-muted">Runs</dt><dd className="tabular-nums text-fg">{formatNumber(chosen.length)}</dd></div>
-              <div className="flex justify-between gap-3"><dt className="text-muted">Total</dt><dd className="font-semibold tabular-nums text-fg">{formatPence(totalPence)}</dd></div>
+              <div className="flex justify-between gap-3"><dt className="text-muted">People</dt><dd className="tabular-nums text-fg">{formatNumber(new Set(counted.map((r) => r.userId)).size)}</dd></div>
+              <div className="flex justify-between gap-3"><dt className="text-muted">Runs</dt><dd className="tabular-nums text-fg">{formatNumber(counted.length)}</dd></div>
+              <div className="flex justify-between gap-3"><dt className="text-muted">Total before checks</dt><dd className="font-semibold tabular-nums text-fg">{formatPence(totalPence)}</dd></div>
             </dl>
+            {chosen.length > counted.length && (
+              <p className="mb-3 text-xs text-muted" data-not-counted="">
+                {formatNumber(chosen.length - counted.length)} ticked {chosen.length - counted.length === 1 ? 'run is' : 'runs are'} not counted: the invoice is not accepted yet or is disputed.
+              </p>
+            )}
             <Button className="h-10 w-full" disabled={!connection || !chosen.length} loading={create.isPending} rightIcon={<ArrowRight aria-hidden />} onClick={review}>
               Review payment
             </Button>
-            <p className="mt-2 text-xs text-muted">Nothing is sent yet: the next page shows who is paid, to which account, and who is left out.</p>
+            <p className="mt-2 text-xs text-muted">Nothing is sent yet: the next page shows who is paid, to which account, and who is left out (for example anyone without bank details).</p>
           </Card>
           <RecentPayments loading={batches.isLoading} rows={batches.data ?? []} iconFor={(provider) => providers.data?.find((p) => p.id === provider)?.iconKey ?? 'bank'} kindFor={(provider) => providers.data?.find((p) => p.id === provider)?.kind} />
         </div>
@@ -219,10 +246,14 @@ function RecentPayments({ loading, rows, iconFor, kindFor }: { loading: boolean;
               <Link to={`/finance/pay/batches/${b.id}`} className="focus-ring-inset flex min-h-14 items-center gap-3 px-5 py-2.5 hover:bg-surface-2/60">
                 <ProviderLogo iconKey={iconFor(b.provider)} size="sm" />
                 <span className="min-w-0 flex-1">
-                  <span className="block truncate text-sm font-medium text-fg">Payment #{b.id} · {formatPence(b.totalPence)}</span>
-                  <span className="block truncate text-xs text-muted">{b.connectionName} · {formatNumber(b.count)} {b.count === 1 ? 'person' : 'people'} · {payDayLabel(b.createdAt.slice(0, 10))}</span>
+                  {/* review fix: both lines wrap rather than cutting off the amount or the date */}
+                  <span className="block text-sm font-medium text-fg">Payment #{b.id} · {formatPence(b.totalPence)}</span>
+                  <span className="block text-xs text-muted">{b.connectionName} · {formatNumber(b.count)} {b.count === 1 ? 'payment' : 'payments'} · {payDayLabel(b.createdAt.slice(0, 10))}</span>
                 </span>
-                <PaymentBatchStatusBadge status={b.status} kind={kindFor(b.provider)} />
+                <span className="flex shrink-0 flex-col items-end gap-1">
+                  <PaymentBatchStatusBadge status={b.status} kind={kindFor(b.provider)} mode={b.mode} />
+                  {b.mode === 'test' && kindFor(b.provider) === 'api' && <Badge tone="info" size="sm">Test</Badge>}
+                </span>
               </Link>
             </li>
           ))}

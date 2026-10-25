@@ -44,13 +44,14 @@ interface StoredRun {
   salesCancelled: number | null;
   adjustmentsTotal: number | null;
   breakdownJson: string | null;
+  adjustedAt: string | null;
 }
 
 const RUN_SELECT = `
   SELECT id, status, deductions, days_worked AS daysWorked, sales, team_sales AS teamSales, base_pay AS basePay,
          commission, bonus, overrides, gross, paid_as AS paidAs, sales_logged AS salesLogged,
          sales_confirmed AS salesConfirmed, sales_cancelled AS salesCancelled, adjustments_total AS adjustmentsTotal,
-         breakdown_json AS breakdownJson
+         breakdown_json AS breakdownJson, adjusted_at AS adjustedAt
   FROM payroll_runs WHERE user_id = ? AND week_start = ?`;
 /** Release 1.3 (P1): the run's columns; the 1.3 ones (paid_as …) stay NULL for a week paid by the 1.2 plan rules. */
 export const INSERT_RUN = `
@@ -58,12 +59,37 @@ export const INSERT_RUN = `
     (user_id, week_start, week_end, days_worked, sales, team_sales, base_pay, commission, bonus, overrides, deductions, gross, due_date, paid_date, status, reference,
      paid_as, sales_logged, sales_confirmed, sales_cancelled, adjustments_total, breakdown_json)
   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`;
+// an unpaid run brought in line with the gauges matches them again: a flag set while it was in a payment on its way goes
 const UPDATE_RUN = `
   UPDATE payroll_runs SET days_worked = ?, sales = ?, team_sales = ?, base_pay = ?, commission = ?, bonus = ?, overrides = ?, gross = ?,
-    paid_as = ?, sales_logged = ?, sales_confirmed = ?, sales_cancelled = ?, adjustments_total = ?, breakdown_json = ?
+    paid_as = ?, sales_logged = ?, sales_confirmed = ?, sales_cancelled = ?, adjustments_total = ?, breakdown_json = ?, adjusted_at = NULL
   WHERE id = ?`;
 
 export const PAID_WEEK_MESSAGE = 'This week has already been paid — ask an administrator to adjust';
+
+/**
+ * Release 1.4 (review fix): the live items of an APPROVED payment from Linear Hub still on its way, as SQL over the
+ * aliases `pi` (payment_items) and `pb` (payment_batches). The run of such an item holds what is being paid, so it is
+ * frozen like a paid run: syncPayrollRun leaves its figures alone (and flags a change, adjusted_at), no correction or
+ * bonus lands on its week (nextOpenWeek here; lib/payRule.ts nextUnpaidWeek and assertWeekUnpaid), and once paid it is
+ * paid at the amount sent. A payment that fails or is cancelled frees the run, and lib/payments/batches.ts brings it
+ * up to date before it can be paid again. Drafts hold nothing.
+ */
+export const IN_PAYMENT_FROM = `FROM payment_items pi JOIN payment_batches pb ON pb.id = pi.batch_id
+  WHERE pi.live = 1 AND pi.status IN ('queued', 'submitted', 'processing') AND pb.status <> 'draft'`;
+
+/** Whether the run is in a payment on its way (read once per context when one is given: one grouped query). */
+export function runInPayment(db: Db, runId: number, ctx?: PayCalcContext): boolean {
+  if (!ctx) return Boolean(get(db, `SELECT 1 ${IN_PAYMENT_FROM} AND pi.payroll_run_id = ? LIMIT 1`, [runId]));
+  ctx.inPayment ??= new Set(all<{ id: number }>(db, `SELECT DISTINCT pi.payroll_run_id AS id ${IN_PAYMENT_FROM}`).map((r) => Number(r.id)));
+  return ctx.inPayment.has(runId);
+}
+
+/** The payment (its id) the person's pay for the week starting `monday` is in, on its way; null when none. */
+export function paymentOnItsWay(db: Db, userId: number, monday: string): number | null {
+  const r = get<{ id: number }>(db, `SELECT pb.id ${IN_PAYMENT_FROM} AND pi.user_id = ? AND pi.week_start = ? ORDER BY pb.id DESC LIMIT 1`, [userId, monday]);
+  return r ? Number(r.id) : null;
+}
 
 /** True when the person's run for the pay week containing `date` has been paid (`paid` or `late`). */
 export function isWeekPaidFor(db: Db, userId: number, date: string): boolean {
@@ -104,11 +130,17 @@ export function runFiguresOf(w: WeekPay): RunFigures {
 /**
  * The first week after `monday` whose run is still open: no run yet, or a pending one. Paid and late runs are money
  * that already landed, and a failed transfer is money already in flight, so neither takes a new line (review fix: the
- * lines used to go on the following week even when it was paid, where nobody ever paid or took them off).
+ * lines used to go on the following week even when it was paid, where nobody ever paid or took them off). Release 1.4:
+ * nor does a week whose pay is in a payment from Linear Hub on its way (IN_PAYMENT_FROM).
  */
 export function nextOpenWeek(db: Db, userId: number, monday: string): string {
   const closed = new Set(
-    all<{ w: string }>(db, `SELECT week_start AS w FROM payroll_runs WHERE user_id = ? AND week_start > ? AND status IN ('paid', 'late', 'failed')`, [userId, monday]).map((r) => r.w),
+    all<{ w: string }>(
+      db,
+      `SELECT week_start AS w FROM payroll_runs WHERE user_id = ? AND week_start > ? AND status IN ('paid', 'late', 'failed')
+       UNION SELECT pi.week_start ${IN_PAYMENT_FROM} AND pi.user_id = ? AND pi.week_start > ?`,
+      [userId, monday, userId, monday],
+    ).map((r) => r.w),
   );
   let week = addDays(monday, 7);
   while (closed.has(week)) week = addDays(week, 7);
@@ -185,6 +217,10 @@ export function runIsDue(w: WeekPay | null, deductions = 0): w is WeekPay {
  *  - a complete week with payable work and no run yet gets a `pending` run.
  * Release 1.3: a week from PAY_RULE_FROM also stores paid_as, the subs logged / confirmed / cancelled, the adjustments
  * total and the calculation itself (breakdown_json), which a paid run keeps as paid.
+ * Release 1.4 (review fix): an unpaid run in a payment from Linear Hub on its way (IN_PAYMENT_FROM) holds what is being
+ * paid: like a paid run it is never recomputed or removed, and its lines stay where they are. When the calculation no
+ * longer matches it, it is flagged `adjusted_at` (refreshed by `flagPaid`; cleared again if the figures come back): the
+ * run shows "Adjusted after payment" and the admin's Needs attention says so, for a correction on a later week.
  */
 export function syncPayrollRun(db: Db, user: RunUser, monday: string, today = todayISO(), opts: { flagPaid?: boolean; ctx?: PayCalcContext; carried?: boolean } = {}): RunSync {
   const sunday = sundayOf(monday);
@@ -197,6 +233,16 @@ export function syncPayrollRun(db: Db, user: RunUser, monday: string, today = to
   }
   const deductions = existing?.deductions ?? 0;
   const w = weekPayFor(db, user, monday, today, { ctx: opts.ctx, deductions });
+  if (existing && runInPayment(db, existing.id, opts.ctx)) {
+    if (runIsDue(w, deductions) && sameFigures(existing, runFiguresOf(w))) {
+      if (existing.adjustedAt === null) return 'unchanged';
+      run(db, `UPDATE payroll_runs SET adjusted_at = NULL WHERE id = ?`, [existing.id]);
+      return 'flagged';
+    }
+    if (existing.adjustedAt !== null && !opts.flagPaid) return 'skipped';
+    run(db, `UPDATE payroll_runs SET adjusted_at = ? WHERE id = ?`, [nowISO(), existing.id]);
+    return 'flagged';
+  }
   const moved = carryForward(db, user.id, monday, w);
   if (moved) {
     // the corrections now sit on a later week: bring its run (when that week is complete) in line too
@@ -218,19 +264,23 @@ export function syncPayrollRun(db: Db, user: RunUser, monday: string, today = to
     insertRun(db, user, monday, f, { deductions: 0, paidDate: null, status: 'pending' });
     return 'created';
   }
-  if (
-    existing.daysWorked === f.daysWorked && existing.sales === f.sales && existing.teamSales === f.teamSales &&
-    existing.basePay === f.basePay && existing.commission === f.commission && existing.bonus === f.bonus &&
-    existing.overrides === f.overrides && existing.gross === f.gross && existing.paidAs === r.paidAs &&
-    existing.salesLogged === r.salesLogged && existing.salesConfirmed === r.salesConfirmed &&
-    existing.salesCancelled === r.salesCancelled && existing.adjustmentsTotal === r.adjustmentsTotal &&
-    existing.breakdownJson === r.breakdownJson
-  ) return 'unchanged';
+  if (sameFigures(existing, f) && existing.adjustedAt === null) return 'unchanged';
   run(db, UPDATE_RUN, [
     f.daysWorked, f.sales, f.teamSales, f.basePay, f.commission, f.bonus, f.overrides, f.gross,
     r.paidAs, r.salesLogged, r.salesConfirmed, r.salesCancelled, r.adjustmentsTotal, r.breakdownJson, existing.id,
   ]);
   return 'updated';
+}
+
+/** True when the stored run already holds exactly these figures. */
+function sameFigures(existing: StoredRun, f: RunFigures): boolean {
+  const r = f.rule;
+  return existing.daysWorked === f.daysWorked && existing.sales === f.sales && existing.teamSales === f.teamSales &&
+    existing.basePay === f.basePay && existing.commission === f.commission && existing.bonus === f.bonus &&
+    existing.overrides === f.overrides && existing.gross === f.gross && existing.paidAs === r.paidAs &&
+    existing.salesLogged === r.salesLogged && existing.salesConfirmed === r.salesConfirmed &&
+    existing.salesCancelled === r.salesCancelled && existing.adjustmentsTotal === r.adjustmentsTotal &&
+    existing.breakdownJson === r.breakdownJson;
 }
 
 /** Inserts a run for a calculated week (the seed passes its own status, paid date and deductions). Returns its id. */

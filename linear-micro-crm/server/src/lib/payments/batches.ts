@@ -20,6 +20,17 @@
  *     (markFileBatchPaid) — the rest he unticks fail with a reason.
  * Never twice: the partial unique index (a run is in at most one live payment), the draft and approval checks, the
  * claim, per-item idempotency keys, and lib/markPaid.ts refusing a run already paid or on its way in a payment.
+ * Review fixes (release 1.4):
+ *  - The payee each item was approved with is kept with it (payee_enc, encrypted): every send, resend, check and cancel
+ *    uses it, so a resend after a timeout is the same request with the same key, even if the person changed their bank
+ *    details since. An approved item is never failed here because the details changed: only the provider fails it.
+ *  - Linear Hub talks to the provider only in the batch's own mode: a connection switched to live (or back to test)
+ *    never sends or checks a payment made in the other mode (connections.ts refuses the switch while one is on its
+ *    way; this guards older data).
+ *  - attempted_at: when an item was first handed to the provider. Cancel stops at once the items never sent; it waits
+ *    (409) while Linear Hub does not know whether the provider made an item (sent, but no reference back yet).
+ *  - A run in a payment on its way is frozen (db/maintenance.ts IN_PAYMENT_FROM); a payment that fails or is cancelled
+ *    frees it and brings it up to date (lib/payRule.ts syncPersonWeek).
  */
 import { randomUUID } from 'node:crypto';
 import {
@@ -56,6 +67,7 @@ import { addDays, isISODate, nowISO, todayISO } from '../dates.ts';
 import { HttpError, badRequest, conflict, notFound } from '../errors.ts';
 import { withInvoiceSummaries } from '../invoices.ts';
 import { markPayrollRunPaid } from '../markPaid.ts';
+import { syncPersonWeek } from '../payRule.ts';
 import { decryptedBankDetails, maskedBankDetails, needsConfirmation } from './bankDetails.ts';
 import { assertFreshCode } from './code.ts';
 import { adapterFor, connectionRow, providerConnection, providerContext, type ConnectionRow } from './connections.ts';
@@ -89,6 +101,7 @@ interface BatchRow {
   hasFile: number;
   lastError: string | null;
   updatedAt: string;
+  cancelledAt: string | null;
   paidCount: number;
   failedCount: number;
   waitingCount: number;
@@ -100,6 +113,7 @@ const BATCH_SELECT = `
          b.approved_by AS approvedBy, TRIM(au.first_name || ' ' || au.last_name) AS approvedByName, b.total_pence AS totalPence,
          b.count, b.status, b.file_name AS fileName, b.idempotency_key AS idempotencyKey, b.provider_ref AS providerRef,
          b.skipped_json AS skippedJson, (b.file_enc IS NOT NULL) AS hasFile, b.last_error AS lastError, b.updated_at AS updatedAt,
+         b.cancelled_at AS cancelledAt,
          COALESCE(s.paid, 0) AS paidCount, COALESCE(s.failed, 0) AS failedCount, COALESCE(s.waiting, 0) AS waitingCount
   FROM payment_batches b
   JOIN payment_connections c ON c.id = b.connection_id
@@ -128,6 +142,10 @@ interface ItemRow {
   updatedAt: string;
   note: string | null;
   live: number;
+  payeeEnc: string | null;
+  attemptedAt: string | null;
+  runPaidDate: string | null;
+  runAdjustedAt: string | null;
 }
 
 const ITEM_SELECT = `
@@ -135,10 +153,14 @@ const ITEM_SELECT = `
          TRIM(u.first_name || ' ' || u.last_name) AS userName, i.week_start AS weekStart, p.reference AS runReference,
          i.amount_pence AS amountPence, i.payee_name AS payeeName, i.account_last4 AS accountLast4, i.status,
          i.provider_ref AS providerRef, i.failure_reason AS failureReason, i.submitted_at AS submittedAt, i.paid_at AS paidAt,
-         i.updated_at AS updatedAt, i.note, i.live
+         i.updated_at AS updatedAt, i.note, i.live, i.payee_enc AS payeeEnc, i.attempted_at AS attemptedAt,
+         p.paid_date AS runPaidDate, p.adjusted_at AS runAdjustedAt
   FROM payment_items i
   LEFT JOIN users u ON u.id = i.user_id
   LEFT JOIN payroll_runs p ON p.id = i.payroll_run_id`;
+
+/** Shown on an item still on its way whose run's figures changed after the approval (the run is frozen meanwhile). */
+const CHANGED_WHILE_WAITING = 'The week’s figures changed after you approved this payment. It is paid as approved: put any difference on a later week as an adjustment.';
 
 function batchRow(db: Db, id: number): BatchRow | undefined {
   return get<BatchRow>(db, `${BATCH_SELECT} WHERE b.id = ?`, [id]);
@@ -154,7 +176,9 @@ function itemRows(db: Db, batchId: number): ItemRow[] {
   return all<ItemRow>(db, `${ITEM_SELECT} WHERE i.batch_id = ? ORDER BY i.week_start, i.payee_name COLLATE NOCASE, i.id`, [batchId]);
 }
 
-const toItem = (r: ItemRow): PaymentItem => ({
+const isWaiting = (s: PaymentItemStatus) => s === 'queued' || s === 'submitted' || s === 'processing';
+
+const toItem = (r: ItemRow, approvedAt: string | null = null): PaymentItem => ({
   id: r.id,
   batchId: r.batchId,
   payrollRunId: r.payrollRunId,
@@ -171,8 +195,60 @@ const toItem = (r: ItemRow): PaymentItem => ({
   submittedAt: r.submittedAt,
   paidAt: r.paidAt,
   updatedAt: r.updatedAt,
-  note: r.note,
+  note: r.note ?? (r.live && isWaiting(r.status) && approvedAt && r.runAdjustedAt && r.runAdjustedAt > approvedAt ? CHANGED_WHILE_WAITING : null),
+  runPaidDate: r.status === 'paid' && r.live ? r.runPaidDate : null,
 });
+
+/** The sort code and account number an item was approved with (null: none kept, or unreadable). */
+function approvedPayee(i: Pick<ItemRow, 'payeeEnc'>): { sortCode: string; accountNumber: string } | null {
+  if (!i.payeeEnc) return null;
+  try {
+    const v = JSON.parse(decrypt(i.payeeEnc)) as { sortCode?: unknown; accountNumber?: unknown };
+    return typeof v.sortCode === 'string' && typeof v.accountNumber === 'string' ? { sortCode: v.sortCode, accountNumber: v.accountNumber } : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Where an approved item's money goes: the details it was approved with. An item approved before they were kept
+ * (older data) uses the person's current details only while they are exactly those (unchanged since the approval,
+ * confirmed, same last four digits); otherwise null and Linear Hub does not send it.
+ */
+function payeeFor(i: ItemRow, b: Pick<BatchRow, 'approvedAt'>, bank: ReturnType<typeof decryptedBankDetails>): { sortCode: string; accountNumber: string } | null {
+  const kept = approvedPayee(i);
+  if (kept || i.payeeEnc) return kept;
+  const d = bank.get(i.userId);
+  if (!d || needsConfirmation(d) || (b.approvedAt !== null && d.changedAt > b.approvedAt) || d.last4 !== i.accountLast4) return null;
+  return { sortCode: d.sortCode, accountNumber: d.accountNumber };
+}
+
+/** One item as the adapter sees it (the payee the item was approved with; empty when Linear Hub has none). */
+function providerItem(b: Pick<BatchRow, 'idempotencyKey'>, i: ItemRow, payee: { sortCode: string; accountNumber: string } | null): ProviderItem {
+  return {
+    id: i.id, payrollRunId: i.payrollRunId, userId: i.userId, amountPence: i.amountPence, currency: 'GBP', payeeName: i.payeeName,
+    sortCode: payee?.sortCode ?? '', accountNumber: payee?.accountNumber ?? '', reference: defaultPaymentReference(i.weekStart, i.payeeName),
+    weekStart: i.weekStart, idempotencyKey: `${b.idempotencyKey}:${i.id}`, providerRef: i.providerRef,
+  };
+}
+
+/** Plain words for a batch whose connection is in the other mode now (null: same mode). */
+function modeMismatch(b: Pick<BatchRow, 'id' | 'mode'>, conn: Pick<ConnectionRow, 'mode'>): string | null {
+  if (conn.mode === b.mode) return null;
+  return b.mode === 'test'
+    ? `Payment #${b.id} was made in test mode, but the connection is now live. Linear Hub does not send or check it through the live service: switch the connection back to test mode to finish it.`
+    : `Payment #${b.id} was made live, but the connection is now in test mode. Linear Hub does not send or check it through the sandbox: switch the connection back to live to finish it.`;
+}
+
+/**
+ * What Cancel can do with the items still waiting: `local`, queued items Linear Hub never sent (cancelled here);
+ * `unsure`, items the provider may have made with no reference back yet (Check now first); `provider`, the rest.
+ */
+function cancelPlan(waiting: readonly ItemRow[]): { local: ItemRow[]; unsure: ItemRow[]; provider: ItemRow[] } {
+  const local = waiting.filter((i) => i.status === 'queued' && !i.attemptedAt);
+  const unsure = waiting.filter((i) => !local.includes(i) && (i.status === 'queued' || !i.providerRef));
+  return { local, unsure, provider: waiting.filter((i) => !local.includes(i) && !unsure.includes(i)) };
+}
 
 function toSummary(b: BatchRow): PaymentBatchSummary {
   return {
@@ -225,7 +301,8 @@ export function listBatches(db: Db, limit = 50): PaymentBatchSummary[] {
 
 export function batchDetail(db: Db, id: number): PaymentBatch {
   const b = requireBatch(db, id);
-  const items = itemRows(db, id).map(toItem);
+  const rows = itemRows(db, id);
+  const items = rows.map((r) => toItem(r, b.approvedAt));
   const adapter = (() => {
     try {
       return adapterFor(b.provider);
@@ -236,8 +313,13 @@ export function batchDetail(db: Db, id: number): PaymentBatch {
   const kind = adapter?.info.kind ?? 'api';
   const conn = connectionRow(db, b.connectionId);
   const connected = !!conn && !conn.disconnectedAt && conn.status === 'connected' && conn.mode === b.mode;
-  const waiting = items.some((i) => i.status === 'queued' || i.status === 'submitted' || i.status === 'processing');
+  // talking to the provider about it: only through its own mode (review fix)
+  const reachable = !!conn && !conn.disconnectedAt && conn.mode === b.mode;
+  const waitingRows = rows.filter((i) => isWaiting(i.status));
+  const waiting = waitingRows.length > 0;
   const approved = b.approvedAt !== null;
+  const plan = cancelPlan(waitingRows);
+  const cancelApi = plan.local.length === waitingRows.length || (!plan.unsure.length && !!adapter?.cancel && reachable);
   return {
     ...toSummary(b),
     items,
@@ -245,8 +327,8 @@ export function batchDetail(db: Db, id: number): PaymentBatch {
     kind,
     actions: {
       approve: b.status === 'draft' && !!adapter?.ready && connected,
-      cancel: b.status === 'draft' || (approved && waiting && (kind === 'file' || !!adapter?.cancel)),
-      refresh: approved && kind === 'api' && waiting && !!adapter?.ready,
+      cancel: b.status === 'draft' || (approved && waiting && (kind === 'file' || cancelApi)),
+      refresh: approved && kind === 'api' && waiting && !!adapter?.ready && reachable,
       download: kind === 'file' && Boolean(b.hasFile) && b.status !== 'cancelled',
       markPaid: kind === 'file' && approved && items.some((i) => i.status === 'submitted' || i.status === 'processing'),
     },
@@ -439,13 +521,31 @@ export async function approveBatch(db: Db, me: UserWithTeam, id: number, code: u
   if (!items.length) throw conflict('There is nobody left to pay in this payment.');
   // before the code is used: nothing changed since the draft
   const problems = recheck(db, me, b, items);
+  // the details each payment goes to, kept with it at the approval (review fix: every resend uses exactly these)
+  const bank = decryptedBankDetails(db, items.map((i) => i.userId));
+  for (const i of items) {
+    const d = bank.get(i.userId);
+    const name = i.userName || i.payeeName;
+    // (the same words as recheck's, so a problem is listed once)
+    if (!d) problems.push(`${name}'s bank details were removed`);
+    else if (d.last4 !== i.accountLast4) problems.push(`${name}'s bank details changed after this payment was made`);
+  }
   if (problems.length) {
-    throw new HttpError(409, `Things changed since this payment was made: ${problems.slice(0, 3).join('; ')}${problems.length > 3 ? ` (and ${problems.length - 3} more)` : ''}. Cancel it and make a new one.`, { code: 'batch_changed', problems });
+    const unique = [...new Set(problems)];
+    throw new HttpError(409, `Things changed since this payment was made: ${unique.slice(0, 3).join('; ')}${unique.length > 3 ? ` (and ${unique.length - 3} more)` : ''}. Cancel it and make a new one.`, { code: 'batch_changed', problems: unique });
   }
   assertFreshCode(db, me, code, source, { required: true });
   const at = nowISO();
-  // one approval wins, even if two arrive together
-  const claimed = run(db, `UPDATE payment_batches SET approved_at = ?, approved_by = ?, status = 'submitted', updated_at = ? WHERE id = ? AND status = 'draft'`, [at, me.id, at, id]).changes;
+  // one approval wins, even if two arrive together; the winner keeps each payee with its item
+  const claimed = transaction(db, () => {
+    const n = run(db, `UPDATE payment_batches SET approved_at = ?, approved_by = ?, status = 'submitted', updated_at = ? WHERE id = ? AND status = 'draft'`, [at, me.id, at, id]).changes;
+    if (!n) return 0;
+    for (const i of items) {
+      const d = bank.get(i.userId)!;
+      run(db, `UPDATE payment_items SET payee_enc = ? WHERE id = ? AND status = 'queued'`, [encrypt(JSON.stringify({ sortCode: d.sortCode, accountNumber: d.accountNumber })), i.id]);
+    }
+    return n;
+  });
   if (!claimed) throw conflict('This payment was approved a moment ago.');
   await sendQueued(db, id, me, `POST /payments/batches/:id/approve`);
   return batchDetail(db, id);
@@ -456,35 +556,47 @@ const plain = (err: unknown, secrets: readonly string[]): string => {
   return redactSecrets(text, secrets).slice(0, 500);
 };
 
-/** Sends the batch's queued items (approval, or a retry after a submit that threw). */
+/**
+ * Sends the batch's queued items (approval, or a retry after a submit that threw), each to the payee it was approved
+ * with and with its own key. Only through the batch's own mode, and never once a cancel was asked for.
+ */
 async function sendQueued(db: Db, id: number, actor: UserWithTeam | null, action: string | null): Promise<void> {
   if (busy.has(id)) return;
   busy.add(id);
   try {
     const b = requireBatch(db, id);
     const conn = connectionRow(db, b.connectionId);
-    if (!conn || conn.disconnectedAt) return;
+    if (!conn || conn.disconnectedAt || b.cancelledAt) return;
+    const mismatch = modeMismatch(b, conn);
+    if (mismatch) {
+      run(db, `UPDATE payment_batches SET last_error = ? WHERE id = ?`, [mismatch, id]);
+      return;
+    }
     const adapter = adapterFor(conn.provider);
     const queued = itemRows(db, id).filter((i) => i.status === 'queued');
     if (!queued.length) return;
     const bank = decryptedBankDetails(db, queued.map((i) => i.userId));
     const send: ProviderItem[] = [];
+    const held: string[] = [];
     for (const i of queued) {
-      const d = bank.get(i.userId);
-      // never to details that changed after the approval (or were never confirmed)
-      if (!d || needsConfirmation(d) || (b.approvedAt !== null && d.changedAt > b.approvedAt) || d.last4 !== i.accountLast4) {
-        failItem(db, b, i, 'Bank details changed after this payment was approved: check them, then pay this week again', actor, action);
+      const payee = payeeFor(i, b, bank);
+      // an approved item is never failed here: without the details it was approved with, it waits (older data)
+      if (!payee) {
+        held.push(i.userName || i.payeeName);
         continue;
       }
-      send.push({
-        id: i.id, payrollRunId: i.payrollRunId, userId: i.userId, amountPence: i.amountPence, currency: 'GBP', payeeName: i.payeeName,
-        sortCode: d.sortCode, accountNumber: d.accountNumber, reference: defaultPaymentReference(i.weekStart, i.payeeName), weekStart: i.weekStart,
-        idempotencyKey: `${b.idempotencyKey}:${i.id}`, providerRef: i.providerRef,
-      });
+      send.push(providerItem(b, i, payee));
     }
+    const heldText = held.length
+      ? `Linear Hub did not send ${held.join(', ')}'s payment again: it no longer has the bank details you approved it with. Check with ${conn.name} whether it was paid before you pay that week again.`
+      : null;
+    if (heldText && !send.length) run(db, `UPDATE payment_batches SET last_error = ? WHERE id = ?`, [heldText, id]);
     if (send.length) {
       const pc = providerConnection(conn);
       const secrets = [...Object.values(pc.secrets), ...send.map((s) => s.accountNumber)];
+      // from here the provider may have them: Cancel waits until Linear Hub knows (cancelPlan)
+      const at = nowISO();
+      run(db, `UPDATE payment_items SET attempted_at = ? WHERE attempted_at IS NULL AND id IN (${placeholders(send.length)})`, [at, ...send.map((s) => s.id)]);
       try {
         const out = await adapter.submit(pc, { id: b.id, mode: b.mode, idempotencyKey: b.idempotencyKey, createdAt: b.createdAt, today: todayISO(), approvedAt: b.approvedAt }, send, providerContext(db, conn.id));
         applyResults(db, b, out.items, actor, action);
@@ -494,7 +606,7 @@ async function sendQueued(db: Db, id: number, actor: UserWithTeam | null, action
         }
         // package A: items the adapter could not send this time stay queued; its reason is the batch's last error
         const notSent = typeof out.error === 'string' && out.error.trim() ? redactSecrets(out.error, secrets).slice(0, 500) : null;
-        run(db, `UPDATE payment_batches SET provider_ref = COALESCE(?, provider_ref), last_error = ? WHERE id = ?`, [out.providerRef ?? null, notSent, id]);
+        run(db, `UPDATE payment_batches SET provider_ref = COALESCE(?, provider_ref), last_error = ? WHERE id = ?`, [out.providerRef ?? null, notSent ?? heldText, id]);
       } catch (err) {
         // the items stay queued: Try again (or the next job tick) sends them with the same keys
         run(db, `UPDATE payment_batches SET last_error = ?, updated_at = ? WHERE id = ?`, [plain(err, secrets), nowISO(), id]);
@@ -554,9 +666,25 @@ function failItem(db: Db, b: BatchRow, i: ItemRow, reason: string, actor: UserWi
   if (!i.live) return;
   // a failed transfer: the run stays unpaid, flagged on Runs to pay (pending → failed), with the reason (GET /finance/payroll)
   const before = payrollSnapshot(db, i.payrollRunId);
-  const flipped = run(db, `UPDATE payroll_runs SET status = 'failed' WHERE id = ? AND status = 'pending'`, [i.payrollRunId]).changes;
-  const after = flipped ? payrollSnapshot(db, i.payrollRunId) : before;
+  run(db, `UPDATE payroll_runs SET status = 'failed' WHERE id = ? AND status = 'pending'`, [i.payrollRunId]);
+  // no longer held: anything that changed while the payment was on its way comes in now
+  resyncFreed(db, i);
+  const after = payrollSnapshot(db, i.payrollRunId);
   recordRun(db, actor, action, i.payrollRunId, `Payment #${b.id} failed: ${i.userName || i.payeeName} ${payWeekLabel(i.weekStart)}, ${formatPence(i.amountPence)}. ${why}`, before, after);
+}
+
+/**
+ * A run a payment no longer holds picks up what changed while it was frozen (db/maintenance.ts IN_PAYMENT_FROM): only
+ * a run flagged then (adjusted_at, set whenever the pay rules found other figures), so an unchanged run stays as it is.
+ */
+function resyncFreed(db: Db, i: Pick<ItemRow, 'userId' | 'weekStart' | 'payrollRunId'>): void {
+  const flagged = get<{ at: string | null }>(db, `SELECT adjusted_at AS at FROM payroll_runs WHERE id = ? AND status IN ('pending', 'failed')`, [i.payrollRunId]);
+  if (!flagged?.at) return;
+  try {
+    syncPersonWeek(db, i.userId, i.weekStart);
+  } catch (err) {
+    console.error('Payments: bringing a pay run up to date after its payment failed did not work; it keeps its figures', err);
+  }
 }
 
 /** An item the provider (or the bank, for a file) paid: its run is marked paid once, through lib/markPaid.ts. */
@@ -584,6 +712,10 @@ function settlePaid(db: Db, b: BatchRow, i: ItemRow, paidDate: string, actor: Us
     return;
   }
   const notes: string[] = [];
+  // the run was frozen while the money was on its way (review fix): what changed is for a later week
+  if (runNow.adjustedAt && b.approvedAt && runNow.adjustedAt > b.approvedAt) {
+    notes.push(`The week’s figures changed while the money was on its way: ${formatPence(i.amountPence)} was paid, as approved. Put any difference on a later week as an adjustment.`);
+  }
   const nowPence = poundsToPence(runNow.gross);
   if (nowPence !== i.amountPence) notes.push(`Sent ${formatPence(i.amountPence)}; the week now comes to ${formatPence(nowPence)}. Add an adjustment for the difference on a later week.`);
   const before = payrollSnapshot(db, runNow.id);
@@ -620,6 +752,13 @@ export async function refreshBatch(db: Db, id: number, actor: UserWithTeam | nul
   if (!adapter.ready) throw notReadyError(adapter.info.name);
   const action = actor ? 'POST /payments/batches/:id/refresh' : null;
   if (conn.disconnectedAt) throw conflict('Its connection was disconnected, so Linear Hub cannot check it any more. Check the payments with the provider.');
+  // never through the other mode's service (review fix): the payment page says why
+  const mismatch = modeMismatch(b, conn);
+  if (mismatch) {
+    run(db, `UPDATE payment_batches SET last_error = ? WHERE id = ?`, [mismatch, id]);
+    bumpDataVersion();
+    throw conflict(mismatch);
+  }
   await sendQueued(db, id, actor, action);
   if (busy.has(id)) return batchDetail(db, id);
   const waiting = itemRows(db, id).filter((i) => i.status === 'submitted' || i.status === 'processing');
@@ -628,19 +767,13 @@ export async function refreshBatch(db: Db, id: number, actor: UserWithTeam | nul
   try {
     const bank = decryptedBankDetails(db, waiting.map((i) => i.userId));
     const pc = providerConnection(conn);
-    const items: ProviderItem[] = waiting.map((i) => {
-      const d = bank.get(i.userId);
-      return {
-        id: i.id, payrollRunId: i.payrollRunId, userId: i.userId, amountPence: i.amountPence, currency: 'GBP', payeeName: i.payeeName,
-        sortCode: d?.sortCode ?? '', accountNumber: d?.accountNumber ?? '', reference: defaultPaymentReference(i.weekStart, i.payeeName),
-        weekStart: i.weekStart, idempotencyKey: `${b.idempotencyKey}:${i.id}`, providerRef: i.providerRef,
-      };
-    });
+    const items: ProviderItem[] = waiting.map((i) => providerItem(b, i, payeeFor(i, b, bank)));
     const secrets = [...Object.values(pc.secrets), ...items.map((x) => x.accountNumber)];
     try {
       const out = await adapter.refresh(pc, items, providerContext(db, conn.id));
       applyResults(db, requireBatch(db, id), out, actor, action);
-      run(db, `UPDATE payment_batches SET last_error = NULL WHERE id = ?`, [id]);
+      // the reason items were left queued stands while any still are
+      run(db, `UPDATE payment_batches SET last_error = NULL WHERE id = ? AND NOT EXISTS (SELECT 1 FROM payment_items WHERE batch_id = ? AND status = 'queued')`, [id, id]);
     } catch (err) {
       run(db, `UPDATE payment_batches SET last_error = ?, updated_at = ? WHERE id = ?`, [plain(err, secrets), nowISO(), id]);
     }
@@ -695,26 +828,44 @@ export async function cancelBatch(db: Db, me: UserWithTeam, id: number): Promise
     // the file was not used (or not for these people): they stay unpaid on Runs to pay
     run(db, `UPDATE payment_items SET status = 'cancelled', updated_at = ? WHERE batch_id = ? AND status IN ('queued', 'submitted', 'processing')`, [at, id]);
     run(db, `UPDATE payment_batches SET cancelled_at = ?, cancelled_by = ? WHERE id = ?`, [at, me.id, id]);
+    for (const i of items) if (i.live) resyncFreed(db, i);
     finalise(db, id);
     bumpDataVersion();
     return batchDetail(db, id);
   }
-  if (!adapter?.cancel || !conn || conn.disconnectedAt) {
-    throw conflict(`Payments already sent to ${conn?.name ?? 'the provider'} cannot be stopped from Linear Hub. Check them with the provider.`);
+  const providerName = conn?.name ?? 'the provider';
+  const plan = cancelPlan(items);
+  // review fix: never "Cancelled" while the provider may have made a payment Linear Hub has no reference for
+  if (plan.unsure.length) {
+    const names = [...new Set(plan.unsure.map((i) => i.userName || i.payeeName))];
+    const noun = conn?.provider === 'wise' ? 'transfer' : 'payment';
+    throw conflict(`Linear Hub is still finding out whether ${providerName} made the ${noun}${plan.unsure.length === 1 ? '' : 's'} for ${names.slice(0, 3).join(', ')}${names.length > 3 ? ` and ${names.length - 3} more` : ''}: press Check now, then cancel.`);
+  }
+  const canStop = !!adapter?.cancel && !!conn && !conn.disconnectedAt && conn.mode === b.mode;
+  if (plan.provider.length && !canStop && !plan.local.length) {
+    throw conflict(conn && !conn.disconnectedAt && conn.mode !== b.mode
+      ? modeMismatch(b, conn)!
+      : `Payments already sent to ${providerName} cannot be stopped from Linear Hub. Check them with the provider.`);
   }
   if (busy.has(id)) throw conflict('Linear Hub is talking to the provider about this payment right now. Try again in a moment.');
+  const action = 'POST /payments/batches/:id/cancel';
+  const stoppedBefore = items.length;
   busy.add(id);
   try {
-    const bank = decryptedBankDetails(db, items.map((i) => i.userId));
-    const pc = providerConnection(conn);
-    const send: ProviderItem[] = items.map((i) => ({
-      id: i.id, payrollRunId: i.payrollRunId, userId: i.userId, amountPence: i.amountPence, currency: 'GBP', payeeName: i.payeeName,
-      sortCode: bank.get(i.userId)?.sortCode ?? '', accountNumber: bank.get(i.userId)?.accountNumber ?? '',
-      reference: defaultPaymentReference(i.weekStart, i.payeeName), weekStart: i.weekStart, idempotencyKey: `${b.idempotencyKey}:${i.id}`, providerRef: i.providerRef,
-    }));
-    const out = await adapter.cancel(pc, send, providerContext(db, conn.id));
-    applyResults(db, b, out, me, 'POST /payments/batches/:id/cancel');
-    run(db, `UPDATE payment_batches SET cancelled_at = ?, cancelled_by = ? WHERE id = ?`, [at, me.id, id]);
+    // never sent: nothing to ask anyone, they stop here and their weeks stay on Runs to pay
+    if (plan.local.length) {
+      run(db, `UPDATE payment_items SET status = 'cancelled', updated_at = ? WHERE status = 'queued' AND attempted_at IS NULL AND id IN (${placeholders(plan.local.length)})`, [at, ...plan.local.map((i) => i.id)]);
+      for (const i of plan.local) if (i.live) resyncFreed(db, i);
+    }
+    if (plan.provider.length && canStop && adapter?.cancel && conn) {
+      const bank = decryptedBankDetails(db, plan.provider.map((i) => i.userId));
+      const pc = providerConnection(conn);
+      const out = await adapter.cancel(pc, plan.provider.map((i) => providerItem(b, i, payeeFor(i, b, bank))), providerContext(db, conn.id));
+      applyResults(db, b, out, me, action);
+    }
+    const left = itemRows(db, id).filter((i) => WAITING.includes(i.status)).length;
+    // only when something actually stopped (Wise may refuse: the transfer is already being paid)
+    if (left < stoppedBefore) run(db, `UPDATE payment_batches SET cancelled_at = ?, cancelled_by = ? WHERE id = ?`, [at, me.id, id]);
     finalise(db, id);
   } catch (err) {
     if (err instanceof HttpError) throw err;

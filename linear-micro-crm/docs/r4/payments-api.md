@@ -103,7 +103,11 @@ A Wise profile ID must be digits.
   - `incoming_payment_waiting` (waiting for Matt to pay it in Wise), `processing`, `funds_converted`, `bounced_back`
     and the rest → processing.
 - **Cancel.** `PUT /v1/transfers/{id}/cancel` stops a transfer not yet paid in Wise, so the week goes back to Runs to
-  pay. A transfer already on its way stays as it is.
+  pay. A transfer already on its way stays as it is. Review fix: Linear Hub can only stop a transfer it has Wise's id
+  for. While a transfer call timed out and Linear Hub does not know yet whether Wise made it, Cancel answers 409
+  ("Linear Hub is still finding out whether Wise Business made the transfer for …: press Check now, then cancel") and
+  changes nothing; Check now finds the transfer (the same `customerTransactionId`), and Cancel then stops it. A cancel
+  that stops nothing (Wise is already paying them) is not recorded as cancelled, and the page says so.
 - **Payment approvals.** Wise refuses transfers made with a personal token while approvals are switched on ("missing
   approval"). Linear Hub fails the item with plain words.
 
@@ -176,7 +180,9 @@ needs an approver; TrueLayer: top up the merchant account if a payout fails for 
 enter your live details (for Revolut, a new code too), then **Test**.
 
 If a provider does not answer while you pay, the payment says why. Linear Hub sends the rest at the next check, or when
-you press Check now, without ever paying anyone twice.
+you press Check now, to the account each payment was approved with and with the same references, so the provider does
+not make them twice. **Cancel the rest** waits until Linear Hub knows whether the provider made them: press **Check
+now** first if it asks you to.
 
 ## Changelog
 

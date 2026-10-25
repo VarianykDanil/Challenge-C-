@@ -15,7 +15,7 @@ import { ApiError } from '@/api/client';
 import { paymentFileUrl, useApproveBatch, useCancelBatch, useMarkBatchPaid, usePaymentBatch, usePaymentProviders, useRefreshBatch } from '@/api/payments';
 import { useCurrentUser } from '@/auth/AuthProvider';
 import { Badge, Button, Card, CardHeader, Field, Input, KpiTile, PageHeader, Skeleton, useToast } from '@/components/ui';
-import { ConfirmDialog, ErrorState, errorMessage } from '@/features/common';
+import { ConfirmDialog, ErrorState, apiMessage, errorMessage } from '@/features/common';
 import { PaymentBatchStatusBadge, PaymentItemStatusBadge } from '@/features/payments';
 import { BankFileHelp } from '@/features/payments/BankFileFormats';
 import { ProviderLogo } from '@/features/payments/ProviderLogo';
@@ -31,6 +31,15 @@ const back = (
 );
 
 const people = (n: number) => `${formatNumber(n)} ${n === 1 ? 'person' : 'people'}`;
+
+/** Review fix: "People" counts people — someone paid for two weeks is one person with two payments. */
+const personCount = (b: Pick<PaymentBatch, 'items'>) => new Set(b.items.map((i) => i.userId)).size;
+
+/** "3 people" or, when someone has more than one week in it, "4 payments for 3 people". */
+function whoText(b: Pick<PaymentBatch, 'items' | 'count'>): string {
+  const n = personCount(b);
+  return n === b.count ? people(n) : `${formatNumber(b.count)} payments for ${people(n)}`;
+}
 
 export function PaymentBatchPage() {
   const { id } = useParams();
@@ -48,7 +57,7 @@ export function PaymentBatchPage() {
         title={b ? <span className="flex flex-wrap items-center gap-3"><ProviderLogo iconKey={provider?.iconKey ?? 'bank'} size="md" />Payment #{b.id}</span> : <Skeleton className="h-9 w-56" />}
         description={b ? (
           <span className="flex flex-wrap items-center gap-2">
-            <PaymentBatchStatusBadge status={b.status} kind={b.kind} />
+            <PaymentBatchStatusBadge status={b.status} kind={b.kind} mode={b.mode} />
             {b.kind === 'api' && <Badge tone={b.mode === 'live' ? 'danger' : 'info'}>{b.mode === 'live' ? 'Live: real money' : 'Test mode: nobody is paid'}</Badge>}
             <span>{b.connectionName} · made {payDayLabel(b.createdAt.slice(0, 10))}{b.createdByName ? ` by ${b.createdByName}` : ''}{b.approvedAt ? ` · approved ${formatDateTime(b.approvedAt)}${b.approvedByName ? ` by ${b.approvedByName}` : ''}` : ''}</span>
           </span>
@@ -69,19 +78,26 @@ function BatchBody({ b, provider, providerName, available }: { b: PaymentBatch; 
   const cancel = useCancelBatch();
   const [confirmCancel, setConfirmCancel] = useState(false);
   const draft = b.status === 'draft';
+  const test = b.kind === 'api' && b.mode === 'test';
+  const persons = personCount(b);
+  const peopleHint = [persons !== b.count ? `${formatNumber(b.count)} payments` : '', b.skipped.length ? `${formatNumber(b.skipped.length)} left out` : ''].filter(Boolean).join(' · ');
+  // review fix: a bank file just made is waiting for Matt's bank, not on its way
+  const fourth = draft ? 'To approve' : b.failedCount ? 'Failed' : b.kind === 'file' ? 'In the file' : 'On the way';
+  const queued = b.items.some((i) => i.status === 'queued');
   return (
     <div className="space-y-6">
       <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
         <KpiTile label="Total" value={formatPence(b.totalPence)} tone="primary" />
-        <KpiTile label="People" value={formatNumber(b.count)} hint={b.skipped.length ? `${formatNumber(b.skipped.length)} left out` : undefined} />
-        <KpiTile label="Paid" value={formatNumber(b.paidCount)} tone={b.paidCount ? 'success' : 'default'} />
-        <KpiTile label={draft ? 'To approve' : b.failedCount ? 'Failed' : 'On the way'} value={formatNumber(draft ? b.waitingCount : b.failedCount || b.waitingCount)} tone={b.failedCount ? 'danger' : 'default'} />
+        <KpiTile label="People" value={formatNumber(persons)} hint={peopleHint || undefined} />
+        <KpiTile label={test ? 'Test, not paid' : 'Paid'} value={formatNumber(b.paidCount)} tone={b.paidCount && !test ? 'success' : 'default'} />
+        <KpiTile label={fourth} value={formatNumber(draft ? b.waitingCount : b.failedCount || b.waitingCount)} tone={b.failedCount ? 'danger' : 'default'} />
       </div>
 
       {b.lastError && (
         <Card tone="danger" role="alert">
           <p className="flex items-start gap-2 text-sm text-fg"><TriangleAlert className="mt-0.5 h-4 w-4 shrink-0 text-danger" aria-hidden />
-            <span>{b.lastError}. Nothing was paid twice: Linear Hub sends the same payments again with the same references when you check.</span>
+            {/* review fix: one full stop, and only a promise Linear Hub keeps (it resends queued payments with the same references) */}
+            <span>{b.lastError.trim().replace(/\.+$/, '')}.{b.kind === 'api' && queued && b.actions.refresh ? ` Linear Hub sends them again with the same references, so ${b.connectionName} does not make them twice.` : ''}</span>
           </p>
         </Card>
       )}
@@ -120,7 +136,7 @@ function BatchBody({ b, provider, providerName, available }: { b: PaymentBatch; 
         </div>
         {/* Release 1.4 (P): which bank file this is and where to upload it */}
         {b.kind === 'file' && b.status !== 'cancelled' && <BankFileHelp connectionId={b.connectionId} className="mx-5 mb-4" />}
-        <ItemList items={b.items} draft={draft} kind={b.kind} />
+        <ItemList items={b.items} draft={draft} kind={b.kind} mode={b.mode} />
       </Card>
 
       {b.actions.markPaid && <MarkPaidCard b={b} />}
@@ -143,12 +159,23 @@ function BatchBody({ b, provider, providerName, available }: { b: PaymentBatch; 
         open={confirmCancel}
         onClose={() => setConfirmCancel(false)}
         title={draft ? `Cancel draft payment #${b.id}?` : `Cancel what is left of payment #${b.id}?`}
-        description={draft ? 'Nothing has been sent. The runs stay on Runs to pay.' : b.kind === 'file' ? 'Only do this if you did not upload the file to your bank (or the bank did not pay them). Those runs stay unpaid on Runs to pay.' : 'Linear Hub asks the provider to stop the payments not yet paid.'}
+        description={draft ? 'Nothing has been sent. The runs stay on Runs to pay.' : b.kind === 'file' ? 'Only do this if you did not upload the file to your bank (or the bank did not pay them). Those runs stay unpaid on Runs to pay.' : `Linear Hub asks ${b.connectionName} to stop the payments it has not paid yet. Any it is already paying stay on their way.`}
         confirmLabel={draft ? 'Cancel draft' : 'Cancel them'}
         tone="danger"
         loading={cancel.isPending}
         onConfirm={() => cancel.mutate({ id: b.id }, {
-          onSuccess: () => { toast.success('Cancelled', 'The runs stay on Runs to pay.'); setConfirmCancel(false); },
+          onSuccess: (next) => {
+            setConfirmCancel(false);
+            if (draft) return toast.success('Draft cancelled', 'The runs stay on Runs to pay.');
+            // review fix: say what actually stopped, and what is still on its way
+            const was = new Set(b.items.filter((i) => i.status === 'queued' || i.status === 'submitted' || i.status === 'processing').map((i) => i.id));
+            const stopped = next.items.filter((i) => was.has(i.id) && (i.status === 'cancelled' || i.status === 'failed')).length;
+            const still = next.waitingCount;
+            if (!stopped) return toast.error('Nothing was stopped', `${formatNumber(still)} still on the way: ${next.connectionName} is already paying ${still === 1 ? 'it' : 'them'}.`);
+            toast.success(`Stopped ${formatNumber(stopped)} ${stopped === 1 ? 'payment' : 'payments'}`, still
+              ? `${formatNumber(still)} still on the way: ${next.connectionName} is already paying ${still === 1 ? 'it' : 'them'}. The stopped weeks stay on Runs to pay.`
+              : 'Those weeks stay on Runs to pay.');
+          },
           onError: (e) => toast.error('Could not cancel', errorMessage(e)),
         })}
       />
@@ -156,7 +183,15 @@ function BatchBody({ b, provider, providerName, available }: { b: PaymentBatch; 
   );
 }
 
-function ItemList({ items, draft, kind }: { items: PaymentItem[]; draft: boolean; kind: 'file' | 'api' }) {
+/** When an item was paid: a bank file's is the day chosen in Mark as paid; a test item was never paid at all. */
+function paidText(i: PaymentItem, kind: 'file' | 'api', mode: PaymentBatch['mode']): string {
+  if (i.status !== 'paid' || !i.paidAt) return '';
+  if (kind === 'api' && mode === 'test') return '';
+  if (kind === 'file' && i.runPaidDate) return ` · paid ${payDayLabel(i.runPaidDate)} · marked ${formatDateTime(i.paidAt)}`;
+  return ` · paid ${formatDateTime(i.paidAt)}`;
+}
+
+function ItemList({ items, draft, kind, mode }: { items: PaymentItem[]; draft: boolean; kind: 'file' | 'api'; mode: PaymentBatch['mode'] }) {
   if (!items.length) return <p className="px-5 pb-5 text-sm text-muted">Nobody is in this payment.</p>;
   return (
     <ul className="divide-y divide-border border-t border-border" aria-label="People in this payment">
@@ -168,13 +203,13 @@ function ItemList({ items, draft, kind }: { items: PaymentItem[]; draft: boolean
               {payWeekLabel(i.weekStart)} · to {i.payeeName}, account <span className="font-mono">••••{i.accountLast4}</span>
               {/* Release 1.4 (P): a bank file line's reference, to find it on the bank statement */}
               {kind === 'file' && i.providerRef ? <> · reference <span className="font-mono">{i.providerRef}</span></> : null}
-              {i.paidAt ? ` · paid ${formatDateTime(i.paidAt)}` : ''}
+              {paidText(i, kind, mode)}
             </span>
             {i.failureReason && <span className="block text-xs text-danger">{i.failureReason}</span>}
             {i.note && <span className="block text-xs text-warning">{i.note}</span>}
           </span>
           <span className="flex items-center gap-3 sm:justify-end">
-            {!draft && <PaymentItemStatusBadge status={i.status} kind={kind} />}
+            {!draft && <PaymentItemStatusBadge status={i.status} kind={kind} mode={mode} />}
             <span className="text-sm font-semibold tabular-nums text-fg">{formatPence(i.amountPence)}</span>
           </span>
         </li>
@@ -201,7 +236,7 @@ function ApproveCard({ b, provider, providerName, available }: { b: PaymentBatch
         setCode('');
         toast.success(next.kind === 'file' ? 'Bank file ready' : 'Payment approved', next.kind === 'file'
           ? 'Download it, upload it to your bank and approve it there. Then mark it paid here.'
-          : next.mode === 'test' ? 'Test mode: nobody is paid.' : createsOnly ? `Now open ${providerName} and pay the transfers there.` : `${people(next.count)}, ${formatPence(next.totalPence)}.`);
+          : next.mode === 'test' ? 'Test mode: nobody is paid.' : createsOnly ? `Now open ${providerName} and pay the transfers there.` : `${whoText(next)}, ${formatPence(next.totalPence)}.`);
       },
     });
   };
@@ -212,12 +247,12 @@ function ApproveCard({ b, provider, providerName, available }: { b: PaymentBatch
         title="Approve"
         icon={<ShieldCheck aria-hidden />}
         description={b.kind === 'file'
-          ? `Linear Hub makes the file for ${people(b.count)} (${formatPence(b.totalPence)}). Nothing moves until you upload it to your bank and approve it there.`
+          ? `Linear Hub makes the file for ${whoText(b)} (${formatPence(b.totalPence)}). Nothing moves until you upload it to your bank and approve it there.`
           : b.mode === 'test'
             ? `Test mode: ${providerName}'s sandbox gets the payments and nobody is paid. The runs stay on Runs to pay.${approveNote}`
             : createsOnly
-              ? `${providerName} gets transfers for ${people(b.count)} (${formatPence(b.totalPence)}) when you approve.${approveNote}`
-              : `${providerName} pays ${people(b.count)} ${formatPence(b.totalPence)} as soon as you approve. This cannot be undone from Linear Hub.`}
+              ? `${providerName} gets transfers for ${whoText(b)} (${formatPence(b.totalPence)}) when you approve.${approveNote}`
+              : `${providerName} pays ${whoText(b)}, ${formatPence(b.totalPence)} in all, as soon as you approve. This cannot be undone from Linear Hub.`}
       />
       {!available ? (
         <p className="flex items-start gap-2 rounded-lg bg-surface-2 px-3 py-2 text-sm text-muted">
@@ -233,7 +268,8 @@ function ApproveCard({ b, provider, providerName, available }: { b: PaymentBatch
         <p className="text-sm text-muted">This connection needs a working test first (Settings → Payments).</p>
       ) : (
         <form onSubmit={submit} className="flex flex-col gap-3 sm:flex-row sm:items-end" noValidate>
-          <Field label="Code from your authenticator app" htmlFor={`${uid}-code`} error={err ? errorMessage(err) : undefined} className="sm:w-64">
+          {/* review fix: the server's message once (errorMessage would repeat it with its field detail) */}
+          <Field label="Code from your authenticator app" htmlFor={`${uid}-code`} error={err ? apiMessage(err, 'Could not approve this payment') : undefined} className="sm:w-64">
             <Input id={`${uid}-code`} value={code} onChange={(e) => setCode(e.target.value)} inputMode="numeric" autoComplete="one-time-code" maxLength={7} placeholder="123456" className="font-mono" invalid={!!err} />
           </Field>
           <Button type="submit" className="h-10" variant={b.mode === 'live' && b.kind === 'api' ? 'danger' : 'primary'} loading={approve.isPending} disabled={code.replace(/\s+/g, '').length !== 6}>

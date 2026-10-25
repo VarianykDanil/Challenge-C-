@@ -8,6 +8,9 @@
  *    to his bank and approves it there.
  *  - Switching an API connection to live needs a connected test first and the words PAYMENT_LIVE_CONFIRMATION typed.
  *    Changing its details puts it back to 'not_connected' (test it again).
+ *  - Review fixes: the mode cannot change while a payment through the connection is on its way (its items would go to
+ *    the other service: a test payment paid with real money, or a live one "paid" in the sandbox); and a change of mode
+ *    or details forgets the last test and its balance (they belonged to the old ones).
  *  - Disconnecting wipes the secrets and keeps the history (batches keep pointing at it). Not while a payment through
  *    it is still on its way; its drafts are cancelled.
  */
@@ -212,13 +215,23 @@ export function updateConnection(db: Db, me: UserWithTeam, id: number, patch: Pa
     if (changed) {
       sets.push('settings_json = ?', 'secrets_enc = ?');
       params.push(JSON.stringify(next.settings), encryptSecrets(next.secrets));
-      // new details need a new test before an API connection pays anyone
-      if (adapter.info.kind === 'api') sets.push(`status = 'not_connected'`, 'last_error = NULL');
+      // new details need a new test before an API connection pays anyone; the old test's balance was theirs
+      if (adapter.info.kind === 'api') sets.push(`status = 'not_connected'`, 'last_error = NULL', 'balance_pence = NULL', 'last_checked_at = NULL');
     }
   }
   if (p.mode !== undefined && p.mode !== r.mode) {
     if (p.mode !== 'live' && p.mode !== 'test') throw badRequest('Mode is test or live');
     if (adapter.info.kind === 'file') throw badRequest('A bank file has no test mode: nothing is paid until you upload the file to your bank and approve it there.');
+    // a payment on its way finishes in the mode it was made in (drafts are refused at approval instead)
+    const waiting = get<{ id: number }>(
+      db,
+      `SELECT b.id FROM payment_batches b JOIN payment_items i ON i.batch_id = b.id
+       WHERE b.connection_id = ? AND b.status <> 'draft' AND i.status IN ('queued', 'submitted', 'processing') ORDER BY b.id LIMIT 1`,
+      [id],
+    );
+    if (waiting) {
+      throw conflict(`Payment #${waiting.id} through this connection is still on its way in ${r.mode === 'live' ? 'live mode' : 'test mode'}. Wait until it has finished (or cancel it), then switch to ${p.mode === 'live' ? 'live' : 'test mode'}.`);
+    }
     if (p.mode === 'live') {
       if (!isLiveConfirmation(p.confirm)) {
         throw badRequest(`To pay real money, type ${PAYMENT_LIVE_CONFIRMATION} exactly`, [{ path: 'confirm', message: `Type ${PAYMENT_LIVE_CONFIRMATION} exactly` }]);
@@ -227,10 +240,10 @@ export function updateConnection(db: Db, me: UserWithTeam, id: number, patch: Pa
       if (statusAfter !== 'connected') throw conflict('Test the connection first: switch to live once a test in test mode has worked.');
       sets.push(`mode = 'live'`, 'live_confirmed_at = ?', 'live_confirmed_by = ?');
       params.push(nowISO(), me.id);
-      // the provider's live service needs its own test
-      sets.push(`status = 'not_connected'`);
+      // the provider's live service needs its own test (and has its own balance)
+      sets.push(`status = 'not_connected'`, 'balance_pence = NULL', 'last_checked_at = NULL');
     } else {
-      sets.push(`mode = 'test'`, `status = 'not_connected'`);
+      sets.push(`mode = 'test'`, `status = 'not_connected'`, 'balance_pence = NULL', 'last_checked_at = NULL');
     }
   }
   if (sets.length) run(db, `UPDATE payment_connections SET ${[...new Set(sets)].join(', ')} WHERE id = ?`, [...params, id]);

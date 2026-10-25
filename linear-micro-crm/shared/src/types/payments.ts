@@ -236,6 +236,11 @@ export interface PaymentItem {
   updatedAt: string;
   /** Something the admin should know, e.g. the run's pay changed after the money was sent. */
   note?: string | null;
+  /**
+   * Release 1.4 (review fix): a paid live item's run's paid date (YYYY-MM-DD) — for a bank file, the day chosen in Mark
+   * as paid (`paidAt` is when it was marked). Null otherwise.
+   */
+  runPaidDate?: string | null;
 }
 
 export interface PaymentBatchSummary {

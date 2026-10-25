@@ -68,7 +68,7 @@ import {
   type WeekPayBreakdown,
 } from '@lm/shared';
 import { all, get, placeholders, run, transaction, type Db } from '../db/connection.ts';
-import { ensurePayrollMaterialised } from '../db/maintenance.ts';
+import { ensurePayrollMaterialised, paymentOnItsWay } from '../db/maintenance.ts';
 import { getPayroll } from '../db/queries.ts';
 import { recordSystemEvent } from './audit/events.ts';
 import { bumpDataVersion } from './cache.ts';
@@ -1101,6 +1101,9 @@ export function resolveInvoice(
   }
   if (!isUnpaid(r.runStatus)) throw conflict('This week has been paid, so the invoice cannot be reissued. Choose Keep as it is and correct it in a later week.');
   const adj = input.adjustment;
+  // Release 1.4 (review fix): a week in a payment from Linear Hub on its way is paid as approved
+  const onItsWay = adj ? paymentOnItsWay(db, r.userId, r.weekStart) : null;
+  if (onItsWay !== null) throw conflict(`This week's pay is in payment #${onItsWay}, which is on its way, so it is paid as approved. Reissue it without a correction, or choose Keep as it is and correct it in a later week.`);
   if (adj && (!Number.isFinite(adj.amount) || adj.amount === 0 || Math.abs(adj.amount) > MONEY_MAX)) throw badRequest('Enter the correction in pounds, e.g. 20 or -12.50');
   transaction(db, () => {
     if (adj) {

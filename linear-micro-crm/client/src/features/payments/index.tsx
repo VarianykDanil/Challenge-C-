@@ -4,7 +4,7 @@
 import { Suspense, lazy } from 'react';
 import { Link } from 'react-router-dom';
 import { Send } from 'lucide-react';
-import type { PaymentBatchStatus, PaymentItemStatus, PayrollRunPayment } from '@lm/shared';
+import type { PaymentBatchStatus, PaymentItemStatus, PaymentMode, PayrollRunPayment } from '@lm/shared';
 import { PAYMENT_BATCH_STATUS_LABELS, PAYMENT_ITEM_STATUS_LABELS } from '@lm/shared';
 import { Badge, Card, Skeleton } from '@/components/ui';
 
@@ -25,17 +25,25 @@ const BATCH_TONE: Record<PaymentBatchStatus, 'neutral' | 'info' | 'success' | 'd
   draft: 'neutral', submitted: 'info', processing: 'info', completed: 'success', partly_failed: 'warning', failed: 'danger', cancelled: 'neutral',
 };
 
-/** "In the file" for a bank file's people still waiting for the bank, else the shared label. */
-export function PaymentItemStatusBadge({ status, kind }: { status: PaymentItemStatus; kind?: 'file' | 'api' }) {
+/**
+ * "In the file" for a bank file's people still waiting for the bank, else the shared label. Review fix: in test mode
+ * (a provider's sandbox) nobody is paid, so a "paid" item reads "Test: not paid".
+ */
+export function PaymentItemStatusBadge({ status, kind, mode }: { status: PaymentItemStatus; kind?: 'file' | 'api'; mode?: PaymentMode }) {
+  if (mode === 'test' && kind !== 'file' && status === 'paid') return <Badge tone="info" size="sm">Test: not paid</Badge>;
   const label = kind === 'file' && (status === 'submitted' || status === 'processing') ? 'In the file' : PAYMENT_ITEM_STATUS_LABELS[status];
   return <Badge tone={ITEM_TONE[status]} size="sm" dot={status === 'paid'}>{label}</Badge>;
 }
 
 /**
  * "File ready" for a bank file not yet marked paid (release 1.4, P: also when someone was left out of the file, which
- * makes the batch 'processing'), else the shared label.
+ * makes the batch 'processing'), else the shared label. Review fix: a test-mode payment that went through reads
+ * "Test done: nobody paid", never "Paid".
  */
-export function PaymentBatchStatusBadge({ status, kind }: { status: PaymentBatchStatus; kind?: 'file' | 'api' }) {
+export function PaymentBatchStatusBadge({ status, kind, mode }: { status: PaymentBatchStatus; kind?: 'file' | 'api'; mode?: PaymentMode }) {
+  if (mode === 'test' && kind !== 'file' && (status === 'completed' || status === 'partly_failed')) {
+    return <Badge tone="info">{status === 'completed' ? 'Test done: nobody paid' : 'Test partly done: nobody paid'}</Badge>;
+  }
   const label = kind === 'file' && (status === 'submitted' || status === 'processing') ? 'File ready' : PAYMENT_BATCH_STATUS_LABELS[status];
   return <Badge tone={BATCH_TONE[status]} dot={status === 'completed'}>{label}</Badge>;
 }

@@ -24,7 +24,10 @@
  *    deleted and made again is still recognised), note (e.g. the run's pay changed after the money was sent) and live
  *    (0 for a test-mode batch: the provider's sandbox moves no money, so its items never mark a run paid).
  *    A partial UNIQUE index on payroll_run_id WHERE status NOT IN ('failed', 'cancelled') AND live = 1: a run can never
- *    be in two live payments. No foreign key to payroll_runs or users: an unpaid run may be removed and made again by the pay
+ *    be in two live payments. Review fixes (upgrade): payee_enc, the sort code and account number the item was APPROVED
+ *    with (encrypted JSON): every send, resend, check and cancel uses them, never details changed since, so a resend
+ *    after a timeout carries the same body with the same key; attempted_at, when Linear Hub first handed the item to
+ *    its provider (NULL: never sent, so it can be cancelled here without asking anyone). No foreign key to payroll_runs or users: an unpaid run may be removed and made again by the pay
  *    rules, and payment history outlives both.
  *
  * Demo seed (fresh databases only): obviously fake bank details (sort code 00-00-00, account number 0000 + the
@@ -36,7 +39,7 @@
  */
 import type { Db } from '../connection.ts';
 import { encrypt } from '../../lib/crypto.ts';
-import type { DbExtension, SeedContext } from './types.ts';
+import { addColumnIfMissing, type DbExtension, type SeedContext } from './types.ts';
 
 const SQL = `
 CREATE TABLE IF NOT EXISTS bank_accounts (
@@ -110,7 +113,9 @@ CREATE TABLE IF NOT EXISTS payment_items (
   paid_at TEXT,
   updated_at TEXT NOT NULL,
   note TEXT,
-  live INTEGER NOT NULL DEFAULT 1 CHECK (live IN (0, 1))
+  live INTEGER NOT NULL DEFAULT 1 CHECK (live IN (0, 1)),
+  payee_enc TEXT,
+  attempted_at TEXT
 );
 CREATE INDEX IF NOT EXISTS idx_payment_items_batch ON payment_items(batch_id);
 CREATE INDEX IF NOT EXISTS idx_payment_items_user_week ON payment_items(user_id, week_start);
@@ -151,9 +156,19 @@ function seedDemoBankDetails(db: Db, ctx: SeedContext): void {
 export const extension: DbExtension = {
   name: 'payments',
   sql: SQL,
-  upgrade() {
-    // 1.4.0 creates every table and column above with the CREATE statements; later releases add columns here.
-    return [];
+  upgrade(db) {
+    // 1.4.0 creates the tables above with the CREATE statements (payee_enc and attempted_at included); a database made
+    // before the review fixes gains those two columns here
+    const payee = addColumnIfMissing(db, 'payment_items', 'payee_enc', 'TEXT');
+    const attempted = addColumnIfMissing(db, 'payment_items', 'attempted_at', 'TEXT');
+    // items of payments approved before the column existed may have reached their provider: count them as sent
+    if (attempted) {
+      db.prepare(
+        `UPDATE payment_items SET attempted_at = COALESCE(submitted_at, updated_at)
+         WHERE attempted_at IS NULL AND batch_id IN (SELECT id FROM payment_batches WHERE approved_at IS NOT NULL)`,
+      ).run();
+    }
+    return [payee, attempted].filter((c): c is string => c !== null);
   },
   seed(db, ctx) {
     seedDemoBankDetails(db, ctx);

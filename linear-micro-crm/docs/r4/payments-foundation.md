@@ -22,7 +22,7 @@ role, their own; client accounts 403. A leader or recruiter never sees anyone el
 | GET | `/payments/providers` | — | `PaymentProviderView[]`: the four (`bank_file`, `revolut`, `wise`, `truelayer`) with `abilities`, `configFields` (the connection form) and `available` (false until P / A build the adapter) |
 | GET | `/payments/connections` | — | `PaymentConnection[]` (active first). Never a secret: `secretsSet` lists the NAMES of the secrets stored |
 | POST | `/payments/connections` | `{ provider, name?, settings?, secrets? }` | 201 `PaymentConnection`. 400 with `details: [{ path, message }]` per wrong field. An API connection starts `mode: 'test'`, `status: 'not_connected'`; a bank file connection `mode: 'live'`, `status: 'connected'` (it has no test mode; nothing moves until Matt uploads the file) |
-| PATCH | `/payments/connections/:id` | `{ name?, settings?, secrets?, mode?, confirm? }` | `PaymentConnection`. An empty secret keeps the stored one. Changing settings or secrets of an API connection puts it back to `not_connected`. `mode: 'live'` needs `confirm: "PAY FOR REAL"` typed exactly (400 otherwise) and a connected test (409 otherwise); afterwards the connection is `not_connected` until a live test works. A bank file cannot change mode (400). 409 once disconnected |
+| PATCH | `/payments/connections/:id` | `{ name?, settings?, secrets?, mode?, confirm? }` | `PaymentConnection`. An empty secret keeps the stored one. Changing settings or secrets of an API connection puts it back to `not_connected`. `mode: 'live'` needs `confirm: "PAY FOR REAL"` typed exactly (400 otherwise) and a connected test (409 otherwise); afterwards the connection is `not_connected` until a live test works. A bank file cannot change mode (400). 409 once disconnected. Review fixes: 409 for a change of mode (either way) while an approved payment through the connection has items waiting ("Payment #12 through this connection is still on its way in test mode. Wait until it has finished (or cancel it), then switch to live."); a change of mode, settings or secrets clears `balancePence` and `lastCheckedAt` (they belonged to the old test) |
 | DELETE | `/payments/connections/:id` | — | `PaymentConnection` with `disconnectedAt`: secrets wiped, drafts through it cancelled, history kept. 409 while a payment through it is still on its way |
 | POST | `/payments/connections/:id/test` | — | `PaymentConnectionTestResult { ok, message, balancePence?, checkedAt, connection }`; stores `connected` / `error`. 501 until the adapter is built |
 
@@ -32,10 +32,10 @@ role, their own; client accounts 403. A leader or recruiter never sees anyone el
 | --- | --- | --- | --- |
 | GET | `/payments/batches` | `?limit=` (1–200, default 50) | `PaymentBatchSummary[]`, newest first, with `paidCount`, `failedCount`, `waitingCount` |
 | POST | `/payments/batches` | `{ connectionId, runIds }` (1–500) | 201 `PaymentBatch` (a draft). Runs that cannot be paid this way are left out with a plain reason (`skipped: PaymentSkip[]`, codes `not_found`, `already_paid`, `in_payment`, `week_not_ended`, `not_positive`, `invoice_not_accepted`, `invoice_disputed`, `no_bank_details`, `bank_details_unconfirmed`). 400 `{ error, details: { skipped } }` when none can; 409 when the connection is not connected, or a run went into another payment a moment ago |
-| GET | `/payments/batches/:id` | — | `PaymentBatch { …summary, items, skipped, kind, actions { approve, cancel, refresh, download, markPaid } }`. Items show the payee name and `accountLast4` only |
+| GET | `/payments/batches/:id` | — | `PaymentBatch { …summary, items, skipped, kind, actions { approve, cancel, refresh, download, markPaid } }`. Items show the payee name and `accountLast4` only. Review fixes: `PaymentItem.runPaidDate?` (a paid live item's run's paid date: for a bank file, the day chosen in Mark as paid; `paidAt` is when it was marked); `note` also says when a waiting item's week changed after the approval; `actions.refresh` / `actions.cancel` are false while the connection is in the other mode or (cancel) while an item may exist at the provider without a reference |
 | POST | `/payments/batches/:id/approve` | `{ code }` | `PaymentBatch` after submitting. Order: 409 unless a draft; 501 if the provider is not built yet; 409 if the connection is not connected or changed mode; 409 `batch_changed` with `details.problems` if anything changed since the draft (a run paid, a run's pay changed, bank details changed, an invoice no longer payable) — all BEFORE the code is used; 403 `twoFactorRequired` if the admin has no two-step verification; 400 for a missing or wrong code (6 wrong codes in 10 minutes → 429); then one approval wins (409 for the other) |
-| POST | `/payments/batches/:id/refresh` | — | `PaymentBatch`: sends again what a failed submit left queued (same idempotency keys) and asks the provider about the rest. 409 for a draft or a bank file |
-| POST | `/payments/batches/:id/cancel` | — | `PaymentBatch`: a draft; a bank file's people not yet marked (the file was not used); an API payment only when the adapter can stop it (409 otherwise: "cannot be stopped from Linear Hub") |
+| POST | `/payments/batches/:id/refresh` | — | `PaymentBatch`: sends again what a failed submit left queued (same idempotency keys, to the account each item was approved with) and asks the provider about the rest. 409 for a draft or a bank file; 409 (and `lastError` says why) when the connection is now in the other mode: Linear Hub never sends or checks a test payment through the live service, or a live one through the sandbox |
+| POST | `/payments/batches/:id/cancel` | — | `PaymentBatch`: a draft; a bank file's people not yet marked (the file was not used); an API payment's queued items Linear Hub never sent (cancelled at once, through any provider); the rest only when the adapter can stop them (409 otherwise: "cannot be stopped from Linear Hub"). 409 "Linear Hub is still finding out whether … made the payment for …: press Check now, then cancel" while an item was sent but has no provider reference yet (it may exist at the provider); nothing changes then. `cancelled_at` is set only when something actually stopped |
 | GET | `/payments/batches/:id/file` | — | The bank file (`Content-Disposition: attachment`, `Cache-Control: no-store`), stored encrypted; recorded in the audit trail as an export. 404 before approval or once cancelled |
 | POST | `/payments/batches/:id/mark-paid` | `{ paid?: itemId[], failed?: itemId[], reason?, paidDate? }` | Bank files only (409 otherwise): `paid` items mark their runs paid (on `paidDate`, default today, not in the future, not before the week ends); `failed` items fail with `reason` (default "The bank did not pay this one"). Neither list: every waiting item is paid |
 
@@ -75,7 +75,9 @@ Proposed LOGIC §17 "Paying people (1.4)".
   idempotency_key UNIQUE, provider_ref, skipped_json, file_enc, last_error, updated_at, cancelled_at, cancelled_by)`.
 - `payment_items (id, batch_id → CASCADE, payroll_run_id, user_id, week_start, amount_pence > 0, payee_name,
   account_last4, status 'queued'|'submitted'|'processing'|'paid'|'failed'|'cancelled', provider_ref, failure_reason,
-  submitted_at, paid_at, updated_at, note, live 0|1)` with the partial UNIQUE index `idx_payment_items_live_run ON
+  submitted_at, paid_at, updated_at, note, live 0|1, payee_enc, attempted_at)` (review fixes: `payee_enc` is the sort
+  code and account number the item was approved with, encrypted; `attempted_at` is when it was first handed to the
+  provider; a database made before them gains both columns, its approved items counted as sent) with the partial UNIQUE index `idx_payment_items_live_run ON
   (payroll_run_id) WHERE status NOT IN ('failed','cancelled') AND live = 1`. No foreign key to `payroll_runs` or `users`
   (the pay rules may remove and remake an unpaid run; payment history outlives both): a run is also matched by
   (user, week).
@@ -104,8 +106,17 @@ A person's own change leaves the details unconfirmed (`confirmed_by_admin_at` NU
 payment to them is skipped ("Thomas changed their bank details on Thu 22 Oct: check them with Thomas, then confirm them
 in Team"), and the admin's Needs-attention feed says "Thomas Grainger changed their bank details" until an admin
 confirms them. Details an admin types in count as confirmed by that admin. Saving the same details again changes
-nothing. Approving a draft re-checks that nobody's details changed since the draft; sending re-checks against the
-approval time, and never sends to details that changed after it.
+nothing. Approving a draft re-checks that nobody's details changed since the draft.
+
+Review fix (a resend after a timeout): at the approval each item keeps the sort code and account number it is approved
+with (`payment_items.payee_enc`, encrypted like the bank details). Every send, resend (Check now, the 5-minute job),
+status check and cancel uses exactly those, so a resend is the same request with the same idempotency key and the
+provider returns the payment it may already have made. A change of bank details after the approval holds FUTURE
+payments only (drafts and approvals); it never fails an approved item here, because a timed-out payment may already
+have gone (before this fix the item was failed, its run freed and paid again to the new account). A payment approved
+before items kept their payee is resent only while the person's details are exactly those it was approved with;
+otherwise it waits, with "Linear Hub did not send …'s payment again: it no longer has the bank details you approved it
+with. Check with … whether it was paid before you pay that week again."
 
 ### 17.3 A batch, from draft to paid (`server/src/lib/payments/batches.ts`)
 
@@ -138,6 +149,34 @@ approval time, and never sends to details that changed after it.
 Never twice: the partial unique index, the draft and approval checks, the claim, per-item idempotency keys, the
 in-payment hold on Mark paid by hand, and `settlePaid` refusing a run already paid.
 
+Review fixes:
+
+7. **Test and live never mix.** Linear Hub talks to a provider about a payment only in the payment's own mode (the
+   adapters choose the sandbox or the live service from the connection's mode). PATCH of a connection's mode answers
+   409 while an approved payment through it has items waiting. A payment whose connection is in the other mode anyway
+   (a database from before this check) is neither sent, checked nor cancelled through it: Check now answers 409, the
+   job skips it, and its `lastError` says "Payment #12 was made in test mode, but the connection is now live …: switch
+   the connection back to test mode to finish it" (or the reverse).
+8. **A run is frozen while its payment is on its way.** A pending or failed run with a live item queued, submitted or
+   processing in an approved payment (`db/maintenance.ts` `IN_PAYMENT_FROM`) holds what is being paid: like a paid run
+   it is never recomputed or removed and its lines never move. When the pay rules would give other figures (a gauge
+   edit, a statement, a rate, a dispute correction) the run is flagged `adjusted_at` (refreshed on each gauge write,
+   cleared if the figures come back); the payment page notes it on the item; Needs attention says "Jordan Lee's pay
+   changed while payment #3 was on its way" until a correction for that week is added (a line whose "week it corrects"
+   is that week); and once paid, the run is paid at the amount sent with the existing "Adjusted after payment" badge
+   and a note: "The week's figures changed while the money was on its way: £240.00 was paid, as approved. Put any
+   difference on a later week as an adjustment." Corrections skip the week: a statement's correction goes to a later
+   unpaid week (`nextUnpaidWeek`, `nextOpenWeek`); a bonus or line added to or removed from it answers 409 ("The pay
+   for w/c 5 Oct is in payment #3, which is on its way, so it is paid as approved. Choose the next unpaid week."); an
+   invoice cannot be reissued with a correction for it (409). A payment that fails or is cancelled frees the run: a
+   flagged run is brought up to date at once (lib/payRule.ts `syncPersonWeek`) before it can be paid again.
+9. **Cancel never claims what it did not do.** `payment_items.attempted_at` records when an item was first handed to
+   the provider. Cancel stops at once the queued items never sent (through any provider); it answers 409 ("press Check
+   now, then cancel") while an item was sent but has no provider reference yet, since the provider may have made it;
+   it asks the provider to stop the rest when the adapter can. `cancelled_at` is set only when something stopped, and
+   nothing is sent once a cancel was recorded. The page's toast says how many stopped and how many are still on their
+   way.
+
 ### 17.4 The provider contract (`server/src/lib/payments/provider.ts`) — for packages P and A
 
 ```ts
@@ -167,8 +206,9 @@ interface PaymentProviderAdapter {
 ### 17.5 Needs attention (`lib/attention/payments.ts`, admin only, one UNION ALL statement)
 
 Changed bank details to check (by name up to three, then one line), failed live payments whose run is still unpaid with
-no newer payment (one line, danger), bank files approved but not marked paid (info, newest two), and connections whose
-last test failed (warning).
+no newer payment (one line, danger), bank files approved but not marked paid (info, newest two), connections whose
+last test failed (warning), and (review fix) runs whose figures changed after their payment was approved (one line,
+warning; 30 days; gone once a correction for that week is added).
 
 ## User guide
 
@@ -192,7 +232,22 @@ last test failed (warning).
    has paid it, tick who it paid under **Mark as paid** (untick anyone it rejected and say why) and press **Mark … paid**.
    If you did not use the file, **Cancel the rest**.
 
-While a payment is on its way, **Mark paid** by hand on those weeks waits for it, so nobody is paid twice.
+While a payment is on its way, **Mark paid** by hand on those weeks waits for it, so nobody is paid twice. The week's
+pay also stays as you approved it: if a gauge or a statement changes it meanwhile, the payment page and Needs attention
+say so, and you put the difference on a later week as an adjustment (saying which week it corrects). If the payment
+fails instead, the week is brought up to date before you pay it again.
+
+**Test mode** payments say "Test done: nobody paid" and each person "Test: not paid", here and in Recent payments
+(with a **Test** badge): nobody receives money in a sandbox. **Switch to live** and **Switch to test mode** wait while a
+payment through that connection is on its way; switching forgets the last test and its balance, so test it again.
+
+**Cancel the rest** stops what has not been paid yet. If a provider did not answer when Linear Hub sent a payment,
+Linear Hub first has to find out whether the provider made it: press **Check now**, then cancel. The message after
+cancelling says how many were stopped and how many are still on their way.
+
+On **Pay people**, the review counts leave out runs whose invoice is not accepted yet or is disputed ("Total before
+checks"); a run already in a draft payment shows "In a draft payment". A connection that needs a test shows "Test it
+in Settings → Payments first".
 
 ### Bank details (everyone)
 
@@ -215,6 +270,20 @@ person, confirm changed ones with **Confirm details**, and can type them in for 
 - Changed: Mark paid by hand waits while the run is in a payment from Linear Hub that is still on its way.
 - Security: payment keys, tokens and account numbers are encrypted at rest and never returned by any API, written to
   the audit trail or logged; every payments write is audited and rate limited.
+- Fixed (review): a payment made in test mode is never sent through the live service after the connection is switched
+  (nor a live one through the sandbox), and the switch waits while a payment through the connection is on its way.
+- Fixed (review): a payment resent after the provider did not answer goes to the account it was approved with, even if
+  the person changed their bank details meanwhile; it is never failed and paid again to the new account.
+- Fixed (review): a week's pay stays as approved while its payment is on its way; a change meanwhile is flagged
+  ("Adjusted after payment", Needs attention) for a later week instead of being recorded as paid.
+- Fixed (review): Cancel the rest no longer says "Cancelled" while a payment may exist at the provider; it asks you to
+  press Check now first, and says how many were stopped.
+- Fixed (review): test-mode payments read "Test done: nobody paid", never "Paid"; a connection switched to live (or
+  with new keys) no longer shows the sandbox balance; Pay people counts only runs that can be paid, shows runs already
+  in a draft, says "invoice disputed" for a disputed one and lists connections that need a test; the payment page
+  counts people (not payments), shows a bank file's paid date, says "In the file" for a file just made, shows a wrong
+  code once, and no longer promises "Nothing was paid twice"; the Needs-attention and Pay people links land on the
+  Bank details and Payments cards.
 
 ## Owner notes
 
@@ -239,6 +308,14 @@ person, confirm changed ones with **Confirm details**, and can type them in for 
 - **Trying the screens without real money**: `LM_PAYMENTS_FAKE=1` adds a "Test provider" and a "Test bank file" that
   pay nobody. Never set it on the server people are paid from.
 - `LM_PAYMENTS_JOB=0` turns off the 5-minute check of payments on their way (Check now still works).
+- **Review fixes, what to know.** (1) Switch to live / Switch to test mode wait while a payment through the connection
+  is on its way; its keys and settings can still be edited then (to reconnect, e.g. a new Revolut code) — change keys
+  for the same account only, never for another account, while a payment is on its way. (2) A week in a payment on its
+  way is paid as approved: when Needs attention says a person's pay changed while their payment was on its way, add an
+  adjustment on a later week for the difference and set "the week it corrects" to that week (that clears the item).
+  (3) A payment approved before these fixes (only on a database used to try 1.4 before them) has no copy of the
+  details it was approved with: if it is still waiting after a timeout and the person changed their details, Linear
+  Hub does not resend it; check with the provider whether it went.
 - The app secret (`server/data/app-secret` or `LM_APP_SECRET`) now also protects bank details and payment keys: back it
   up with the database, as before. If it is lost, bank details cannot be read: everyone re-enters them, and
   connections must be connected again.

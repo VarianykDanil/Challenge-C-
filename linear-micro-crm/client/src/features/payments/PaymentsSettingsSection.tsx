@@ -17,6 +17,7 @@ import { useCreateConnection, useDisconnectConnection, usePaymentConnections, us
 import { Badge, Button, Card, CardHeader, Field, Input, Modal, Select, Skeleton, Textarea, useToast } from '@/components/ui';
 import { ConfirmDialog, ErrorState, errorMessage } from '@/features/common';
 import { formatDateTime } from '@/lib/format';
+import { useScrollToHash } from '@/lib/useScrollToHash';
 import { OptionPicker, bankFileFormatLabel, hasOptionLogos } from './BankFileFormats';
 import { ProviderLogo } from './ProviderLogo';
 
@@ -30,6 +31,8 @@ export default function PaymentsSettingsSection({ className }: { className?: str
   const providers = usePaymentProviders();
   const connections = usePaymentConnections();
   const [connecting, setConnecting] = useState<{ provider: PaymentProviderView; connection?: PaymentConnection } | null>(null);
+  // Settings#payments (Pay people's "Open Settings → Payments") lands here once this lazy section has its data
+  useScrollToHash('payments', !providers.isLoading && !connections.isLoading);
   return (
     <Card id="payments" className={`scroll-mt-20 ${className ?? ''}`} data-testid="payments-settings">
       <CardHeader
@@ -147,7 +150,8 @@ function ConnectionRow({ provider: p, connection: c, onEdit }: { provider: Payme
       {!api && bankFileFormatLabel(c.settings) && <p className="mt-1 text-xs text-fg" data-connection-format={c.settings.format}>{bankFileFormatLabel(c.settings)}</p>}
       <p className="mt-1 text-xs text-muted">
         {c.lastCheckedAt ? `Last tested ${formatDateTime(c.lastCheckedAt)}` : api ? 'Test it before you pay anyone through it.' : 'Ready to make bank files.'}
-        {c.balancePence != null ? ` · Balance ${formatPence(c.balancePence)}` : ''}
+        {/* review fix: only a working test's balance, named for its mode (a sandbox balance is not real money) */}
+        {c.balancePence != null && c.status === 'connected' ? ` · ${api && c.mode === 'test' ? 'Sandbox balance' : 'Balance'} ${formatPence(c.balancePence)}` : ''}
       </p>
       {api && c.mode === 'live' && c.status !== 'connected' && p.liveNote && <p className="mt-1 text-xs text-muted" data-live-note="">{p.liveNote}</p>}
       {c.lastError && <p className="mt-1 text-xs text-danger">{c.lastError}</p>}
