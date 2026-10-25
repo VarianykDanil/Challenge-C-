@@ -86,6 +86,13 @@ export interface PaymentProviderInfo {
   abilities: PaymentAbilities;
   /** The client's logo key (features/payments/ProviderLogo): 'bank' | 'revolut' | 'wise' | 'truelayer' | 'test'. */
   iconKey: string;
+  /**
+   * Package A: how to connect, in order — including the steps done OUTSIDE Linear Hub (in the provider's app or
+   * console, or on a computer). Shown at the top of the Connect form.
+   */
+  connectSteps?: string[];
+  /** Package A: what switching to live means for this provider (e.g. live has its own keys). Shown with Switch to live. */
+  liveNote?: string;
 }
 
 /** One field of a connection form (driven by the provider's configFields). */

@@ -7,6 +7,7 @@
  */
 import { after, afterEach, before, beforeEach, describe, test } from 'node:test';
 import assert from 'node:assert/strict';
+import { generateKeyPairSync } from 'node:crypto';
 import { PAYMENT_LIVE_CONFIRMATION, paydayForWeek } from '@lm/shared';
 import { all, get, run, type Db } from '../db/connection.ts';
 import { encrypt } from '../lib/crypto.ts';
@@ -15,6 +16,7 @@ import { createFakeProvider, type FakeProvider } from '../lib/payments/fake.ts';
 import { providerFetch, redactSecrets } from '../lib/payments/http.ts';
 import { validateConfigFields } from '../lib/payments/provider.ts';
 import { registerPaymentProvider, unregisterPaymentProvider } from '../lib/payments/registry.ts';
+import { stubProvider } from '../lib/payments/stubs.ts';
 import { generateSecret, totp } from '../lib/totp.ts';
 import { resetCodeFailures } from '../lib/twofactor.ts';
 import { isWriteLimited } from '../middleware/writeLimit.ts';
@@ -188,12 +190,12 @@ describe('ways to pay and connections', () => {
     await srv.close();
   });
 
-  test('the four ways to pay, with plain abilities, form fields, and not available until P and A land', async () => {
+  test('the four ways to pay, with plain abilities, form fields; the API ones available since package A', async () => {
     const r = await admin.get('/payments/providers');
     assert.equal(r.status, 200);
     assert.deepEqual(r.json.map((p: Json) => p.id), ['bank_file', 'revolut', 'wise', 'truelayer']);
     for (const p of r.json as Json[]) {
-      assert.equal(p.available, false, p.id);
+      if (p.id !== 'bank_file') assert.equal(p.available, true, p.id); // package A: payments-api.test.ts
       assert.ok(p.configFields.length > 0, p.id);
       assert.ok(typeof p.abilities.paysFromApp === 'boolean' && p.abilities.fees && p.abilities.setup.length, p.id);
     }
@@ -204,26 +206,28 @@ describe('ways to pay and connections', () => {
   });
 
   test('a connection starts in test mode; secrets are stored encrypted and never answered or recorded', async () => {
-    const secret = '-----BEGIN PRIVATE KEY-----MIIEvQIBADANBgkqhkiG9w0BAQEFAASC-----END PRIVATE KEY-----';
-    const made = await admin.post('/payments/connections', { provider: 'revolut', settings: { clientId: 'client-abc' }, secrets: { privateKey: secret } });
+    // package A: Revolut's form needs a real RSA key, the redirect address and the code from Revolut
+    const secret = generateKeyPairSync('rsa', { modulusLength: 2048 }).privateKey.export({ type: 'pkcs8', format: 'pem' }).toString();
+    const marker = secret.split('\n')[1].slice(0, 24);
+    const made = await admin.post('/payments/connections', { provider: 'revolut', settings: { clientId: 'client-abc', redirectUri: 'https://example.com' }, secrets: { privateKey: secret, authCode: 'oa_sand_code_123' } });
     assert.equal(made.status, 201, JSON.stringify(made.json));
     assert.equal(made.json.mode, 'test');
     assert.equal(made.json.status, 'not_connected');
     assert.equal(made.json.name, 'Revolut Business');
-    assert.deepEqual(made.json.secretsSet, ['privateKey']);
-    assert.deepEqual(made.json.settings, { clientId: 'client-abc' });
+    assert.deepEqual(made.json.secretsSet, ['authCode', 'privateKey']);
+    assert.deepEqual(made.json.settings, { clientId: 'client-abc', redirectUri: 'https://example.com' });
     const everything = JSON.stringify([made.json, (await admin.get('/payments/connections')).json]);
-    assert.ok(!everything.includes('MIIEvQ'), 'no secret in any answer');
+    assert.ok(!everything.includes(marker) && !everything.includes('oa_sand_code_123'), 'no secret in any answer');
     const stored = get<{ enc: string }>(srv.db, `SELECT secrets_enc AS enc FROM payment_connections WHERE id = ?`, [made.json.id])!.enc;
     assert.match(stored, /^v1:/);
-    assert.ok(!stored.includes('MIIEvQ'));
+    assert.ok(!stored.includes(marker));
     const audit = JSON.stringify(all(srv.db, `SELECT summary, before_json, after_json FROM audit_log`));
-    assert.ok(!audit.includes('MIIEvQ'), 'no secret in the audit trail');
+    assert.ok(!audit.includes(marker) && !audit.includes('oa_sand_code_123'), 'no secret in the audit trail');
     assert.ok(all<{ summary: string }>(srv.db, `SELECT summary FROM audit_log WHERE entity = 'payment_connection'`).some((r) => /Revolut Business/.test(r.summary)));
     // an edit that leaves the secret empty keeps it
     const renamed = await admin.patch(`/payments/connections/${made.json.id}`, { name: 'Revolut (office)', secrets: { privateKey: '' } });
     assert.equal(renamed.status, 200);
-    assert.deepEqual(renamed.json.secretsSet, ['privateKey']);
+    assert.deepEqual(renamed.json.secretsSet, ['authCode', 'privateKey']);
     // required fields, plainly
     const missing = await admin.post('/payments/connections', { provider: 'revolut', settings: {} });
     assert.equal(missing.status, 400);
@@ -232,11 +236,17 @@ describe('ways to pay and connections', () => {
   });
 
   test('testing or paying through a provider not built yet answers 501 with a plain sentence', async () => {
-    const made = await admin.post('/payments/connections', { provider: 'wise', secrets: { apiToken: 'wise-token-123456' } });
-    const t = await admin.post(`/payments/connections/${made.json.id}/test`);
-    assert.equal(t.status, 501);
-    assert.match(t.json.error, /Paying through Wise Business is not switched on in this version of Linear Hub yet/);
-    assert.ok(!JSON.stringify(t.json).includes('wise-token'));
+    // package A built Wise: its stub stands in here for "a way to pay this version cannot use yet"
+    registerPaymentProvider(stubProvider('wise'));
+    try {
+      const made = await admin.post('/payments/connections', { provider: 'wise', secrets: { apiToken: 'wise-token-123456' } });
+      const t = await admin.post(`/payments/connections/${made.json.id}/test`);
+      assert.equal(t.status, 501);
+      assert.match(t.json.error, /Paying through Wise Business is not switched on in this version of Linear Hub yet/);
+      assert.ok(!JSON.stringify(t.json).includes('wise-token'));
+    } finally {
+      unregisterPaymentProvider('wise');
+    }
   });
 
   test('a bank file connection makes real files at once; it has no test mode', async () => {

@@ -3,6 +3,9 @@
 // Connect (a form driven by the provider's fields; keys are stored encrypted and never shown again), Test, Switch to
 // live (type PAY FOR REAL), Switch back to test mode, Disconnect. Loaded lazily from pages/Settings.tsx
 // (LazyPaymentsSettingsSection), so neither the Settings chunk nor the main one carries it or the logos.
+// Package A: the Connect form starts with the provider's steps (what happens outside Linear Hub, in order); an API
+// connection is tested as soon as it is saved (Revolut's code only works for 2 minutes); Switch to live shows what
+// live needs for that provider (its own keys).
 import { useId, useState, type FormEvent } from 'react';
 import { Check, Plug, PlugZap, RefreshCw, TriangleAlert, Unplug, X } from 'lucide-react';
 import {
@@ -137,6 +140,7 @@ function ConnectionRow({ provider: p, connection: c, onEdit }: { provider: Payme
         {c.lastCheckedAt ? `Last tested ${formatDateTime(c.lastCheckedAt)}` : api ? 'Test it before you pay anyone through it.' : 'Ready to make bank files.'}
         {c.balancePence != null ? ` · Balance ${formatPence(c.balancePence)}` : ''}
       </p>
+      {api && c.mode === 'live' && c.status !== 'connected' && p.liveNote && <p className="mt-1 text-xs text-muted" data-live-note="">{p.liveNote}</p>}
       {c.lastError && <p className="mt-1 text-xs text-danger">{c.lastError}</p>}
       <div className="mt-2 flex flex-wrap gap-2">
         {api && <Button size="sm" variant="outline" className="h-10 sm:h-8" loading={test.isPending} leftIcon={<RefreshCw aria-hidden />} onClick={runTest}>Test</Button>}
@@ -149,7 +153,7 @@ function ConnectionRow({ provider: p, connection: c, onEdit }: { provider: Payme
         <Button size="sm" variant="ghost" className="h-10 sm:h-8" onClick={onEdit}>Edit</Button>
         <Button size="sm" variant="ghost" className="h-10 text-danger sm:h-8" leftIcon={<Unplug aria-hidden />} onClick={() => setConfirmOff(true)}>Disconnect</Button>
       </div>
-      <LiveModal open={live} connection={c} onClose={() => setLive(false)} />
+      <LiveModal open={live} connection={c} liveNote={p.liveNote} onClose={() => setLive(false)} />
       <ConfirmDialog
         open={confirmOff}
         onClose={() => setConfirmOff(false)}
@@ -167,7 +171,7 @@ function ConnectionRow({ provider: p, connection: c, onEdit }: { provider: Payme
   );
 }
 
-function LiveModal({ open, connection: c, onClose }: { open: boolean; connection: PaymentConnection; onClose: () => void }) {
+function LiveModal({ open, connection: c, liveNote, onClose }: { open: boolean; connection: PaymentConnection; liveNote?: string; onClose: () => void }) {
   const uid = useId();
   const [typed, setTyped] = useState('');
   const update = useUpdateConnection();
@@ -198,6 +202,7 @@ function LiveModal({ open, connection: c, onClose }: { open: boolean; connection
         </>
       )}
     >
+      {liveNote && <p className="mb-3 text-sm text-muted">{liveNote}</p>}
       <Field label={`Type ${PAYMENT_LIVE_CONFIRMATION} to switch it on`} htmlFor={`${uid}-confirm`}>
         <Input id={`${uid}-confirm`} value={typed} onChange={(e) => setTyped(e.target.value)} autoComplete="off" autoCapitalize="characters" spellCheck={false} placeholder={PAYMENT_LIVE_CONFIRMATION} />
       </Field>
@@ -209,6 +214,7 @@ function ConnectModal({ provider: p, connection: c, onClose }: { provider: Payme
   const uid = useId();
   const create = useCreateConnection();
   const update = useUpdateConnection();
+  const test = useTestConnection();
   const toast = useToast();
   const [name, setName] = useState(c?.name ?? p.name);
   const [values, setValues] = useState<Record<string, string>>(() => {
@@ -216,7 +222,8 @@ function ConnectModal({ provider: p, connection: c, onClose }: { provider: Payme
     for (const f of p.configFields) out[f.name] = f.secret ? '' : (c?.settings[f.name] ?? (f.type === 'select' ? f.options?.[0]?.value ?? '' : ''));
     return out;
   });
-  const busy = create.isPending || update.isPending;
+  const busy = create.isPending || update.isPending || test.isPending;
+  const testOnSave = p.kind === 'api' && p.available;
   const error = create.error ?? update.error;
   const errs: Record<string, string> = {};
   if (error instanceof ApiError && Array.isArray(error.details)) {
@@ -227,7 +234,19 @@ function ConnectModal({ provider: p, connection: c, onClose }: { provider: Payme
     const settings: Record<string, string> = {};
     const secrets: Record<string, string> = {};
     for (const f of p.configFields) (f.secret ? secrets : settings)[f.name] = values[f.name] ?? '';
-    const done = () => { toast.success(c ? 'Connection saved' : 'Connected', p.kind === 'api' ? 'Test it next: it starts in test mode.' : 'You can pay people through it now.'); onClose(); };
+    const done = (saved: PaymentConnection) => {
+      if (!testOnSave) {
+        toast.success(c ? 'Connection saved' : 'Connected', p.kind === 'api' ? 'Test it next: it starts in test mode.' : 'You can pay people through it now.');
+        onClose();
+        return;
+      }
+      // tested straight away: a pasted code (Revolut) only works for a short while
+      test.mutate(saved.id, {
+        onSuccess: (r) => (r.ok ? toast.success('Saved, and the connection works', r.message) : toast.error('Saved, but the test did not work', r.message)),
+        onError: (e) => toast.error('Saved, but it could not be tested', errorMessage(e)),
+        onSettled: onClose,
+      });
+    };
     const fail = (err: unknown) => { if (!(err instanceof ApiError && Array.isArray(err.details) && err.details.length)) toast.error('Could not save the connection', errorMessage(err)); };
     if (c) update.mutate({ id: c.id, patch: { name, settings, secrets } }, { onSuccess: done, onError: fail });
     else create.mutate({ provider: p.id, name, settings, secrets }, { onSuccess: done, onError: fail });
@@ -243,11 +262,18 @@ function ConnectModal({ provider: p, connection: c, onClose }: { provider: Payme
       footer={(
         <>
           <Button variant="ghost" onClick={onClose}>Cancel</Button>
-          <Button type="submit" form={`${uid}-form`} loading={busy}>{c ? 'Save changes' : 'Save connection'}</Button>
+          <Button type="submit" form={`${uid}-form`} loading={busy}>{testOnSave ? 'Save and test' : c ? 'Save changes' : 'Save connection'}</Button>
         </>
       )}
     >
       <form id={`${uid}-form`} onSubmit={submit} className="space-y-4" noValidate>
+        {!!p.connectSteps?.length && (
+          <section className="rounded-lg border border-border bg-surface-2/40 p-3" aria-labelledby={`${uid}-steps`} data-connect-steps="">
+            <h5 id={`${uid}-steps`} className="font-sans text-sm font-semibold tracking-normal text-fg">How to connect</h5>
+            <p className="mt-0.5 text-xs text-muted">Some of these steps happen outside Linear Hub: in the provider’s own app or console, or on a computer.</p>
+            <ol className="mt-2 list-decimal space-y-1.5 pl-5 text-sm text-fg">{p.connectSteps.map((step) => <li key={step}>{step}</li>)}</ol>
+          </section>
+        )}
         <Field label="Name" htmlFor={`${uid}-name`} hint="What you call it, e.g. “Revolut (office account)”" error={errs.name}>
           <Input id={`${uid}-name`} value={name} onChange={(e) => setName(e.target.value)} maxLength={80} />
         </Field>

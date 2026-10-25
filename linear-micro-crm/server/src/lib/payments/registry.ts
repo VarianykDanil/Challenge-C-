@@ -12,13 +12,16 @@
 import type { PaymentProviderView } from '@lm/shared';
 import { createFakeProvider } from './fake.ts';
 import type { PaymentProviderAdapter } from './provider.ts';
+import { createRevolutProvider } from './revolut.ts';
 import { stubProvider } from './stubs.ts';
+import { createTrueLayerProvider } from './truelayer.ts';
+import { createWiseProvider } from './wise.ts';
 
 const BUILT_IN: readonly PaymentProviderAdapter[] = [
   stubProvider('bank_file'), // package P: the bank payment file
-  stubProvider('revolut'), // package A
-  stubProvider('wise'), // package A
-  stubProvider('truelayer'), // package A
+  createRevolutProvider(), // package A: ./revolut.ts
+  createWiseProvider(), // package A: ./wise.ts
+  createTrueLayerProvider(), // package A: ./truelayer.ts
 ];
 
 const adapters = new Map<string, PaymentProviderAdapter>(BUILT_IN.map((a) => [a.info.id, a]));
