@@ -753,8 +753,8 @@ describe('through Linear Hub: connect, test, live, approve with a code, checked,
     assert.equal(approved.json.items[0].status, 'queued');
     const posts = () => tlFake.requests.filter((r) => r.method === 'POST' && r.path === '/v3/payouts').length;
     const sentBefore = posts();
-    // a MacBook closed for the afternoon: the approval was 6 hours ago
-    const aged = new Date(Date.now() - 6 * 3_600_000).toISOString();
+    // a MacBook closed for the afternoon: the approval was 6 hours ago (approved_at is on the business clock)
+    const aged = new Date(businessNow().getTime() - 6 * 3_600_000).toISOString();
     run(srv.db, `UPDATE payment_batches SET approved_at = ?, created_at = ? WHERE id = ?`, [aged, aged, draft.id]);
     run(srv.db, `UPDATE payment_items SET attempted_at = ? WHERE batch_id = ?`, [aged, draft.id]);
     const checked = await admin.post(`/payments/batches/${draft.id}/refresh`);
@@ -768,6 +768,7 @@ describe('through Linear Hub: connect, test, live, approve with a code, checked,
   test('cross:X-1: the age is measured on one clock (a pinned business clock does not make a fresh approval look old)', async () => {
     const id = await connectLive('truelayer', { clientId: tlFake.clientId, signingKeyId: tlFake.kid }, { clientSecret: tlFake.clientSecret, privateKey: EC_PEM });
     registerPaymentProvider(createTrueLayerProvider({ baseUrl: tlFake.url, timeoutMs: 300 }));
+    const offset = businessNow().getTime() - Date.now(); // keep a clock pinned by LM_BUSINESS_NOW for the later tests
     setBusinessClock(new Date(Date.now() - 2 * 86_400_000)); // LM_BUSINESS_NOW two days behind, as for screenshots
     try {
       tlFake.script({ payoutSlow: 3 });
@@ -780,7 +781,7 @@ describe('through Linear Hub: connect, test, live, approve with a code, checked,
       const again = await admin.post(`/payments/batches/${draft.id}/refresh`);
       assert.equal(again.json.items[0].status, 'processing', 'sent again with the same key, not failed as too old');
     } finally {
-      setBusinessClock(null);
+      setBusinessClock(offset ? new Date(Date.now() + offset) : null);
     }
   });
 
