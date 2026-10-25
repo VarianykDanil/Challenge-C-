@@ -1,11 +1,11 @@
 import { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
-import { Check, Copy, DatabaseBackup, KeyRound, Monitor, Moon, RefreshCw, ShieldCheck, ShieldOff, Sun, TriangleAlert } from 'lucide-react';
+import { Check, Copy, DatabaseBackup, Monitor, Moon, RefreshCw, ShieldCheck, Sun, TriangleAlert } from 'lucide-react';
 import { BRAND, POSITION_LABELS, ROLE_LABELS } from '@lm/shared';
 import clsx from 'clsx';
 import { Avatar, Badge, Button, Card, CardHeader, PageHeader, Skeleton } from '@/components/ui';
 import { api } from '@/api/client';
-import { useHealth, useTwoFactorStatus, type HealthInfo } from '@/api/hooks';
+import { useHealth, type HealthInfo } from '@/api/hooks';
 import { useCurrentUser } from '@/auth/AuthProvider';
 import { ErrorBoundary, UserStatusBadge, errorMessage } from '@/features/common';
 import { PinSettings } from '@/features/settings/PinSettings';
@@ -17,7 +17,7 @@ import { PaySettingsSection } from '@/features/pay/PaySettingsSection';
 import { QuestionBankSection } from '@/features/recruitment/QuestionBankSection';
 import { IntegrationsSection } from '@/features/statements/IntegrationsSection';
 import { VideoSettingsSection } from '@/features/videos/VideoSettingsSection';
-import { RecoveryCodesModal, TwoFactorDisableModal, TwoFactorSetupModal } from '@/features/settings';
+import { TwoFactorSection } from '@/features/settings/TwoFactorSection';
 import { formatDate, formatDateTime, formatRelative, fullName, pluralise } from '@/lib/format';
 import { useTheme, type Theme } from '@/components/layout';
 import { usePageTitle } from '@/lib/usePageTitle';
@@ -138,79 +138,22 @@ export function SettingsPage() {
 
 /* ───────────────────────────── Security ───────────────────────────── */
 
-type SecurityModal = null | 'setup' | 'disable' | 'codes';
-
-/** Security section: the "Two-step verification" card with its status and the three actions. */
+/**
+ * Security section: the "Two-step verification" card (release 1.4: features/settings/TwoFactorSection, shared with the
+ * client portal; required for every account but the demo sign-in ones) and the PIN and sign-in rules.
+ */
 function SecurityCard() {
   const t = COPY.security;
-  const status = useTwoFactorStatus();
-  const [modal, setModal] = useState<SecurityModal>(null);
-  const s = status.data;
-  const close = () => setModal(null);
-
   return (
     <Card>
       <CardHeader title={t.title} description={t.description} icon={<ShieldCheck aria-hidden />} />
 
-      <section aria-labelledby="two-factor-title" data-testid="two-factor-card" className="rounded-xl border border-border p-4">
-        <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
-          <div className="min-w-0 flex-1">
-            <div className="flex flex-wrap items-center gap-2">
-              <h4 id="two-factor-title" className="font-sans text-sm font-semibold tracking-normal text-fg">{t.twoFactor.title}</h4>
-              {status.isLoading ? (
-                <Skeleton className="h-5 w-12 rounded-full" />
-              ) : s ? (
-                <Badge tone={s.enabled ? 'success' : 'neutral'} dot={s.enabled} data-testid="two-factor-badge">
-                  {s.enabled ? t.twoFactor.on : t.twoFactor.off}
-                </Badge>
-              ) : null}
-            </div>
-
-            <p className="mt-1 text-sm text-muted" data-testid="two-factor-status">
-              {status.isLoading ? (
-                <Skeleton className="h-3.5 w-64" />
-              ) : status.isError ? (
-                <span className="inline-flex flex-wrap items-center gap-2 text-danger">
-                  {errorMessage(status.error, 'Could not load the status')}
-                  <Button variant="outline" size="xs" onClick={() => void status.refetch()} leftIcon={<RefreshCw aria-hidden />}>Try again</Button>
-                </span>
-              ) : s?.enabled ? (
-                <>
-                  On since <span className="font-medium text-fg">{formatDate(s.enabledAt)}</span>
-                  <span aria-hidden> · </span>
-                  <span className={clsx(s.recoveryCodesLeft <= 2 && 'font-medium text-warning')}>{pluralise(s.recoveryCodesLeft, 'recovery code')} left</span>
-                </>
-              ) : (
-                t.twoFactor.offHint
-              )}
-            </p>
-
-            {s?.enabled && s.recoveryCodesLeft <= 2 && <p className="mt-1.5 text-xs text-warning">{t.twoFactor.lowCodesHint}</p>}
-            {s && !s.enabled && s.pendingSetup && <p className="mt-1.5 text-xs text-muted">{t.twoFactor.pendingHint}</p>}
-          </div>
-
-          <div className="flex shrink-0 flex-wrap gap-2">
-            {s?.enabled ? (
-              <>
-                <Button variant="outline" size="sm" onClick={() => setModal('codes')} leftIcon={<KeyRound aria-hidden />}>{t.twoFactor.newCodes}</Button>
-                <Button variant="outline" size="sm" onClick={() => setModal('disable')} leftIcon={<ShieldOff aria-hidden />}>{t.twoFactor.turnOff}</Button>
-              </>
-            ) : (
-              <Button size="sm" onClick={() => setModal('setup')} disabled={!s} leftIcon={<ShieldCheck aria-hidden />}>{t.twoFactor.setUp}</Button>
-            )}
-          </div>
-        </div>
-        <p className="mt-3 text-xs text-muted">{t.twoFactor.description}</p>
-      </section>
+      <TwoFactorSection />
 
       {/* Release 1.2 slot (U1): your PIN and (admin) the sign-in settings; nothing until the package lands. */}
       <ErrorBoundary name="pin-settings" fallback={null}>
         <PinSettings className="mt-4" />
       </ErrorBoundary>
-
-      <TwoFactorSetupModal open={modal === 'setup'} onClose={close} />
-      <TwoFactorDisableModal open={modal === 'disable'} onClose={close} />
-      <RecoveryCodesModal open={modal === 'codes'} onClose={close} />
     </Card>
   );
 }

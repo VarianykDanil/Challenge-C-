@@ -18,8 +18,8 @@
  */
 import { createHmac, randomBytes, scrypt, timingSafeEqual, type BinaryLike, type ScryptOptions } from 'node:crypto';
 import {
-  PIN_LOCK_AFTER_FAILURES, PIN_LOCK_MAX_MINUTES, PIN_LOCK_MINUTES, SESSION_IDLE_HOURS_DEFAULT, isPinFormatValid,
-  isSessionIdleHoursValid, type PinStatus, type Role, type SecuritySettings,
+  PIN_LOCK_AFTER_FAILURES, PIN_LOCK_MAX_MINUTES, PIN_LOCK_MINUTES, SESSION_IDLE_HOURS_DEFAULT, SESSION_MAX_HOURS_DEFAULT, isPinFormatValid,
+  isSessionIdleHoursValid, isSessionMaxHoursValid, type PinStatus, type Role, type SecuritySettings,
 } from '@lm/shared';
 import { all, get, run, transaction, type Db } from '../db/connection.ts';
 import { currentDataVersion } from './cache.ts';
@@ -215,38 +215,50 @@ export function resetPinAndSignOut(db: Db, userId: number): number {
 
 export const SECURITY_SETTING_KEYS = {
   requirePin: 'ext:pin:require-pin',
+  /** Release 1.4: still read (no data loss) but no longer decides anything: two-step is required for everyone. */
   requireAdminTwoFactor: 'ext:pin:require-admin-2fa',
   sessionIdleHours: 'ext:pin:session-idle-hours',
+  /** Release 1.4 (package S): hours from sign-in to the automatic sign-out. */
+  sessionMaxHours: 'ext:pin:session-max-hours',
 } as const;
 
-export const DEFAULT_SECURITY_SETTINGS: SecuritySettings = { requirePin: false, requireAdminTwoFactor: false, sessionIdleHours: SESSION_IDLE_HOURS_DEFAULT };
+/** The sign-in settings as the server always answers them: every field present (sessionMaxHours included). */
+export type ResolvedSecuritySettings = SecuritySettings & { sessionMaxHours: number };
 
-const settingsCache = new WeakMap<Db, { version: number; settings: SecuritySettings }>();
+export const DEFAULT_SECURITY_SETTINGS: ResolvedSecuritySettings = {
+  requirePin: false, requireAdminTwoFactor: false, sessionIdleHours: SESSION_IDLE_HOURS_DEFAULT, sessionMaxHours: SESSION_MAX_HOURS_DEFAULT,
+};
+
+const settingsCache = new WeakMap<Db, { version: number; settings: ResolvedSecuritySettings }>();
 
 /** The sign-in settings (defaults for absent or unreadable keys). Cheap: one cached read per data version. */
-export function readSecuritySettings(db: Db): SecuritySettings {
+export function readSecuritySettings(db: Db): ResolvedSecuritySettings {
   const version = currentDataVersion();
   const hit = settingsCache.get(db);
   if (hit && hit.version === version) return hit.settings;
-  const rows = all<{ key: string; value: string }>(db, `SELECT key, value FROM meta WHERE key IN (?, ?, ?)`, Object.values(SECURITY_SETTING_KEYS));
+  const keys = Object.values(SECURITY_SETTING_KEYS);
+  const rows = all<{ key: string; value: string }>(db, `SELECT key, value FROM meta WHERE key IN (${keys.map(() => '?').join(', ')})`, keys);
   const value = (key: string) => rows.find((r) => r.key === key)?.value;
   const hours = Number(value(SECURITY_SETTING_KEYS.sessionIdleHours));
-  const settings: SecuritySettings = {
+  const maxHours = Number(value(SECURITY_SETTING_KEYS.sessionMaxHours));
+  const settings: ResolvedSecuritySettings = {
     requirePin: value(SECURITY_SETTING_KEYS.requirePin) === '1',
     requireAdminTwoFactor: value(SECURITY_SETTING_KEYS.requireAdminTwoFactor) === '1',
     sessionIdleHours: isSessionIdleHoursValid(hours) ? hours : SESSION_IDLE_HOURS_DEFAULT,
+    sessionMaxHours: isSessionMaxHoursValid(maxHours) ? maxHours : SESSION_MAX_HOURS_DEFAULT,
   };
   settingsCache.set(db, { version, settings });
   return settings;
 }
 
 /** Writes the given settings (already validated) and returns the full set. */
-export function writeSecuritySettings(db: Db, patch: Partial<SecuritySettings>): SecuritySettings {
+export function writeSecuritySettings(db: Db, patch: Partial<SecuritySettings>): ResolvedSecuritySettings {
   const put = (key: string, value: string) =>
     run(db, `INSERT INTO meta (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value`, [key, value]);
   if (patch.requirePin !== undefined) put(SECURITY_SETTING_KEYS.requirePin, patch.requirePin ? '1' : '0');
   if (patch.requireAdminTwoFactor !== undefined) put(SECURITY_SETTING_KEYS.requireAdminTwoFactor, patch.requireAdminTwoFactor ? '1' : '0');
   if (patch.sessionIdleHours !== undefined) put(SECURITY_SETTING_KEYS.sessionIdleHours, String(patch.sessionIdleHours));
+  if (patch.sessionMaxHours !== undefined) put(SECURITY_SETTING_KEYS.sessionMaxHours, String(patch.sessionMaxHours));
   settingsCache.delete(db);
   return readSecuritySettings(db);
 }
@@ -270,6 +282,11 @@ export interface AccountFlagsSubject {
   hasPin: boolean;
   twoFactorEnabled: boolean;
   demoClient: boolean;
+  /**
+   * Release 1.4 (package S): one of the demo sign-in accounts while Linear Hub is still the demo
+   * (lib/demoTeams.ts isDemoSignInAccount): exempt from two-step verification and the 14-hour sign-out.
+   */
+  demoSignIn: boolean;
 }
 
 export function accountFlags(settings: SecuritySettings, who: AccountFlagsSubject): AccountFlags {
@@ -278,7 +295,10 @@ export function accountFlags(settings: SecuritySettings, who: AccountFlagsSubjec
     // Release 1.3 (P6 client-portal): a client account always needs a PIN (its first sign-in creates it), except the
     // seeded demo client, so the demo sign-in button works; the admin's "Require a PIN for everyone" covers it too.
     pinSetupRequired: !who.hasPin && (settings.requirePin || (who.role === 'client' && !who.demoClient)),
-    twoFactorSetupRequired: settings.requireAdminTwoFactor && who.role === 'admin' && !who.twoFactorEnabled,
+    // Release 1.4 (package S, owner's decision): two-step verification for every account that signs in — admin,
+    // leader, recruiter, rep and client — except the demo sign-in accounts while still the demo. The old
+    // "Require two-step verification for administrators" switch (settings.requireAdminTwoFactor) no longer matters.
+    twoFactorSetupRequired: !who.twoFactorEnabled && !who.demoSignIn,
   };
 }
 

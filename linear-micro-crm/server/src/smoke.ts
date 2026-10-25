@@ -1557,7 +1557,10 @@ async function main(): Promise<void> {
     eq(c.json.pinned, false, 'not pinned');
   });
 
-  // ── two-step verification (TOTP) — a non-demo user so the demo sign-in keeps working ──
+  // ── two-step verification (TOTP) — a non-demo user so the demo sign-in keeps working. Release 1.4 (package S):
+  // two-step is required for every account but the demo sign-in accounts, so this user is held at setup until it is
+  // on and can never turn it off (only an admin reset clears it); switching it off is checked on a demo Sapiens
+  // account, which is exempt while the database is still the demo. ──
   const tfa = {
     employeeId: 'LM-0920', email: 'smoke.totp@linear-mcr.co.uk', firstName: 'Smoke', lastName: 'Totp', role: 'rep', position: 'field_rep',
     teamId: 2, startDate: today, status: 'active', phone: null, city: 'Manchester',
@@ -1605,10 +1608,12 @@ async function main(): Promise<void> {
     eq((await tfaUser.get('/auth/me')).json.user.twoFactorEnabled, false, '/auth/me flag off');
     const off = await tfaUser.get('/auth/2fa');
     status(off, 200, 'status');
-    eq(JSON.stringify(off.json), JSON.stringify({ enabled: false, enabledAt: null, recoveryCodesLeft: 0, pendingSetup: false }), 'status off');
+    eq(JSON.stringify(off.json), JSON.stringify({ enabled: false, enabledAt: null, recoveryCodesLeft: 0, pendingSetup: false, required: true }), 'status off');
+    eq((await tfaUser.get('/auth/me')).json.user.twoFactorSetupRequired, true, 'release 1.4: held at setup');
+    eq((await tfaUser.get('/me/dashboard')).json.twoFactorSetupRequired, true, 'the gate holds the app');
     status(await tfaUser.post('/auth/2fa/enable', { code: '123456' }), 409, 'enable with nothing pending');
-    status(await tfaUser.post('/auth/2fa/disable', { code: '123456' }), 409, 'disable while off');
-    status(await tfaUser.post('/auth/2fa/recovery-codes', { code: '123456' }), 409, 'recovery codes while off');
+    status(await tfaUser.post('/auth/2fa/disable', { code: '123456' }), 403, 'disable while off: held at setup');
+    status(await tfaUser.post('/auth/2fa/recovery-codes', { code: '123456' }), 403, 'recovery codes while off: held at setup');
     const first = await tfaUser.post('/auth/2fa/setup');
     status(first, 201, 'setup');
     ok(/^[A-Z2-7]{32}$/.test(first.json.secret), `base32 secret (${first.json.secret})`);
@@ -1697,7 +1702,7 @@ async function main(): Promise<void> {
     status(replay, 401, 'the same code is refused at login');
     eq(replay.json.error, 'That code is not valid', 'message');
     status(await tfaUser.post('/auth/2fa/recovery-codes', { code: used }), 400, 'and in settings');
-    status(await tfaUser.post('/auth/2fa/disable', { code: used }), 400, 'and for disabling');
+    status(await tfaUser.post('/auth/2fa/disable', { code: used }), 409, 'disabling is refused anyway (release 1.4: required)');
     eq(get<Json>(db, `SELECT totp_last_counter AS n FROM users WHERE id = ?`, [tfaUserId])!.n, stored, 'marker unchanged by refused replays');
     // the following 30-second step (still inside the ±1 window) is a new code and is accepted
     status(await c.post('/auth/login/2fa', { challengeToken: token, code: totp(tfaSecret, { timeMs: Date.now() + 30_000 }) }), 200, 'the next code works');
@@ -1728,33 +1733,56 @@ async function main(): Promise<void> {
     status(await c.post('/auth/logout'), 204, 'logout');
     tfaCodes = fresh.json.recoveryCodes;
   });
-  await check('Disable: 400 without a valid code, 204 with a recovery code (or code); login goes back to one step', async () => {
+  await check('Disable: refused for an account that must use it; a demo account: 400 without a valid code, 204 with a recovery code (or code), login back to one step', async () => {
+    // Release 1.4 (package S): the non-demo user keeps two-step on, whatever it sends
     status(await tfaUser.post('/auth/2fa/disable', {}), 400, 'nothing supplied → validation');
-    const bad = await tfaUser.post('/auth/2fa/disable', { code: wrongCode(tfaSecret) });
+    const refused = await tfaUser.post('/auth/2fa/disable', { recoveryCode: tfaCodes[1] });
+    status(refused, 409, 'required for every account');
+    ok(/required for every account/.test(refused.json.error), `message (${refused.json.error})`);
+    eq((await tfaUser.get('/auth/2fa')).json.enabled, true, 'still on');
+    eq(recoveryRows(), 10, 'no recovery code spent');
+    // …a demo sign-in account (team Sapiens) may switch it on and off again
+    const demo = get<Json>(db, `SELECT id, email, employee_id AS employeeId FROM users WHERE employee_id = 'LM-0107'`)!;
+    const demoLogin = { email: demo.email, employeeId: demo.employeeId };
+    const demoCode = (secret: string): string => {
+      run(db, `UPDATE users SET totp_last_counter = NULL WHERE id = ?`, [demo.id]);
+      return totp(secret);
+    };
+    const y = new Client(base, 'totp-demo');
+    status(await y.post('/auth/login', demoLogin), 200, 'demo account signs in in one step');
+    eq((await y.get('/auth/2fa')).json.required, false, 'not required for a demo sign-in account');
+    const ySetup = await y.post('/auth/2fa/setup');
+    status(ySetup, 201, 'setup');
+    const yOn = await y.post('/auth/2fa/enable', { code: totp(ySetup.json.secret) });
+    status(yOn, 200, 'enable');
+    status(await y.post('/auth/2fa/disable', {}), 400, 'nothing supplied → validation');
+    const bad = await y.post('/auth/2fa/disable', { code: wrongCode(ySetup.json.secret) });
     status(bad, 400, 'wrong code');
     eq(bad.json.error, 'That code is not valid', 'message');
-    status(await tfaUser.post('/auth/2fa/disable', { recoveryCode: 'zzzz-zzzz' }), 400, 'unknown recovery code');
-    status(await tfaUser.post('/auth/2fa/disable', { recoveryCode: tfaCodes[1] }), 204, 'disable with a recovery code');
-    const st = await tfaUser.get('/auth/2fa');
-    eq(JSON.stringify(st.json), JSON.stringify({ enabled: false, enabledAt: null, recoveryCodesLeft: 0, pendingSetup: false }), 'status off');
-    eq((await tfaUser.get('/auth/me')).json.user.twoFactorEnabled, false, 'flag off');
-    const row = tfaDbRow();
+    status(await y.post('/auth/2fa/disable', { recoveryCode: 'zzzz-zzzz' }), 400, 'unknown recovery code');
+    status(await y.post('/auth/2fa/disable', { recoveryCode: yOn.json.recoveryCodes[1] }), 204, 'disable with a recovery code');
+    const st = await y.get('/auth/2fa');
+    eq(JSON.stringify(st.json), JSON.stringify({ enabled: false, enabledAt: null, recoveryCodesLeft: 0, pendingSetup: false, required: false }), 'status off');
+    eq((await y.get('/auth/me')).json.user.twoFactorEnabled, false, 'flag off');
+    const row = get<Json>(db, `SELECT totp_secret_enc AS s, totp_pending_enc AS p, totp_enabled_at AS e FROM users WHERE id = ?`, [demo.id])!;
     ok(row.s === null && row.p === null && row.e === null, 'secret columns cleared');
-    eq(recoveryRows(), 0, 'recovery codes deleted');
+    eq(get<Json>(db, `SELECT COUNT(*) AS n FROM recovery_codes WHERE user_id = ?`, [demo.id])!.n, 0, 'recovery codes deleted');
     const c = new Client(base, 'totp-plain');
-    const login = await c.post('/auth/login', tfaLogin);
+    const login = await c.post('/auth/login', demoLogin);
     status(login, 200, 'one-step login again');
     eq(login.json.requiresTwoFactor, undefined, 'no challenge');
     eq(login.json.user.twoFactorEnabled, false, 'flag off on login');
     status(await c.get('/auth/me'), 200, 'cookie set');
     status(await c.post('/auth/logout'), 204, 'logout');
     // disable with an authenticator code
-    const again = await enable2fa(tfaUser);
-    status(await tfaUser.post('/auth/2fa/disable', { code: code(again.secret) }), 204, 'disable with a code');
-    eq((await tfaUser.get('/auth/2fa')).json.enabled, false, 'off again');
+    const again = await y.post('/auth/2fa/setup');
+    status(await y.post('/auth/2fa/enable', { code: totp(again.json.secret) }), 200, 'on again');
+    status(await y.post('/auth/2fa/disable', { code: demoCode(again.json.secret) }), 204, 'disable with a code');
+    eq((await y.get('/auth/2fa')).json.enabled, false, 'off again');
+    status(await y.post('/auth/logout'), 204, 'logout');
   });
   await check('Admin reset: 403 for non-admins, 400 for own account, 404 unknown, 204 clears 2FA and signs the user out everywhere', async () => {
-    const { secret } = await enable2fa(tfaUser);
+    const secret = tfaSecret; // still on (release 1.4: it cannot be turned off)
     const c = new Client(base, 'totp-second');
     const step1 = await c.post('/auth/login', tfaLogin);
     status(await c.post('/auth/login/2fa', { challengeToken: step1.json.challengeToken, code: code(secret) }), 200, 'second device signed in');
@@ -1772,6 +1800,7 @@ async function main(): Promise<void> {
     const login = await tfaUser.post('/auth/login', tfaLogin);
     status(login, 200, 'one-step login again');
     eq(login.json.user.twoFactorEnabled, false, 'flag off');
+    eq(login.json.user.twoFactorSetupRequired, true, 'release 1.4: set it up again before carrying on');
     status(await admin.get('/auth/me'), 200, 'admin session intact');
   });
   await check('Code limiters: 6 wrong codes exhaust the challenge (410) and lock the source (429); another address is unaffected; wrong codes count for the login limiter', async () => {
@@ -1793,7 +1822,7 @@ async function main(): Promise<void> {
     status(locked, 429, 'fresh challenge, right code: this source is locked after 6 failures');
     ok(/^Too many attempts, try again in \d+ minutes?$/.test(locked.json.error), `error text (${locked.json.error})`);
     status(await tfaUser.post('/auth/2fa/recovery-codes', { code: code(secret) }), 429, 'settings endpoints share the per-source limiter');
-    status(await tfaUser.post('/auth/2fa/disable', { code: code(secret) }), 429, 'disable too');
+    status(await tfaUser.post('/auth/2fa/disable', { code: code(secret) }), 409, 'disable is refused anyway (release 1.4: required)');
     // the real person on another device (another source address) is not locked out by a stranger's guesses
     const other = new Client(base, 'totp-other-device', '127.0.0.2');
     const token3 = (await other.post('/auth/login', tfaLogin)).json.challengeToken as string;
@@ -1825,7 +1854,8 @@ async function main(): Promise<void> {
     ok(get<Json>(db, `SELECT expires_at AS e FROM two_factor_challenges WHERE token = ?`, [live])!.e > new Date(Date.now() + 4 * 60_000).toISOString(), 'fresh challenge lives ~5 minutes');
     status(await c.post('/auth/login/2fa', { challengeToken: live, code: code(tfaSecret) }), 200, 'fresh challenge works');
     status(await c.post('/auth/logout'), 204, 'logout');
-    status(await tfaUser.post('/auth/2fa/disable', { code: code(tfaSecret) }), 204, 'leave 2FA off');
+    // Release 1.4: the account cannot switch it off; the admin reset leaves it off (it sets it up at its next sign-in)
+    status(await admin.post(`/users/${tfaUserId}/2fa/reset`), 204, 'leave 2FA off (admin reset)');
     eq((await anon.get('/auth/demo-accounts')).json.accounts.length, 4, 'demo accounts untouched (2FA off for all four)');
     eq(get<Json>(db, `SELECT COUNT(*) AS n FROM users WHERE totp_enabled_at IS NOT NULL`)!.n, 0, 'no user has 2FA on');
   });

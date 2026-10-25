@@ -21,22 +21,31 @@
  * — an invited client has a PIN once P6 requires one) created on first use, so no other test sees an extra user. The
  * fixture writes no demo-client marker, so cleo is never "the demo client". addClientUser(db, …) adds more client
  * accounts (with `pinHash`, or addClientUserWithPin, for one that has a PIN).
+ *
+ * Release 1.4 (package S): two-step verification is required for every account except the demo sign-in accounts while
+ * the database is still the demo (lib/demoTeams.ts isDemoSignInAccount). So `srv.login(…)` first sets it up for an
+ * account that must have it and has not (enrolTwoFactor: a fresh secret, encrypted, straight into the users row), and
+ * answers the code step with a current code (currentCode). The fixture's accounts are not demo accounts, so they all
+ * sign in with a code; the demo seed's accounts do not. `srv.login(who, pin, { twoFactor: false })` signs in as the
+ * account stands: one without two-step then meets the setup gate (403 twoFactorSetupRequired) like a real person.
  */
 import { mkdtempSync, rmSync } from 'node:fs';
 import http from 'node:http';
 import type { AddressInfo } from 'node:net';
 import os from 'node:os';
 import path from 'node:path';
-import type { EventStatus, EventType, GaugeTotals } from '@lm/shared';
+import type { EventStatus, EventType, GaugeTotals, Role } from '@lm/shared';
 import { createApp } from '../app.ts';
 import { get, openDb, run, type Db } from '../db/connection.ts';
 import { createSchema } from '../db/schema.ts';
 import { seed as seedDemo, type SeedOptions } from '../db/seed.ts';
 import { bumpDataVersion, clearResponseCache } from '../lib/cache.ts';
 import { clientPayPlanId, nextClientAccessCode } from '../lib/client.ts';
-import { configureAppSecret } from '../lib/crypto.ts';
+import { configureAppSecret, decrypt, encrypt } from '../lib/crypto.ts';
 import { addDays, mondayOf, todayISO } from '../lib/dates.ts';
+import { isDemoSignInAccount } from '../lib/demoTeams.ts';
 import { hashPin, savePinHash } from '../lib/pin.ts';
+import { generateSecret, totp } from '../lib/totp.ts';
 import { resetCodeFailures } from '../lib/twofactor.ts';
 import { resetLoginFailures } from '../routes/auth.ts';
 
@@ -71,9 +80,11 @@ export class TestClient {
       headers: { 'content-type': 'application/json', ...(this.cookie ? { cookie: this.cookie } : {}) },
       body: body === undefined ? undefined : JSON.stringify(body),
     });
-    const setCookie = res.headers.get('set-cookie');
-    if (setCookie) {
-      const m = /lm_session=([^;]*)/.exec(setCookie);
+    // The last lm_session cookie wins, as in a browser (release 1.4: a sign-in over a session that just ended clears the
+    // old cookie and sets the new one in the same answer).
+    const session = res.headers.getSetCookie().filter((c) => c.startsWith('lm_session=')).at(-1);
+    if (session !== undefined) {
+      const m = /lm_session=([^;]*)/.exec(session);
       this.cookie = m && m[1] ? `lm_session=${m[1]}` : '';
     }
     const text = await res.text();
@@ -314,6 +325,56 @@ export interface StartOptions {
   seedOptions?: SeedOptions;
 }
 
+export interface LoginOptions {
+  /**
+   * Release 1.4: false → do not set up two-step verification for an account that has none (it then meets the setup
+   * gate). The code step is still answered when the account already has it on.
+   */
+  twoFactor?: boolean;
+}
+
+/**
+ * Release 1.4: switch two-step verification on for a person directly (a fresh secret, encrypted with the test app
+ * secret, no recovery codes) — what finishing the Settings setup leaves in the users row. Returns the secret.
+ */
+export function enrolTwoFactor(db: Db, userId: number): string {
+  const secret = generateSecret();
+  run(db, `UPDATE users SET totp_secret_enc = ?, totp_pending_enc = NULL, totp_enabled_at = ?, totp_last_counter = NULL WHERE id = ?`, [
+    encrypt(secret), new Date().toISOString(), userId,
+  ]);
+  return secret;
+}
+
+/**
+ * Release 1.4: a current authenticator code for a person with two-step on. Codes are single use per 30-second step, so
+ * this forgets the last accepted step first: a test may sign the same person in several times within one step.
+ */
+export function currentCode(db: Db, userId: number): string {
+  const row = get<{ s: string | null }>(db, `SELECT totp_secret_enc AS s FROM users WHERE id = ?`, [userId]);
+  if (!row?.s) throw new Error(`user ${userId} has no two-step secret`);
+  run(db, `UPDATE users SET totp_last_counter = NULL WHERE id = ?`, [userId]);
+  return totp(decrypt(row.s));
+}
+
+/**
+ * Release 1.4: the whole sign-in on any TestClient (also one pointed at a second app on the same database): sets up
+ * two-step verification first for an account that must use it (unless `twoFactor: false`), posts the credentials (and
+ * PIN), and answers the code step with a current code when asked. Returns the last answer, whatever its status.
+ */
+export async function signInWith(db: Db, client: TestClient, creds: Credentials, opts: LoginOptions = {}): Promise<TestResponse> {
+  const user = get<{ id: number; role: Role; email: string; employeeId: string; status: string; totpOn: number }>(
+    db,
+    `SELECT id, role, email, employee_id AS employeeId, status, (totp_enabled_at IS NOT NULL) AS totpOn FROM users WHERE lower(email) = lower(?) AND lower(employee_id) = lower(?)`,
+    [creds.email, creds.employeeId],
+  );
+  if (user && opts.twoFactor !== false && user.status !== 'left' && !user.totpOn && !isDemoSignInAccount(db, user)) enrolTwoFactor(db, user.id);
+  const r = await client.post('/auth/login', creds);
+  if (r.status === 200 && r.json?.requiresTwoFactor === true && user) {
+    return client.post('/auth/login/2fa', { challengeToken: r.json.challengeToken, code: currentCode(db, user.id) });
+  }
+  return r;
+}
+
 export interface TestServer {
   db: Db;
   /** e.g. http://127.0.0.1:54321/api */
@@ -323,8 +384,10 @@ export interface TestServer {
   /**
    * Sign in by role / fixture account name, or with explicit credentials; throws unless the login answers 200.
    * Release 1.2: `pin` (or `who.pin`) is sent as the sign-in PIN; without one the body is exactly as before.
+   * Release 1.4: an account that must use two-step verification gets it set up first (unless `twoFactor: false`), and
+   * the code step is answered with a current code whenever the server asks for one.
    */
-  login(who: DemoRole | FixtureAccount | Credentials, pin?: string): Promise<TestClient>;
+  login(who: DemoRole | FixtureAccount | Credentials, pin?: string, opts?: LoginOptions): Promise<TestClient>;
   /** A client without a session. */
   anon(): TestClient;
   /** Forget cached aggregates (e.g. after writing rows directly with addGauge, or flipping LM_SMART). */
@@ -370,14 +433,14 @@ export async function startTestServer(opts: StartOptions = {}): Promise<TestServ
     db,
     base,
     fixture,
-    async login(who, pin) {
+    async login(who, pin, loginOpts = {}) {
       const client = new TestClient(base);
       const creds = credentials(who);
       // Release 1.3: the fixture's client account exists only once a test signs in as it (with its PIN).
       if (who === 'client' && fixture && !get(db, `SELECT 1 FROM users WHERE lower(employee_id) = lower(?)`, [creds.employeeId])) {
         await addClientUserWithPin(db, { campaignId: fixture.campaignId, email: creds.email, employeeId: creds.employeeId }, FIXTURE_ACCOUNTS.client.pin);
       }
-      const r = await client.post('/auth/login', pin === undefined ? creds : { ...creds, pin });
+      const r = await signInWith(db, client, pin === undefined ? creds : { ...creds, pin }, loginOpts);
       if (r.status !== 200 || !client.cookie) throw new Error(`login ${JSON.stringify(who)} → ${r.status} ${JSON.stringify(r.json)}`);
       return client;
     },

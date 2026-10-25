@@ -75,9 +75,10 @@ test('registry: literal and :param patterns, method-specific, read receipts skip
 });
 
 test('sign-ins are recorded with the person who signed in; reads write nothing (1.3: a failed sign-in writes one sign-in row)', async () => {
-  const signIns = auditRows(srv.db, `WHERE summary = 'Signed in'`);
+  // Release 1.4: the fixture's accounts must use two-step verification, so they sign in with a code
+  const signIns = auditRows(srv.db, `WHERE summary = 'Signed in with two-step verification'`);
   assert.ok(signIns.length >= 5, 'one per login in before()');
-  assert.ok(signIns.every((r) => r.userId !== null && r.entity === 'user' && r.entityId === r.userId && r.action === 'POST /auth/login'));
+  assert.ok(signIns.every((r) => r.userId !== null && r.entity === 'user' && r.entityId === r.userId && r.action === 'POST /auth/login/2fa'));
   const n = auditCount(srv.db);
   const bad = await srv.anon().post('/auth/login', { email: fx().accounts.rep.email, employeeId: 'WRONG-1' });
   assert.equal(bad.status, 401);
@@ -204,7 +205,9 @@ test('people, events and announcements: deactivate, role change, cancel and post
 });
 
 test('nothing secret is stored: no session token, PIN, two-step secret or recovery code in any snapshot', async () => {
-  const setup = await admin.post('/auth/2fa/setup', {});
+  // Release 1.4: everyone signed in above already has two-step on (required); Rita signs in without it and starts setting it up
+  const rita = await srv.login('repA2', undefined, { twoFactor: false });
+  const setup = await rita.post('/auth/2fa/setup', {});
   assert.equal(setup.status, 201);
   assert.equal(newest(srv.db).summary, 'Started setting up two-step verification');
   recordAudit(srv.db, { userId: null, action: 'TEST', summary: 'redaction check', after: { name: 'x', pin: '1234', nested: { recoveryCodes: ['a'], sessionToken: 't' } } });

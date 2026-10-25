@@ -298,7 +298,7 @@ export const AUDIT_FIELD_LABELS: Record<string, string> = {
   // expense, announcement, pitch, settings, learning
   category: 'Category', amount: 'Amount', title: 'Title', body: 'Text', pinned: 'Pinned', authorName: 'Author',
   facts: 'Fact check', requirePin: 'Require a PIN for everyone', requireAdminTwoFactor: 'Require two-step for administrators',
-  sessionIdleHours: 'Sign out after idle (hours)', lessonKey: 'Lesson', learnedAt: 'Learned', quizScore: 'Self-check score',
+  sessionIdleHours: 'Sign out after idle (hours)', sessionMaxHours: 'Sign out after (hours from sign-in)', lessonKey: 'Lesson', learnedAt: 'Learned', quizScore: 'Self-check score',
   teachbackAt: 'Teach-back written', signedOffByName: 'Signed off by', signedOffAt: 'Signed off',
   // Release 1.3 (P9): exports and opened records reported by a page, failed sign-ins
   what: 'What', format: 'Format', rows: 'Rows', filename: 'File', record: 'Record', reason: 'Reason',

@@ -144,7 +144,22 @@ export function shareableSignInUrl(url: string | null | undefined): string | nul
   return u;
 }
 
-/** The plain text a recruiter or leader sends a new person: where to sign in, with what, and (if asked) the PIN step. */
+/**
+ * Release 1.4 (package S): the step every new account's instructions end with. Two-step verification (an authenticator
+ * app) is required for every account that signs in, and the people these texts are for — anyone added through
+ * POST /users, every invited client account — are never one of the exempt demo sign-in accounts. It comes after the
+ * PIN step, as at sign-in (`afterPin`: "Then …", else "The first time, …").
+ */
+export function twoFactorSetupStep(n: number, afterPin: boolean): string {
+  return `${n}. ${afterPin ? 'Then set up' : 'The first time, set up'} two-step verification. You need an authenticator app on your phone ` +
+    '(Google Authenticator, Microsoft Authenticator, 1Password or Authy): scan the code Linear Hub shows, type the 6-digit code ' +
+    'from the app and keep your recovery codes somewhere safe. Each time you sign in after that, you type a new code from the app.';
+}
+
+/**
+ * The plain text a recruiter or leader sends a new person: where to sign in, with what, (if asked) the PIN step, and
+ * (1.4) the two-step setup.
+ */
 export function staffSignInInstructions(t: StaffSignInText): string {
   const url = shareableSignInUrl(t.signInUrl);
   const where = url ? `Open ${url}` : 'Open the Linear Hub sign-in page';
@@ -156,6 +171,7 @@ export function staffSignInInstructions(t: StaffSignInText): string {
   if (t.pinRequired) {
     steps.push(`3. The first time, create a PIN of ${PIN_MIN_LENGTH} to ${PIN_MAX_LENGTH} digits. You will type it after your email and employee ID each time you sign in.`);
   }
+  steps.push(twoFactorSetupStep(steps.length + 1, t.pinRequired));
   return [
     `Hello ${t.firstName.trim() || 'there'},`,
     '',
@@ -163,6 +179,6 @@ export function staffSignInInstructions(t: StaffSignInText): string {
     '',
     ...steps,
     '',
-    'Keep your employee ID to yourself: it is how you sign in.',
+    `Keep your employee ID${t.pinRequired ? ', PIN' : ''} and recovery codes to yourself. If you lose your phone, sign in with a recovery code, or ask an administrator to reset two-step verification.`,
   ].join('\n');
 }

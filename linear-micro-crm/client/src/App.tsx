@@ -5,6 +5,7 @@ import { Navigate, Outlet, Route, Routes, useLocation, useNavigate } from 'react
 import { AppShell } from '@/components/layout';
 import { ToastProvider, useToast } from '@/components/ui';
 import { UNAUTHENTICATED_EVENT } from '@/api/client';
+import { peekSessionEndNotice } from '@/api/sessionEnd';
 import { AuthProvider, useAuth } from '@/auth/AuthProvider';
 import { RedirectIfAuthed, RequireAuth } from '@/auth/RequireAuth';
 import {
@@ -131,7 +132,8 @@ function HomeGate() {
   const { user, loading } = useAuth();
   const { pathname } = useLocation();
   if (loading) return <FullPageSpinner label="Loading…" />;
-  if (!user && pathname === '/') return <PublicLanding />;
+  // Release 1.4: after the automatic sign-out 14 hours after sign-in, `/` goes to the sign-in page (which says why)
+  if (!user && pathname === '/' && !peekSessionEndNotice()) return <PublicLanding />;
   return (
     <RequireAuth>
       <ShellLayout />
@@ -154,7 +156,8 @@ function SessionWatcher() {
       if (!user || handled.current) return;
       handled.current = true;
       clearSession();
-      toast.info('Your session has ended', 'Sign in again to carry on where you left off.');
+      // Release 1.4: the automatic sign-out 14 hours after sign-in is explained on the sign-in page itself
+      if (!peekSessionEndNotice()) toast.info('Your session has ended', 'Sign in again to carry on where you left off.');
       navigate('/login', { replace: true, state: { from: location.pathname + location.search } });
     };
     window.addEventListener(UNAUTHENTICATED_EVENT, onExpired);

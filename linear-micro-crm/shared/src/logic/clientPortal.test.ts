@@ -135,6 +135,12 @@ test('invite instructions: the email, the access code, the PIN rule and the sign
   assert.match(text, /1\. Open https:\/\/hub\.example\/login\./);
   assert.match(text, /your email \(jo\.bloggs@charity\.example\) and your access code: CL-0002\./);
   assert.match(text, /create a PIN of 4 to 6 digits/);
+  // Release 1.4: every invited client account sets up two-step verification at its first sign-in, after the PIN.
+  assert.match(text, /\n4\. Then set up two-step verification\. You need an authenticator app on your phone \(Google Authenticator, Microsoft Authenticator, 1Password or Authy\)/);
+  assert.match(text, /keep your recovery codes somewhere safe\. Each time you sign in after that, you type a new code from the app\./);
+  assert.ok(text.indexOf('create a PIN') < text.indexOf('two-step'), 'the PIN comes first, as at sign-in');
+  assert.match(text, /Keep your access code, PIN and recovery codes to yourself\. If you forget your PIN, ask Linear MCR to reset it\. If you lose your phone, sign in with a recovery code, or ask Linear MCR to reset two-step verification\./);
+  assert.ok(!text.includes('  '), 'no double spaces');
   const noUrl = clientInviteInstructions({ firstName: ' ', email: 'a@b.example', accessCode: 'CL-0003', campaignName: 'CHN' });
   assert.match(noUrl, /^Hello there,/);
   assert.match(noUrl, /1\. Open the Linear Hub sign-in page\./);

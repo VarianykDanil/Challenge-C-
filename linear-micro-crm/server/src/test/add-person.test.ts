@@ -62,12 +62,16 @@ test('a leader adds a trainee to their own team: rep, active, the standard plan,
   assert.ok(u.signInInstructions.includes(`your employee ID: ${stored}.`));
   assert.ok(u.signInInstructions.includes(`(${u.email})`));
   assert.doesNotMatch(u.signInInstructions, /PIN/, 'no PIN step while the office does not require one');
+  // Release 1.4: every new account sets up two-step verification at its first sign-in, and the text says so
+  assert.match(u.signInInstructions, /\n3\. The first time, set up two-step verification\. You need an authenticator app on your phone/);
   // every later read hides it again from the leader
   assert.equal((await leader.get(`/users/${u.id}`)).json.employeeId, '');
   assert.equal(((await leader.get(`/users?teamId=${fx().teams.a}`)).json as { id: number; employeeId: string }[]).find((x) => x.id === u.id)!.employeeId, '');
   assert.equal((await leader.get(`/users/${u.id}/performance`)).json.user.employeeId, '');
   assert.equal((await admin.get(`/users/${u.id}`)).json.employeeId, stored, 'administrators still see it');
   // the new person can sign in with those details
+  const first = await srv.login({ email: u.email, employeeId: stored }, undefined, { twoFactor: false });
+  assert.equal((await first.get('/auth/me')).json.user.twoFactorSetupRequired, true, 'the two-step setup the instructions describe');
   const fresh = await srv.login({ email: u.email, employeeId: stored });
   assert.equal((await fresh.get('/auth/me')).json.user.employeeId, stored, 'and sees their own');
 });
@@ -205,6 +209,7 @@ test('the sign-in instructions add the PIN step while the office requires a PIN 
     const r = await leader.post('/users', person());
     assert.equal(r.status, 201);
     assert.match(r.json.signInInstructions, /3\. The first time, create a PIN of 4 to 6 digits\./);
+    assert.match(r.json.signInInstructions, /\n4\. Then set up two-step verification\./, 'after the PIN, as at sign-in');
     assert.match(r.json.signInInstructions, /1\. Open the Linear Hub sign-in page\./, 'no address given: the plain wording');
   } finally {
     writeSecuritySettings(srv.db, { requirePin: false });
@@ -251,9 +256,10 @@ test('POST /users over the limit: 429 with the sentence, nothing added', async (
   await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', () => resolve()));
   try {
     const port = (server.address() as { port: number }).port;
-    const { TestClient } = await import('./helpers.ts');
+    const { TestClient, signInWith } = await import('./helpers.ts');
     const c = new TestClient(`http://127.0.0.1:${port}/api`);
-    assert.equal((await c.post('/auth/login', { email: 'lee.leader@fixture.test', employeeId: 'FX-0002' })).status, 200);
+    // Release 1.4: the fixture leader signs in with a two-step code (signInWith sets it up and answers it)
+    assert.equal((await signInWith(limited.db, c, { email: 'lee.leader@fixture.test', employeeId: 'FX-0002' })).status, 200);
     const add = (i: number) => c.post('/users', { firstName: 'Lim', lastName: `It${i}`, email: `lim.it${i}@linear-mcr.co.uk`, position: 'trainee' });
     assert.equal((await add(1)).status, 201);
     assert.equal((await add(2)).status, 201);

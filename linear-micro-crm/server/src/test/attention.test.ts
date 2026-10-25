@@ -157,7 +157,8 @@ test('admin: payroll:to-pay counts exactly the runs GET /finance/payroll?status=
     assert.ok(!(ranged.json as Json[]).some((r) => r.id === oldFailed), 'from/to given: only that range');
     assert.equal(toPay.severity, 'danger', 'one run is past its due date');
     assert.equal(toPay.href, '/finance?tab=company#runs');
-    assert.ok(keysOf(first).includes('security:2fa'), 'the fixture admin has two-step off');
+    // Release 1.4: two-step verification is required for the fixture admin (not a demo account), so it is on: no nudge
+    assert.ok(!keysOf(first).includes('security:2fa'), 'the fixture admin has two-step on');
     const second = await admin.get('/me/attention');
     assert.equal(second.headers.get('x-cache'), 'HIT');
     assert.deepEqual(second.json, first.json);

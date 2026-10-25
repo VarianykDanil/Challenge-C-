@@ -22,6 +22,7 @@ import {
   PROGRESSION_MILESTONES,
   ROLE_LABELS,
   SESSION_IDLE_HOURS_DEFAULT,
+  SESSION_MAX_HOURS_DEFAULT,
   STAGE_LABELS,
   auditChangeText,
   auditDayLabel,
@@ -599,7 +600,11 @@ const campaignName = (s: Snap | null) => (s ? `${str(s.name, 'a campaign')} (${s
 const expenseText = (s: Snap | null) => (s ? `${auditMoney(numOr0(s.amount))} ${categoryLabel(s.category)}, ${auditDayLabel(String(s.date))}` : 'an expense');
 
 /** The settings snapshot U1's PUT /auth/security-settings answers with (known keys only, in a fixed order). */
-const SETTINGS_DEFAULTS: Snap = { requirePin: false, requireAdminTwoFactor: false, sessionIdleHours: SESSION_IDLE_HOURS_DEFAULT };
+const SETTINGS_DEFAULTS: Snap = {
+  requirePin: false, requireAdminTwoFactor: false, sessionIdleHours: SESSION_IDLE_HOURS_DEFAULT,
+  // Release 1.4 (package S)
+  sessionMaxHours: SESSION_MAX_HOURS_DEFAULT,
+};
 
 function settingsFrom(v: unknown): Snap | null {
   if (!isRecord(v)) return null;

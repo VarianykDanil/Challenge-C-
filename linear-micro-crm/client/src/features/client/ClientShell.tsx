@@ -35,7 +35,7 @@ export function ClientShell({ user, onLogout, children }: ClientShellProps) {
       </a>
       <header className="sticky top-0 z-30 border-b border-border bg-topbar backdrop-blur-md">
         <div className="mx-auto flex h-16 w-full max-w-3xl items-center justify-between gap-3 px-4 sm:px-6">
-          <Link to="/client" className="focus-ring flex min-w-0 items-center gap-3 rounded-lg text-fg" aria-label="Client portal home">
+          <Link to="/client" className="focus-ring flex min-h-10 min-w-0 items-center gap-3 rounded-lg text-fg" aria-label="Client portal home">
             <Logo size={28} title="" />
           </Link>
           <div className="flex min-w-0 items-center gap-2">

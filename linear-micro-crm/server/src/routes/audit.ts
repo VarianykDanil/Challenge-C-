@@ -48,7 +48,7 @@ import { getGauge, getUser } from '../db/queries.ts';
 import { addDays, toBusinessISO } from '../lib/dates.ts';
 import { badRequest, forbidden, notFound } from '../lib/errors.ts';
 import { gaugeSummary } from '../lib/auditSpecs.ts';
-import { IDLE_SIGN_OUT_ACTION } from '../lib/audit/sessions.ts';
+import { IDLE_SIGN_OUT_ACTION, MAX_AGE_SIGN_OUT_ACTION } from '../lib/audit/sessions.ts';
 import { personOrderSql } from '../lib/people.ts';
 import { canSeeEntryDetails } from '../lib/scope.ts';
 import { idParam, isoDate, offsetQuery, optionalIdQuery, optionalString } from '../lib/validate.ts';
@@ -62,8 +62,9 @@ export const ENTITY_HISTORY_MAX = 100;
 /**
  * The sign-in and sign-out rows (left out with `signIns=0`, so the page lists changes only). Release 1.3: with the
  * sign-out by the idle timeout (lib/audit/signIns.ts IDLE_SIGN_OUT_ACTION), which is not the person being active.
+ * Release 1.4 (package S): and the automatic sign-out at the hours-from-sign-in limit (MAX_AGE_SIGN_OUT_ACTION), also not.
  */
-export const SIGN_IN_ACTIONS = ['POST /auth/login', 'POST /auth/login/2fa', 'POST /auth/logout', IDLE_SIGN_OUT_ACTION] as const;
+export const SIGN_IN_ACTIONS = ['POST /auth/login', 'POST /auth/login/2fa', 'POST /auth/logout', IDLE_SIGN_OUT_ACTION, MAX_AGE_SIGN_OUT_ACTION] as const;
 /** GET /announcements/reads without `ids`: the 50 newest (pinned first, as the dashboard lists them). */
 const READS_DEFAULT_LIMIT = 50;
 
@@ -312,7 +313,7 @@ export function auditRouter(db: Db): Router {
     const stats = get<{ lastSignInAt: string | null; lastActiveAt: string | null; failed: number | null }>(
       db,
       `SELECT MAX(CASE WHEN a.action IN ('POST /auth/login', 'POST /auth/login/2fa') AND a.kind = 'sign_in' AND a.after_json IS NULL THEN a.at END) AS lastSignInAt,
-              MAX(CASE WHEN ${ATTEMPT_ON_ACCOUNT} OR a.action = '${IDLE_SIGN_OUT_ACTION}' THEN NULL ELSE a.at END) AS lastActiveAt,
+              MAX(CASE WHEN ${ATTEMPT_ON_ACCOUNT} OR a.action IN ('${IDLE_SIGN_OUT_ACTION}', '${MAX_AGE_SIGN_OUT_ACTION}') THEN NULL ELSE a.at END) AS lastActiveAt,
               SUM(CASE WHEN ${FAILED_ATTEMPT} AND a.at >= ? THEN 1 ELSE 0 END) AS failed
        FROM audit_log a WHERE a.user_id = ?`,
       [since, userId],

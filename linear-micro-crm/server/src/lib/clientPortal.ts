@@ -145,12 +145,16 @@ export function markClientPostsRead(db: Db, postIds: readonly number[], userId: 
 
 const ACCOUNT_SELECT = `
   SELECT u.id, u.first_name AS firstName, u.last_name AS lastName, u.email, u.employee_id AS accessCode,
-         u.client_campaign_id AS campaignId, u.status, (u.pin_hash IS NOT NULL) AS hasPin, u.start_date AS createdAt
+         u.client_campaign_id AS campaignId, u.status, (u.pin_hash IS NOT NULL) AS hasPin, u.start_date AS createdAt,
+         (u.totp_enabled_at IS NOT NULL) AS twoFactorEnabled
   FROM users u WHERE u.role = 'client'`;
 
-type AccountRow = Omit<ClientAccount, 'hasPin'> & { hasPin: number | boolean };
+type AccountRow = Omit<ClientAccount, 'hasPin' | 'twoFactorEnabled'> & { hasPin: number | boolean; twoFactorEnabled: number | boolean };
 
-const mapAccount = (r: AccountRow): ClientAccount => ({ ...r, hasPin: Boolean(r.hasPin), status: r.status === 'left' ? 'left' : 'active' });
+// Release 1.4 (package S): `twoFactorEnabled` too (the campaign page's Client accounts card shows it, with Reset two-step).
+const mapAccount = (r: AccountRow): ClientAccount => ({
+  ...r, hasPin: Boolean(r.hasPin), twoFactorEnabled: Boolean(r.twoFactorEnabled), status: r.status === 'left' ? 'left' : 'active',
+});
 
 /** One client account (never a staff member: 404s come from undefined). */
 export function getClientAccount(db: Db, id: number): ClientAccount | undefined {

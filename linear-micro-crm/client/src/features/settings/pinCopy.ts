@@ -1,5 +1,5 @@
 // Release 1.2 — OWNED BY U1 sign-in-pin. Every sentence the PIN screens show (British English, kind, specific).
-import { PIN_LOCK_AFTER_FAILURES, PIN_LOCK_MINUTES, PIN_MAX_LENGTH, PIN_MIN_LENGTH, SESSION_IDLE_HOURS_DEFAULT } from '@lm/shared';
+import { PIN_LOCK_AFTER_FAILURES, PIN_LOCK_MINUTES, PIN_MAX_LENGTH, PIN_MIN_LENGTH, SESSION_IDLE_HOURS_DEFAULT, SESSION_MAX_HOURS_DEFAULT } from '@lm/shared';
 
 const plural = (n: number, one: string, many: string) => `${n} ${n === 1 ? one : many}`;
 
@@ -35,6 +35,8 @@ export const PIN_COPY = {
     submit: 'Sign in',
     /** The only way back on the PIN step (the header's "Back" to the public page shows on step one only). */
     back: 'Back to email and employee ID',
+    /** Release 1.4: a client account signs in with an access code. */
+    backClient: 'Back to email and access code',
     forgot: 'Forgotten it? An administrator can reset your PIN, then you sign in with your email and employee ID.',
     wrong: 'That PIN isn’t right. Check it and try again.',
     triesLeft: (n: number) => `${plural(n, 'try', 'tries')} left before your PIN locks for a while.`,
@@ -57,7 +59,9 @@ export const PIN_COPY = {
   twoFactor: {
     eyebrow: 'One more step',
     heading: 'Set up two-step verification',
-    body: 'Administrators now sign in with a 6-digit code from an authenticator app as well. It takes about two minutes, and you only do it once.',
+    // Release 1.4 (package S): everyone, not only administrators
+    body: 'Linear Hub now asks everyone for a 6-digit code from an authenticator app when they sign in. It takes about two minutes, and you only do it once.',
+    clientBody: 'Your client account now needs a 6-digit code from an authenticator app each time you sign in, after your PIN. It takes about two minutes, and you only do it once.',
     start: 'Set up now',
     signOut: 'Sign out',
   },
@@ -100,11 +104,13 @@ export const PIN_COPY = {
     requirePinNeedsOwn: 'Set your own PIN first, so the rule cannot lock you out.',
     requirePinConfirmTitle: 'Require a PIN for everyone?',
     requirePinConfirmBody: 'Everyone without a PIN will be asked to create one before they can carry on, including anyone signed in right now. Demo accounts too.',
-    requireAdmin2fa: 'Require two-step verification for administrators',
-    requireAdmin2faBody: 'Administrators without it set it up at their next sign-in. Any signed in now are signed out.',
-    requireAdmin2faNeedsOwn: 'Turn on your own two-step verification first.',
-    requireAdmin2faConfirmTitle: 'Require two-step verification for administrators?',
-    requireAdmin2faConfirmBody: 'Other administrators who have not set it up are signed out now and set it up when they next sign in.',
+    // Release 1.4 (package S): no longer a switch — a plain line
+    twoFactorEveryone: 'Two-step verification is required for everyone',
+    twoFactorEveryoneBody:
+      'Everyone, charity and client accounts included, signs in with a 6-digit code from an authenticator app. Anyone without it sets it up at their next sign-in. The demo sign-in accounts are left out while Linear Hub is still the demo.',
+    maxAge: 'Sign out after',
+    maxAgeHint: (hours: number) =>
+      `Everyone is signed out ${plural(hours, 'hour', 'hours')} after signing in, whatever they are doing, and signs in again with their code. A shorter time applies at once; a longer one from each person’s next sign-in.${hours === SESSION_MAX_HOURS_DEFAULT ? '' : ` The default is ${SESSION_MAX_HOURS_DEFAULT} hours.`}`,
     turnOn: 'Turn on',
     idle: 'Sign out after inactivity',
     idleHint: (hours: number) =>

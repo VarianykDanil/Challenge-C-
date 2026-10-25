@@ -13,6 +13,7 @@
 import type { AnnouncementSource } from './types/client.ts';
 import type { InvoiceSummary } from './types/invoices.ts';
 import type { PaidAs } from './types/pay.ts';
+import type { SessionInfo } from './types/pin.ts';
 import type { EventBookingSummary } from './types/venues.ts';
 
 // ───────────────────────────── People ─────────────────────────────
@@ -603,6 +604,8 @@ export interface LoginInput {
 
 export interface AuthResponse {
   user: UserWithTeam;
+  /** Release 1.4 (package S): when this session ends (GET /auth/me and the sign-in answers). */
+  session?: SessionInfo;
 }
 
 /** Returned by POST /auth/login instead of AuthResponse when the account has two-step verification on. */
@@ -617,6 +620,11 @@ export interface TwoFactorStatus {
   enabledAt: string | null;
   recoveryCodesLeft: number;
   pendingSetup: boolean;
+  /**
+   * Release 1.4: this account must use two-step verification (every account except the demo sign-in accounts while
+   * Linear Hub is still the demo), so it cannot be turned off — only reset by an administrator.
+   */
+  required?: boolean;
 }
 
 export interface TwoFactorSetup {

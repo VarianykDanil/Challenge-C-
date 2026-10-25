@@ -451,7 +451,8 @@ test('automatic steps are filed under "Linear Hub" with kind automatic', async (
 });
 
 test('a client portal account\'s own actions are kind client; its sign-ins are sign-ins', async () => {
-  const signIn = rows(srv.db, `WHERE user_id = (SELECT id FROM users WHERE employee_id = ?) AND action = 'POST /auth/login'`, [FIXTURE_ACCOUNTS.client.employeeId]);
+  // Release 1.4: a client account signs in with a two-step code too, so its sign-in is the code step's row
+  const signIn = rows(srv.db, `WHERE user_id = (SELECT id FROM users WHERE employee_id = ?) AND action IN ('POST /auth/login', 'POST /auth/login/2fa')`, [FIXTURE_ACCOUNTS.client.employeeId]);
   assert.ok(signIn.length >= 1 && signIn.every((r) => r.kind === 'sign_in'));
   const changed = await client.post('/auth/pin', { pin: '6047', currentPin: FIXTURE_ACCOUNTS.client.pin });
   assert.equal(changed.status, 204, JSON.stringify(changed.json));

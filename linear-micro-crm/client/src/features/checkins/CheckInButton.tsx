@@ -17,7 +17,7 @@ import clsx from 'clsx';
 import type { SalesEventWithMeta } from '@lm/shared';
 import { LATE_GRACE_MINUTES, shiftCheckInClock, shiftCheckInLabel, shiftCheckInStatusText, shiftCheckInWindow } from '@lm/shared';
 import { Button, useToast } from '@/components/ui';
-import { isNetworkError } from '@/api/client';
+import { ApiError, isNetworkError } from '@/api/client';
 import { useCheckIn, useUndoCheckIn } from '@/api/checkins';
 import { useCurrentUser } from '@/auth/AuthProvider';
 import { errorMessage } from '@/features/common/QueryStates';
@@ -59,13 +59,15 @@ export function CheckInButton({ event, variant = 'row', className }: CheckInButt
   const canUndo = current?.where === 'phone' || (current?.where === 'server' && canUndoServer);
   const compact = variant === 'compact';
 
-  const keepOnPhone = (tappedAt: string) => {
+  /** `signedOut`: release 1.4 — the session ended as this was sent (14 hours after sign-in); it sends after the next sign-in. */
+  const keepOnPhone = (tappedAt: string, signedOut = false) => {
     const item = enqueueCheckIn(me.id, { eventId: event.id, date: event.date, checkedInAt: tappedAt, eventName: event.name, startTime: event.startTime });
     if (!item) {
-      toast.error('Could not check in', "No signal, and this phone couldn't keep it. Try again when you're back online.");
+      toast.error('Could not check in', signedOut ? 'You were signed out, and this phone couldn’t keep it. Sign in again and tap again.' : "No signal, and this phone couldn't keep it. Try again when you're back online.");
       return;
     }
-    toast.info('No signal — check-in saved on this phone', `${queuedLabel(item)}. It sends when you're back online.`);
+    if (signedOut) toast.info('Check-in saved on this phone', `${queuedLabel(item)}. It sends after you sign in again.`);
+    else toast.info('No signal — check-in saved on this phone', `${queuedLabel(item)}. It sends when you're back online.`);
   };
 
   const tap = async () => {
@@ -81,6 +83,7 @@ export function CheckInButton({ event, variant = 'row', className }: CheckInButt
       else if (compact) toast.success(label, event.name);
     } catch (e) {
       if (isNetworkError(e)) keepOnPhone(tappedAt);
+      else if (e instanceof ApiError && e.status === 401) keepOnPhone(tappedAt, true); // release 1.4: signed out as it was sent
       else toast.error('Could not check in', errorMessage(e));
     }
   };

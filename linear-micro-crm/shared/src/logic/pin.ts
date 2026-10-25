@@ -2,7 +2,7 @@
  * Release 1.2 — OWNED BY U1 sign-in-pin (laid down by r2-foundation). Pure PIN rules shared by the sign-in page,
  * Settings and the server (the server hashes with scrypt; nothing here ever stores or logs a PIN).
  */
-import { PIN_MAX_LENGTH, PIN_MIN_LENGTH, SESSION_IDLE_HOURS_MAX, SESSION_IDLE_HOURS_MIN } from '../types/pin.ts';
+import { PIN_MAX_LENGTH, PIN_MIN_LENGTH, SESSION_IDLE_HOURS_MAX, SESSION_IDLE_HOURS_MIN, SESSION_MAX_HOURS_MAX, SESSION_MAX_HOURS_MIN } from '../types/pin.ts';
 
 /** 4–6 digits, nothing else. */
 export function isPinFormatValid(pin: unknown): pin is string {
@@ -76,3 +76,26 @@ export function isSessionIdleHoursValid(hours: unknown): hours is number {
 export function isSessionIdle(lastSeenMs: number, nowMs: number, idleHours: number): boolean {
   return nowMs - lastSeenMs > idleHours * 3_600_000;
 }
+
+// ── Release 1.4 (package S): the absolute session limit ──
+
+/** A whole number of hours inside 4–24 (the hours-from-sign-in limit an admin may choose). */
+export function isSessionMaxHoursValid(hours: unknown): hours is number {
+  return typeof hours === 'number' && Number.isInteger(hours) && hours >= SESSION_MAX_HOURS_MIN && hours <= SESSION_MAX_HOURS_MAX;
+}
+
+/** When a session signed in at `signedInMs` ends (ms since the epoch). */
+export const sessionEndsAtMs = (signedInMs: number, maxHours: number): number => signedInMs + maxHours * 3_600_000;
+
+/**
+ * True once `maxHours` have passed since sign-in, whatever the activity: at exactly the limit the session has ended
+ * (its cookie, whose Max-Age is the same, ends then too). An unreadable sign-in time counts as ended.
+ */
+export function isSessionPastMaxAge(signedInMs: number, nowMs: number, maxHours: number): boolean {
+  if (!Number.isFinite(signedInMs)) return true;
+  return nowMs >= sessionEndsAtMs(signedInMs, maxHours);
+}
+
+/** The sentence the sign-in page shows after the automatic sign-out (and the 401's `error`). */
+export const sessionMaxAgeMessage = (hours: number): string =>
+  `For security you are signed out ${hours} hours after signing in. Sign in again to carry on.`;

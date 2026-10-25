@@ -3,6 +3,7 @@ import { createContext, useCallback, useContext, useEffect, useMemo, useRef, use
 import { useQueryClient } from '@tanstack/react-query';
 import type { AuthResponse, LoginInput, LoginPinChallenge, TwoFactorChallenge, UserWithTeam } from '@lm/shared';
 import { api, ApiError } from '@/api/client';
+import { forgetSession, rememberSession } from '@/api/sessionEnd';
 
 /**
  * What `login()` resolves to. A plain credentials match signs the user in straight away; an account with
@@ -51,6 +52,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const refresh = useCallback(async () => {
     try {
       const res = await api<AuthResponse>('/auth/me');
+      // Release 1.4: when this session ends, so the sign-in page can say why once it has (api/sessionEnd.ts)
+      rememberSession(res.session);
       setUser(res.user);
     } catch (e) {
       if (e instanceof ApiError && e.status === 401) setUser(null);
@@ -86,6 +89,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     (res: AuthResponse) => {
       // Drop anything cached for a previous session before the new user's pages mount.
       qc.clear();
+      rememberSession(res.session);
       setUser(res.user);
     },
     [qc],
@@ -120,6 +124,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     try {
       await api<void>('/auth/logout', { method: 'POST' });
     } finally {
+      forgetSession(); // signed out by hand: nothing to explain at the next sign-in
       setUser(null);
       qc.clear();
     }

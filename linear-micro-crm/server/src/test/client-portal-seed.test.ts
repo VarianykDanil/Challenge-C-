@@ -20,7 +20,7 @@ import { addClientUser, startTestServer, type Json } from './helpers.ts';
 test('accountFlags: a client account needs a PIN until it has one; the demo client and staff only when the admin requires one', () => {
   const off = DEFAULT_SECURITY_SETTINGS;
   const on = { ...DEFAULT_SECURITY_SETTINGS, requirePin: true };
-  const who = (role: 'client' | 'rep' | 'admin', hasPin: boolean, demoClient = false) => ({ role, hasPin, twoFactorEnabled: false, demoClient });
+  const who = (role: 'client' | 'rep' | 'admin', hasPin: boolean, demoClient = false) => ({ role, hasPin, twoFactorEnabled: false, demoClient, demoSignIn: demoClient });
   // [settings, subject, pinSetupRequired] — the whole truth table
   const table: [typeof off, ReturnType<typeof who>, boolean][] = [
     [off, who('client', false), true],
@@ -39,7 +39,14 @@ test('accountFlags: a client account needs a PIN until it has one; the demo clie
     assert.equal(accountFlags(settings, subject).pinSetupRequired, expected, `${JSON.stringify(settings.requirePin)} ${JSON.stringify(subject)}`);
     assert.equal(accountFlags(settings, subject).hasPin, subject.hasPin);
   }
-  assert.equal(accountFlags({ ...off, requireAdminTwoFactor: true }, who('client', false)).twoFactorSetupRequired, false, 'two-step is for administrators only');
+  // Release 1.4 (package S): two-step verification is for every account, client accounts included; the demo sign-in
+  // accounts (the demo client among them) are exempt while still the demo. The old admin-only switch decides nothing.
+  for (const settings of [off, { ...off, requireAdminTwoFactor: true }]) {
+    assert.equal(accountFlags(settings, who('client', true)).twoFactorSetupRequired, true, 'an invited client sets it up');
+    assert.equal(accountFlags(settings, who('rep', false)).twoFactorSetupRequired, true, 'staff too');
+    assert.equal(accountFlags(settings, who('client', false, true)).twoFactorSetupRequired, false, 'the demo client is exempt');
+    assert.equal(accountFlags(settings, { ...who('client', true), twoFactorEnabled: true }).twoFactorSetupRequired, false, 'once it is on');
+  }
 });
 
 // ───────────────────────────── the demo seed ─────────────────────────────

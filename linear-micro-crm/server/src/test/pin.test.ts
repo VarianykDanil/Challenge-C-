@@ -1,7 +1,8 @@
 /**
  * U1 sign-in-pin (release 1.2), end to end on the small fixture: setting, changing and removing a PIN; sign-in with a
  * PIN (missing / wrong / right, the login rate limit, the lock after PIN_LOCK_AFTER_FAILURES wrong PINs in a row and a
- * parallel burst); the "Require a PIN for everyone" gate; "Require two-step verification for administrators"; the
+ * parallel burst); the "Require a PIN for everyone" gate; the old "Require two-step verification for administrators"
+ * switch, which since 1.4 decides nothing (two-step is required for every account: test/r4-security.test.ts); the
  * admin's PIN reset and status; the session idle timeout; and the extension's upgrade of an existing database.
  * Sessions and PINs run on the real clock, so nothing here pins the business clock.
  */
@@ -19,7 +20,7 @@ import { hashPin, verifyPin } from '../lib/pin.ts';
 import { totp } from '../lib/totp.ts';
 import { LAST_SEEN_RESOLUTION_MS, purgeExpiredSessions } from '../middleware/auth.ts';
 import { LOGIN_MAX_FAILURES, resetLoginFailures } from '../routes/auth.ts';
-import { FIXTURE_ACCOUNTS, startTestServer, type Json, type TestClient, type TestServer } from './helpers.ts';
+import { FIXTURE_ACCOUNTS, currentCode, startTestServer, type Json, type LoginOptions, type TestClient, type TestServer } from './helpers.ts';
 
 const GOOD_PIN = '5821';
 const OTHER_PIN = '7390';
@@ -46,8 +47,8 @@ const pinHashOf = (userId: number) => get<{ h: string | null; n: number }>(srv!.
 const sessionsOf = (userId: number) => get<{ n: number }>(srv!.db, `SELECT COUNT(*) AS n FROM sessions WHERE user_id = ?`, [userId])!.n;
 
 /** Sign in, set `pin` as a first PIN and return the client (its session survives the change). */
-async function withPin(account: keyof typeof FIXTURE_ACCOUNTS, pin = GOOD_PIN): Promise<TestClient> {
-  const client = await srv!.login(account);
+async function withPin(account: keyof typeof FIXTURE_ACCOUNTS, pin = GOOD_PIN, opts: LoginOptions = {}): Promise<TestClient> {
+  const client = await srv!.login(account, undefined, opts);
   const r = await client.post('/auth/pin', { pin });
   assert.equal(r.status, 204, JSON.stringify(r.json));
   return client;
@@ -115,10 +116,13 @@ test('set a PIN: rules, stored hashed, other sessions signed out, sign-in then n
   assert.equal(wrong.json.details.reason, 'wrong');
   assert.equal(wrong.json.details.attemptsLeft, PIN_LOCK_AFTER_FAILURES - 1);
   assert.equal(pinHashOf(fx().users.rep).n, 1);
-  const ok = await anon.post('/auth/login', { ...creds, pin: GOOD_PIN });
+  const right = await anon.post('/auth/login', { ...creds, pin: GOOD_PIN });
+  assert.equal(right.status, 200);
+  assert.equal(right.json.requiresTwoFactor, true, 'release 1.4: then the two-step code');
+  assert.equal(pinHashOf(fx().users.rep).n, 0, 'a right PIN wipes the count');
+  const ok = await anon.post('/auth/login/2fa', { challengeToken: right.json.challengeToken, code: currentCode(srv!.db, fx().users.rep) });
   assert.equal(ok.status, 200);
   assert.equal(ok.json.user.hasPin, true);
-  assert.equal(pinHashOf(fx().users.rep).n, 0, 'a right PIN wipes the count');
 
   // A wrong employee ID still answers the plain mismatch (the PIN is never mentioned).
   const mismatch = await srv!.anon().post('/auth/login', { email: creds.email, employeeId: 'FX-9999', pin: GOOD_PIN });
@@ -207,7 +211,7 @@ test('a parallel burst of guesses meets the limits one request at a time', async
 
 test('signing in with a PIN and two-step verification: the PIN first, then the code', async () => {
   await start();
-  const rep = await withPin('rep');
+  const rep = await withPin('rep', GOOD_PIN, { twoFactor: false });
   const secret = await enableTwoFactor(rep);
   const creds = FIXTURE_ACCOUNTS.rep;
   const anon = srv!.anon();
@@ -233,7 +237,7 @@ test('"Require a PIN for everyone": admin only, own PIN first, the gate holds ot
   assert.equal((await srv!.anon().get('/auth/security-settings')).status, 401);
 
   const admin = await srv!.login('admin');
-  assert.deepEqual((await admin.get('/auth/security-settings')).json, { requirePin: false, requireAdminTwoFactor: false, sessionIdleHours: 12 });
+  assert.deepEqual((await admin.get('/auth/security-settings')).json, { requirePin: false, requireAdminTwoFactor: false, sessionIdleHours: 12, sessionMaxHours: 14 });
   const own = await admin.put('/auth/security-settings', { requirePin: true });
   assert.equal(own.status, 409, 'your own PIN first');
   assert.match(own.json.error, /own PIN/);
@@ -243,7 +247,7 @@ test('"Require a PIN for everyone": admin only, own PIN first, the gate holds ot
   assert.equal((await admin.post('/auth/pin', { pin: OTHER_PIN })).status, 204);
   const on = await admin.put('/auth/security-settings', { requirePin: true });
   assert.equal(on.status, 200);
-  assert.deepEqual(on.json, { requirePin: true, requireAdminTwoFactor: false, sessionIdleHours: 12 });
+  assert.deepEqual(on.json, { requirePin: true, requireAdminTwoFactor: false, sessionIdleHours: 12, sessionMaxHours: 14 });
 
   // An open session without a PIN: 403 everywhere except PIN setup, me, logout and health.
   const blocked = await rep.get('/me/dashboard');
@@ -275,10 +279,13 @@ test('"Require a PIN for everyone": admin only, own PIN first, the gate holds ot
   assert.equal((await admin.get('/me/dashboard')).status, 200, 'the admin has a PIN');
 
   assert.equal((await admin.put('/auth/security-settings', { requirePin: false })).json.requirePin, false);
-  assert.equal((await repA2.get('/me/dashboard')).status, 200, 'switched off: no gate');
+  // Release 1.4: the PIN gate is gone, the two-step one stays (Rita signed in without setting it up)
+  const held = await repA2.get('/me/dashboard');
+  assert.equal(held.status, 403, 'switched off: no PIN gate');
+  assert.equal(held.json.twoFactorSetupRequired, true);
 });
 
-test('"Require two-step verification for administrators": own first, other admins signed out and held at setup', async () => {
+test('release 1.4: two-step is required for every admin anyway; the old "administrators" switch decides nothing and signs nobody out', async () => {
   await start();
   const db = srv!.db;
   const plan = get<{ id: number }>(db, `SELECT pay_plan_id AS id FROM users WHERE id = ?`, [fx().users.admin])!.id;
@@ -288,36 +295,32 @@ test('"Require two-step verification for administrators": own first, other admin
      VALUES ('FX-0009', 'ola.admin@fixture.test', 'Ola', 'Admin', 'admin', 'owner', NULL, ?, '2025-01-06', 'active', NULL, '#4F46E5', 'Manchester')`,
     [plan],
   );
-  const second = await srv!.login({ email: 'ola.admin@fixture.test', employeeId: 'FX-0009' });
+  const second = await srv!.login({ email: 'ola.admin@fixture.test', employeeId: 'FX-0009' }, undefined, { twoFactor: false });
   const admin = await srv!.login('admin');
   const rep = await srv!.login('rep');
 
-  assert.equal((await admin.put('/auth/security-settings', { requireAdminTwoFactor: true })).status, 409, 'own two-step first');
-  await enableTwoFactor(admin);
-  const on = await admin.put('/auth/security-settings', { requireAdminTwoFactor: true });
-  assert.equal(on.status, 200);
-  assert.equal(on.json.requireAdminTwoFactor, true);
-  assert.equal((await admin.get('/me/dashboard')).status, 200, 'the admin who switched it on carries on');
-  assert.equal((await second.get('/auth/me')).status, 401, 'other admins without two-step are signed out');
-  assert.equal((await rep.get('/me/dashboard')).status, 200, 'everyone else is unaffected');
-  assert.equal((await rep.get('/auth/me')).json.user.twoFactorSetupRequired, false);
-
-  const again = await srv!.login({ email: 'ola.admin@fixture.test', employeeId: 'FX-0009' });
-  const me = (await again.get('/auth/me')).json.user;
-  assert.equal(me.twoFactorSetupRequired, true);
+  const me = (await second.get('/auth/me')).json.user;
+  assert.equal(me.twoFactorSetupRequired, true, 'held at setup with the switch off');
   assert.equal(me.pinSetupRequired, false);
-  const blocked = await again.get('/me/dashboard');
+  const on = await admin.put('/auth/security-settings', { requireAdminTwoFactor: true });
+  assert.equal(on.status, 200, 'still accepted (and stored)');
+  assert.equal(on.json.requireAdminTwoFactor, true);
+  assert.equal((await second.get('/auth/me')).status, 200, 'nobody is signed out by it');
+  assert.equal((await rep.get('/me/dashboard')).status, 200, 'everyone with two-step carries on');
+  const blocked = await second.get('/me/dashboard');
   assert.equal(blocked.status, 403);
   assert.deepEqual(blocked.json, { error: 'Set up two-step verification to carry on', twoFactorSetupRequired: true });
-  assert.equal((await again.get('/auth/2fa')).status, 200);
-  assert.equal((await again.post('/auth/pin', { pin: OTHER_PIN })).status, 204, 'PIN setup stays open');
-  const secret = await enableTwoFactor(again);
+  assert.equal((await second.get('/auth/2fa')).status, 200);
+  assert.equal((await second.post('/auth/pin', { pin: OTHER_PIN })).status, 204, 'PIN setup stays open');
+  const secret = await enableTwoFactor(second);
   assert.ok(secret);
-  assert.equal((await again.get('/me/dashboard')).status, 200, 'set up: the gate lifts');
+  assert.equal((await second.get('/me/dashboard')).status, 200, 'set up: the gate lifts');
+  assert.equal((await admin.put('/auth/security-settings', { requireAdminTwoFactor: false })).status, 200);
+  assert.equal((await second.get('/me/dashboard')).status, 200);
 
-  const off = await admin.post('/auth/2fa/disable', { code: '000000' });
-  assert.equal(off.status, 409, 'an admin keeps two-step on while the rule holds');
-  assert.match(off.json.error, /required for administrators/);
+  const off = await admin.post('/auth/2fa/disable', { code: currentCode(db, fx().users.admin) });
+  assert.equal(off.status, 409, 'every account keeps two-step on');
+  assert.match(off.json.error, /required for every account/);
 });
 
 test('admin PIN status and reset: admin only, never yourself, 404 for nobody', async () => {

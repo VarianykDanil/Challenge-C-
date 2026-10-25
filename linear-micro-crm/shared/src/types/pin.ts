@@ -33,6 +33,15 @@ export const PIN_LOCK_MAX_MINUTES = 24 * 60;
 export const SESSION_IDLE_HOURS_DEFAULT = 12;
 export const SESSION_IDLE_HOURS_MIN = 1;
 export const SESSION_IDLE_HOURS_MAX = 72;
+/**
+ * Release 1.4 (package S): a session ends this many hours after sign-in, whatever the activity (the owner: "every 14
+ * hours everyone gets signed out and they have to do log in and 2fa"). Default 14; the admin may choose 4–24 whole
+ * hours in Settings → Sign-in rules. Real clock, like the idle timeout. The demo sign-in accounts are exempt while
+ * Linear Hub is still the demo (they keep the 14-day session).
+ */
+export const SESSION_MAX_HOURS_DEFAULT = 14;
+export const SESSION_MAX_HOURS_MIN = 4;
+export const SESSION_MAX_HOURS_MAX = 24;
 
 /** GET /auth/pin — the caller's own PIN state (never the PIN or its hash). Also GET /auth/pin/:userId (admin). */
 export interface PinStatus {
@@ -57,12 +66,42 @@ export interface PinRemoveInput {
   currentPin: string;
 }
 
-/** Admin settings for sign-in (defaults: false, false, 12). */
+/** Admin settings for sign-in (defaults: false, false, 12, 14). */
 export interface SecuritySettings {
   requirePin: boolean;
+  /**
+   * Release 1.4: no longer decides anything — two-step verification is required for every account (the demo sign-in
+   * accounts aside). Still read and returned, so nothing stored is lost; PUT still accepts it.
+   */
   requireAdminTwoFactor: boolean;
   sessionIdleHours: number;
+  /** Release 1.4: hours from sign-in to the automatic sign-out (SESSION_MAX_HOURS_*). Always sent by a 1.4 server. */
+  sessionMaxHours?: number;
 }
+
+/** Release 1.4: why a session ended without anyone signing out — 'max_age': the hours-from-sign-in limit. */
+export type SessionEndReason = 'max_age';
+
+/**
+ * Release 1.4: the `details` of the 401 the request that finds a session past its limit gets (the `error` is
+ * sessionMaxAgeMessage). The session is gone and the cookie cleared, so later requests get a plain 401.
+ */
+export interface SessionEndedDetails {
+  sessionEnded: SessionEndReason;
+  maxHours: number;
+}
+
+/**
+ * Release 1.4: when the signed-in session ends (GET /auth/me and the sign-in responses carry it as `session`), so the
+ * sign-in page can say why even after the browser dropped the cookie. `maxHours` is null for the demo sign-in
+ * accounts, whose sessions last 14 days.
+ */
+export interface SessionInfo {
+  signedInAt: string;
+  endsAt: string;
+  maxHours: number | null;
+}
+
 
 /**
  * POST /auth/login answers 200 with this (and no session cookie) when the email and employee ID are right, the account
@@ -107,7 +146,10 @@ export interface PinSetupRequiredError {
   pinSetupRequired: true;
 }
 
-/** The 403 body of the gate while an administrator still has to set up two-step verification (when required). */
+/**
+ * The 403 body of the gate while the caller still has to set up two-step verification. Release 1.4: every account
+ * except the demo sign-in accounts (while still the demo), client accounts included.
+ */
 export interface TwoFactorSetupRequiredError {
   error: string;
   twoFactorSetupRequired: true;

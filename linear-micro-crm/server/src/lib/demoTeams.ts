@@ -11,6 +11,8 @@
 import type { Role } from '@lm/shared';
 import { all, get, run, type Db } from '../db/connection.ts';
 import { AVATAR_PALETTE, DEMO_TEAM_ACCOUNTS, DEMO_TEAMS, type DemoTeamAccountSeed, type DemoTeamSeed } from '../db/seed-data.ts';
+import { currentDataVersion } from './cache.ts';
+import { demoClientMarkers, matchesDemoClient, type DemoClientMarker } from './client.ts';
 import { formatEmployeeId, maxEmployeeNumber } from './people.ts';
 
 /** meta key: JSON `DemoTeamMarker[]`, the demo team accounts the seed or the start-up step inserted. */
@@ -75,6 +77,64 @@ export function demoStepAllowed(db: Db): 'yes' | 'later' | 'never' {
   if (!isDemoDatabase(db)) return 'later';
   if (!get(db, `SELECT 1 FROM users LIMIT 1`) || !get(db, `SELECT 1 FROM pay_plans LIMIT 1`)) return 'later';
   return demoStaffIntact(db) ? 'yes' : 'never';
+}
+
+// ── Release 1.4 (package S): the demo sign-in accounts are exempt from two-step and the 14-hour sign-out ──
+
+/** Who signs in as the demo, worked out once per data version (every write request moves it). */
+interface DemoSignInState {
+  /** The database part of demoStepAllowed says 'yes' (LM_DEMO_ACCOUNTS is read on every call, never cached). */
+  stillDemo: boolean;
+  teamAccounts: DemoTeamAccountMarker[];
+  clients: DemoClientMarker[];
+}
+
+const signInStateCache = new WeakMap<Db, { version: number; state: DemoSignInState }>();
+
+function demoSignInState(db: Db): DemoSignInState {
+  const version = currentDataVersion();
+  const hit = signInStateCache.get(db);
+  if (hit && hit.version === version) return hit.state;
+  const stillDemo =
+    isDemoDatabase(db) && Boolean(get(db, `SELECT 1 FROM users LIMIT 1`)) && Boolean(get(db, `SELECT 1 FROM pay_plans LIMIT 1`)) && demoStaffIntact(db);
+  const state: DemoSignInState = stillDemo
+    ? { stillDemo, teamAccounts: demoTeamMarkers(db).flatMap((m) => m.accounts), clients: demoClientMarkers(db) }
+    : { stillDemo, teamAccounts: [], clients: [] };
+  signInStateCache.set(db, { version, state });
+  return state;
+}
+
+/** The fields of a users row the rule reads. */
+export interface DemoSignInSubject {
+  id: number;
+  role: Role | string;
+  email: string;
+  employeeId: string;
+}
+
+/**
+ * Release 1.4 (package S, owner's decision): true for an account the sign-in page's demo buttons list, while Linear Hub
+ * is still the demo — the same "still the demo" rule as demoStepAllowed ('yes': LM_DEMO_ACCOUNTS is not 0, the
+ * database is one the demo seed built and its four demo staff are intact) AND the account is one GET
+ * /auth/demo-accounts lists: one of the four by employee ID and role (DEMO_STAFF), a team Sapiens account by its
+ * marker (same id, employee ID and email; staff), or the demo charity account by its marker (lib/client.ts
+ * matchesDemoClient). Those accounts need no two-step verification and keep the 14-day session, so one-click demo
+ * sign-in keeps working on the owner's Mac. Every other account (anyone Matt adds, every invited client) is not
+ * exempt, even on the demo database, and nobody is once the database is in real use.
+ * Cheap: the database reads are cached per data version.
+ */
+export function isDemoSignInAccount(db: Db, user: DemoSignInSubject | null | undefined): boolean {
+  if (!user || process.env.LM_DEMO_ACCOUNTS === '0') return false;
+  const state = demoSignInState(db);
+  if (!state.stillDemo) return false;
+  const employeeId = user.employeeId.toUpperCase();
+  if (DEMO_STAFF.some((d) => d.employeeId === employeeId && d.role === user.role)) return true;
+  if (user.role === 'client') {
+    return state.clients.some((m) => matchesDemoClient(m, { id: user.id, role: 'client', email: user.email, employeeId: user.employeeId }));
+  }
+  return state.teamAccounts.some(
+    (a) => a.id === user.id && a.employeeId.toUpperCase() === employeeId && a.email.toLowerCase() === user.email.toLowerCase(),
+  );
 }
 
 const isAccount = (a: unknown): a is DemoTeamAccountMarker =>

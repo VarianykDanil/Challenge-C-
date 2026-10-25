@@ -11,8 +11,9 @@
  *
  * The client role (r3-foundation): users.role = 'client', users.client_campaign_id, position 'client', employee_id =
  * the access code. The server's client guard (middleware/clientGuard.ts, foundation, STABLE) lets a client session
- * call ONLY /health, /auth/me, /auth/logout, /auth/login, /auth/login/2fa, /auth/demo-accounts, /auth/pin(/*) and
- * /client(/*); everything else answers 403 ClientPortalOnlyError.
+ * call ONLY /health, /auth/me, /auth/logout, /auth/login, /auth/login/2fa, /auth/demo-accounts, /auth/pin(/*),
+ * /auth/2fa(/*) (release 1.4: two-step verification is required for client accounts too) and /client(/*); everything
+ * else answers 403 ClientPortalOnlyError.
  *
  * Endpoints (owned by P6):
  *  routes/client.ts, mounted at /client (the client's own portal; client role only, others 403):
@@ -122,6 +123,8 @@ export interface ClientAccount {
   status: ClientAccountStatus;
   hasPin: boolean;
   createdAt: string | null;
+  /** Release 1.4: two-step verification is on (required for client accounts; the admin can reset it). */
+  twoFactorEnabled?: boolean;
 }
 
 export interface ClientInviteInput {
