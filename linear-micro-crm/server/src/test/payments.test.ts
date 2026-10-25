@@ -643,20 +643,25 @@ describe('payment batches with the fake provider', () => {
     adminSecret = enable2fa(srv.db, fx.users.admin);
     setBank(srv.db, fx.users.rep);
     const a = addRun(srv.db, { userId: fx.users.rep, weekStart: weeks.w3, gross: 10 });
-    // Release 1.4 (P): the bank file is built now, so this uses a not-yet-built API provider, marked connected by hand
-    // (its own test answers 501) to reach the approval
-    const conn = (await admin.post('/payments/connections', { provider: 'wise', secrets: { apiToken: 'wise-token-123456' } })).json.id;
-    run(srv.db, `UPDATE payment_connections SET status = 'connected' WHERE id = ?`, [conn]);
-    const draft = await admin.post('/payments/batches', { connectionId: conn, runIds: [a] });
-    assert.equal(draft.status, 201);
-    assert.equal(draft.json.actions.approve, false);
-    const code = freshCode(srv.db, fx.users.admin, adminSecret);
-    const r = await admin.post(`/payments/batches/${draft.json.id}/approve`, { code });
-    assert.equal(r.status, 501);
-    assert.match(r.json.error, /Paying through Wise Business is not switched on in this version of Linear Hub yet/);
-    assert.equal((await admin.get(`/payments/batches/${draft.json.id}`)).json.status, 'draft');
-    // the code still works (it was not used)
-    assert.equal((await admin.put('/me/bank-details', { holderName: 'Ada Admin', sortCode: '000000', accountNumber: '00000001', code })).status, 200);
+    // Release 1.4: P built the bank file and A built Wise, so Wise's stub stands in for "a way to pay this version
+    // cannot use yet", marked connected by hand (its own test answers 501) to reach the approval
+    registerPaymentProvider(stubProvider('wise'));
+    try {
+      const conn = (await admin.post('/payments/connections', { provider: 'wise', secrets: { apiToken: 'wise-token-123456' } })).json.id;
+      run(srv.db, `UPDATE payment_connections SET status = 'connected' WHERE id = ?`, [conn]);
+      const draft = await admin.post('/payments/batches', { connectionId: conn, runIds: [a] });
+      assert.equal(draft.status, 201);
+      assert.equal(draft.json.actions.approve, false);
+      const code = freshCode(srv.db, fx.users.admin, adminSecret);
+      const r = await admin.post(`/payments/batches/${draft.json.id}/approve`, { code });
+      assert.equal(r.status, 501);
+      assert.match(r.json.error, /Paying through Wise Business is not switched on in this version of Linear Hub yet/);
+      assert.equal((await admin.get(`/payments/batches/${draft.json.id}`)).json.status, 'draft');
+      // the code still works (it was not used)
+      assert.equal((await admin.put('/me/bank-details', { holderName: 'Ada Admin', sortCode: '000000', accountNumber: '00000001', code })).status, 200);
+    } finally {
+      unregisterPaymentProvider('wise');
+    }
   });
 
   test('GET /payments/batches lists newest first with counts; GET one shows items and skipped', async () => {
