@@ -1,3 +1,6 @@
+> **Linear Hub** (the CRM for Linear MCR) lives in [`linear-micro-crm/`](linear-micro-crm/README.md). Its commands
+> (`npm install`, `npm run build`, `npm start`, `npm run latest` …) work from this folder too.
+
 Strava Journey Analyzer
 ====
 This project fetches GPS data from Strava and analyzes the journey details using both Python and C++. It calculates journey statistics such as total distance traveled using the Haversine formula.

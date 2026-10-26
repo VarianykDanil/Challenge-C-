@@ -9,6 +9,12 @@ response field is renamed or removed, and new fields are optional.
 
 What comes next is in [docs/ROADMAP.md](docs/ROADMAP.md).
 
+### Fixed
+
+- `npm run build`, `npm start`, `npm run latest` and the other commands now also work from the top folder of the
+  repository, the folder above `linear-micro-crm`. Run there, they failed with "Could not read package.json"; now each
+  one changes into `linear-micro-crm` and runs the same command, and `npm install` there installs Linear Hub.
+
 ## [1.4.0] - 2026-10-25
 
 Two-step verification for everyone, a sign-out 14 hours after sign-in, and paying people from Linear Hub in four ways.

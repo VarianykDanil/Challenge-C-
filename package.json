@@ -1,0 +1,28 @@
+{
+  "name": "linear-hub-top-folder",
+  "private": true,
+  "description": "Linear Hub lives in linear-micro-crm/. These scripts let its commands run from this top folder too: each one changes into linear-micro-crm and runs the same command there.",
+  "scripts": {
+    "postinstall": "cd linear-micro-crm && npm ci",
+    "dev": "cd linear-micro-crm && npm run dev --",
+    "setup": "cd linear-micro-crm && npm run setup --",
+    "build": "cd linear-micro-crm && npm run build --",
+    "start": "cd linear-micro-crm && npm start --",
+    "latest": "cd linear-micro-crm && npm run latest --",
+    "stop": "cd linear-micro-crm && npm run stop --",
+    "restart": "cd linear-micro-crm && npm run restart --",
+    "share": "cd linear-micro-crm && npm run share --",
+    "doctor": "cd linear-micro-crm && npm run doctor --",
+    "seed": "cd linear-micro-crm && npm run seed --",
+    "backup": "cd linear-micro-crm && npm run backup --",
+    "backups": "cd linear-micro-crm && npm run backups --",
+    "restore": "cd linear-micro-crm && npm run restore --",
+    "pin:reset": "cd linear-micro-crm && npm run pin:reset --",
+    "2fa:reset": "cd linear-micro-crm && npm run 2fa:reset --",
+    "service:install": "cd linear-micro-crm && npm run service:install --",
+    "service:uninstall": "cd linear-micro-crm && npm run service:uninstall --",
+    "service:status": "cd linear-micro-crm && npm run service:status --",
+    "typecheck": "cd linear-micro-crm && npm run typecheck --",
+    "test": "cd linear-micro-crm && npm test --"
+  }
+}

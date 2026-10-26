@@ -94,6 +94,10 @@ and the coaching worked out in the browser stay on. Plain-words guide:
 
 Requires **Node.js ≥ 22.18** (`.nvmrc` says `22`; 24 and 26 work too). The server runs TypeScript directly with Node's type stripping and uses the built-in `node:sqlite`, so there is nothing else to install.
 
+Run the commands in this `linear-micro-crm` folder. They also work from the folder above it (the top of the
+repository): there, each one changes into `linear-micro-crm` and runs the same command, and `npm install` installs
+Linear Hub.
+
 ```bash
 npm install
 npm run dev
@@ -262,6 +266,7 @@ parses, `KeepAlive` and `RunAtLoad` are true, and the environment and log path a
 
 | Symptom | What to do |
 |---|---|
+| `npm run build` (or any other command) says "Could not read package.json" with `ENOENT` | It was run in a folder with no Linear Hub commands. Update (`git pull`) so the top folder passes commands down, or run `cd linear-micro-crm` first |
 | `npm start` says port 4000 is already in use, or an older build printed "listening" and the shell prompt came straight back | An earlier copy of this server is still running (another terminal tab or window; older builds printed "listening" anyway because Express 5 hands a failed bind to the listen callback instead of throwing). Run `npm run stop`, then `npm start`. The server now refuses to start behind another process, names it and exits with code 1, and reports any other reason it stops (a signal, a crash, a drained event loop). `npm run doctor` checks everything else; paste its report when asking for help |
 | The browser shows a blank page that never finishes loading on <http://localhost:4000> | Something else is answering on that port. If it is an old Linear Hub, `npm run stop` ends it; otherwise find it with `lsof -nP -iTCP:4000 -sTCP:LISTEN` and `kill <PID>`, or use `PORT=4001 npm start` |
 | An old copy keeps appearing on port 4000 | Stop the server with **Ctrl+C** in the terminal where it runs, not Ctrl+Z (which only pauses it and keeps the port) and not by closing the window. The current build stops within two seconds of Ctrl+C and treats Ctrl+Z as a stop request; an older copy that is still around is ended by `npm run stop` |
