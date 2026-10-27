@@ -33,6 +33,12 @@ const fx = () => srv.fixture!;
 const W = addDays(mondayOf(todayISO()), -7);
 const W0 = addDays(W, -7);
 const dmy = (iso: string) => `${iso.slice(8, 10)}/${iso.slice(5, 7)}/${iso.slice(0, 4)}`;
+/**
+ * The emails' own Date headers: 13 days ago, `minute` minutes apart, so they always sit inside the 60 days the
+ * Needs-attention list looks back over, whatever the real date.
+ */
+const MAIL_DAY_MS = Date.now() - 13 * 86_400_000;
+const mailDate = (minute: number) => new Date(MAIL_DAY_MS + minute * 60_000).toUTCString();
 
 before(async () => {
   dir = mkdtempSync(path.join(os.tmpdir(), 'lm-statements-'));
@@ -500,9 +506,9 @@ test('check now: each PDF attachment from a listed sender is stored once; the ne
   const unknownName = fxcSpec({ subtitle: 'Commission statement (email 2)', lines: [`Period: ${dmy(addDays(W, 42))} to ${dmy(addDays(W, 48))}`], rows: [['Someone New', '1', '0', '1', '£120.00']], totals: null });
   const calls: FetchRequest[] = [];
   const messages = [
-    { uid: 11, source: eml({ from: 'statements@fixture-charity.example', messageId: '<m11@fixture-charity.example>', subject: 'Your commission statement', date: 'Wed, 14 Oct 2026 08:47:00 +0100', pdfs: [{ name: 'auto.pdf', data: await renderStatementPdf(weekLater) }, { name: 'review.pdf', data: await renderStatementPdf(unknownName) }] }) },
-    { uid: 12, source: eml({ from: 'someone@else.example', messageId: '<m12@else.example>', subject: 'Not a sender', date: 'Wed, 14 Oct 2026 09:00:00 +0100', pdfs: [{ name: 'x.pdf', data: await renderStatementPdf(fxcSpec({ subtitle: 'stray' })) }] }) },
-    { uid: 13, source: eml({ from: 'statements@fixture-charity.example', messageId: '<m13@fixture-charity.example>', subject: 'No attachment', date: 'Wed, 14 Oct 2026 10:00:00 +0100', pdfs: [] }) },
+    { uid: 11, source: eml({ from: 'statements@fixture-charity.example', messageId: '<m11@fixture-charity.example>', subject: 'Your commission statement', date: mailDate(0), pdfs: [{ name: 'auto.pdf', data: await renderStatementPdf(weekLater) }, { name: 'review.pdf', data: await renderStatementPdf(unknownName) }] }) },
+    { uid: 12, source: eml({ from: 'someone@else.example', messageId: '<m12@else.example>', subject: 'Not a sender', date: mailDate(13), pdfs: [{ name: 'x.pdf', data: await renderStatementPdf(fxcSpec({ subtitle: 'stray' })) }] }) },
+    { uid: 13, source: eml({ from: 'statements@fixture-charity.example', messageId: '<m13@fixture-charity.example>', subject: 'No attachment', date: mailDate(73), pdfs: [] }) },
   ];
   setMailSource(fakeGmail(messages, calls));
   const r = await admin.post('/statements/check-now');
@@ -521,7 +527,7 @@ test('check now: each PDF attachment from a listed sender is stored once; the ne
     ['statements@fixture-charity.example', '<m11@fixture-charity.example>#1', 'applied'],
     ['statements@fixture-charity.example', '<m11@fixture-charity.example>#2', 'needs_review'],
   ]);
-  assert.equal(stored[0]!.receivedAt, '2026-10-14T07:47:00.000Z', 'the email’s own date');
+  assert.equal(stored[0]!.receivedAt, new Date(mailDate(0)).toISOString(), 'the email’s own date');
   const sys = auditRows(srv.db, 'SYSTEM statements.%');
   assert.ok(sys.some((a) => a.action === 'SYSTEM statements.apply' && a.userId === null && /^Applied a statement automatically: FXC /.test(a.summary)));
   assert.ok(sys.some((a) => a.action === 'SYSTEM statements.fetch' && /^Fetched 2 statements from Gmail: FXC .*; 1 applied automatically$/.test(a.summary)));
@@ -727,11 +733,11 @@ test('check now: an email Gmail could not confirm, one without a From, and a re-
   const period = (n: number) => [`Period: ${dmy(addDays(W, 7 * n))} to ${dmy(addDays(W, 7 * n + 6))}`];
   const pdf = (n: number, sub: string) => renderStatementPdf(fxcSpec({ subtitle: sub, lines: period(n), rows: [['Remy Rep', '0', '0', '0', '£0.00']], totals: null }));
   const messages = [
-    { uid: 31, source: eml({ from: 'statements@fixture-charity.example', messageId: '<m31@fixture-charity.example>', subject: 'Statement', date: 'Wed, 14 Oct 2026 08:47:00 +0100', pdfs: [{ name: 'a.pdf', data: await pdf(-9, 'unconfirmed') }], auth: null }) },
-    { uid: 32, source: eml({ from: 'statements@fixture-charity.example', messageId: '<m32@fixture-charity.example>', subject: 'Statement', date: 'Wed, 14 Oct 2026 08:48:00 +0100', pdfs: [{ name: 'b.pdf', data: await pdf(-10, 'forged') }], auth: 'mx.google.com; dkim=fail header.i=@fixture-charity.example; dmarc=fail (p=NONE) header.from=fixture-charity.example' }) },
-    { uid: 33, source: eml({ from: null, messageId: '<m33@fixture-charity.example>', subject: 'No sender', date: 'Wed, 14 Oct 2026 08:49:00 +0100', pdfs: [{ name: 'c.pdf', data: await pdf(-11, 'no from') }] }) },
-    { uid: 34, source: eml({ from: 'statements@fixture-charity.example', messageId: '<m34@fixture-charity.example>', subject: 'Statement', date: 'Wed, 14 Oct 2026 08:50:00 +0100', pdfs: [{ name: 'd.pdf', data: await pdf(-12, 'confirmed') }] }) },
-    { uid: 35, source: eml({ from: 'statements@fixture-charity.example', messageId: '<m35@fixture-charity.example>', subject: 'Statement again', date: 'Wed, 14 Oct 2026 08:51:00 +0100', pdfs: [{ name: 'e.pdf', data: await pdf(-12, 'confirmed, sent again') }] }) },
+    { uid: 31, source: eml({ from: 'statements@fixture-charity.example', messageId: '<m31@fixture-charity.example>', subject: 'Statement', date: mailDate(0), pdfs: [{ name: 'a.pdf', data: await pdf(-9, 'unconfirmed') }], auth: null }) },
+    { uid: 32, source: eml({ from: 'statements@fixture-charity.example', messageId: '<m32@fixture-charity.example>', subject: 'Statement', date: mailDate(1), pdfs: [{ name: 'b.pdf', data: await pdf(-10, 'forged') }], auth: 'mx.google.com; dkim=fail header.i=@fixture-charity.example; dmarc=fail (p=NONE) header.from=fixture-charity.example' }) },
+    { uid: 33, source: eml({ from: null, messageId: '<m33@fixture-charity.example>', subject: 'No sender', date: mailDate(2), pdfs: [{ name: 'c.pdf', data: await pdf(-11, 'no from') }] }) },
+    { uid: 34, source: eml({ from: 'statements@fixture-charity.example', messageId: '<m34@fixture-charity.example>', subject: 'Statement', date: mailDate(3), pdfs: [{ name: 'd.pdf', data: await pdf(-12, 'confirmed') }] }) },
+    { uid: 35, source: eml({ from: 'statements@fixture-charity.example', messageId: '<m35@fixture-charity.example>', subject: 'Statement again', date: mailDate(4), pdfs: [{ name: 'e.pdf', data: await pdf(-12, 'confirmed, sent again') }] }) },
   ];
   setMailSource(fakeGmail(messages));
   run(srv.db, `UPDATE meta SET value = json_set(value, '$.lastUid', NULL) WHERE key = ?`, [MAIL_META_KEY]);
@@ -758,7 +764,7 @@ test('check now: an email that fails to process is tried again on the next check
   const { campaignId } = fx();
   const spec = fxcSpec({ subtitle: 'Retry me', lines: [`Period: ${dmy(addDays(W, -91))} to ${dmy(addDays(W, -85))}`], rows: [['Remy Rep', '0', '0', '0', '£0.00']], totals: null });
   const calls: FetchRequest[] = [];
-  setMailSource(fakeGmail([{ uid: 41, source: eml({ from: 'statements@fixture-charity.example', messageId: '<m41@fixture-charity.example>', subject: 'Retry', date: 'Wed, 14 Oct 2026 09:00:00 +0100', pdfs: [{ name: 'r.pdf', data: await renderStatementPdf(spec) }] }) }], calls));
+  setMailSource(fakeGmail([{ uid: 41, source: eml({ from: 'statements@fixture-charity.example', messageId: '<m41@fixture-charity.example>', subject: 'Retry', date: mailDate(13), pdfs: [{ name: 'r.pdf', data: await renderStatementPdf(spec) }] }) }], calls));
   run(srv.db, `UPDATE meta SET value = json_set(value, '$.lastUid', 40, '$.mailbox', '[Gmail]/All Mail', '$.uidValidity', '7') WHERE key = ?`, [MAIL_META_KEY]);
   // the statements folder cannot be written (a file where the folder should be): storing the PDF throws
   const blocked = path.join(dir, 'not-a-folder');

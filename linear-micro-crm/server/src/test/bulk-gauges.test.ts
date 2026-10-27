@@ -12,7 +12,10 @@ import { all, get, run } from '../db/connection.ts';
 import { PAID_WEEK_MESSAGE } from '../db/maintenance.ts';
 import { currentDataVersion } from '../lib/cache.ts';
 import { addDays, mondayOf } from '../lib/dates.ts';
-import { addEvent, startTestServer, type Json, type TestClient, type TestServer } from './helpers.ts';
+import { addEvent, pinBusinessClock, startTestServer, type Json, type TestClient, type TestServer } from './helpers.ts';
+
+// A check-in at 00:01 today is in the future for the first minute after midnight: check one fixed afternoon.
+pinBusinessClock();
 
 let srv: TestServer;
 let admin: TestClient;

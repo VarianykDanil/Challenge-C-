@@ -13,7 +13,10 @@ import { createSchema } from '../db/schema.ts';
 import { seed } from '../db/seed.ts';
 import { DEFAULT_INTERVIEW_QUESTIONS } from '../lib/recruitmentPlus/defaults.ts';
 import { addDays, nowISO, todayISO } from '../lib/dates.ts';
-import { startTestServer, type Json, type TestServer } from './helpers.ts';
+import { pinBusinessClock, startTestServer, type Json, type TestServer } from './helpers.ts';
+
+// The seed's pipeline, change log and dates of birth come out differently from day to day: check one fixed day.
+pinBusinessClock();
 
 function seeded(): Db {
   const db = openDb(':memory:');

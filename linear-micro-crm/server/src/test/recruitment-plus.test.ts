@@ -13,7 +13,10 @@ import { all, get } from '../db/connection.ts';
 import { extension as recruitment, upgradeDefaultQuestions } from '../db/extensions/recruitment.ts';
 import { DEFAULT_INTERVIEW_QUESTIONS } from '../lib/recruitmentPlus/defaults.ts';
 import { addDays, todayISO } from '../lib/dates.ts';
-import { startTestServer, type Json, type TestClient, type TestServer } from './helpers.ts';
+import { pinBusinessClock, startTestServer, type Json, type TestClient, type TestServer } from './helpers.ts';
+
+// The interviews below are booked for dates written out in full (10–12 Nov 2026), which must stay in the future.
+pinBusinessClock();
 
 let srv: TestServer;
 let admin: TestClient;

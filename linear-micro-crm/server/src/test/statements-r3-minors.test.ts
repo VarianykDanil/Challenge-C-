@@ -129,7 +129,8 @@ test("a listed person's days with no row on the statement count as cancelled: a 
   const d = await upload(spec(C1, addDays(C3, 6), ['Fundraiser name', 'Period', 'Paid subs'], [['Rita Rep', `${dmy(C3)} to ${dmy(addDays(C3, 6))}`, '2']], 'Weeks C, one row'));
   assert.deepEqual(d.blockers, []);
   const w = d.warnings!.find((x) => x.includes('no row'));
-  assert.match(w ?? '', /^Rita Rep logged 3 FXC sales on days this statement has no row for (her|them) \(w\/c \d{1,2} \w{3}\): they count as cancelled\. Check with the PDF before you press Apply\.$/, JSON.stringify(d.warnings));
+  // the week shows its year when it falls in another year than today (in January, C1 is last December)
+  assert.match(w ?? '', /^Rita Rep logged 3 FXC sales on days this statement has no row for (her|them) \(w\/c \d{1,2} \w{3}( \d{4})?\): they count as cancelled\. Check with the PDF before you press Apply\.$/, JSON.stringify(d.warnings));
   assert.equal(d.status, 'needs_review', 'never applies itself: the columns are saved and every row is matched, but a week is silent');
   assert.equal((await admin.del(`/statements/${d.id}`)).status, 204);
   // with a row for every week it is ready
