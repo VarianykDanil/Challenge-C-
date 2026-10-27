@@ -10,6 +10,7 @@
  */
 
 // Release 1.3 (r3-foundation): optional fields on core types reference the package contract files (type-only imports).
+import type { TrialStatus } from './types/access.ts';
 import type { AnnouncementSource } from './types/client.ts';
 import type { InvoiceSummary } from './types/invoices.ts';
 import type { PayrollRunPayment } from './types/payments.ts';
@@ -606,12 +607,16 @@ export interface LoginInput {
   employeeId: string;
   /** Release 1.2 (U1): the 4–6 digit PIN, required once the person has set one (see types/pin.ts). */
   pin?: string;
+  /** The one-time setup code an administrator gave, for an account still setting up (types/access.ts). */
+  setupCode?: string;
 }
 
 export interface AuthResponse {
   user: UserWithTeam;
   /** Release 1.4 (package S): when this session ends (GET /auth/me and the sign-in answers). */
   session?: SessionInfo;
+  /** GET /auth/me for an administrator while the database is in trial mode (types/access.ts). */
+  trial?: TrialStatus;
 }
 
 /** Returned by POST /auth/login instead of AuthResponse when the account has two-step verification on. */

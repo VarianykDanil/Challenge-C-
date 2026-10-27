@@ -48,6 +48,7 @@
  *
  * Release 1.3.1:
  *  - people            names without a surname, who may add people, sign-in instructions
+ *  - access            setup codes, trial mode and secure-connection wording
  */
 export * from './gauges.ts';
 export * from './finance.ts';
@@ -88,6 +89,7 @@ export * from './recruitmentPlus.ts';
 export * from './venues.ts';
 // Release 1.3.1
 export * from './people.ts';
+export * from './access.ts';
 // Release 1.4
 export * from './payments.ts';
 export * from './bankFiles.ts';

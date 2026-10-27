@@ -149,6 +149,16 @@ export interface ClientInviteResult {
   accessCode: string;
   /** Plain sign-in instructions to copy into an email. */
   instructions: string;
+  /** The one-time setup code for the first sign-in, shown once (null: not shown over an insecure connection). */
+  setupCode?: string | null;
+  setupCodeExpiresAt?: string;
+  setupCodeWithheld?: boolean;
+}
+
+/** POST /client-accounts/:id/reset-pin and /reset-2fa: the account, and the setup code its next sign-in needs (shown once). */
+export interface ClientAccountReset extends ClientAccount {
+  setupCode: string | null;
+  setupCodeExpiresAt: string;
 }
 
 /** Announcement.fromClient — the badge "From Breast Cancer Now". */

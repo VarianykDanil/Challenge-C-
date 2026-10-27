@@ -19,5 +19,6 @@ export * from './types/venues.ts';
 export * from './types/people.ts';
 // Release 1.4: paying people from Linear Hub (package F; P and A add to it).
 export * from './types/payments.ts';
+export * from './types/access.ts';
 export * from './constants.ts';
 export * from './logic/index.ts';

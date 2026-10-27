@@ -156,6 +156,8 @@ export interface ClientAuditEventInput {
 export const AUDIT_SIGN_IN_REASONS = [
   'wrong_employee_id', 'deactivated', 'unknown_email', 'wrong_pin', 'pin_locked_now', 'pin_locked', 'too_many_attempts',
   'wrong_code', 'too_many_codes', 'challenge_expired', 'wrong_current_pin',
+  // a wrong, used or expired one-time setup code
+  'wrong_setup_code',
 ] as const;
 export type AuditSignInReason = (typeof AUDIT_SIGN_IN_REASONS)[number];
 
