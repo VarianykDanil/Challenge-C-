@@ -20,6 +20,7 @@ import { Logo } from '@/components/brand/Logo';
 import { COPY, GAUGE_HELP } from '@/content/copy';
 import { TEAM_MEMBERS } from '@/content/team';
 import { ABOUT } from '@/content/about';
+import { OWNERSHIP_NOTICE } from '@/content/ownership';
 
 const GAUGE_ICONS: Record<GaugeKey, LucideIcon> = {
   stops: Footprints,
@@ -209,7 +210,7 @@ export function AboutPage() {
           <span>{BRAND.address}</span>
         </p>
         <p>
-          {COPY.product} v{ABOUT.version} · © {BRAND.legalName} — internal use
+          {COPY.product} v{ABOUT.version} · {OWNERSHIP_NOTICE}
         </p>
       </footer>
     </div>
