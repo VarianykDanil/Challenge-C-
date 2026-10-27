@@ -4,7 +4,7 @@ import {
   GAUGE_KEYS,
   GAUGE_LABELS,
   GAUGE_SHORT_LABELS,
-  RATIO_SHORT_LABELS,
+  RATIO_LABELS,
   benchmarkSeverity,
   compareToBenchmark,
   funnelRatios,
@@ -236,18 +236,19 @@ export function FunnelChart({
         {GAUGE_KEYS.map((k, i) => (
           <div
             key={`${k}-label`}
-            className={clsx('truncate text-center text-muted', compact ? 'text-[10px]' : 'text-[11px]')}
+            className="truncate text-center text-[11px] text-muted"
             style={{ gridColumn: `${2 * i + 1} / span 2`, gridRow: 2 }}
           >
             {labels[k]}
           </div>
         ))}
         {chipMode === 'legend' ? (
-          <div className="flex flex-wrap items-center justify-center gap-x-2 gap-y-1" style={{ gridColumn: '1 / -1', gridRow: 3 }}>
-            {showBenchmarks && <span className={clsx('text-muted', compact ? 'text-[10px]' : 'text-[11px]')}>vs benchmark:</span>}
+          // narrow (a phone): each step in words with its rate, not the "S→T" shorthand the chips used to carry here
+          <div className="mt-1 grid grid-cols-1 gap-x-3 gap-y-1 min-[300px]:grid-cols-2" style={{ gridColumn: '1 / -1', gridRow: 3 }}>
+            {showBenchmarks && <span className="col-span-full text-xs text-muted">Each step against the law of averages:</span>}
             {ratioKeys.map((step) => (
-              <span key={step.key} className="inline-flex items-center gap-1">
-                <span className={clsx('text-muted', compact ? 'text-[10px]' : 'text-[11px]')}>{RATIO_SHORT_LABELS[step.key]}</span>
+              <span key={step.key} className="inline-flex min-w-0 items-center justify-between gap-2">
+                <span className="truncate text-xs text-muted">{RATIO_LABELS[step.key]}</span>
                 <RatioChip step={step} comparison={byKey.get(step.key)!} fromCount={totals[step.from]} showBenchmarks={showBenchmarks} compact={compact} dense />
               </span>
             ))}

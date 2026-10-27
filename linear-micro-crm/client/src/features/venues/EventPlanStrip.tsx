@@ -38,6 +38,17 @@ export function EventPlanStrip({ event, variant, className }: EventPlanStripProp
       </p>
     );
   }
+  if (variant === 'upcoming') {
+    // the dashboard, read by reps between stops: a sentence rather than the "120 stops → 42 → …" shorthand
+    return (
+      <span className={clsx('flex min-w-0 items-start gap-1 text-xs leading-snug text-muted', className)} data-plan-strip={variant}>
+        <Target className="mt-[0.2em] h-3 w-3 shrink-0 text-primary" aria-hidden />
+        <span className="min-w-0">
+          <span className="font-medium text-fg">Your aim: {salesText(aim.targetSales)}.</span> That usually takes {plainSteps(aim.steps)}.
+        </span>
+      </span>
+    );
+  }
   return (
     <span className={clsx('flex min-w-0 items-start gap-1 text-xs leading-snug text-muted', className)} data-plan-strip={variant}>
       <Target className="mt-[0.2em] h-3 w-3 shrink-0 text-primary" aria-hidden />
@@ -46,4 +57,13 @@ export function EventPlanStrip({ event, variant, className }: EventPlanStripProp
       </span>
     </span>
   );
+}
+
+/** "about 120 stops, 42 at the table, 21 presentations, 9 closes and 6 taps" (the steps before the sales). */
+function plainSteps(steps: ReadonlyArray<{ key: string; need: number }>): string {
+  const words = steps
+    .filter((st) => st.key !== 'sales')
+    .map((st) => (st.key === 'table' ? `${formatNumber(st.need)} at the table` : planStepText(st as Parameters<typeof planStepText>[0])));
+  if (!words.length) return 'a good day';
+  return `about ${words.length > 1 ? `${words.slice(0, -1).join(', ')} and ${words[words.length - 1]}` : words[0]}`;
 }

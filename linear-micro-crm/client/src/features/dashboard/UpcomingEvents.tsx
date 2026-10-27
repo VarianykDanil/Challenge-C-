@@ -72,7 +72,7 @@ export function UpcomingEvents({ events }: { events: SalesEventWithMeta[] }) {
                       <span className="font-semibold text-fg">{formatDateShort(e.date)}</span> · {formatTime(e.startTime)} · {formatRelative(e.date)}
                     </span>
                     <span className="mt-0.5 flex items-start gap-1 text-xs text-muted"><MapPin className="mt-0.5 h-3 w-3 shrink-0" aria-hidden /><span className="min-w-0 truncate">{e.venue}, {e.city} · {e.teamName}</span></span>
-                    {forecast && <EventForecastChip forecast={forecast} targetSales={e.targetSales} campaignCode={e.campaignCode} type={e.type} teamName={e.teamName} booked={booked?.booked} side="bottom" className="mt-1" />}
+                    {forecast && <EventForecastChip forecast={forecast} targetSales={e.targetSales} campaignCode={e.campaignCode} type={e.type} teamName={e.teamName} booked={booked?.booked} side="bottom" plain className="mt-1" />}
                     <ErrorBoundary name="event-plan" fallback={null}><EventPlanStrip event={booked ? { ...e, bookings: booked } : e} variant="upcoming" className="mt-1" /></ErrorBoundary>
                   </span>
                 </span>

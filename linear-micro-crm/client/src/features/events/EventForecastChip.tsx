@@ -115,12 +115,24 @@ export interface EventForecastChipProps {
   side?: 'top' | 'bottom';
   /** Release 1.3 (P8): people booked on the event (the forecast is then for them). */
   booked?: number;
+  /** Words instead of symbols ("Expected: about 14 sales (8 to 20)"), for the rep's dashboard. */
+  plain?: boolean;
   className?: string;
 }
 
-export function EventForecastChip({ forecast: f, targetSales, campaignCode, type, teamName, variant = 'chip', side = 'top', booked = 0, className }: EventForecastChipProps) {
+/** ["Expected: about 14 sales (8 to 20)", "· 4 booked"]: the headline in words, without ≈ or a dash range. */
+export function plainHeadlineParts(f: Pick<EventForecast, 'expectedSales' | 'expectedReps' | 'low' | 'high'>, booked = 0): [string, string] {
+  const expected = Math.round(f.expectedSales);
+  const reps = Math.max(1, Math.round(f.expectedReps));
+  return [
+    `Expected: about ${pluralise(expected, 'sale')} (${formatNumber(Math.round(f.low))} to ${formatNumber(Math.round(f.high))})`,
+    booked > 0 ? `· ${bookedText(f, booked)}` : `· usually ${pluralise(reps, 'person', 'people')}`,
+  ];
+}
+
+export function EventForecastChip({ forecast: f, targetSales, campaignCode, type, teamName, variant = 'chip', side = 'top', booked = 0, plain = false, className }: EventForecastChipProps) {
   const sentence = forecastSentence(f, targetSales, campaignCode, type, teamName);
-  const [estimate, reps] = forecastHeadlineParts(f, booked);
+  const [estimate, reps] = plain ? plainHeadlineParts(f, booked) : forecastHeadlineParts(f, booked);
   // A block that takes its cell's width and wraps inside it: in a narrow grid cell (Events rows from 768 to ~1600 px)
   // the reps half drops to a second line instead of running over the next cell (each half is an inline-block, so the
   // line breaks between them first). Never truncated: the range stays on show.

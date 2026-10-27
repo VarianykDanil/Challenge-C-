@@ -26,7 +26,8 @@ import { useBefore, useShiftCheckIn, useTicker } from './useShiftCheckIn';
 
 export interface CheckInButtonProps {
   event: SalesEventWithMeta;
-  variant?: 'compact' | 'row';
+  /** 'hero': the dashboard's Today card, the main button there (filled, 44 px on a phone); otherwise as 'row'. */
+  variant?: 'compact' | 'row' | 'hero';
   className?: string;
 }
 
@@ -155,9 +156,10 @@ export function CheckInButton({ event, variant = 'row', className }: CheckInButt
   // ── Dashboard row / roll call ────────────────────────────────────────────────────────────────────────────────
   if (!current) {
     const started = nowHHMM >= event.startTime.slice(0, 5);
+    const hero = variant === 'hero';
     return (
-      <div className={clsx('flex flex-wrap items-center gap-x-3 gap-y-1', className)} data-checkin-button="row">
-        <Button variant="soft" onClick={() => void tap()} loading={checkIn.isPending} leftIcon={<MapPinCheck className="h-4 w-4" aria-hidden />} className="h-10 sm:h-8 sm:px-3">
+      <div className={clsx('flex flex-wrap items-center gap-x-3 gap-y-1', className)} data-checkin-button={hero ? 'hero' : 'row'}>
+        <Button variant={hero ? 'primary' : 'soft'} onClick={() => void tap()} loading={checkIn.isPending} leftIcon={<MapPinCheck className="h-4 w-4" aria-hidden />} className={hero ? 'max-sm:h-11 max-sm:px-5' : 'h-10 sm:h-8 sm:px-3'}>
           Check in
         </Button>
         <span className="text-xs text-muted">
