@@ -1,7 +1,7 @@
 // Loading, error and empty-state helpers shared by every list and card.
-import { AlertTriangle, RefreshCw } from 'lucide-react';
+import { AlertTriangle, RefreshCw, WifiOff } from 'lucide-react';
 import { Button, Card, Skeleton } from '@/components/ui';
-import { ApiError } from '@/api/client';
+import { ApiError, isNetworkError } from '@/api/client';
 
 /** Every validation detail as a "field: message" line (zod `{ path, message }` objects or plain strings). */
 export function errorDetails(err: unknown): string[] {
@@ -39,6 +39,21 @@ export function apiMessage(err: unknown, fallback: string): string {
 }
 
 export function ErrorState({ error, onRetry, title = 'Could not load this section', className }: { error: unknown; onRetry?: () => void; title?: string; className?: string }) {
+  // No signal is not a fault: say so calmly, and that it loads by itself when the connection is back.
+  if (isNetworkError(error)) {
+    return (
+      <div role="status" className={`flex flex-col items-center justify-center gap-2 rounded-xl border border-border bg-surface-2/60 p-8 text-center ${className ?? ''}`}>
+        <WifiOff className="h-6 w-6 text-muted" aria-hidden />
+        <div className="text-sm font-semibold text-fg">You’re offline</div>
+        <p className="max-w-md text-sm text-muted">This needs a connection and loads when you’re back. Gauges and check-ins you save meanwhile wait on this phone.</p>
+        {onRetry && (
+          <Button variant="outline" size="sm" onClick={onRetry} leftIcon={<RefreshCw className="h-4 w-4" aria-hidden />}>
+            Try again
+          </Button>
+        )}
+      </div>
+    );
+  }
   return (
     <div role="alert" className={`flex flex-col items-center justify-center gap-2 rounded-xl border border-danger/40 bg-danger/5 p-8 text-center ${className ?? ''}`}>
       <AlertTriangle className="h-6 w-6 text-danger" aria-hidden />

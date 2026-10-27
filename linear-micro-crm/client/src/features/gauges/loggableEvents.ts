@@ -4,7 +4,9 @@
 // three weeks up to today, own team for reps and leaders, every team for admins. When that query has no data (no
 // signal: TanStack Query pauses it, or it failed), the lists already in the cache stand in — the dashboard's upcoming
 // events, any event list or event page seen this session — so a rep who loses signal can still log today's event.
-import { useMemo } from 'react';
+// When the app was opened with no signal the cache is empty: the events kept in the field kit (src/offline/) stand in,
+// and every time the list loads online it is kept there for next time.
+import { useEffect, useMemo } from 'react';
 import { useQueryClient, type QueryClient } from '@tanstack/react-query';
 import { subDays } from 'date-fns';
 import type { Dashboard, SalesEventWithMeta, UserWithTeam } from '@lm/shared';
@@ -12,6 +14,7 @@ import { isNetworkError } from '@/api/client';
 import { useEvents } from '@/api/hooks';
 import { useCurrentUser } from '@/auth/AuthProvider';
 import { todayISO, toISODate } from '@/lib/dates';
+import { kitEvents, rememberKitEvents } from '@/offline/fieldKit';
 
 const isEvent = (v: unknown): v is SalesEventWithMeta =>
   !!v && typeof v === 'object' && typeof (v as SalesEventWithMeta).id === 'number' && typeof (v as SalesEventWithMeta).date === 'string' && typeof (v as SalesEventWithMeta).teamId === 'number';
@@ -64,11 +67,17 @@ export function useLoggableEvents(opts: { enabled?: boolean } = {}): LoggableEve
   const q = useEvents(params, { enabled: opts.enabled ?? true });
   const live = q.data;
   const offline = q.fetchStatus === 'paused' || (q.isError && !q.isFetching && isNetworkError(q.error));
+  useEffect(() => {
+    if (live) rememberKitEvents(me.id, live);
+  }, [live, me.id]);
   const fallback = useMemo(() => {
     if (live || !offline) return null;
-    const list = cachedEvents(qc, (e) => e.date >= params.from && e.date <= params.to && (params.teamId == null || e.teamId === params.teamId));
-    return list.length ? list : null;
-  }, [live, offline, qc, params]);
+    const inWindow = (e: SalesEventWithMeta) => e.date >= params.from && e.date <= params.to && (params.teamId == null || e.teamId === params.teamId);
+    const list = cachedEvents(qc, inWindow);
+    if (list.length) return list;
+    const kept = kitEvents(me.id).filter(inWindow);
+    return kept.length ? kept : null;
+  }, [live, offline, qc, params, me.id]);
   const events = useMemo(() => (live ?? fallback ?? undefined)?.filter((e) => e.status !== 'cancelled' && e.date <= today), [live, fallback, today]);
   return { events, fromCache: !live && !!fallback, isLoading: q.isLoading, offline };
 }

@@ -2,8 +2,9 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 import type { AuthResponse, LoginInput, LoginPinChallenge, TwoFactorChallenge, UserWithTeam } from '@lm/shared';
-import { api, ApiError } from '@/api/client';
+import { api, ApiError, isNetworkError } from '@/api/client';
 import { forgetSession, rememberSession } from '@/api/sessionEnd';
+import { forgetKit, offlineUser, rememberKitUser } from '@/offline/fieldKit';
 
 /**
  * What `login()` resolves to. A plain credentials match signs the user in straight away; an account with
@@ -55,9 +56,16 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       // Release 1.4: when this session ends, so the sign-in page can say why once it has (api/sessionEnd.ts)
       rememberSession(res.session);
       setUser(res.user);
+      rememberKitUser(res.user);
     } catch (e) {
-      if (e instanceof ApiError && e.status === 401) setUser(null);
-      // Network / server errors keep the current user and let pages surface the error.
+      if (e instanceof ApiError && e.status === 401) {
+        setUser(null);
+        forgetKit();
+      }
+      // No signal when the app opens: carry on as the person last signed in on this phone (src/offline/fieldKit.ts),
+      // so they can log gauges and check in; it all waits on the phone and sends once they are signed in online.
+      else if (isNetworkError(e)) setUser((current) => current ?? offlineUser());
+      // Other server errors keep the current user and let pages surface the error.
     } finally {
       setLoading(false);
     }
@@ -91,6 +99,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       qc.clear();
       rememberSession(res.session);
       setUser(res.user);
+      rememberKitUser(res.user);
     },
     [qc],
   );
@@ -125,12 +134,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       await api<void>('/auth/logout', { method: 'POST' });
     } finally {
       forgetSession(); // signed out by hand: nothing to explain at the next sign-in
+      forgetKit();
       setUser(null);
       qc.clear();
     }
   }, [qc]);
 
   const clearSession = useCallback(() => {
+    forgetKit();
     setUser(null);
     qc.clear();
   }, [qc]);

@@ -2,6 +2,7 @@ import { defineConfig } from 'vite';
 import react from '@vitejs/plugin-react';
 import tailwindcss from '@tailwindcss/vite';
 import { fileURLToPath, URL } from 'node:url';
+import { serviceWorkerPlugin } from './build/serviceWorkerPlugin.ts';
 
 /**
  * The libraries every page needs go into their own chunks, apart from the app's code: the entry stays small, and
@@ -17,7 +18,7 @@ function vendorChunk(id: string): string | undefined {
 }
 
 export default defineConfig({
-  plugins: [react(), tailwindcss()],
+  plugins: [react(), tailwindcss(), serviceWorkerPlugin({ swEntry: fileURLToPath(new URL('./sw/sw.ts', import.meta.url)) })],
   resolve: {
     alias: { '@': fileURLToPath(new URL('./src', import.meta.url)) },
   },
