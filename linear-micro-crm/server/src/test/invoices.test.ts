@@ -433,6 +433,8 @@ test('attention: the person sees "Check and accept your invoice" (in the bell, n
   assert.equal(item.severity, 'info');
   assert.equal(item.title, 'Check and accept your invoice by 12:00 Thu 22 Oct');
   assert.match(item.body, /by 12:00 Thu 22 Oct/);
+  // opens that week's payslip and its invoice, not just the top of My pay
+  assert.equal(item.href, `/finance?tab=me&run=${runOf(fx().users.leader, LAST_WEEK).id}`);
   const adminFeed = await admin.get('/me/attention');
   const dispute = invoiceOfRun(runOf(fx().users.repA2, LAST_WEEK).id)!;
   const adminItem = adminFeed.json.items.find((i: Json) => i.key === `invoices:dispute:${dispute.id}:v1`);
