@@ -13,6 +13,7 @@ import { LogGaugesModal } from '@/features/gauges';
 import { ProgressCard } from '@/features/learning/ProgressCard';
 import { TodayTallyLink } from '@/features/gauges/TallyLinks';
 import { TodayShift } from '@/features/dashboard/TodayShift';
+import { PhoneFold } from '@/features/dashboard/PhoneFold';
 import { showsTodayCard } from '@/features/dashboard/todayShift';
 import { LazyAttentionCard, LazyWeekInReview, LazyWeekPayStrip } from '@/features/smart';
 import { COPY, greetingFor, motivationForDate } from '@/content/copy';
@@ -118,11 +119,25 @@ export function DashboardPage() {
             <AnnouncementsCard dashboard={d} canAnnounce={canAnnounce} onNew={() => setAnnounceOpen(true)} className="lg:col-span-2 min-[1360px]:col-span-1" />
           </div>
 
-          {fieldFirst && <PersonalCharts dashboard={d} canLog={canLog} onLog={() => setLogOpen(true)} baseline={insights?.personal.baseline} direction={insights?.personal.direction} />}
+          {fieldFirst && (
+            <PhoneFold id="my-charts" title="Your trend and funnel" hint="Charts of your sales and stops, and tips">
+              <PersonalCharts dashboard={d} canLog={canLog} onLog={() => setLogOpen(true)} baseline={insights?.personal.baseline} direction={insights?.personal.direction} />
+            </PhoneFold>
+          )}
 
-          <ErrorBoundary name="week-in-review"><LazyWeekInReview /></ErrorBoundary>
+          {fieldFirst ? (
+            <PhoneFold id="week-review" title="Your week in review" hint="Last week's numbers and highlights">
+              <ErrorBoundary name="week-in-review"><LazyWeekInReview /></ErrorBoundary>
+            </PhoneFold>
+          ) : (
+            <ErrorBoundary name="week-in-review"><LazyWeekInReview /></ErrorBoundary>
+          )}
 
-          {!companyFirst && d?.company && <ErrorBoundary name="company"><CompanySection company={d.company} rangeLabel={`${formatDate(d.from)} – ${formatDate(d.to)}`} checkIns={insights?.company?.checkIns} /></ErrorBoundary>}
+          {!companyFirst && d?.company && (
+            <PhoneFold id="company" title="Company" hint="How every team is doing">
+              <ErrorBoundary name="company"><CompanySection company={d.company} rangeLabel={`${formatDate(d.from)} – ${formatDate(d.to)}`} checkIns={insights?.company?.checkIns} /></ErrorBoundary>
+            </PhoneFold>
+          )}
         </div>
       )}
 
