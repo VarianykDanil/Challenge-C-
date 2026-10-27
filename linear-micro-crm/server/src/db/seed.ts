@@ -909,10 +909,12 @@ export function resetAndSeed(file: string): SeedStats {
 
 const isMain = process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url);
 if (isMain) {
+  // npm run seed: never a live database, one with people of the office's own, or one in use (lib/seedGuard.ts)
   const file = process.env.DB_PATH ? path.resolve(process.env.DB_PATH) : DEFAULT_DB_PATH;
-  const started = performance.now();
-  const stats = resetAndSeed(file);
-  const ms = Math.round(performance.now() - started);
-  console.log(`Seeded ${file} in ${ms}ms`);
-  console.table(stats);
+  // loaded after this module has finished (no top-level await): the guard's helpers import this module too
+  void import('../lib/seedGuard.ts')
+    .then(({ runSeedCommand }) => runSeedCommand(file, process.argv.slice(2), Number(process.env.PORT ?? 4000)))
+    .then((code) => {
+      process.exitCode = code;
+    });
 }
