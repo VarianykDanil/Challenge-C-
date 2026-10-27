@@ -86,7 +86,8 @@ test('GET /me/attention: an AttentionFeed for every role, cached', async () => {
     assert.ok(!Number.isNaN(Date.parse(r.json.generatedAt)));
     for (const it of r.json.items) {
       assert.equal(typeof it.key, 'string');
-      assert.ok(['gauges', 'pay', 'payroll', 'events', 'recruitment', 'security'].includes(it.kind));
+      // the 1.1 kinds, plus 'system' (administrators: backups, the app key on paper), which the fixture always has
+      assert.ok(['gauges', 'pay', 'payroll', 'events', 'recruitment', 'security', 'system'].includes(it.kind), it.kind);
       assert.ok(['info', 'warning', 'danger'].includes(it.severity));
       assert.ok(typeof it.title === 'string' && typeof it.body === 'string' && it.href.startsWith('/'));
     }

@@ -15,6 +15,7 @@ import { AUDIT_SPECS as payments } from './paymentSpecs.ts';
 import { AUDIT_SPECS as recruitment } from './recruitmentSpecs.ts';
 import { AUDIT_SPECS as security } from './securitySpecs.ts';
 import { AUDIT_SPECS as statements } from './statementSpecs.ts';
+import { AUDIT_SPECS as system } from './systemSpecs.ts';
 import { AUDIT_SPECS as venues } from './venueSpecs.ts';
 import { AUDIT_SPECS as videos } from './videoSpecs.ts';
 
@@ -24,6 +25,8 @@ export const PACKAGE_AUDIT_SPECS: Readonly<Record<string, readonly AuditRouteSpe
   pay, invoices, statements, videos, client, recruitment, venues, auditEvents,
   // Release 1.4 (S): two-step for everyone, 14-hour sessions; (F, P, A): payments and bank details
   security, payments,
+  // the recovery sheet (keys)
+  system,
 };
 
 /** Every spec, in match order: the 1.3 packages' first, then the 1.2 registry. */

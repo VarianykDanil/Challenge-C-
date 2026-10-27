@@ -5,7 +5,7 @@
 import { after, before, test } from 'node:test';
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, symlinkSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import {
@@ -15,8 +15,10 @@ import {
   macProtectedFolder,
   serviceEnvironment,
   serviceNodePath,
+  serviceSecretPlan,
   staleNodeWarning,
   systemdUnit,
+  writeServiceSecret,
   type ServiceSpec,
 } from '../service.ts';
 
@@ -174,4 +176,52 @@ test('a service that runs another or a missing Node is reported', () => {
   writeFileSync(file, systemdUnit({ ...spec, node: other }));
   assert.match(staleNodeWarning(file) ?? '', /this terminal uses/);
   assert.equal(staleNodeWarning(null), null);
+});
+
+// SEC-7 / SECURITY-MISSED-3: the always-on install used to refuse LM_APP_SECRET, so every backup held the key file.
+// Now the key travels through a private file outside the data folder; the unit and the LaunchAgent never hold it.
+test('LM_APP_SECRET reaches the service through a private file outside the data folder, never through the service file', () => {
+  const secret = 'Zm9vYmFyLWtleS1mb3ItdGVzdHMtb25seQ==';
+  const r = spawnSync(process.execPath, ['src/service.ts', '--print', '--platform=linux'], {
+    cwd: serverDir,
+    encoding: 'utf8',
+    env: { ...process.env, NODE_NO_WARNINGS: '1', HOME: tmp, XDG_CONFIG_HOME: '', LM_APP_SECRET: secret },
+  });
+  assert.equal(r.status, 0, r.stderr);
+  const envFile = path.join(tmp, '.config', 'linear-hub', 'linear-hub.env');
+  assert.match(r.stdout, new RegExp(`^EnvironmentFile=${envFile.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$`, 'm'));
+  assert.match(r.stdout, /^RestartPreventExitStatus=78$/m, 'a missing or wrong key is not restarted in a loop');
+  assert.equal(r.stdout.includes(secret), false, 'the key is not printed or put in the unit');
+  assert.match(r.stdout, /would write .*linear-hub\.env \(mode 600\)/);
+
+  const linux = serviceSecretPlan({ LM_APP_SECRET: secret, HOME: tmp }, 'linux', tmp)!;
+  assert.equal(linux.file, envFile);
+  assert.match(linux.content, new RegExp(`^LM_APP_SECRET=${secret.replace(/[+/=]/g, '\\$&')}$`, 'm'));
+  assert.deepEqual(linux.env, {});
+  assert.throws(() => serviceSecretPlan({ LM_APP_SECRET: 'has a "quote" $HOME' }, 'linux', tmp), /LM_APP_SECRET_FILE/);
+  assert.throws(() => serviceSecretPlan({ LM_APP_SECRET: ' padded ' }, 'linux', tmp), /space/);
+  assert.equal(serviceSecretPlan({}, 'linux', tmp), null);
+
+  const mac = serviceSecretPlan({ LM_APP_SECRET: secret, DB_PATH: 'data/live.sqlite' }, 'darwin', tmp)!;
+  assert.equal(mac.file, path.join(tmp, 'Library', 'Application Support', 'LinearHub', 'app-secret'));
+  assert.equal(mac.content, `${secret}\n`);
+  assert.equal(mac.env.LM_APP_SECRET_FILE, mac.file);
+  assert.equal(mac.env.LM_UPLOADS_DIR, path.join(serverDir, 'data', 'uploads'), 'the uploads stay where they are');
+  const plist = launchAgentPlist({ node: process.execPath, entry: SERVER_ENTRY, workDir: serverDir, env: { ...serviceEnvironment({ LM_APP_SECRET: secret }), ...mac.env }, log: '/tmp/x.log' });
+  assert.equal(plist.includes(secret), false);
+  assert.ok(plist.includes(mac.file));
+});
+
+test('the private key file is mode 600, and a different one already there is kept, never overwritten', () => {
+  const plan = serviceSecretPlan({ LM_APP_SECRET: 'first-key-0123456789' }, 'linux', path.join(tmp, 'home-a'))!;
+  assert.equal(writeServiceSecret(plan), null);
+  if (process.platform !== 'win32') {
+    assert.equal(statSync(plan.file).mode & 0o777, 0o600);
+    assert.equal(statSync(path.dirname(plan.file)).mode & 0o777, 0o700);
+  }
+  assert.equal(writeServiceSecret(plan), null, 'the same content: nothing to do');
+  const next = serviceSecretPlan({ LM_APP_SECRET: 'second-key-0123456789' }, 'linux', path.join(tmp, 'home-a'))!;
+  const kept = writeServiceSecret(next, new Date('2026-10-27T12:00:00Z'));
+  assert.ok(kept && readFileSync(kept, 'utf8').includes('first-key-0123456789'));
+  assert.ok(readFileSync(next.file, 'utf8').includes('second-key-0123456789'));
 });

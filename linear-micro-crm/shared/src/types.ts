@@ -806,7 +806,9 @@ export interface CheckInPerson {
  */
 export type AttentionKind = 'gauges' | 'pay' | 'payroll' | 'events' | 'recruitment' | 'security' | 'invoices' | 'statements' | 'client'
   // Release 1.4 (F): bank details to check, failed payments, bank files waiting to be marked paid (admin)
-  | 'payments';
+  | 'payments'
+  // System health (admin): backups, off-site copies, disk space, the app key on paper, server errors
+  | 'system';
 export type AttentionSeverity = 'info' | 'warning' | 'danger';
 
 /** p5 — one item in the role-scoped "Needs attention" feed (no table: derived on every request). */

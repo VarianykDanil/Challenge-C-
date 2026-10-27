@@ -138,6 +138,17 @@ export function backupScheduleOn(): boolean {
   return configuredSchedule ?? backupsEnabled();
 }
 
+let configuredOffsite: OffsiteConfig | null = null;
+
+/** The off-site settings this server runs with (index.ts), for the status Settings shows. */
+export function configureOffsite(c: OffsiteConfig | null): void {
+  configuredOffsite = c;
+}
+
+export function currentOffsite(): OffsiteConfig | null {
+  return configuredOffsite;
+}
+
 // ── names and clocks ─────────────────────────────────────────────────────────
 
 const pad2 = (n: number) => String(n).padStart(2, '0');
@@ -499,6 +510,28 @@ async function runBackup(db: DatabaseSync, opts: BackupOptions): Promise<BackupR
     offsite,
     offsiteError,
   };
+}
+
+/**
+ * A backup that is checked before anything risky (npm run latest, before the new version changes the database): made
+ * with backupNow (uploaded files included), then opened again read-only and compared with the live database
+ * (integrity_check, the core tables, the same number of people, gauge entries and pay runs). Throws a plain message
+ * when the backup cannot be made or does not match; the caller then changes nothing.
+ */
+export async function backupAndVerify(dbPath: string, opts: Omit<BackupOptions, 'rotate' | 'offsite'>): Promise<{ result: BackupResult; summary: DbSummary }> {
+  const db = new DatabaseSync(dbPath);
+  try {
+    db.exec('PRAGMA busy_timeout = 5000');
+    const result = await backupNow(db, { ...opts, offsite: null });
+    const check = inspectDatabase(result.path);
+    if (!check.ok || !check.summary) throw new Error(`The backup failed its check: ${check.problems.join(' ')}`);
+    const live = summariseDb(db);
+    const same = live.users === check.summary.users && live.gauges === check.summary.gauges && live.payrollRuns === check.summary.payrollRuns;
+    if (!same) throw new Error('The backup does not hold the same people, gauges and pay runs as the database. Nothing was changed: try again.');
+    return { result, summary: check.summary };
+  } finally {
+    db.close();
+  }
 }
 
 export const BACKUP_FAILURE_META = { at: 'last_backup_error_at', message: 'last_backup_error' } as const;

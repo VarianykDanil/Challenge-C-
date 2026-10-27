@@ -232,8 +232,8 @@ test('audit registry: package specs first, every 1.2 spec kept, POST /audit/even
   assert.equal(matchAuditSpec('GET', '/finance/payroll/12'), null);
 });
 
-test('attention providers: the three 1.3 ones (and 1.4 payments after them), and with no extra items the 1.1 feed passes through unchanged', () => {
-  assert.deepEqual(ATTENTION_PROVIDERS.map((p) => p.name), ['invoices', 'statements', 'client-posts', 'payments']);
+test('attention providers: the three 1.3 ones (then 1.4 payments and system health), and with no extra items the 1.1 feed passes through unchanged', () => {
+  assert.deepEqual(ATTENTION_PROVIDERS.map((p) => p.name), ['invoices', 'statements', 'client-posts', 'payments', 'system']);
   const core = [{ key: 'a', kind: 'pay' as const, severity: 'info' as const, title: 't', body: 'b', href: '/' }];
   assert.equal(withProviderItems(core, []), core);
   const merged = withProviderItems(core, [{ key: 'client:post:1', kind: 'client', severity: 'warning', title: 'New update', body: 'b', href: '/campaigns/1' }]);

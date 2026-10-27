@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { Check, Copy, DatabaseBackup, Monitor, Moon, RefreshCw, ShieldCheck, Sun, TriangleAlert } from 'lucide-react';
 import { BRAND, POSITION_LABELS, ROLE_LABELS } from '@lm/shared';
@@ -9,6 +9,7 @@ import { useHealth, type HealthInfo } from '@/api/hooks';
 import { useCurrentUser } from '@/auth/AuthProvider';
 import { ErrorBoundary, UserStatusBadge, errorMessage } from '@/features/common';
 import { PinSettings } from '@/features/settings/PinSettings';
+import { KeySafetySection } from '@/features/system/KeySafetySection';
 // Release 1.3 slots: Settings → Invoices and Company (P2), Pay (P1), Integrations (P3), Learning videos (P5),
 // Recruitment's question bank (P7). Each renders a whole card, or nothing.
 import { CompanySettingsSection } from '@/features/invoices/CompanySettingsSection';
@@ -185,6 +186,11 @@ function hoursSince(iso: string | null | undefined): number {
  */
 function BackupsCard() {
   const q = useQuery({ queryKey: ['settings', 'backups'], queryFn: () => api<HealthInfo>('/health'), staleTime: 60_000 });
+  const cardRef = useRef<HTMLDivElement>(null);
+  // /settings#backups (the Needs-attention bell's system-health items) scrolls here once the card is on the page
+  useEffect(() => {
+    if (window.location.hash === '#backups') cardRef.current?.scrollIntoView({ block: 'start' });
+  }, []);
   const [copied, setCopied] = useState(false);
   const b = q.data?.backup as BackupInfo | undefined;
   const age = hoursSince(b?.lastAt);
@@ -206,10 +212,11 @@ function BackupsCard() {
   };
 
   return (
+    <div id="backups" ref={cardRef} className="scroll-mt-20">
     <Card data-testid="backups-card">
       <CardHeader
         title="Backups"
-        description={off ? 'Automatic backups are off on this server.' : 'A copy of the database every night while Linear Hub runs.'}
+        description={off ? 'Automatic backups are off on this server.' : 'A copy of the database and the uploaded files every night while Linear Hub runs.'}
         icon={<DatabaseBackup aria-hidden />}
         actions={
           off ? <Badge tone="warning" dot>Off</Badge> : b && !stale && b.lastAt ? <Badge tone="success" dot>Up to date</Badge> : undefined
@@ -308,6 +315,10 @@ function BackupsCard() {
           </p>
         </>
       )}
+      <ErrorBoundary name="key-safety" fallback={null}>
+        <KeySafetySection />
+      </ErrorBoundary>
     </Card>
+    </div>
   );
 }

@@ -8,6 +8,7 @@ import { ZodError } from 'zod';
 import type { Db } from './db/connection.ts';
 import { bumpDataVersion, responseCache } from './lib/cache.ts';
 import { compression } from './lib/compress.ts';
+import { logServerError } from './lib/errorLog.ts';
 import { HttpError } from './lib/errors.ts';
 import { authenticate, pinSetupGate, requireAuth } from './middleware/auth.ts';
 import { perUserWriteLimit } from './middleware/writeLimit.ts';
@@ -54,6 +55,7 @@ import { isVideoProgressReport } from './lib/videos/progress.ts';
 // Release 1.4 (F): paying people from Linear Hub, and bank details
 import { myBankDetailsRouter, userBankDetailsRouter } from './routes/bankDetails.ts';
 import { paymentsRouter } from './routes/payments.ts';
+import { systemRouter } from './routes/system.ts';
 
 export interface AppOptions {
   /** When set (production), serve the built client from this folder with an SPA fallback. */
@@ -248,6 +250,8 @@ export function createApp(db: Db, opts: AppOptions = {}): Express {
   mount('/venues', requireAuth, venuesRouter(db));
   // Release 1.4 (F): connections, batches, approval with a fresh two-step code, bank files (admin only)
   mount('/payments', requireAuth, paymentsRouter(db));
+  // System health and the recovery sheet (Settings › Backups; admin, the sheet owner only)
+  mount('/system', requireAuth, systemRouter(db));
   api.use((_req, res) => {
     res.status(404).json({ error: 'Not found' });
   });
@@ -277,7 +281,7 @@ export function createApp(db: Db, opts: AppOptions = {}): Express {
   return app;
 }
 
-const errorHandler: ErrorRequestHandler = (err: unknown, _req, res, _next) => {
+const errorHandler: ErrorRequestHandler = (err: unknown, req, res, _next) => {
   if (err instanceof ZodError) {
     res.status(400).json({
       error: 'Validation failed',
@@ -306,6 +310,7 @@ const errorHandler: ErrorRequestHandler = (err: unknown, _req, res, _next) => {
     res.status(e.status).json({ error: e.message ?? 'Request error' });
     return;
   }
-  console.error(err);
+  // to the terminal and <data dir>/logs/errors.log (path only, never the query or body), counted for the admins' bell
+  logServerError('Server error', err, { method: req.method, path: req.originalUrl, userId: req.user?.id ?? null });
   res.status(500).json({ error: 'Internal server error' });
 };
