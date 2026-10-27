@@ -9,7 +9,7 @@ import { peekSessionEndNotice } from '@/api/sessionEnd';
 import { AuthProvider, useAuth } from '@/auth/AuthProvider';
 import { RedirectIfAuthed, RequireAuth } from '@/auth/RequireAuth';
 import {
-  AUDIT_ROLES, BULK_GAUGE_ROLES, CAMPAIGN_PAGE_ROLES, CAMPAIGN_ROLES, GAUGE_ROLES, PAYMENT_ROLES, RECRUITMENT_ROLES, RequireRole, STATEMENT_ROLES, VENUE_ROLES,
+  AUDIT_ROLES, BULK_GAUGE_ROLES, CAMPAIGN_PAGE_ROLES, CAMPAIGN_ROLES, GAUGE_ROLES, PAY_DAY_ROLES, PAYMENT_ROLES, RECRUITMENT_ROLES, RequireRole, STATEMENT_ROLES, VENUE_ROLES,
 } from '@/auth/RequireRole';
 import { PinSetupGate } from '@/auth/PinSetupGate';
 import { NotFoundPage } from '@/pages/NotFound';
@@ -61,6 +61,7 @@ const ClientSecurityPage = lazy(() => import('@/pages/ClientSecurity').then((m) 
 // Release 1.4 (F): paying people from Linear Hub (admin)
 const PaymentsPayPage = lazy(() => import('@/pages/PaymentsPay').then((m) => ({ default: m.PaymentsPayPage })));
 const PaymentBatchPage = lazy(() => import('@/pages/PaymentBatch').then((m) => ({ default: m.PaymentBatchPage })));
+const PayDaysPage = lazy(() => import('@/pages/PayDays').then((m) => ({ default: m.PayDaysPage })));
 
 /**
  * Signed-in shell: one layout route for every signed-in page, the dashboard included (as the index child), so the
@@ -225,6 +226,7 @@ export default function App() {
             <Route path="finance/statements" element={<RequireRole roles={STATEMENT_ROLES}><StatementsPage /></RequireRole>} />
             <Route path="finance/pay" element={<RequireRole roles={PAYMENT_ROLES}><PaymentsPayPage /></RequireRole>} />
             <Route path="finance/pay/batches/:id" element={<RequireRole roles={PAYMENT_ROLES}><PaymentBatchPage /></RequireRole>} />
+            <Route path="pay/days" element={<RequireRole roles={PAY_DAY_ROLES}><PayDaysPage /></RequireRole>} />
             <Route path="venues" element={<RequireRole roles={VENUE_ROLES}><VenuesPage /></RequireRole>} />
             <Route path="venues/:key" element={<RequireRole roles={VENUE_ROLES}><VenueDetailPage /></RequireRole>} />
             <Route path="recruitment/schedule" element={<RequireRole roles={RECRUITMENT_ROLES}><InterviewSchedulePage /></RequireRole>} />
