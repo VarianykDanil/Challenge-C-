@@ -126,6 +126,8 @@ export interface SeedContext {
  */
 export interface UpgradeOptions {
   demoSteps?: boolean;
+  /** The office's local starter-team file (lib/starterTeam.ts), when the server knows where the database lives. */
+  starterTeamFile?: string | null;
 }
 
 export interface DbExtension {

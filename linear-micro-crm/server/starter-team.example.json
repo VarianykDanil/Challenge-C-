@@ -1,0 +1,68 @@
+{
+  "_comment": "The starter team the demo seed adds at its end, with one-tap sign-ins during the trial. This example uses invented people. To load your own team instead, copy this file to server/data/starter-team.json (next to the database; it is never committed) and change the names and emails. Employee IDs are optional (the next free ones from LM-0101 are used). Surnames are optional too.",
+  "teams": [
+    {
+      "name": "Sapiens",
+      "color": "#7C3AED"
+    }
+  ],
+  "accounts": [
+    {
+      "employeeId": "LM-0101",
+      "firstName": "Ava",
+      "email": "ava@linearhub.example",
+      "role": "leader",
+      "position": "team_leader",
+      "team": "Sapiens",
+      "leadsTeam": true
+    },
+    {
+      "employeeId": "LM-0102",
+      "firstName": "Ben",
+      "email": "ben@linearhub.example",
+      "role": "leader",
+      "position": "team_leader",
+      "team": "Sapiens"
+    },
+    {
+      "employeeId": "LM-0103",
+      "firstName": "Cleo",
+      "email": "cleo@linearhub.example",
+      "role": "leader",
+      "position": "team_leader",
+      "team": "Sapiens"
+    },
+    {
+      "employeeId": "LM-0104",
+      "firstName": "Dev",
+      "email": "dev@linearhub.example",
+      "role": "leader",
+      "position": "team_leader",
+      "team": "Sapiens"
+    },
+    {
+      "employeeId": "LM-0105",
+      "firstName": "Esme",
+      "email": "esme@linearhub.example",
+      "role": "rep",
+      "position": "trainee",
+      "team": "Sapiens"
+    },
+    {
+      "employeeId": "LM-0106",
+      "firstName": "Femi",
+      "email": "femi@linearhub.example",
+      "role": "rep",
+      "position": "trainee",
+      "team": "Sapiens"
+    },
+    {
+      "employeeId": "LM-0107",
+      "firstName": "Gina",
+      "email": "gina@linearhub.example",
+      "role": "rep",
+      "position": "trainee",
+      "team": "Sapiens"
+    }
+  ]
+}

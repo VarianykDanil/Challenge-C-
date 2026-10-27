@@ -125,8 +125,8 @@ describe('verifyTotp', () => {
 
 describe('otpauthUrl', () => {
   it('builds the key URI authenticator apps expect', () => {
-    const url = otpauthUrl({ issuer: 'Linear Hub', label: 'Linear Hub:jane.doe@linear-mcr.co.uk', secret: 'JBSWY3DPEHPK3PXP' });
-    assert.equal(url, 'otpauth://totp/Linear%20Hub:jane.doe%40linear-mcr.co.uk?secret=JBSWY3DPEHPK3PXP&issuer=Linear%20Hub&algorithm=SHA1&digits=6&period=30');
+    const url = otpauthUrl({ issuer: 'Linear Hub', label: 'Linear Hub:jane.doe@linearhub.example', secret: 'JBSWY3DPEHPK3PXP' });
+    assert.equal(url, 'otpauth://totp/Linear%20Hub:jane.doe%40linearhub.example?secret=JBSWY3DPEHPK3PXP&issuer=Linear%20Hub&algorithm=SHA1&digits=6&period=30');
     const parsed = new URL(url);
     assert.equal(parsed.protocol, 'otpauth:');
     assert.equal(parsed.searchParams.get('secret'), 'JBSWY3DPEHPK3PXP');

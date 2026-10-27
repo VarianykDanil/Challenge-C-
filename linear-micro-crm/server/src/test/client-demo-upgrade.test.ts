@@ -251,7 +251,7 @@ test('a maintenance command never runs the demo steps: npm run pin:reset on an o
     // and the real command, with no LM_DEMO_ACCOUNTS in its environment
     const env: NodeJS.ProcessEnv = { ...process.env, DB_PATH: file, LM_APP_SECRET_FILE: path.join(dir, 'app-secret'), NODE_NO_WARNINGS: '1' };
     delete env.LM_DEMO_ACCOUNTS;
-    const r = spawnSync(process.execPath, [path.join(import.meta.dirname, '..', 'pinReset.ts'), 'danil@linear-mcr.co.uk'], { env, encoding: 'utf8' });
+    const r = spawnSync(process.execPath, [path.join(import.meta.dirname, '..', 'pinReset.ts'), 'morgan.blake@linearhub.example'], { env, encoding: 'utf8' });
     assert.equal(r.status, 0, r.stderr);
     const after = openDb(file);
     try {

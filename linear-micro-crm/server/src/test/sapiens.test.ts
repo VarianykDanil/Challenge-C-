@@ -1,12 +1,12 @@
 /**
- * Release 1.3.1: team Sapiens and its seven blank demo accounts (Theo, Daniel, Ridwan, Jamie as Team Leaders; Olivia,
- * Owens, Yasmin as trainees). A fresh demo seed inserts them at its very end (after every extension seed); an existing
+ * Release 1.3.1: team Sapiens and its seven blank demo accounts (Ava, Ben, Cleo, Dev as Team Leaders; Esme,
+ * Femi, Gina as trainees). A fresh demo seed inserts them at its very end (after every extension seed); an existing
  * demo database gains them once on start-up (db/extensions/sapiens.ts); a database the demo seed did not create never
  * does. The sign-in page lists them only from the marker the seed or that step wrote.
  */
 import { after, before, test } from 'node:test';
 import assert from 'node:assert/strict';
-import { DEMO_TEAM_ACCOUNTS, DEMO_TEAMS } from '../db/seed-data.ts';
+import { loadStarterTeam, parseStarterTeam } from '../lib/starterTeam.ts';
 import { all, get, openDb, run, type Db } from '../db/connection.ts';
 import { createSchema } from '../db/schema.ts';
 import { seed } from '../db/seed.ts';
@@ -21,15 +21,15 @@ const START = { demoSteps: true } as const;
 
 const TODAY = '2026-10-21';
 const SEVEN = [
-  ['LM-0101', 'Theo', 'leader', 'team_leader'],
-  ['LM-0102', 'Daniel', 'leader', 'team_leader'],
-  ['LM-0103', 'Ridwan', 'leader', 'team_leader'],
-  ['LM-0104', 'Jamie', 'leader', 'team_leader'],
-  ['LM-0105', 'Olivia', 'rep', 'trainee'],
-  ['LM-0106', 'Owens', 'rep', 'trainee'],
-  ['LM-0107', 'Yasmin', 'rep', 'trainee'],
+  ['LM-0101', 'Ava', 'leader', 'team_leader'],
+  ['LM-0102', 'Ben', 'leader', 'team_leader'],
+  ['LM-0103', 'Cleo', 'leader', 'team_leader'],
+  ['LM-0104', 'Dev', 'leader', 'team_leader'],
+  ['LM-0105', 'Esme', 'rep', 'trainee'],
+  ['LM-0106', 'Femi', 'rep', 'trainee'],
+  ['LM-0107', 'Gina', 'rep', 'trainee'],
 ] as const;
-const emailOf = (first: string) => `${first.toLowerCase()}@linear-mcr.co.uk`;
+const emailOf = (first: string) => `${first.toLowerCase()}@linearhub.example`;
 
 interface UserRow {
   id: number; employeeId: string; email: string; firstName: string; lastName: string; role: string; position: string;
@@ -58,16 +58,18 @@ function freshDemo(options: Parameters<typeof seed>[2] = {}): { db: Db; stats: R
 before(() => setBusinessClock(new Date(`${TODAY}T15:00:00`)));
 after(() => setBusinessClock(null));
 
-test('seed data: the seven accounts and team Sapiens as the owner listed them (ids and emails free in the demo)', () => {
-  assert.deepEqual(DEMO_TEAMS.map((t) => t.name), ['Sapiens']);
-  assert.deepEqual(DEMO_TEAM_ACCOUNTS.map((a) => [a.employeeId, a.firstName, a.role, a.position]), SEVEN.map((s) => [...s]));
-  assert.ok(DEMO_TEAM_ACCOUNTS.every((a) => a.team === 'Sapiens' && a.email === emailOf(a.firstName)));
-  assert.equal(DEMO_TEAM_ACCOUNTS.filter((a) => a.leadsTeam).map((a) => a.firstName).join(), 'Theo');
+test('seed data: the example starter team (invented people; a local file holds the office’s own), ids free in the demo', () => {
+  const { teams, accounts, source } = loadStarterTeam();
+  assert.equal(source, 'example');
+  assert.deepEqual(teams.map((t) => t.name), ['Sapiens']);
+  assert.deepEqual(accounts.map((a) => [a.employeeId, a.firstName, a.role, a.position]), SEVEN.map((s) => [...s]));
+  assert.ok(accounts.every((a) => a.team === 'Sapiens' && a.email === emailOf(a.firstName)));
+  assert.equal(accounts.filter((a) => a.leadsTeam).map((a) => a.firstName).join(), 'Ava');
   // appended after the 1.3 ones (release 1.4's payments comes after it); its seed does nothing
   assert.ok(EXTENSIONS[EXTENSIONS.findIndex((e) => e.name === 'venues') + 1]?.name === 'sapiens' && sapiensExtension.seed === undefined, 'appended after 1.3; its seed does nothing');
 });
 
-test('fresh demo seed: team Sapiens (its own colour, Theo leads) with seven active, blank accounts at the very end', () => {
+test('fresh demo seed: team Sapiens (its own colour, Ava leads) with seven active, blank accounts at the very end', () => {
   const { db, stats } = freshDemo();
   try {
     const team = sapiensTeam(db)!;
@@ -89,7 +91,7 @@ test('fresh demo seed: team Sapiens (its own colour, Theo leads) with seven acti
       const plan = get<{ id: number }>(db, `SELECT id FROM pay_plans WHERE position = ? ORDER BY id LIMIT 1`, [u.position])!;
       assert.equal(u.payPlanId, plan.id, `${u.firstName}: the default plan for ${u.position}`);
     }
-    assert.equal(team.leaderId, people[0]!.id, 'Theo is the team leader');
+    assert.equal(team.leaderId, people[0]!.id, 'Ava is the team leader');
     // inserted last: every other person (staff and the demo client) has a lower row id
     const maxOther = count(db, `SELECT MAX(id) AS n FROM users WHERE team_id IS NOT ? OR team_id IS NULL`, [team.id]);
     assert.ok(people.every((u) => u.id > maxOther), 'after every other user, the demo client included');
@@ -124,7 +126,7 @@ test('fresh demo seed: no data row anywhere refers to the seven (no gauges, pay,
         checked++;
         const rows = all<{ id: unknown }>(db, `SELECT rowid AS id FROM ${t} WHERE ${col} IN (${ids.map(() => '?').join(', ')})`, ids);
         if (t === 'teams' && col === 'leader_id') {
-          assert.equal(rows.length, 1, 'only team Sapiens names Theo as its leader');
+          assert.equal(rows.length, 1, 'only team Sapiens names Ava as its leader');
           assert.equal(count(db, `SELECT COUNT(*) AS n FROM teams WHERE leader_id = ? AND id = ?`, [ids[0]!, team.id]), 1);
           continue;
         }
@@ -198,14 +200,14 @@ test('a "Sapiens" team made by hand is reused: only the missing accounts are add
     const theo = run(
       db,
       `INSERT INTO users (employee_id, email, first_name, last_name, role, position, team_id, pay_plan_id, start_date, status, phone, avatar_color, city)
-       VALUES ('LM-0035', 'Theo@linear-mcr.co.uk', 'Theo', 'Byhand', 'leader', 'team_leader', ?, ?, '2026-10-01', 'active', NULL, '#4F46E5', 'Salford')`,
+       VALUES ('LM-0035', 'Ava@linearhub.example', 'Ava', 'Byhand', 'leader', 'team_leader', ?, ?, '2026-10-01', 'active', NULL, '#4F46E5', 'Salford')`,
       [teamId, plan],
     ).lastInsertRowid;
-    // someone else already holds LM-0103: Ridwan gets the next free ID instead
+    // someone else already holds LM-0103: Cleo gets the next free ID instead
     run(
       db,
       `INSERT INTO users (employee_id, email, first_name, last_name, role, position, team_id, pay_plan_id, start_date, status, phone, avatar_color, city)
-       VALUES ('LM-0103', 'someone.else@linear-mcr.co.uk', 'Some', 'One', 'rep', 'field_rep', NULL, ?, '2026-10-01', 'active', NULL, '#4F46E5', NULL)`,
+       VALUES ('LM-0103', 'someone.else@linearhub.example', 'Some', 'One', 'rep', 'field_rep', NULL, ?, '2026-10-01', 'active', NULL, '#4F46E5', NULL)`,
       [plan],
     );
     assert.deepEqual(createSchema(db, START), ['sapiens:team.sapiens']);
@@ -215,16 +217,16 @@ test('a "Sapiens" team made by hand is reused: only the missing accounts are add
     const people = sapiensUsers(db);
     assert.equal(people.length, 7);
     assert.ok(people.every((u) => u.teamId === teamId));
-    const handTheo = people.find((u) => u.firstName === 'Theo')!;
-    assert.deepEqual([handTheo.id, handTheo.employeeId, handTheo.lastName, handTheo.city], [theo, 'LM-0035', 'Byhand', 'Salford'], 'Theo by hand untouched');
-    assert.equal(team.leaderId, theo, 'a team without a leader gets Theo (already on it)');
-    const ridwan = people.find((u) => u.firstName === 'Ridwan')!;
+    const handTheo = people.find((u) => u.firstName === 'Ava')!;
+    assert.deepEqual([handTheo.id, handTheo.employeeId, handTheo.lastName, handTheo.city], [theo, 'LM-0035', 'Byhand', 'Salford'], 'Ava by hand untouched');
+    assert.equal(team.leaderId, theo, 'a team without a leader gets Ava (already on it)');
+    const ridwan = people.find((u) => u.firstName === 'Cleo')!;
     assert.notEqual(ridwan.employeeId, 'LM-0103');
     assert.match(ridwan.employeeId, /^LM-\d{4}$/);
     const marked = demoTeamMarkers(db)[0]!;
     assert.equal(marked.teamId, teamId);
     assert.deepEqual(marked.accounts.map((a) => a.email), SEVEN.slice(1).map(([, f]) => emailOf(f)), 'the marker lists only the six it inserted');
-    assert.equal(marked.accounts.find((a) => a.email === emailOf('Ridwan'))!.employeeId, ridwan.employeeId);
+    assert.equal(marked.accounts.find((a) => a.email === emailOf('Cleo'))!.employeeId, ridwan.employeeId);
     assert.deepEqual(createSchema(db, START), []);
   } finally {
     db.close();
@@ -333,9 +335,9 @@ test('GET /auth/demo-accounts: the four, then the Sapiens group with the seven o
   assert.match(group.color, /^#[0-9A-Fa-f]{6}$/);
   assert.deepEqual(group.accounts.map((a: { employeeId: string }) => a.employeeId), SEVEN.map(([id]) => id));
   assert.deepEqual(group.accounts[0], {
-    label: 'Theo (Team Leader)', name: 'Theo', role: 'leader', position: 'team_leader', email: 'theo@linear-mcr.co.uk', employeeId: 'LM-0101',
+    label: 'Ava (Team Leader)', name: 'Ava', role: 'leader', position: 'team_leader', email: 'ava@linearhub.example', employeeId: 'LM-0101',
   });
-  assert.equal(group.accounts[4].label, 'Olivia (Trainee)');
+  assert.equal(group.accounts[4].label, 'Esme (Trainee)');
   assert.ok(group.accounts.every((a: { label: string }) => !a.label.includes('  ') && !a.label.includes(' (', a.label.indexOf('(') + 1)));
 });
 
@@ -346,15 +348,15 @@ test('GET /auth/demo-accounts: hidden with LM_DEMO_ACCOUNTS=0; an account whose 
   } finally {
     delete process.env.LM_DEMO_ACCOUNTS;
   }
-  const owens = get<{ id: number }>(srv.db, `SELECT id FROM users WHERE email = 'owens@linear-mcr.co.uk'`)!.id;
-  const yasmin = get<{ id: number }>(srv.db, `SELECT id FROM users WHERE email = 'yasmin@linear-mcr.co.uk'`)!.id;
+  const owens = get<{ id: number }>(srv.db, `SELECT id FROM users WHERE email = 'femi@linearhub.example'`)!.id;
+  const yasmin = get<{ id: number }>(srv.db, `SELECT id FROM users WHERE email = 'gina@linearhub.example'`)!.id;
   try {
     run(srv.db, `UPDATE users SET email = 'owens.real@example.test' WHERE id = ?`, [owens]);
     run(srv.db, `UPDATE users SET status = 'left' WHERE id = ?`, [yasmin]);
     const ids = (await srv.anon().get('/auth/demo-accounts')).json.demoTeams[0].accounts.map((a: { employeeId: string }) => a.employeeId);
     assert.deepEqual(ids, ['LM-0101', 'LM-0102', 'LM-0103', 'LM-0104', 'LM-0105'], 'a real email or a leaver is never offered on the sign-in page');
   } finally {
-    run(srv.db, `UPDATE users SET email = 'owens@linear-mcr.co.uk' WHERE id = ?`, [owens]);
+    run(srv.db, `UPDATE users SET email = 'femi@linearhub.example' WHERE id = ?`, [owens]);
     run(srv.db, `UPDATE users SET status = 'active' WHERE id = ?`, [yasmin]);
   }
 });
@@ -364,7 +366,7 @@ test('GET /auth/demo-accounts: never by email or ID alone — no marker, no grou
   try {
     const plan = fx.fixture!.plans.leader;
     run(fx.db, `INSERT INTO users (employee_id, email, first_name, last_name, role, position, team_id, pay_plan_id, start_date, status, avatar_color)
-                VALUES ('LM-0101', 'theo@linear-mcr.co.uk', 'Theo', '', 'leader', 'team_leader', ?, ?, '2026-10-01', 'active', '#4F46E5')`, [fx.fixture!.teams.a, plan]);
+                VALUES ('LM-0101', 'ava@linearhub.example', 'Ava', '', 'leader', 'team_leader', ?, ?, '2026-10-01', 'active', '#4F46E5')`, [fx.fixture!.teams.a, plan]);
     const r = await fx.anon().get('/auth/demo-accounts');
     assert.equal(r.status, 200);
     assert.equal(r.json.demoTeams, undefined);
@@ -374,10 +376,10 @@ test('GET /auth/demo-accounts: never by email or ID alone — no marker, no grou
   }
 });
 
-test('Theo and Olivia sign in with the one-click details; their pages work with no data at all', async () => {
-  const theo = await srv.login({ email: 'theo@linear-mcr.co.uk', employeeId: 'LM-0101' });
+test('Ava and Esme sign in with the one-click details; their pages work with no data at all', async () => {
+  const theo = await srv.login({ email: 'ava@linearhub.example', employeeId: 'LM-0101' });
   const me = (await theo.get('/auth/me')).json.user;
-  assert.equal(me.firstName, 'Theo');
+  assert.equal(me.firstName, 'Ava');
   assert.equal(me.lastName, '');
   assert.equal(me.teamName, 'Sapiens');
   assert.equal(me.role, 'leader');
@@ -387,12 +389,12 @@ test('Theo and Olivia sign in with the one-click details; their pages work with 
     assert.ok(r.status === 200, `${path} → ${r.status}`);
   }
   const team = (await theo.get(`/users?teamId=${me.teamId}`)).json as { firstName: string; employeeId: string }[];
-  assert.deepEqual(team.map((u) => u.firstName), ['Daniel', 'Jamie', 'Olivia', 'Owens', 'Ridwan', 'Theo', 'Yasmin'], 'sorted by name, first names standing in for surnames');
-  assert.ok(team.every((u) => u.firstName === 'Theo' ? u.employeeId === 'LM-0101' : u.employeeId === ''), 'employee IDs stay hidden from a leader');
+  assert.deepEqual(team.map((u) => u.firstName), ['Ava', 'Ben', 'Cleo', 'Dev', 'Esme', 'Femi', 'Gina'], 'sorted by name, first names standing in for surnames');
+  assert.ok(team.every((u) => u.firstName === 'Ava' ? u.employeeId === 'LM-0101' : u.employeeId === ''), 'employee IDs stay hidden from a leader');
   const teams = (await theo.get('/teams')).json as { name: string; leaderName: string | null; memberCount?: number }[];
   const sap = teams.find((t) => t.name === 'Sapiens')!;
-  assert.equal(sap.leaderName, 'Theo', 'no trailing space');
-  const olivia = await srv.login({ email: 'olivia@linear-mcr.co.uk', employeeId: 'LM-0105' });
+  assert.equal(sap.leaderName, 'Ava', 'no trailing space');
+  const olivia = await srv.login({ email: 'esme@linearhub.example', employeeId: 'LM-0105' });
   for (const path of ['/me/dashboard', '/finance/me', '/me/digest', '/learning/progress']) {
     const r = await olivia.get(path);
     assert.ok(r.status === 200, `${path} → ${r.status}`);
@@ -406,13 +408,13 @@ test('names without a surname read well: the Team list sorts them among the othe
   const all = (await admin.get('/users')).json as { firstName: string; lastName: string }[];
   const keys = all.map((u) => (u.lastName || u.firstName).toLowerCase());
   assert.deepEqual(keys, [...keys].sort((a, b) => a.localeCompare(b)), 'one alphabetical list');
-  const theoId = get<{ id: number }>(srv.db, `SELECT id FROM users WHERE email = 'theo@linear-mcr.co.uk'`)!.id;
+  const theoId = get<{ id: number }>(srv.db, `SELECT id FROM users WHERE email = 'ava@linearhub.example'`)!.id;
   // Edit without adding a surname still saves (it stays blank); adding one later works; clearing a real one does not
   const p1 = await admin.patch(`/users/${theoId}`, { phone: '07700 900101', lastName: '' });
   assert.equal(p1.status, 200, JSON.stringify(p1.json));
   assert.equal(p1.json.lastName, '');
   const summary = get<{ s: string }>(srv.db, `SELECT summary AS s FROM audit_log WHERE entity = 'user' AND entity_id = ? ORDER BY id DESC LIMIT 1`, [theoId])!.s;
-  assert.match(summary, /^Updated Theo\b/);
+  assert.match(summary, /^Updated Ava\b/);
   assert.ok(!summary.includes('  '), summary);
   const p2 = await admin.patch(`/users/${theoId}`, { lastName: 'Example' });
   assert.equal(p2.json.lastName, 'Example');

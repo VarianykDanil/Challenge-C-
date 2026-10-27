@@ -193,7 +193,7 @@ test('a table PDF: valid file, brand header, cells as on screen, header row on e
     rows,
     totals: { userName: '130 people', gross: '£169,227.50' },
     filename: 'linear-hub-team-pay-2026-10-01_2026-10-21.csv',
-    generatedBy: 'Danil Varianyk',
+    generatedBy: 'Morgan Blake',
     now: NOW,
   });
   const pdf = parsePdf(doc.bytes());
@@ -202,7 +202,7 @@ test('a table PDF: valid file, brand header, cells as on screen, header row on e
   const all = pdf.text.flat();
   const page1 = pdf.text[0]!;
   // brand band, title, subtitle, filters with the row count, generated line
-  for (const s of ['Linear', 'Hub', 'Linear MCR Limited', 'Generated Thu 22 Oct 2026, 15:04 by Danil Varianyk', 'Team pay', 'Finance']) {
+  for (const s of ['Linear', 'Hub', 'Linear MCR Limited', 'Generated Thu 22 Oct 2026, 15:04 by Morgan Blake', 'Team pay', 'Finance']) {
     assert.ok(page1.includes(s), `page 1 shows ${JSON.stringify(s)}`);
   }
   assert.ok(page1.some((s) => s.includes('Team: Deansgate') && s.includes('1 – 21 Oct 2026') && s.includes('130 rows')), 'filter line with the row count');
@@ -218,7 +218,7 @@ test('a table PDF: valid file, brand header, cells as on screen, header row on e
   });
   assert.equal(all.filter((s) => s === '£169,227.50').length, 1, 'the totals row is printed once');
   assert.ok(pdf.text[pdf.pages - 1]!.includes('£169,227.50'), 'on the last page');
-  assert.equal(all.filter((s) => s === 'Generated Thu 22 Oct 2026, 15:04 by Danil Varianyk').length, 1, 'the brand band only on page 1');
+  assert.equal(all.filter((s) => s === 'Generated Thu 22 Oct 2026, 15:04 by Morgan Blake').length, 1, 'the brand band only on page 1');
   // only single-byte strings: jsPDF writes a string with any character above U+00FF as 16-bit gibberish
   assert.ok(!pdf.contents.some((c) => c.includes('\u0000')) && !all.some((s) => s.includes('\u0000')), 'no 16-bit strings');
   // metadata
@@ -286,7 +286,7 @@ test('pdfDocument: the invoice building blocks (P2) make a valid A4 document, fo
     .paragraph('Self-billed invoice issued by Linear MCR Limited on behalf of the supplier under a self-billing agreement.', { muted: true, size: 8.5 })
     .keyValues([['Payday', 'Fri 23 Oct 2026'], ['Reference', 'LM-SB-2026-000123']])
     .signatureBlock(
-      { label: 'For Linear MCR Limited', name: 'Danil Varianyk', imageDataUrl: PNG_1PX },
+      { label: 'For Linear MCR Limited', name: 'Morgan Blake', imageDataUrl: PNG_1PX },
       { label: 'Accepted by the supplier', name: 'Jordan Lee', note: 'Accepted electronically by Jordan Lee on Thu 22 Oct 2026, 14:05' },
     )
     .footer('Linear MCR Limited · Self-billed invoice LM-SB-2026-000123');
@@ -549,7 +549,7 @@ test('Release 1.3.1 fix: a line table row\'s note is drawn under its first cell,
 test('audit PDF: who a row names, as the Audit page says it; how much of the trail the file holds', () => {
   type Who = Parameters<typeof auditPdfWho>[0];
   const row = (r: Partial<Who>): Who => ({ userName: null, kind: 'change', action: 'PATCH /users/:id', after: null, ...r }) as Who;
-  assert.equal(auditPdfWho(row({ userName: 'Danil Varianyk' })), 'Danil Varianyk');
+  assert.equal(auditPdfWho(row({ userName: 'Morgan Blake' })), 'Morgan Blake');
   // a failed try on the sign-in page is filed under the account, but whoever typed it may not be that person
   assert.equal(auditPdfWho(row({ userName: 'Jordan Lee', kind: 'sign_in', action: 'POST /auth/login', after: { reason: 'wrong_employee_id' } })), "Attempt on Jordan Lee's account");
   assert.equal(auditPdfWho(row({ kind: 'sign_in', action: 'POST /auth/login', after: { reason: 'unknown_email' } })), 'Unknown person');

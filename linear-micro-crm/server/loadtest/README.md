@@ -27,7 +27,7 @@ for d in /proc/[0-9]*/fd; do ls -l "$d" 2>/dev/null | grep -q load.sqlite && \
 ## 2. Demo logins used
 
 Each script logs in with the seeded demo accounts (one session per virtual connection):
-admin `danil@linear-mcr.co.uk`/`LM-0001`, leader `amelia.hart@…`/`LM-0002`, recruiter `priya.shah@…`/`LM-0003`,
+admin `morgan.blake@linearhub.example`/`LM-0001`, leader `amelia.hart@…`/`LM-0002`, recruiter `priya.shah@…`/`LM-0003`,
 rep `jordan.lee@…`/`LM-0010`.
 
 ## 3. Scripts

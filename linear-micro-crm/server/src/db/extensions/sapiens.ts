@@ -1,5 +1,5 @@
 /**
- * Release 1.3.1: team Sapiens and its seven blank demo accounts on an EXISTING demo database (the owner's Mac after
+ * Release 1.3.1: the starter team (lib/starterTeam.ts: the office's local file, else invented people) on an EXISTING demo database (the owner's Mac after
  * `npm run latest`). A fresh demo seed adds them itself, at its very end (db/seed.ts → lib/demoTeams.ts addDemoTeams)
  * and marks this step done, so this extension has no seed.
  *
@@ -16,6 +16,8 @@
 import { transaction } from '../connection.ts';
 import { todayISO } from '../../lib/dates.ts';
 import { addDemoTeams, DEMO_TEAMS_DONE_KEY, demoStepAllowed } from '../../lib/demoTeams.ts';
+import { loadStarterTeam, type StarterTeam } from '../../lib/starterTeam.ts';
+import { addDemoPeople } from '../../lib/trialMode.ts';
 import { metaFlag, setMetaFlag, type DbExtension } from './types.ts';
 
 export const extension: DbExtension = {
@@ -32,8 +34,17 @@ export const extension: DbExtension = {
       setMetaFlag(db, DEMO_TEAMS_DONE_KEY);
       return [];
     }
+    let starter: StarterTeam;
+    try {
+      starter = loadStarterTeam(opts.starterTeamFile);
+    } catch (err) {
+      console.error(err instanceof Error ? err.message : String(err)); // a broken local file: ask again next start
+      return [];
+    }
     const r = transaction(db, () => {
-      const added = addDemoTeams(db, todayISO());
+      const added = addDemoTeams(db, todayISO(), starter);
+      // invented people (the example file) belong to the demo company, which npm run golive removes
+      if (starter.source === 'example') addDemoPeople(db, added.inserted.map((a) => a.id));
       setMetaFlag(db, DEMO_TEAMS_DONE_KEY);
       return added;
     });

@@ -200,7 +200,7 @@ describe('the BCN pitch in the demo seed', () => {
       assert.equal(p.title, BCN_PITCH_TITLE);
       assert.equal(p.body, BCN_PITCH_BODY);
       assert.equal(p.facts, BCN_PITCH_FACTS);
-      assert.equal(p.updatedByName, 'Danil Varianyk');
+      assert.equal(p.updatedByName, 'Morgan Blake');
       const list = (await c.get('/pitches')).json as PitchListItem[];
       assert.deepEqual(list.filter((x) => x.hasPitch).map((x) => x.campaignCode), ['BCN']);
       assert.ok(list.length >= 4);

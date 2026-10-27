@@ -779,13 +779,10 @@ test('the demo seed: invoices for the last six weeks, Jordan still to accept, tw
       WHERE i.id IS NULL AND p.status IN ('pending', 'failed') AND u.role IN ('rep', 'leader')`)!.n;
     assert.equal(uninvoiced, 0);
     assert.deepEqual(syncInvoices(d), { issued: 0, reissued: 0, refreshed: 0, deemed: 0 }, 'the first tick has nothing to do');
-    // older failed transfers: invoiced when self-billing started in the demo (the Monday after its first invoiced week),
-    // never backdated to their own week as if 1.3 had existed then, and never today
-    const started = addDays(LAST_WEEK, -28);
+    // the demo is paid up (finding UX-9: a sales demo showed weeks never paid, "74 days overdue"): no older unpaid run,
+    // so no invoice for a week before self-billing started in the demo
     const late = all<{ issuedAt: string; status: string }>(d, `SELECT i.issued_at AS issuedAt, i.status FROM invoices i JOIN payroll_runs p ON p.id = i.payroll_run_id WHERE p.week_start < ?`, [addDays(LAST_WEEK, -35)]);
-    assert.ok(late.length > 0, 'the demo has older failed transfers');
-    assert.ok(late.every((x) => new Date(x.issuedAt).toLocaleDateString('en-CA', { timeZone: 'Europe/London' }) === started), JSON.stringify(late.slice(0, 3)));
-    assert.ok(late.every((x) => x.status === 'accepted' || x.status === 'deemed_accepted'));
+    assert.deepEqual(late, [], 'no older unpaid runs in the demo');
     const jordan = await demo.login('rep');
     const mine = await jordan.get('/finance/me');
     const last = mine.json.runs.find((r: Json) => r.weekStart === LAST_WEEK);

@@ -27,7 +27,7 @@ if (!email) {
   console.log('Usage: npm run pin:reset -- <email>\n');
   console.log('Clears that person’s sign-in PIN and its lock and signs them out on every device. They then sign in');
   console.log('with their email and employee ID and choose a new PIN. For example:');
-  console.log('  npm run pin:reset -- danil@linear-mcr.co.uk');
+  console.log('  npm run pin:reset -- jo.bloggs@example.com');
   process.exit(1);
 }
 if (!existsSync(dbPath)) {

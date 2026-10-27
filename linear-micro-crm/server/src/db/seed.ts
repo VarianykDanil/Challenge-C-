@@ -29,6 +29,8 @@ import { extensionRng } from './extensions/types.ts';
 import { Rng } from '../lib/prng.ts';
 import { insertDemoClientAccounts, writeDemoClientMarkers } from '../lib/client.ts';
 import { addDemoTeams, DEMO_TEAMS_DONE_KEY } from '../lib/demoTeams.ts';
+import { loadStarterTeam, starterTeamFileFor, type StarterTeam } from '../lib/starterTeam.ts';
+import { addDemoPeople, currentSeedMarks, setTrialMode, writeSeedMarks } from '../lib/trialMode.ts';
 import { weekPayFor } from '../lib/pay.ts';
 import { computeWeek, DAY_RATE_KEY, payCalcContext, RULE_FROM_KEY } from '../lib/payWeek.ts';
 import { carryForwardCorrections, insertRun, runFiguresOf, runIsDue } from './maintenance.ts';
@@ -115,6 +117,11 @@ export interface SeedOptions {
    * database as 1.2 seeded it, so client-demo-upgrade.test.ts can prove an older demo database gains her on start-up.
    */
   demoClients?: boolean;
+  /**
+   * The starter team (lib/starterTeam.ts): the office's local file when the caller knows where the database lives
+   * (resetAndSeed, index.ts), else the example of invented people.
+   */
+  starterTeam?: StarterTeam;
 }
 
 export function seed(db: Db, today: string = D.todayISO(), options: SeedOptions = {}): SeedStats {
@@ -188,7 +195,7 @@ export function seed(db: Db, today: string = D.todayISO(), options: SeedOptions 
     for (const u of sortedSeeds) {
       const startDate = typeof u.start === 'string' ? u.start : D.addDays(thisMonday, -u.start.weeksAgo * 7);
       const employeeId = `LM-${String(u.no).padStart(4, '0')}`;
-      const email = u.email ?? `${u.firstName}.${u.lastName}@linear-mcr.co.uk`.toLowerCase();
+      const email = u.email ?? `${u.firstName}.${u.lastName}@${S.DEMO_EMAIL_DOMAIN}`.toLowerCase();
       const teamId = u.team ? teamIds.get(u.team)! : null;
       const plan = plans.get(u.position)!;
       const phone = `07700 900${String(u.no).padStart(3, '0')}`;
@@ -206,7 +213,7 @@ export function seed(db: Db, today: string = D.todayISO(), options: SeedOptions 
     stats.users = users.length;
     const byId = new Map(users.map((u) => [u.id, u]));
     const priya = users.find((u) => u.role === 'recruiter')!;
-    const danil = users.find((u) => u.position === 'owner')!;
+    const owner = users.find((u) => u.position === 'owner')!;
     const amelia = users.find((u) => u.employeeId === 'LM-0002')!;
     const jordan = users.find((u) => u.employeeId === 'LM-0010')!;
     const leaders = users.filter((u) => u.role === 'leader' && u.status === 'active');
@@ -578,7 +585,7 @@ export function seed(db: Db, today: string = D.todayISO(), options: SeedOptions 
           type === 'phone' ? p.ownerId
           : type === 'first' ? (rng.chance(0.5) ? p.ownerId : rng.pick(leaders).id)
           : type === 'observation' ? rng.pick([...teamLeaderOf.values()]).id
-          : rng.chance(0.6) ? danil.id : amelia.id;
+          : rng.chance(0.6) ? owner.id : amelia.id;
         let at: number;
         let outcome: InterviewPlan['outcome'];
         if (nextChange) {
@@ -632,7 +639,7 @@ export function seed(db: Db, today: string = D.todayISO(), options: SeedOptions 
     for (const r of rateRows) {
       // a change was approved a few days before it took effect; the first rows are the campaign's own rates
       const createdAt = r.approved ? ts(D.addDays(r.from, -3), 11) : ts(r.from, 9);
-      insertRate.run(r.campaignId, r.rep, r.payout, r.from, r.source, r.approved ? danil.id : null, createdAt);
+      insertRate.run(r.campaignId, r.rep, r.payout, r.from, r.source, r.approved ? owner.id : null, createdAt);
     }
     const ctx = payCalcContext(db);
     const insertAdjustment = db.prepare(
@@ -667,7 +674,7 @@ export function seed(db: Db, today: string = D.todayISO(), options: SeedOptions 
         const month = MONTH_NAMES[Number(m.start.slice(5, 7)) - 1]!;
         insertAdjustment.run(
           top.userId, D.mondayOf(m.next), null, 'bonus', S.BONUS_SEEDS.monthlyTop.amount,
-          `Top seller in ${month}: ${Number(top.sales)} subs. Thank you!`, null, danil.id, notAfterNow(ts(m.next, 10)),
+          `Top seller in ${month}: ${Number(top.sales)} subs. Thank you!`, null, owner.id, notAfterNow(ts(m.next, 10)),
         );
       }
     }
@@ -678,7 +685,7 @@ export function seed(db: Db, today: string = D.todayISO(), options: SeedOptions 
         if (!top || Number(top.sales) <= 0) continue;
         insertAdjustment.run(
           top.userId, lastCompletedMonday, null, 'bonus', S.BONUS_SEEDS.weeklyTeamTop.amount,
-          `Top of ${t.name} last week: ${Number(top.sales)} subs`, null, danil.id, notAfterNow(ts(thisMonday, 9)),
+          `Top of ${t.name} last week: ${Number(top.sales)} subs`, null, owner.id, notAfterNow(ts(thisMonday, 9)),
         );
       }
     }
@@ -713,7 +720,10 @@ export function seed(db: Db, today: string = D.todayISO(), options: SeedOptions 
             paidDate = D.addDays(dueDate, payRng.int(1, 6));
             if (paidDate > today) paidDate = today;
           } else if (r < 0.98) {
-            status = 'failed';
+            // a demo with weeks that were never paid reads badly ("74 days overdue"): every past week is paid, the odd
+            // one late; the only unpaid run is the week that just ended, due this Friday (same random draws as before)
+            status = 'paid';
+            paidDate = dueDate;
           } else {
             status = 'paid';
             paidDate = dueDate;
@@ -782,7 +792,7 @@ export function seed(db: Db, today: string = D.todayISO(), options: SeedOptions 
       [
         'Breast Cancer Awareness Month — October push',
         'October is Breast Cancer Awareness Month and BCN have doubled their private-site allocation for us. Target is 500 new regular givers across the crew this month. Top three reps on BCN sales by 31 October take home a double bonus. Wear pink on Fridays.',
-        danil.id, 14, true,
+        owner.id, 14, true,
       ],
       [
         'FibreCity: new residential patches live in Sale & Altrincham',
@@ -797,7 +807,7 @@ export function seed(db: Db, today: string = D.todayISO(), options: SeedOptions 
       [
         'Payday reminder — payroll runs Friday',
         'Gauges must be submitted by Sunday 8pm for the week to be included in Friday\'s payroll. Late submissions roll into the following week. Query your payslip via Finance → My pay.',
-        danil.id, 2, false,
+        owner.id, 2, false,
       ],
       [
         'Volt Energy B2B refresher — Thursday 9am, Parsonage Gardens',
@@ -861,12 +871,23 @@ export function seed(db: Db, today: string = D.todayISO(), options: SeedOptions 
     // After every extension seed, so none of them sees these people: no gauges, pay, invoices, learning, check-ins,
     // bookings or audit rows — only the team, the seven users (their marker in meta) and the step's done flag, the
     // same rows an existing demo database gains on start-up (db/extensions/sapiens.ts). No random draws.
+    const starterPeople: number[] = [];
     if (options.demoTeams !== false) {
-      const added = addDemoTeams(db, today);
+      const starter = options.starterTeam ?? loadStarterTeam();
+      const added = addDemoTeams(db, today, starter);
       stats.users += added.inserted.length;
       stats.teams += added.teamsCreated;
       run(db, `INSERT INTO meta (key, value) VALUES (?, '1') ON CONFLICT(key) DO UPDATE SET value = excluded.value`, [DEMO_TEAMS_DONE_KEY]);
+      // invented people (the example file) belong to the demo company; the office's own (its local file) do not
+      if (starter.source === 'example') starterPeople.push(...added.inserted.map((a) => a.id));
     }
+
+    // ── Trial mode: the demo company, until the owner runs npm run golive ──
+    // Its people are everyone made above (the staff, the demo client accounts and an example starter team); the seed
+    // marks record how far each company table goes, so golive can tell the demo's rows from those people add later.
+    addDemoPeople(db, [...users.map((u) => u.id), ...clients.map((c) => c.id), ...starterPeople]);
+    writeSeedMarks(db, currentSeedMarks(db));
+    setTrialMode(db, true);
   });
 
   return stats;
@@ -880,7 +901,7 @@ export function resetAndSeed(file: string): SeedStats {
   const db = openDb(file);
   try {
     createSchema(db);
-    return seed(db);
+    return seed(db, D.todayISO(), { starterTeam: loadStarterTeam(starterTeamFileFor(file)) });
   } finally {
     db.close();
   }

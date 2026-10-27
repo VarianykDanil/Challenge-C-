@@ -16,3 +16,5 @@ server/data/*.restoring-*
 server/data/media/
 server/data/statements/
 server/data/uploads/
+# the office's own starter team (real names and emails): server/starter-team.example.json shows the shape
+server/data/starter-team.json
