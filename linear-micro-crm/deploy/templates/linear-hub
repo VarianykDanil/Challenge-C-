@@ -62,14 +62,16 @@ settings() { grep -E '^[A-Za-z_][A-Za-z0-9_]*=' "$ENV_FILE" || true; }
 setting() { settings | grep -E "^$1=" | tail -n1 | cut -d= -f2-; }
 offsite_setting() { grep -E "^$1=" "$OFFSITE_CONF" 2>/dev/null | tail -n1 | cut -d= -f2-; }
 
-# app [--without NAME]… [--own-group] [NAME=value…] command…: run as the service user, in the app folder, with the
-# settings. --own-group starts it as a new process group, so `kill -- -PID` stops it and everything it started.
+# app [--without NAME]… [NAME=value…] command…: run as the service user, in the app folder, with the settings.
+# app --background … runs it in the background as its own process group and sets APP_PID, so
+# `kill -- -$APP_PID` stops it and everything it started.
+APP_PID=''
 app() {
-  local skip=' ' line group=()
+  local skip=' ' line background=0
   while :; do
     case ${1:-} in
       --without) skip+="$2 "; shift 2 ;;
-      --own-group) group=(setsid); shift ;;
+      --background) background=1; shift ;;
       *) break ;;
     esac
   done
@@ -78,8 +80,15 @@ app() {
     [[ $skip == *" ${line%%=*} "* ]] && continue
     vars+=("$line")
   done < <(settings)
-  (cd "$APP_ROOT" && exec "${group[@]}" runuser -u "$SERVICE_USER" -- env -i HOME="$HOME_DIR" \
+  local run=(runuser -u "$SERVICE_USER" -- env -i HOME="$HOME_DIR"
     PATH="$(dirname "$NODE_BIN"):/usr/local/bin:/usr/bin:/bin" LANG=C.UTF-8 "${vars[@]}" "$@")
+  if ((background)); then
+    # The background child execs setsid (it is not a group leader, so setsid does not fork): its PID is the group.
+    (cd "$APP_ROOT" && exec setsid "${run[@]}") &
+    APP_PID=$!
+  else
+    (cd "$APP_ROOT" && "${run[@]}")
+  fi
 }
 
 npm_script() { # npm_script NAME [args…]
@@ -231,13 +240,21 @@ cmd_import() {
 # Set by the restore test; cleared up on exit whatever happens (the scratch folder holds a decrypted database).
 RESTORE_TMP=''
 RESTORE_PID=''
+# group_alive ID: true while a process of that session (setsid made it one) still runs, not just waits to be reaped.
+group_alive() {
+  local states
+  states=$(ps -o stat= -s "$1" 2>/dev/null) || return 1
+  grep -qv '^Z' <<<"$states"
+}
+
 restore_test_cleanup() {
   if [[ -n $RESTORE_PID ]]; then
     # The scratch server runs as its own process group: stop all of it, and wait, before its folder goes.
-    kill -TERM -- "-$RESTORE_PID" 2>/dev/null || kill -TERM "$RESTORE_PID" 2>/dev/null || true
+    kill -TERM -- "-$RESTORE_PID" 2>/dev/null || true
     local i
-    for ((i = 0; i < 40; i++)); do kill -0 -- "-$RESTORE_PID" 2>/dev/null || break; sleep 0.25; done
+    for ((i = 0; i < 40; i++)); do group_alive "$RESTORE_PID" || break; sleep 0.25; done
     kill -KILL -- "-$RESTORE_PID" 2>/dev/null || true
+    wait "$RESTORE_PID" 2>/dev/null || true
   fi
   if [[ -n $RESTORE_TMP ]]; then rm -rf "$RESTORE_TMP"; fi
 }
@@ -273,8 +290,8 @@ cmd_restore_test() {
   }
   ok "decrypted with the passphrase, checked, and its app key found"
   say "Starting it on 127.0.0.1:$TEST_PORT (payments, Gmail and backups switched off for the test)…"
-  app --without LM_OFFSITE_DIR --own-group "${scratch[@]}" NODE_ENV=production "$NODE_BIN" server/src/index.ts >"$tmp/server.log" 2>&1 &
-  RESTORE_PID=$!
+  app --without LM_OFFSITE_DIR --background "${scratch[@]}" NODE_ENV=production "$NODE_BIN" server/src/index.ts >"$tmp/server.log" 2>&1
+  RESTORE_PID=$APP_PID
   if ! wait_healthy "http://127.0.0.1:$TEST_PORT/api/health" 60; then
     tail -n 30 "$tmp/server.log"
     die "The restore test FAILED: the restored copy did not start (log above). Tell Noryn today."
