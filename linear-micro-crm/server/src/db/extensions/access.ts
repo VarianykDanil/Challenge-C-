@@ -12,15 +12,17 @@
  *    install the table is empty and the flag is set straight away.
  *  - `trial`: a database from before trial mode gets its value once. Still the demo (the demo seed built it and its
  *    four demo staff are intact) → trial mode on, with the demo company's people (the seed's 34 staff by their fixed id
- *    and employee ID, and its demo client accounts) and the seed marks recorded for `npm run golive`; the starter team
- *    already on it is treated as real people. Anything else with people in it → off. Skipped, without the flag, while
+ *    and employee ID, and its demo client accounts) and the seed marks recorded for `npm run golive`, below the first
+ *    record the app made since (lib/demoRecords.ts seedMarksFromEvidence: the audit trail, and when statements arrived),
+ *    so a trial week already spent on it is kept; the starter team already on it is treated as real people. Anything else with people in it → off. Skipped, without the flag, while
  *    the users table is empty (a fresh install, before its seed — the seed sets trial mode itself).
  */
 import { all, get, transaction } from '../connection.ts';
 import { demoClientMarkers } from '../../lib/client.ts';
 import { demoStaffIntact, isDemoDatabase } from '../../lib/demoTeams.ts';
 import { sessionKey } from '../../lib/sessionKey.ts';
-import { TRIAL_MODE_KEY, addDemoPeople, currentSeedMarks, setTrialMode, writeSeedMarks } from '../../lib/trialMode.ts';
+import { seedMarksFromEvidence } from '../../lib/demoRecords.ts';
+import { TRIAL_MODE_KEY, addDemoPeople, setTrialMode, writeSeedMarks } from '../../lib/trialMode.ts';
 import { USERS } from '../seed-data.ts';
 import { addColumnIfMissing, metaFlag, setMetaFlag, type DbExtension } from './types.ts';
 
@@ -82,7 +84,7 @@ export const extension: DbExtension = {
         transaction(db, () => {
           if (on) {
             addDemoPeople(db, seededDemoPeople(db));
-            writeSeedMarks(db, currentSeedMarks(db));
+            writeSeedMarks(db, seedMarksFromEvidence(db));
           }
           setTrialMode(db, on);
           setMetaFlag(db, TRIAL_FLAG);

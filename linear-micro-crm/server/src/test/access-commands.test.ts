@@ -128,9 +128,77 @@ test('npm run seed: a new database straight away; an existing trial only after S
     const live = seedCmd(['--confirm', 'START AGAIN']);
     assert.equal(live.code, 1, live.out);
     assert.match(live.out, /has gone live/);
+    // the way out it suggests names a full path, so it works from any folder (npm -w server runs in server/)
+    assert.ok(live.out.includes(`DB_PATH=${path.join(dir, 'demo.sqlite')} npm run seed`), live.out);
     db = openDb(dbPath);
     assert.equal(count(db, `SELECT COUNT(*) AS n FROM users`), users, 'nothing touched');
     db.close();
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('npm run seed: the office’s own starter team counts as theirs once they have used it', async () => {
+  const dir = mkdtempSync(path.join(os.tmpdir(), 'linear-seed-starters-'));
+  try {
+    const dbPath = path.join(dir, 'linear.sqlite');
+    writeFileSync(path.join(dir, 'app-secret'), 'seed-guard-test-secret-0123456789ab\n', { mode: 0o600 });
+    writeFileSync(path.join(dir, 'starter-team.json'), JSON.stringify({
+      teams: [{ name: 'North', color: '#0E7490' }],
+      accounts: [{ firstName: 'Kit', lastName: 'Lane', email: 'kit.lane@office.example', role: 'leader', position: 'team_leader', team: 'North', leadsTeam: true }],
+    }));
+    const port = await freePort();
+    const fresh = command('src/db/seed.ts', dbPath, [], port);
+    assert.equal(fresh.code, 0, fresh.out);
+    // unused, the starter team is made again by the seed: START AGAIN may go ahead
+    const unused = command('src/db/seed.ts', dbPath, ['--confirm', 'START AGAIN'], port);
+    assert.equal(unused.code, 0, unused.out);
+    // once Kit has signed in and logged something, their history is real
+    const db = openDb(dbPath);
+    const kit = get<{ id: number }>(db, `SELECT id FROM users WHERE email = 'kit.lane@office.example'`)!.id;
+    run(db, `INSERT INTO audit_log (at, user_id, action, entity, entity_id, summary, kind) VALUES (?, ?, 'POST /gauges', 'gauge_entry', 1, 'Logged a shift', 'change')`, [
+      new Date().toISOString(), kit,
+    ]);
+    db.close();
+    const used = command('src/db/seed.ts', dbPath, ['--confirm', 'START AGAIN'], port);
+    assert.equal(used.code, 1, used.out);
+    assert.match(used.out, /people of your own/);
+    assert.match(used.out, /Kit Lane/);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('the server never makes a new demo company where backups show a database was: DB_PATH may be wrong', async () => {
+  const dir = mkdtempSync(path.join(os.tmpdir(), 'linear-missing-db-'));
+  try {
+    writeFileSync(path.join(dir, 'app-secret'), 'missing-db-test-secret-0123456789ab\n', { mode: 0o600 });
+    const backups = path.join(dir, 'backups');
+    const backup = path.join(backups, 'linear-2026-10-20-0200.sqlite');
+    const { mkdirSync } = await import('node:fs');
+    mkdirSync(backups);
+    const db = openDb(backup);
+    createSchema(db);
+    seed(db, todayISO());
+    db.close();
+    const dbPath = path.join(dir, 'linear.sqlite');
+    const port = await freePort();
+    const r = spawnSync(process.execPath, ['src/index.ts'], {
+      cwd: SERVER_DIR,
+      encoding: 'utf8',
+      timeout: 20_000,
+      env: {
+        ...process.env, NODE_NO_WARNINGS: '1', TZ: 'Europe/London', DB_PATH: dbPath, PORT: String(port), HOST: '127.0.0.1',
+        LM_APP_SECRET_FILE: path.join(dir, 'app-secret'), LM_BACKUP: '0', LM_BACKUP_DIR: '', LM_TLS_CERT_FILE: '', LM_TLS_KEY_FILE: '',
+      },
+    });
+    const out = `${r.stdout}${r.stderr}`;
+    assert.equal(r.status, 1, out);
+    assert.match(out, /There is no database at .*linear\.sqlite/);
+    assert.match(out, /linear-2026-10-20-0200\.sqlite/);
+    assert.match(out, /npm run restore -- linear-2026-10-20-0200\.sqlite/);
+    assert.match(out, /npm run seed/);
+    assert.equal(readdirSync(dir).includes('linear.sqlite'), false, 'no new database was made');
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }

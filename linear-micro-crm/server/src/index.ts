@@ -21,6 +21,7 @@ import { startPaymentsJob } from './lib/payments/job.ts';
 import { purgeExpiredSessions } from './middleware/auth.ts';
 import { readTlsFiles, tlsFilesFromEnv } from './lib/tls.ts';
 import { loadStarterTeam, starterTeamFileFor } from './lib/starterTeam.ts';
+import { missingDatabaseRefusal } from './lib/seedGuard.ts';
 
 const dbPath = process.env.DB_PATH ? path.resolve(process.env.DB_PATH) : DEFAULT_DB_PATH;
 // Built-in HTTPS when LM_TLS_CERT_FILE and LM_TLS_KEY_FILE are both set (lib/tls.ts): checked before anything opens, so
@@ -39,6 +40,12 @@ const scheme = tls ? 'https' : 'http';
 configureAppSecret(process.env.LM_APP_SECRET_FILE ? path.resolve(process.env.LM_APP_SECRET_FILE) : path.join(path.dirname(dbPath), 'app-secret'));
 if (businessClockPinned()) {
   console.warn(`LM_BUSINESS_NOW is set: "today" for events, gauges and pay is ${businessNow().toString()}, not the real date. Unset it for real use.`);
+}
+// never a new demo company where backups show a database was (a wrong DB_PATH, or a moved file)
+const missing = missingDatabaseRefusal(dbPath);
+if (missing) {
+  console.error(missing);
+  process.exit(1);
 }
 const db = openDb(dbPath);
 // the server's start: the demo-account steps may run (UpgradeOptions), with the office's own starter team if it has one

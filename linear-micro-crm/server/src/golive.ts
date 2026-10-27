@@ -20,7 +20,8 @@ import { DEFAULT_DB_PATH } from './db/seed.ts';
 import { backupDirFor, backupNow, inspectDatabase } from './lib/backup.ts';
 import { findPortHolder } from './lib/boot.ts';
 import { ask, flagValue, runningRefusal, stopHint, typedConfirmation } from './lib/commandLine.ts';
-import { goLive, ownerProblem, planGoLive, type GoLiveOwnerInput } from './lib/goLive.ts';
+import { goLive, ownerProblem, planGoLive, recordCountText, recordName, type GoLiveOwnerInput } from './lib/goLive.ts';
+import type { SeedMarkTable } from './lib/trialMode.ts';
 import { isTrialMode } from './lib/trialMode.ts';
 import { installedServiceFile } from './service.ts';
 
@@ -67,52 +68,71 @@ if (!isTrialMode(db)) {
 
 // ── what goes and what stays ──
 const plan = planGoLive(db);
-const list = (people: { name: string; employeeId: string; role: string }[], max = 10) => {
-  const shown = people.slice(0, max).map((p) => `    ${p.name || '(no name)'} (${p.employeeId}, ${p.role})`);
-  return people.length > max ? [...shown, `    … and ${people.length - max} more`] : shown;
-};
+const more = <T,>(items: T[], max: number, line: (item: T) => string) =>
+  items.length > max ? [...items.slice(0, max).map(line), `    … and ${items.length - max} more`] : items.map(line);
+const person = (p: { name: string; employeeId: string; role: string }) => `${p.name || '(no name)'} (${p.employeeId}, ${p.role})`;
 const records = Object.entries(plan.removeRecords)
-  .map(([t, n]) => `${n} ${t.replace('_', ' ')}`)
+  .map(([t, n]) => recordCountText(t as SeedMarkTable, n ?? 0))
   .join(', ');
 console.log(`Going live changes ${dbPath}.\n`);
-console.log(`It removes the demo company: ${plan.removePeople.length} demo people and their history${records ? `, and ${records}` : ''}.`);
+console.log(`It removes the demo company: ${plan.removePeople.length} demo people and their history${records ? `, and ${records} the demo made` : ''}.`);
 console.log('The one-tap demo accounts go even if you renamed them: anyone on your network could open them.');
-for (const line of list(plan.removePeople, 6)) console.log(line);
-console.log('\nIt keeps your settings (pay plans, payment connections, security settings), your own people and everything made');
-console.log('in the app since the demo was set up.');
+for (const line of more(plan.removePeople, 6, (p) => `    ${person(p)}`)) console.log(line);
+if (plan.usedDemoPeople.length) {
+  console.log('\nUsed during the trial (these demo accounts go too: from now on everyone signs in with their own account):');
+  for (const line of more(plan.usedDemoPeople, 10, (p) =>
+    `    ${person(p)}: ${p.changes} ${p.changes === 1 ? 'change' : 'changes'}, ${p.signIns} ${p.signIns === 1 ? 'sign-in' : 'sign-ins'}, last on ${p.lastAt.slice(0, 10)}`)) {
+    console.log(line);
+  }
+}
+if (plan.removedUsedRecords.length) {
+  console.log('\nChanged during the trial but only by demo accounts, so they go:');
+  for (const line of more(plan.removedUsedRecords, 10, (r) => `    ${recordName(r.table)} ${r.label}: ${r.reason}`)) console.log(line);
+}
+console.log('\nIt keeps your settings (pay plans, payment connections, security settings), your own people and their');
+console.log('history, and every record made in the app since the demo was set up.');
+if (plan.keptDemoRecords.length) {
+  console.log('These demo records stay because something of yours uses them, or you made or changed them in the app:');
+  for (const line of more(plan.keptDemoRecords, 15, (r) => `    ${recordName(r.table)} ${r.label}: ${r.reason}`)) console.log(line);
+}
 if (plan.keepPeople.length) {
   console.log(`  ${plan.keepPeople.length} of your own:`);
-  for (const line of list(plan.keepPeople)) console.log(line);
+  for (const line of more(plan.keepPeople, 10, (p) => `    ${person(p)}`)) console.log(line);
 } else {
   console.log('  No people of your own yet.');
 }
-console.log('');
+console.log('Statement PDFs stay in the statements folder.\n');
 
-// ── the first owner, when no administrator of the office's own would be left ──
+// ── the first owner: needed when no administrator of the office's own would be left; asked for by flags otherwise ──
 let owner: GoLiveOwnerInput | undefined;
-if (plan.ownerNeeded) {
-  const flags = { email: flagValue(args, 'owner-email'), firstName: flagValue(args, 'owner-first-name'), lastName: flagValue(args, 'owner-last-name') };
-  if (flags.email && flags.firstName) {
-    owner = { email: flags.email, firstName: flags.firstName, lastName: flags.lastName ?? '' };
-  } else if (process.stdin.isTTY) {
-    console.log('No administrator of your own would be left, so this makes the first owner (you).');
-    owner = {
-      firstName: (await ask('  Owner’s first name: ')) ?? '',
-      lastName: (await ask('  Owner’s last name: ')) ?? '',
-      email: (await ask('  Owner’s sign-in email: ')) ?? '',
-    };
-  } else {
-    db.close();
-    fail(
-      'Nothing was changed: no administrator of your own would be left, so going live makes the first owner. Add their details:\n' +
-        '  --owner-email you@example.com --owner-first-name Sam --owner-last-name Smith',
-    );
-  }
+const flags = { email: flagValue(args, 'owner-email'), firstName: flagValue(args, 'owner-first-name'), lastName: flagValue(args, 'owner-last-name') };
+if (flags.email && flags.firstName) {
+  owner = { email: flags.email, firstName: flags.firstName, lastName: flags.lastName ?? '' };
+} else if (plan.ownerNeeded && process.stdin.isTTY) {
+  console.log('No administrator of your own would be left, so this makes the first owner (you).');
+  owner = {
+    firstName: (await ask('  Owner’s first name: ')) ?? '',
+    lastName: (await ask('  Owner’s last name: ')) ?? '',
+    email: (await ask('  Owner’s sign-in email: ')) ?? '',
+  };
+} else if (plan.ownerNeeded) {
+  db.close();
+  fail(
+    'Nothing was changed: no administrator of your own would be left, so going live makes the first owner. Add their details:\n' +
+      '  --owner-email you@example.com --owner-first-name Sam --owner-last-name Smith',
+  );
+}
+if (owner) {
   const problem = ownerProblem(db, owner, plan);
   if (problem) {
     db.close();
     fail(`Nothing was changed: ${problem}`);
   }
+} else {
+  const admins = plan.keepPeople.filter((p) => p.role === 'admin' && p.status !== 'left').map((p) => p.name);
+  console.log(`An administrator of your own stays (${admins.join(', ')}), so no new owner is made.`);
+  console.log('If you used a demo account yourself, add yourself too: --owner-email … --owner-first-name … --owner-last-name …,');
+  console.log('or have that administrator add you in Team after going live.\n');
 }
 
 const refused = await typedConfirmation(args, WORDS, 'This cannot be undone in the app (a backup is made first).');
