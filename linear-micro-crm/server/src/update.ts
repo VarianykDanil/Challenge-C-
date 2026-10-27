@@ -5,14 +5,16 @@
  * 1. Refuse if you have edited tracked files (other than package-lock.json): your work is never thrown away.
  * 2. Discard local changes to package-lock.json: npm rewrites that file on install; the pulled one replaces it.
  * 3. Stop Linear Hub: the background service when it is installed (so nothing runs while node_modules is reinstalled),
- *    otherwise the copy running in a terminal.
+ *    otherwise the copy running in a terminal. With a service installed, any Linear Hub setting this terminal leaves
+ *    unset (database, port, key file, folders) is taken from the service, so every step below uses the service's own.
  * 4. Back the database up and check the backup (with the uploaded files), before anything can change the database.
  *    No good backup, no update: the service is started again as it was.
  * 5. git pull --ff-only, and list what came in.
  * 6. npm ci when the dependencies changed, npm run build when the screens changed (npm run setup, prepare.ts).
- * 7. Start: install the background service again (it starts the new version), otherwise run npm start here. The new
- *    version upgrades the database at its first start, in one transaction.
- * If a step fails after the stop, the service is started again and the way back is printed.
+ * 7. Start: install the background service again (it starts the new version and keeps the service's settings),
+ *    otherwise run npm start here. The new version upgrades the database at its first start, in one transaction.
+ * If a step fails after the stop, the service is started again (on the old version before the pull, on the new one
+ * after it) and the way back is printed.
  *
  * `npm run latest -- --no-start` stops after step 6.
  */
@@ -22,7 +24,7 @@ import path from 'node:path';
 import { DEFAULT_DB_PATH } from './db/seed.ts';
 import { backupAndVerify, backupDirFor, foldersOutsideBackup } from './lib/backup.ts';
 import { backupVideos } from './lib/backupFiles.ts';
-import { installedServiceFile, startInstalledService, stopInstalledService } from './service.ts';
+import { absoluteServerPaths, installedServiceFile, installedServiceSettings, startInstalledService, stopInstalledService, withInstalledSettings } from './service.ts';
 
 const repoDir = path.resolve(import.meta.dirname, '..', '..'); // linear-micro-crm/
 const npm = process.platform === 'win32' ? 'npm.cmd' : 'npm';
@@ -42,11 +44,15 @@ function npmRun(args: string[], env: NodeJS.ProcessEnv = process.env): number {
 
 /** Set once the background service was stopped, so a failure starts it again. */
 let serviceStopped = false;
+/** Set once new code was pulled: a service started again after that runs the new version. */
+let pulled = false;
 
 function fail(message: string): never {
   console.error(`\nLinear Hub: npm run latest stopped. ${message}`);
   if (serviceStopped) {
-    console.error(startInstalledService() ? 'Linear Hub: the background service was started again as it was.' : 'Linear Hub: start it again with  npm run service:install');
+    if (!startInstalledService()) console.error('Linear Hub: start it again with  npm run service:install');
+    else if (pulled) console.error('Linear Hub: the background service was started again with the new version, which may not work until the step above is fixed (see the way back above).');
+    else console.error('Linear Hub: the background service was started again as it was.');
   }
   process.exit(1);
 }
@@ -75,6 +81,11 @@ if (changed.length) {
 
 // 3. Stop Linear Hub: the background service too, so it never serves while node_modules is being reinstalled.
 const service = installedServiceFile();
+const installed = service ? installedServiceSettings() : null;
+const withService = withInstalledSettings(process.env, installed);
+const fromService = Object.keys(withService).filter((k) => withService[k] !== process.env[k]);
+Object.assign(process.env, absoluteServerPaths(withService));
+if (fromService.length) console.log(`Linear Hub: using the background service's settings for ${fromService.join(', ')} (this terminal does not set them).`);
 if (service) {
   console.log('Linear Hub: stopping the background service for the update…');
   if (!(await stopInstalledService())) fail('The background service did not stop (see npm run service:status). Nothing was changed.');
@@ -87,9 +98,12 @@ if (service) {
 // 4. A checked backup before anything can change the database (the new version upgrades it at its first start).
 const dbPath = process.env.DB_PATH ? path.resolve(process.env.DB_PATH) : DEFAULT_DB_PATH;
 let backupFile: string | null = null;
-if (existsSync(dbPath)) {
+if (!existsSync(dbPath)) console.log(`Linear Hub: there is no database at ${dbPath} yet, so there was nothing to back up.`);
+else {
   try {
-    const secretFile = process.env.LM_APP_SECRET ? null : process.env.LM_APP_SECRET_FILE ? path.resolve(process.env.LM_APP_SECRET_FILE) : path.join(path.dirname(dbPath), 'app-secret');
+    // a key handed to the service through its private environment file is not a file in the data folder
+    const keyInEnv = Boolean(process.env.LM_APP_SECRET || installed?.environmentFile);
+    const secretFile = keyInEnv ? null : process.env.LM_APP_SECRET_FILE ? path.resolve(process.env.LM_APP_SECRET_FILE) : path.join(path.dirname(dbPath), 'app-secret');
     const { result, summary } = await backupAndVerify(dbPath, {
       dir: backupDirFor(dbPath),
       secretFile,
@@ -113,6 +127,7 @@ if (!pull.ok) {
   );
 }
 const after = git(['rev-parse', 'HEAD']).out;
+pulled = before !== after;
 if (before === after) {
   console.log('Linear Hub: already up to date.');
 } else {
@@ -125,7 +140,7 @@ if (before === after) {
 // 6. Dependencies and screens (the same step npm start runs first).
 const wayBack = () =>
   `To go back: git checkout ${before.slice(0, 12)} && npm run setup${backupFile ? ` && npm run restore -- ${path.basename(backupFile)}` : ''}`;
-if (npmRun(['run', '--silent', 'setup']) !== 0) fail(`The install or build failed (see above). ${wayBack()}`);
+if (npmRun(['run', '--silent', 'setup']) !== 0) fail(`The install or build failed (see above).\n${wayBack()}`);
 
 if (backupFile) console.log(`Linear Hub: if the new version is not right: ${wayBack()}`);
 if (noStart) {

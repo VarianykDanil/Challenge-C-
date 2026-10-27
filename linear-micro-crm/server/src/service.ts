@@ -144,6 +144,18 @@ export interface ServiceSecret {
   environmentFile: string | null;
 }
 
+/**
+ * macOS: the LaunchAgent reads the key from the private key file. LM_UPLOADS_DIR is pinned to where the uploads are
+ * now, because they sit next to the key file by default and would otherwise seem to vanish when the key moves.
+ */
+function macKeyFileEnv(env: NodeJS.ProcessEnv, home: string): { LM_APP_SECRET_FILE: string; LM_UPLOADS_DIR?: string } {
+  const file = path.join(serviceKeyDir('darwin', home, env), 'app-secret');
+  if (env.LM_UPLOADS_DIR?.trim()) return { LM_APP_SECRET_FILE: file };
+  const dataDir = path.dirname(env.DB_PATH?.trim() ? path.resolve(serverDir, env.DB_PATH.trim()) : path.join(serverDir, 'data', 'linear.sqlite'));
+  const oldKeyFile = env.LM_APP_SECRET_FILE?.trim() ? path.resolve(serverDir, env.LM_APP_SECRET_FILE.trim()) : path.join(dataDir, 'app-secret');
+  return { LM_APP_SECRET_FILE: file, LM_UPLOADS_DIR: path.join(path.dirname(oldKeyFile), 'uploads') };
+}
+
 /** Characters a key may have to travel in a systemd environment file without any quoting surprises. */
 const PLAIN_SECRET_RE = /^[A-Za-z0-9._~+/=:@-]+$/;
 
@@ -160,15 +172,8 @@ export function serviceSecretPlan(env: NodeJS.ProcessEnv = process.env, platform
   if (value !== value.trim()) throw new Error('LM_APP_SECRET starts or ends with a space, so it cannot be handed to the service as it is. Remove the spaces (the key changes with them) or put the key in a file and set LM_APP_SECRET_FILE.');
   const dir = serviceKeyDir(platform, home, env);
   if (platform === 'darwin') {
-    const file = path.join(dir, 'app-secret');
-    const dataDir = path.dirname(env.DB_PATH?.trim() ? path.resolve(serverDir, env.DB_PATH.trim()) : path.join(serverDir, 'data', 'linear.sqlite'));
-    const oldKeyFile = env.LM_APP_SECRET_FILE?.trim() ? path.resolve(serverDir, env.LM_APP_SECRET_FILE.trim()) : path.join(dataDir, 'app-secret');
-    return {
-      file,
-      content: `${value}\n`,
-      env: { LM_APP_SECRET_FILE: file, ...(env.LM_UPLOADS_DIR?.trim() ? {} : { LM_UPLOADS_DIR: path.join(path.dirname(oldKeyFile), 'uploads') }) },
-      environmentFile: null,
-    };
+    const env2 = macKeyFileEnv(env, home);
+    return { file: env2.LM_APP_SECRET_FILE, content: `${value}\n`, env: env2, environmentFile: null };
   }
   if (!PLAIN_SECRET_RE.test(value)) {
     throw new Error('LM_APP_SECRET has characters (spaces, quotes, $ or %) that a systemd environment file would change. Put the key in a file readable only by you and set LM_APP_SECRET_FILE to it instead.');
@@ -182,21 +187,132 @@ export function serviceSecretPlan(env: NodeJS.ProcessEnv = process.env, platform
   };
 }
 
-export function serviceSpec(platform: string = process.platform): ServiceSpec {
+/** What an installed unit or LaunchAgent hands the server: its Environment settings and its EnvironmentFile=. */
+export interface InstalledSettings {
+  env: Record<string, string>;
+  environmentFile: string | null;
+}
+
+/** Reads the settings back from a LaunchAgent or a systemd unit written by launchAgentPlist / systemdUnit. */
+export function readServiceSettings(content: string): InstalledSettings {
+  const env: Record<string, string> = {};
+  const dict = /<key>EnvironmentVariables<\/key>\s*<dict>([\s\S]*?)<\/dict>/.exec(content);
+  if (dict) {
+    for (const m of dict[1]!.matchAll(/<key>([^<]*)<\/key>\s*<string>([^<]*)<\/string>/g)) env[unxml(m[1]!)] = unxml(m[2]!);
+    return { env, environmentFile: null };
+  }
+  let environmentFile: string | null = null;
+  for (const line of content.split('\n')) {
+    const quoted = /^Environment="((?:[^"\\]|\\.)*)"\s*$/.exec(line);
+    const value = quoted ? sdUnquoteEnv(quoted[1]!) : /^Environment=(\S+)\s*$/.exec(line)?.[1];
+    if (value) {
+      const eq = value.indexOf('=');
+      if (eq > 0) env[value.slice(0, eq)] = value.slice(eq + 1);
+    }
+    const file = /^EnvironmentFile=-?(.+?)\s*$/.exec(line);
+    if (file) environmentFile = file[1]!.replace(/%%/g, '%');
+  }
+  return { env, environmentFile };
+}
+
+/** The installed service's settings, or null when no service is installed (or its file cannot be read). */
+export function installedServiceSettings(platform: string = process.platform, home: string = os.homedir()): InstalledSettings | null {
+  const file = platform === 'darwin' ? launchAgentPath(home) : platform === 'linux' ? systemdUnitPath(home) : null;
+  if (!file || !existsSync(file)) return null;
+  try {
+    return readServiceSettings(readFileSync(file, 'utf8'));
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * This terminal's settings, with every Linear Hub setting it leaves unset taken from the installed service. Used by
+ * `npm run latest`, so its backup, its stop and the restarted service all use the database, port and folders the
+ * service really uses, even from a plain terminal.
+ */
+export function withInstalledSettings(env: NodeJS.ProcessEnv, installed: InstalledSettings | null): NodeJS.ProcessEnv {
+  const out: NodeJS.ProcessEnv = { ...env };
+  if (!installed) return out;
+  for (const key of PASS_THROUGH) {
+    if (!env[key]?.trim() && installed.env[key]) out[key] = installed.env[key];
+  }
+  return out;
+}
+
+/** Relative paths in the Linear Hub settings made absolute the way the server reads them (from server/). */
+export function absoluteServerPaths(env: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
+  const out: NodeJS.ProcessEnv = { ...env };
+  for (const key of PATH_VARS) {
+    const value = env[key]?.trim();
+    if (value) out[key] = path.resolve(serverDir, value);
+  }
+  return out;
+}
+
+export interface ServiceSpecOptions {
+  env?: NodeJS.ProcessEnv;
+  home?: string;
+  /** The service installed now (default: read from disk); null ignores it. */
+  installed?: InstalledSettings | null;
+  /** --fresh: this terminal's settings only (no installed service, no key file from an earlier install). */
+  fresh?: boolean;
+}
+
+/**
+ * The service to write. Settings set in this terminal win; any left unset are kept from the service installed before
+ * (`kept` says which), so a rebuild from a plain terminal, as `npm run latest` does, never drops the key hand-over or
+ * the off-site settings. When nothing names a key, the private key file written by an earlier install is used again.
+ */
+export function serviceSpec(platform: string = process.platform, opts: ServiceSpecOptions = {}): ServiceSpec & { kept: string[] } {
+  const home = opts.home ?? os.homedir();
+  const installed = opts.fresh ? null : opts.installed === undefined ? installedServiceSettings(platform, home) : opts.installed;
+  const terminal = opts.env ?? process.env;
+  const env = withInstalledSettings(terminal, installed);
+  const kept: string[] = PASS_THROUGH.filter((k) => env[k] !== terminal[k]);
   let secret: ServiceSecret | null = null;
   try {
-    secret = serviceSecretPlan(process.env, platform);
+    secret = serviceSecretPlan(env, platform, home);
   } catch {
     secret = null; // install says why and stops before writing anything (installEnvSecret)
+  }
+  const extra: Record<string, string> = { ...(secret?.env ?? {}) };
+  let environmentFile = secret?.environmentFile ?? null;
+  if (!secret && platform !== 'win32' && !opts.fresh) {
+    const keyFile = path.join(serviceKeyDir(platform, home, env), platform === 'darwin' ? 'app-secret' : 'linear-hub.env');
+    const namesAKey = Boolean(env.LM_APP_SECRET_FILE?.trim());
+    if (platform === 'linux' && installed?.environmentFile && existsSync(installed.environmentFile)) {
+      environmentFile = installed.environmentFile;
+      kept.push(`the app key file (${environmentFile})`);
+    } else if (!namesAKey && existsSync(keyFile)) {
+      // written by an earlier install from LM_APP_SECRET: without it the service could not open the locked data
+      if (platform === 'linux') environmentFile = keyFile;
+      else Object.assign(extra, macKeyFileEnv(env, home));
+      kept.push(`the app key file (${keyFile})`);
+    }
   }
   return {
     node: stableNodePath(),
     entry: SERVER_ENTRY,
     workDir: serverDir,
-    env: { ...serviceEnvironment(), ...(secret?.env ?? {}) },
-    log: platform === 'darwin' ? macLogPath() : '',
-    environmentFile: secret?.environmentFile ?? null,
+    env: { ...serviceEnvironment(env), ...extra },
+    log: platform === 'darwin' ? macLogPath(home) : '',
+    environmentFile,
+    kept,
   };
+}
+
+/** The line install prints about the settings it kept (null when it kept none). */
+function keptNote(kept: string[]): string | null {
+  if (!kept.length) return null;
+  return `Kept from the service installed before (this terminal does not set them): ${kept.join(', ')}. To use only this terminal's settings, run  npm run service:install -- --fresh`;
+}
+
+/** With --fresh: a warning when a key file kept for the service is now left out. */
+function freshNote(platform: string, home: string = os.homedir()): string | null {
+  const keyFile = path.join(serviceKeyDir(platform, home), platform === 'darwin' ? 'app-secret' : 'linear-hub.env');
+  if (process.env.LM_APP_SECRET || !existsSync(keyFile)) return null;
+  return `▲ --fresh: the app key file ${keyFile} from an earlier install is not used. If the database needs that key, the service will not start: set LM_APP_SECRET or LM_APP_SECRET_FILE, or install again without --fresh.`;
 }
 
 /**
@@ -266,6 +382,8 @@ const sdQuoteEnv = (s: string) => `"${s.replace(/\\/g, '\\\\').replace(/"/g, '\\
 /** systemd quoting for ExecStart=: as above, and `$` doubled, because ExecStart= expands `$VAR` and `${VAR}`. */
 const sdQuoteExec = (s: string) => sdQuoteEnv(s).replace(/\$/g, '$$$$');
 const sdUnquote = (s: string) => s.replace(/\$\$/g, '$').replace(/%%/g, '%').replace(/\\(.)/g, '$1');
+/** The reverse of sdQuoteEnv (inside the quotes): one pass, so an escaped `\\` before `%%` reads back right. */
+const sdUnquoteEnv = (s: string) => s.replace(/\\(.)|%(%)/g, (_m, esc: string | undefined, pct: string | undefined) => esc ?? pct ?? '');
 
 /** The systemd user unit. */
 export function systemdUnit(spec: ServiceSpec): string {
@@ -412,7 +530,8 @@ export function startInstalledService(): boolean {
 
 // ── command line ─────────────────────────────────────────────────────────────
 
-const port = Number(process.env.PORT ?? 4000);
+/** The port the service answers on: this terminal's PORT, else the installed service's (set in main). */
+let port = Number(process.env.PORT ?? 4000);
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
 function run(cmd: string, args: string[]): { ok: boolean; out: string } {
@@ -435,7 +554,7 @@ function requireBuiltClient(): void {
  * LM_APP_SECRET set in this terminal: hand it to the service through a private file outside the data folder (never
  * the service file itself, which is readable by others). Returns the line to print, or exits with the reason.
  */
-function installEnvSecret(platform: string, print: boolean): string | null {
+function installEnvSecret(platform: string, print: boolean, keyFileSetting?: string): string | null {
   let plan: ServiceSecret | null;
   try {
     plan = serviceSecretPlan(process.env, platform);
@@ -443,7 +562,7 @@ function installEnvSecret(platform: string, print: boolean): string | null {
     console.error(err instanceof Error ? err.message : String(err));
     process.exit(1);
   }
-  if (!plan) return checkKeyFileSetting();
+  if (!plan) return checkKeyFileSetting(keyFileSetting);
   if (print) return `# would write ${plan.file} (mode 600) holding LM_APP_SECRET (not shown here)`;
   const kept = writeServiceSecret(plan);
   return (
@@ -452,9 +571,9 @@ function installEnvSecret(platform: string, print: boolean): string | null {
   );
 }
 
-/** LM_APP_SECRET_FILE set: say if that file is missing or readable by others. */
-function checkKeyFileSetting(): string | null {
-  const raw = process.env.LM_APP_SECRET_FILE?.trim();
+/** LM_APP_SECRET_FILE set (here or kept from the installed service): say if that file is missing or readable by others. */
+function checkKeyFileSetting(setting: string | undefined): string | null {
+  const raw = setting?.trim();
   if (!raw) return null;
   const file = path.resolve(serverDir, raw);
   if (!existsSync(file)) return `▲ LM_APP_SECRET_FILE points at ${file}, which does not exist yet: a new database gets a new key there; an existing one will not start without its key.`;
@@ -516,8 +635,15 @@ function launchctlTarget(): { domain: string; target: string } {
   return { domain, target: `${domain}/${SERVICE_LABEL}` };
 }
 
-async function macInstall(print: boolean): Promise<void> {
-  const spec = serviceSpec('darwin');
+/** Prints what install kept from the service before, or left out with --fresh (as comments in a dry run). */
+function printSettingsNotes(spec: { kept: string[] }, platform: string, fresh: boolean, print: boolean): void {
+  for (const note of [keptNote(spec.kept), fresh ? freshNote(platform) : null]) {
+    if (note) console.log(print ? `# ${note}` : note);
+  }
+}
+
+async function macInstall(print: boolean, fresh: boolean): Promise<void> {
+  const spec = serviceSpec('darwin', { fresh });
   const plistPath = launchAgentPath();
   const plist = launchAgentPlist(spec);
   const { domain, target } = launchctlTarget();
@@ -525,15 +651,17 @@ async function macInstall(print: boolean): Promise<void> {
   if (print) {
     console.log(`# ${plistPath}\n${plist}`);
     console.log(`# then: launchctl bootstrap ${domain} "${plistPath}"   (older macOS: launchctl load -w "${plistPath}")`);
-    const keyNote = installEnvSecret('darwin', true);
+    const keyNote = installEnvSecret('darwin', true, spec.env.LM_APP_SECRET_FILE);
     if (keyNote) console.log(keyNote.startsWith('#') ? keyNote : `# ${keyNote}`);
+    printSettingsNotes(spec, 'darwin', fresh, true);
     if (!clientBuilt()) console.log(PRINT_BUILD_NOTE);
     if (privacy) console.log(`# warning: ${privacy}`);
     return;
   }
   requireBuiltClient();
-  const keyNote = installEnvSecret('darwin', false);
+  const keyNote = installEnvSecret('darwin', false, spec.env.LM_APP_SECRET_FILE);
   if (keyNote) console.log(keyNote);
+  printSettingsNotes(spec, 'darwin', fresh, false);
   if (privacy) console.warn(`▲ ${privacy}\n`);
   if (run('launchctl', ['print', target]).ok) {
     console.log('Replacing the background service installed earlier…');
@@ -599,21 +727,24 @@ async function macStatus(): Promise<void> {
 
 // Linux ──────────────────────────────────────────────────────────────────────
 
-async function linuxInstall(print: boolean): Promise<void> {
+async function linuxInstall(print: boolean, fresh: boolean): Promise<void> {
   const unitPath = systemdUnitPath();
-  const unit = systemdUnit(serviceSpec('linux'));
+  const spec = serviceSpec('linux', { fresh });
+  const unit = systemdUnit(spec);
   if (print) {
     console.log(`# ${unitPath}\n${unit}`);
     console.log(`# then: systemctl --user daemon-reload && systemctl --user enable --now ${SYSTEMD_UNIT}`);
     console.log('# to keep it running while nobody is logged in: loginctl enable-linger $USER');
-    const keyNote = installEnvSecret('linux', true);
+    const keyNote = installEnvSecret('linux', true, spec.env.LM_APP_SECRET_FILE);
     if (keyNote) console.log(keyNote.startsWith('#') ? keyNote : `# ${keyNote}`);
+    printSettingsNotes(spec, 'linux', fresh, true);
     if (!clientBuilt()) console.log(PRINT_BUILD_NOTE);
     return;
   }
   requireBuiltClient();
-  const keyNote = installEnvSecret('linux', false);
+  const keyNote = installEnvSecret('linux', false, spec.env.LM_APP_SECRET_FILE);
   if (keyNote) console.log(keyNote);
+  printSettingsNotes(spec, 'linux', fresh, false);
   run('systemctl', ['--user', 'stop', SYSTEMD_UNIT]);
   stopForegroundCopy();
   mkdirSync(path.dirname(unitPath), { recursive: true });
@@ -690,6 +821,7 @@ function windowsSteps(): void {
 
 async function main(argv: string[]): Promise<void> {
   const print = argv.includes('--print');
+  const fresh = argv.includes('--fresh');
   const platformFlag = argv.find((a) => a.startsWith('--platform='))?.slice('--platform='.length);
   const command = argv.find((a) => !a.startsWith('--')) ?? (print ? 'install' : undefined);
   if (platformFlag && !print) {
@@ -698,7 +830,7 @@ async function main(argv: string[]): Promise<void> {
   }
   const platform = (platformFlag ?? process.platform) as string;
   if (!command || !['install', 'uninstall', 'status'].includes(command)) {
-    console.log('Usage: npm run service:install | service:uninstall | service:status   (add -- --print for a dry run)');
+    console.log('Usage: npm run service:install | service:uninstall | service:status   (add -- --print for a dry run, -- --fresh to drop the settings of the service installed before)');
     process.exit(command ? 1 : 0);
   }
   if (platform === 'win32') return windowsSteps();
@@ -707,7 +839,8 @@ async function main(argv: string[]): Promise<void> {
     process.exit(1);
   }
   const mac = platform === 'darwin';
-  if (command === 'install') await (mac ? macInstall(print) : linuxInstall(print));
+  port = Number(withInstalledSettings(process.env, fresh ? null : installedServiceSettings(platform)).PORT ?? 4000);
+  if (command === 'install') await (mac ? macInstall(print, fresh) : linuxInstall(print, fresh));
   else if (command === 'uninstall') await (mac ? macUninstall(print) : linuxUninstall(print));
   else if (print) console.log(mac ? `launchctl print ${launchctlTarget().target}` : `systemctl --user status ${SYSTEMD_UNIT}`);
   else await (mac ? macStatus() : linuxStatus());
