@@ -14,6 +14,8 @@ import { getOutbox } from '@/features/gauges/outbox';
 import { CheckInOutboxReplay } from '@/features/checkins/CheckInOutboxReplay';
 // Release 1.3 slot (P2): the self-billing agreement, shown once to each field person who has not accepted it.
 import { AgreementPrompt } from '@/features/invoices/AgreementPrompt';
+// Trial mode: administrators see it on every page until the owner goes live.
+import { TrialBanner } from '@/features/access/TrialBanner';
 import { FOCUSABLE } from '../ui/Modal';
 import { NAV_ITEMS } from './nav';
 import { Sidebar, SIDEBAR_COLLAPSED_WIDTH, SIDEBAR_WIDTH } from './Sidebar';
@@ -180,6 +182,9 @@ export function AppShell({ user, onLogout, children, title, fluid }: AppShellPro
             throws hides itself (fallback null) rather than blanking the app. The wrapper is opaque (bg-bg) because the
             banners' soft tints are translucent in dark mode, and scrolled content must not show through them. */}
         <div className="sticky top-16 z-20 bg-bg">
+          <ErrorBoundary name="trial-banner" fallback={null}>
+            <TrialBanner />
+          </ErrorBoundary>
           <ErrorBoundary name="offline-banner" fallback={null}>
             <OfflineBanner gaugeNote={GAUGE_ROLES.includes(user.role)} />
           </ErrorBoundary>

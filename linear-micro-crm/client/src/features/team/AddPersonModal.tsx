@@ -7,7 +7,7 @@
 // Problems and the copy confirmation show inside the dialog, beside its buttons: a toast sits over a phone's footer.
 import { useEffect, useId, useRef, useState } from 'react';
 import { Check, Copy, UserPlus } from 'lucide-react';
-import { FIELD_ADD_POSITIONS, POSITION_LABELS, type AddPersonResult, type FieldAddPosition } from '@lm/shared';
+import { ACCESS_MESSAGES, FIELD_ADD_POSITIONS, POSITION_LABELS, setupCodeExpiryText, type AddPersonResult, type FieldAddPosition } from '@lm/shared';
 import { useCreateUser, useTeams } from '@/api/hooks';
 import { useCurrentUser } from '@/auth/AuthProvider';
 import { Button, Field, Input, Modal, Select } from '@/components/ui';
@@ -145,11 +145,14 @@ function AddPersonForm({ onClose, onSaved }: { onClose: () => void; onSaved: (r:
 }
 
 /**
- * "Sign-in details": shown once, straight after adding someone (the employee ID is hidden from non-admins afterwards),
- * so a tap beside the dialog does not close it (`persistent`); Done, the X and Escape do. The copy is confirmed on the
- * button and in a line under the instructions, not with a toast, which on a phone would cover Done.
+ * "Sign-in details": shown once, straight after adding someone (the employee ID is hidden from non-admins afterwards,
+ * and the one-time setup code is never shown again), so a tap beside the dialog does not close it (`persistent`);
+ * Done, the X and Escape do. The copy is confirmed on the button and in a line under the instructions, not with a
+ * toast, which on a phone would cover Done. Also used by the administrators' Add person form.
  */
-function SignInDetails({ person, onClose }: { person: AddPersonResult; onClose: () => void }) {
+export type SignInPerson = Pick<AddPersonResult, 'firstName' | 'lastName' | 'email' | 'employeeId' | 'teamName' | 'signInInstructions' | 'setupCode' | 'setupCodeExpiresAt' | 'setupCodeWithheld'>;
+
+export function SignInDetails({ person, onClose }: { person: SignInPerson; onClose: () => void }) {
   const textRef = useRef<HTMLPreElement>(null);
   const [copied, setCopied] = useState<'no' | 'yes' | 'failed'>('no');
   const name = fullName(person);
@@ -178,7 +181,7 @@ function SignInDetails({ person, onClose }: { person: AddPersonResult; onClose: 
       onClose={onClose}
       persistent
       title="Sign-in details"
-      description={`${name} can sign in now. Send them these details: this is the only time you see their employee ID. If it gets lost, an administrator can find it on the Team page.`}
+      description={`${name} can sign in now. Send them these details privately: this is the only time you see their setup code (and, unless you are an administrator, their employee ID). If the code gets lost, an administrator gives a new one on the Team page.`}
       size="md"
       footer={
         <>
@@ -211,6 +214,17 @@ function SignInDetails({ person, onClose }: { person: AddPersonResult; onClose: 
         <div className="sm:col-span-2">
           <dt className="text-xs text-muted">Employee ID</dt>
           <dd className="mt-0.5 font-mono text-2xl font-bold tracking-widest text-fg" data-testid="sign-in-employee-id">{person.employeeId}</dd>
+        </div>
+        <div className="sm:col-span-2">
+          <dt className="text-xs text-muted">One-time setup code</dt>
+          {person.setupCode ? (
+            <>
+              <dd className="mt-0.5 break-all font-mono text-2xl font-bold tracking-widest text-fg" data-testid="sign-in-setup-code">{person.setupCode}</dd>
+              {person.setupCodeExpiresAt && <dd className="mt-0.5 text-xs text-muted">{setupCodeExpiryText(person.setupCodeExpiresAt)}. It works once.</dd>}
+            </>
+          ) : (
+            <dd className="mt-0.5 text-sm text-warning" data-testid="sign-in-setup-code-withheld">{ACCESS_MESSAGES.setupCodeWithheld}</dd>
+          )}
         </div>
       </dl>
       {instructions && (

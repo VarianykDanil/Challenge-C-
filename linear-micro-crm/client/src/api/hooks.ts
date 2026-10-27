@@ -38,6 +38,8 @@ import type {
   Role,
   SalesEvent,
   SalesEventWithMeta,
+  SetupCodeIssued,
+  HiredSignIn,
   SmartInsights,
   StageChange,
   Team,
@@ -260,12 +262,22 @@ export function useRegenerateRecoveryCodes() {
   });
 }
 
-/** Admin: POST /users/:id/2fa/reset — clears another person's second factor (lost device) and signs them out everywhere. */
+/**
+ * Admin: POST /users/:id/2fa/reset — clears another person's second factor (lost device) and signs them out everywhere.
+ * Needs the admin's fresh two-step code; answers the one-time setup code they sign in with next.
+ */
 export function useResetUserTwoFactor(userId: number) {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: () => api<void>(`/users/${userId}/2fa/reset`, { method: 'POST' }),
+    mutationFn: (input: { code: string }) => api<SetupCodeIssued>(`/users/${userId}/2fa/reset`, { method: 'POST', json: input }),
     onSuccess: () => void qc.invalidateQueries({ queryKey: ['users'] }),
+  });
+}
+
+/** Admin: POST /users/:id/setup-code — a new one-time setup code for someone (the admin's fresh two-step code). */
+export function useIssueSetupCode(userId: number) {
+  return useMutation({
+    mutationFn: (input: { code: string }) => api<SetupCodeIssued>(`/users/${userId}/setup-code`, { method: 'POST', json: input }),
   });
 }
 
@@ -359,7 +371,8 @@ export interface FieldPersonInput {
 export function useCreateUser() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: (input: (Omit<UserInput, 'employeeId'> & { employeeId?: string; signInUrl?: string }) | FieldPersonInput) =>
+    // `code`: the admin's fresh two-step code, needed to create an administrator
+    mutationFn: (input: (Omit<UserInput, 'employeeId'> & { employeeId?: string; signInUrl?: string; code?: string }) | FieldPersonInput) =>
       api<AddPersonResult>('/users', { method: 'POST', json: input }),
     onSuccess: () => {
       void qc.invalidateQueries({ queryKey: ['users'] });
@@ -371,7 +384,8 @@ export function useCreateUser() {
 export function useUpdateUser() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: ({ id, ...patch }: Partial<User> & { id: number }) => api<UserWithTeam>(`/users/${id}`, { method: 'PATCH', json: patch }),
+    // `code`: the admin's fresh two-step code, needed to make someone an administrator or change their sign-in email
+    mutationFn: ({ id, ...patch }: Partial<User> & { id: number; code?: string }) => api<UserWithTeam>(`/users/${id}`, { method: 'PATCH', json: patch }),
     onSuccess: (user) => {
       void qc.invalidateQueries({ queryKey: ['users'] });
       void qc.invalidateQueries({ queryKey: ['teams'] });
@@ -715,7 +729,8 @@ export function useMoveCandidateStage() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: ({ id, stage, note, teamId, position }: { id: number; stage: CandidateStage; note?: string; /** hire only */ teamId?: number | null; /** hire only: trainee | field_rep */ position?: Position }) =>
-      api<CandidateWithMeta>(`/recruitment/candidates/${id}/stage`, { method: 'POST', json: { stage, note, ...(teamId !== undefined ? { teamId } : {}), ...(position ? { position } : {}) } }),
+      // a hire also answers the new account's Sign-in details (with its one-time setup code), shown once
+      api<CandidateWithMeta & { hiredSignIn?: HiredSignIn }>(`/recruitment/candidates/${id}/stage`, { method: 'POST', json: { stage, note, ...(teamId !== undefined ? { teamId } : {}), ...(position ? { position } : {}) } }),
     onSuccess: (_c, vars) => {
       invalidateRecruitment(qc);
       if (vars.stage === 'hired') {

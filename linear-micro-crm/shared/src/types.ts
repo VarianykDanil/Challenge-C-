@@ -648,6 +648,10 @@ export interface TwoFactorSetup {
 
 export interface TwoFactorEnabled {
   recoveryCodes: string[];
+  /** Over an insecure connection from another device the codes are not sent (none are kept): make new ones later. */
+  recoveryCodesWithheld?: boolean;
+  /** The sentence to show when they were withheld. */
+  message?: string;
 }
 
 export interface ApiError {

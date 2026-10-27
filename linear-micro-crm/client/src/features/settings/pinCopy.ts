@@ -126,7 +126,7 @@ export const PIN_COPY = {
     lockedUntil: (time: string) => `until ${time}`,
     reset: 'Reset PIN',
     confirmTitle: 'Reset their PIN?',
-    confirmBody: 'will be signed out of every device and will sign in with just their email and employee ID until they choose a new PIN.',
+    confirmBody: 'will be signed out of every device. They sign in next with their email, employee ID and the one-time setup code you get next, then choose a new PIN.',
     toast: 'PIN reset',
     set: 'PIN set',
     none: 'No PIN',

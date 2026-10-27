@@ -5,12 +5,13 @@
 import { useId, useState } from 'react';
 import { KeyRound, RotateCcw } from 'lucide-react';
 import clsx from 'clsx';
-import type { UserWithTeam } from '@lm/shared';
+import type { SetupCodeIssued, UserWithTeam } from '@lm/shared';
 import { useResetUserPin, useUserPinStatus } from '@/api/pin';
 import { useCurrentUser } from '@/auth/AuthProvider';
-import { Badge, Button, Skeleton, useToast } from '@/components/ui';
-import { ConfirmDialog } from '@/features/common/ConfirmDialog';
-import { errorMessage } from '@/features/common/QueryStates';
+import { Badge, Button, Skeleton } from '@/components/ui';
+import { SetupCodeDialog } from '@/features/access/SetupCodeDialog';
+import { StepUpDialog } from '@/features/access/StepUpDialog';
+import { apiMessage } from '@/features/common/QueryStates';
 import { formatDate, fullName } from '@/lib/format';
 import { PIN_COPY, pinUnlockTime } from './pinCopy';
 
@@ -28,20 +29,26 @@ export function PinResetSection({ user, className }: PinResetSectionProps) {
 function PinResetCard({ user, className }: PinResetSectionProps) {
   const t = PIN_COPY.admin;
   const uid = useId();
-  const toast = useToast();
   const status = useUserPinStatus(user.id);
   const reset = useResetUserPin(user.id);
   const [confirm, setConfirm] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  // the one-time setup code their next sign-in needs, shown once
+  const [issued, setIssued] = useState<SetupCodeIssued | null>(null);
   const s = status.data;
 
-  async function onConfirm() {
-    try {
-      await reset.mutateAsync();
-      toast.success(t.toast, fullName(user));
-      setConfirm(false);
-    } catch (err) {
-      toast.error('Could not reset', errorMessage(err));
-    }
+  function onConfirm(code: string) {
+    setError(null);
+    reset.mutate(
+      { code },
+      {
+        onSuccess: (r) => {
+          setConfirm(false);
+          setIssued(r);
+        },
+        onError: (err) => setError(apiMessage(err, 'Could not reset the PIN.')),
+      },
+    );
   }
 
   return (
@@ -70,23 +77,38 @@ function PinResetCard({ user, className }: PinResetSectionProps) {
           type="button"
           variant="outline"
           className="shrink-0"
-          onClick={() => setConfirm(true)}
+          onClick={() => { setError(null); setConfirm(true); }}
           disabled={!s || (!s.hasPin && !s.locked)}
           leftIcon={<RotateCcw aria-hidden />}
         >
           {t.reset}
         </Button>
       </div>
-      <ConfirmDialog
+      <StepUpDialog
         open={confirm}
         onClose={() => setConfirm(false)}
-        onConfirm={() => void onConfirm()}
-        tone="danger"
+        onConfirm={onConfirm}
         title={t.confirmTitle}
         description={`${fullName(user)} ${t.confirmBody}`}
         confirmLabel={t.reset}
-        loading={reset.isPending}
+        busy={reset.isPending}
+        error={error}
       />
+      {issued && (
+        <SetupCodeDialog
+          name={fullName(user)}
+          firstName={user.firstName}
+          email={user.email}
+          idLabel="Employee ID"
+          idValue={user.employeeId}
+          setupCode={issued.setupCode}
+          expiresAt={issued.expiresAt}
+          withheld={issued.withheld}
+          intro={`${t.toast}: ${fullName(user)} is signed out everywhere.`}
+          next="choose a new PIN"
+          onClose={() => setIssued(null)}
+        />
+      )}
     </section>
   );
 }

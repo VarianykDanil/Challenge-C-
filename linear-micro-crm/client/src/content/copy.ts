@@ -257,7 +257,7 @@ export const COPY = {
       body: 'Reset this if they have lost their phone. They are signed out everywhere and set it up again, with a new code, when they next sign in.',
       reset: 'Reset two-step verification',
       confirmTitle: 'Reset two-step verification?',
-      confirmBody: 'will be signed out of every device and will set up two-step verification again, with a new authenticator code, when they next sign in.',
+      confirmBody: 'will be signed out of every device. They sign in next with their email, employee ID and the one-time setup code you get next, then set up two-step verification again.',
       toast: 'Two-step verification reset',
       notSetUp: 'Not set up',
     },

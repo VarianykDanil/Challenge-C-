@@ -4,7 +4,7 @@
 // refreshes it too.
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import type {
-  Campaign, CampaignBriefInput, CampaignPage, ClientAccount, ClientAccountUpdateInput, ClientInviteInput, ClientInviteResult, ClientPortal, ClientPost,
+  Campaign, CampaignBriefInput, CampaignPage, ClientAccount, ClientAccountReset, ClientAccountUpdateInput, ClientInviteInput, ClientInviteResult, ClientPortal, ClientPost,
   ClientPostDecisionInput, ClientPostInput, ClientPostStatus,
 } from '@lm/shared';
 import { api, qs } from './client';
@@ -127,18 +127,26 @@ export function useInviteClient(campaignId: number) {
 export function useUpdateClientAccount() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: ({ id, ...patch }: ClientAccountUpdateInput & { id: number }) => api<ClientAccount>(`/client-accounts/${id}`, { method: 'PATCH', json: patch }),
+    // `code`: the admin's fresh two-step code, needed when the sign-in email changes
+    mutationFn: ({ id, ...patch }: ClientAccountUpdateInput & { id: number; code?: string }) => api<ClientAccount>(`/client-accounts/${id}`, { method: 'PATCH', json: patch }),
     onSuccess: () => invalidateClient(qc),
   });
 }
 
+/** POST /client-accounts/:id/reset-pin — the admin's fresh two-step code; answers the setup code their next sign-in needs. */
 export function useResetClientPin() {
   const qc = useQueryClient();
-  return useMutation({ mutationFn: (id: number) => api<ClientAccount>(`/client-accounts/${id}/reset-pin`, { method: 'POST' }), onSuccess: () => invalidateClient(qc) });
+  return useMutation({
+    mutationFn: ({ id, code }: { id: number; code: string }) => api<ClientAccountReset>(`/client-accounts/${id}/reset-pin`, { method: 'POST', json: { code } }),
+    onSuccess: () => invalidateClient(qc),
+  });
 }
 
-/** Release 1.4 (package S): POST /client-accounts/:id/reset-2fa — a lost phone; they set it up again at their next sign-in. */
+/** POST /client-accounts/:id/reset-2fa — a lost phone; the admin's fresh code; answers the setup code for their next sign-in. */
 export function useResetClientTwoFactor() {
   const qc = useQueryClient();
-  return useMutation({ mutationFn: (id: number) => api<ClientAccount>(`/client-accounts/${id}/reset-2fa`, { method: 'POST' }), onSuccess: () => invalidateClient(qc) });
+  return useMutation({
+    mutationFn: ({ id, code }: { id: number; code: string }) => api<ClientAccountReset>(`/client-accounts/${id}/reset-2fa`, { method: 'POST', json: { code } }),
+    onSuccess: () => invalidateClient(qc),
+  });
 }

@@ -8,6 +8,7 @@ import { useEnableTwoFactor, useStartTwoFactorSetup } from '@/api/hooks';
 import { useCurrentUser } from '@/auth/AuthProvider';
 import { apiMessage, errorMessage } from '@/features/common';
 import { COPY } from '@/content/copy';
+import { ACCESS_MESSAGES } from '@lm/shared';
 import { copyToClipboard } from '@/lib/files';
 import { OneTimeCodeInput, isCompleteCode } from './OneTimeCodeInput';
 import { RecoveryCodesPanel } from './RecoveryCodesPanel';
@@ -42,6 +43,9 @@ function SetupFlow({ onClose }: { onClose: () => void }) {
   const [codeError, setCodeError] = useState<string | null>(null);
   const [locked, setLocked] = useState(false);
   const [codes, setCodes] = useState<string[]>([]);
+  // over an insecure connection from another device the server does not send the recovery codes (they make new ones
+  // later on a secure connection)
+  const [withheld, setWithheld] = useState<string | null>(null);
   const [saved, setSaved] = useState(false);
   const [keyCopied, setKeyCopied] = useState(false);
   const codeRef = useRef<HTMLInputElement>(null);
@@ -68,6 +72,7 @@ function SetupFlow({ onClose }: { onClose: () => void }) {
     try {
       const res = await enable.mutateAsync({ code: candidate });
       setCodes(res.recoveryCodes);
+      setWithheld(res.recoveryCodesWithheld ? (res.message ?? ACCESS_MESSAGES.recoveryCodesWithheld) : null);
       setStep('codes');
     } catch (e) {
       if (e instanceof ApiError && e.status === 429) {
@@ -113,7 +118,7 @@ function SetupFlow({ onClose }: { onClose: () => void }) {
         <Button type="submit" form={formId} loading={enable.isPending} disabled={locked || !isCompleteCode(code)}>{t.turnOn}</Button>
       </>
     ) : (
-      <Button onClick={finish} disabled={!saved}>{COPY.security.recovery.done}</Button>
+      <Button onClick={finish} disabled={!saved && !withheld}>{COPY.security.recovery.done}</Button>
     );
 
   return (
@@ -222,7 +227,11 @@ function SetupFlow({ onClose }: { onClose: () => void }) {
             <h4 className="font-sans text-sm font-semibold tracking-normal text-fg">{t.codesTitle}</h4>
             <p className="mt-1 text-sm leading-relaxed text-muted">{t.codesBody}</p>
           </div>
-          <RecoveryCodesPanel codes={codes} email={user.email} saved={saved} onSavedChange={setSaved} />
+          {withheld ? (
+            <p role="status" className="rounded-lg border border-warning/30 bg-warning-soft p-3 text-sm text-fg" data-testid="recovery-codes-withheld">{withheld}</p>
+          ) : (
+            <RecoveryCodesPanel codes={codes} email={user.email} saved={saved} onSavedChange={setSaved} />
+          )}
         </div>
       )}
     </Modal>
