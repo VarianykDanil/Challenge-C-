@@ -21,7 +21,7 @@
     "latest": "NODE_NO_WARNINGS=1 node server/src/update.ts",
     "share": "npm run share -w server",
     "seed": "npm run seed -w server",
-    "backup": "npm run backup -w server",
+    "backup": "npm run backup -w server --",
     "backups": "npm run backups -w server",
     "restore": "npm run restore -w server --",
     "pin:reset": "npm run pin:reset -w server --",
