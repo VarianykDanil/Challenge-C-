@@ -169,6 +169,7 @@ check "the status line says ok" grep -q '^ok ' /var/lib/linear-hub/offsite-sync.
 if linear-hub restore-test >/tmp/restoretest.log 2>&1; then ok "linear-hub restore-test passes"; else bad "linear-hub restore-test passes"; tail -30 /tmp/restoretest.log; fi
 check "…it names the copy it tested" grep -q "Restore test passed: linear-" /tmp/restoretest.log
 check "…and leaves no decrypted copy behind" bash -c "! ls -d /var/lib/linear-hub/restore-test.* 2>/dev/null"
+check "…and stops its scratch copy (nothing answers on the test port)" bash -c "! curl -fsS -m 3 http://127.0.0.1:$LH_RESTORE_TEST_PORT/api/health"
 
 echo "== 5b. Bringing the trial database from the office Mac (DEPLOY.md step 5)"
 # A stand-in for the Mac: its own demo database, key and folders, made by Linear Hub itself, then one encrypted copy
@@ -184,12 +185,14 @@ mac_ok=0
 for _ in $(seq 1 45); do curl -fsS "http://127.0.0.1:$LH_RESTORE_TEST_PORT/api/health" 2>/dev/null | grep -q '"ok":true' && { mac_ok=1; break; }; sleep 2; done
 pkill -f "[n]ode server/src/index.ts" || true
 sleep 2
-check "the stand-in Mac made its own demo database" test "$mac_ok" = 1
+check "the stand-in Mac made its own demo database" test "$mac_ok" = 1 -a -s "$MAC/linear.sqlite"
 as_mac npm run --silent backup -- --new-passphrase "$MAC/move-pass" >/tmp/mac-pass.log 2>&1 || true
 check "npm run backup -- --new-passphrase made the move passphrase (mode 600)" test "$(stat -c '%a' "$MAC/move-pass" 2>/dev/null)" = 600
 as_mac LM_OFFSITE_DIR="$MAC/move" LM_BACKUP_PASSPHRASE_FILE="$MAC/move-pass" npm run --silent backup >/tmp/mac-backup.log 2>&1 || true
 move_file=$(find "$MAC/move" -maxdepth 1 -name 'linear-*.lhbk' | head -n1)
-check "the Mac's backup wrote one encrypted copy for the move" test -n "$move_file"
+if [[ -n $move_file ]]; then ok "the Mac's backup wrote one encrypted copy for the move"; else
+  bad "the Mac's backup wrote one encrypted copy for the move"; tail -20 /tmp/mac-backup.log; exit 1
+fi
 server_key_before=$(sha256sum /etc/linear-hub/keys/app-secret | cut -c1-16)
 cp "$move_file" /root/
 if linear-hub import "/root/$(basename "$move_file")" --passphrase-file "$MAC/move-pass" --yes --forget-payments >/tmp/import.log 2>&1; then
