@@ -2,6 +2,7 @@ import { useEffect, useId, useRef, useState, type CSSProperties, type ReactNode,
 import { createPortal } from 'react-dom';
 import { X } from 'lucide-react';
 import clsx from 'clsx';
+import { DIALOG_OPEN_EVENT } from './Toast';
 
 export interface ModalProps {
   open: boolean;
@@ -90,6 +91,8 @@ export function Modal({ open, onClose, title, description, children, footer, siz
     if (!open) return;
     restoreRef.current = document.activeElement as HTMLElement | null;
     openCount += 1;
+    // heads-up toasts (Needs attention) make way for the dialog (components/ui/Toast.tsx)
+    window.dispatchEvent(new Event(DIALOG_OPEN_EVENT));
     const prevOverflow = document.body.style.overflow;
     const prevPad = document.body.style.paddingRight;
     const scrollbar = window.innerWidth - document.documentElement.clientWidth;

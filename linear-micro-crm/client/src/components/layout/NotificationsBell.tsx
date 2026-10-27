@@ -138,6 +138,7 @@ export function NotificationsBell({ hasNotifications = false, onNotifications }:
         description: item.body,
         tone: item.key.startsWith('pay:paid:') ? 'success' : item.severity === 'danger' ? 'error' : item.severity === 'warning' ? 'warning' : 'info',
         duration: TOAST_MS,
+        notice: true,
         action: {
           label: item.actionLabel ?? 'Open',
           onClick: () => {
