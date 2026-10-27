@@ -1,0 +1,4 @@
+# Node.js from NodeSource, not Ubuntu's older nodejs package (deploy/install.sh).
+Package: nodejs
+Pin: origin deb.nodesource.com
+Pin-Priority: 600

@@ -1,0 +1,274 @@
+#!/usr/bin/env bash
+# The linear-hub command (written by deploy/install.sh): everyday jobs on a Linear Hub server, run with sudo.
+# It runs Linear Hub's own npm commands as the service user, with the server's settings, and stops and starts the
+# service around the commands that need the database to themselves. `sudo linear-hub help` lists everything.
+set -Eeuo pipefail
+
+SERVICE_USER=@SERVICE_USER@
+HOME_DIR=@HOME_DIR@
+APP_ROOT=@APP_ROOT@
+ENV_FILE=@ENV_FILE@
+DATA_DIR=@DATA_DIR@
+OFFSITE_CONF=@OFFSITE_CONF@
+DOMAIN=@DOMAIN@
+APP_PORT=@APP_PORT@
+NODE_BIN=@NODE_BIN@
+RCLONE_CONF=@RCLONE_CONF@
+SERVICE=linear-hub.service
+TEST_PORT=4100
+
+say() { printf '%s\n' "$*"; }
+ok() { printf '  ✔ %s\n' "$*"; }
+warn() { printf '  ▲ %s\n' "$*" >&2; }
+die() {
+  printf '✖ %s\n' "$*" >&2
+  exit 1
+}
+
+usage() {
+  cat <<EOF
+linear-hub: everyday jobs on this Linear Hub server (https://$DOMAIN). Run with sudo.
+
+  status              running? does https answer? newest backup and off-site copy, free disk
+  logs [-f]           the service log (-f keeps following it)
+  start | stop | restart
+  update [TAG]        back up, check the backup, update the code, start again (TAG: move to that release)
+  import FILE.lhbk    bring a database from another computer (asks that copy's passphrase), then start
+  golive              end the trial: removes the demo company, makes the first owner (stops the service meanwhile)
+  restore FILE        put a backup back (stops the service meanwhile; lists any payments it would forget)
+  restore-test        open the newest off-site copy in a scratch folder, start it, check it, then delete it
+  offsite-sync        copy the encrypted backups off this server now
+  key:restore         put the app key back from the recovery sheet (stops the service meanwhile)
+  recovery-sheet      print the recovery sheet (the owner keeps it locked away)
+  doctor | backup | backups | setup-code EMAIL | 2fa:reset EMAIL | pin:reset EMAIL
+                      Linear Hub's own commands, run with this server's settings
+  help                this text
+EOF
+}
+
+[[ ${1:-help} == help || ${1:-} == --help || ${1:-} == -h ]] && {
+  usage
+  exit 0
+}
+[[ $EUID == 0 ]] || die "Run it with sudo:  sudo linear-hub $*"
+
+have_systemd() { [[ -d /run/systemd/system ]]; }
+
+# The settings file as NAME=value words, read without running it.
+settings() { grep -E '^[A-Za-z_][A-Za-z0-9_]*=' "$ENV_FILE" || true; }
+setting() { settings | grep -E "^$1=" | tail -n1 | cut -d= -f2-; }
+offsite_setting() { grep -E "^$1=" "$OFFSITE_CONF" 2>/dev/null | tail -n1 | cut -d= -f2-; }
+
+# app [--without NAME]… [NAME=value…] command…: run as the service user, in the app folder, with the settings.
+app() {
+  local skip=' ' line
+  while [[ ${1:-} == --without ]]; do
+    skip+="$2 "
+    shift 2
+  done
+  local vars=()
+  while IFS= read -r line; do
+    [[ $skip == *" ${line%%=*} "* ]] && continue
+    vars+=("$line")
+  done < <(settings)
+  (cd "$APP_ROOT" && runuser -u "$SERVICE_USER" -- env -i HOME="$HOME_DIR" \
+    PATH="$(dirname "$NODE_BIN"):/usr/local/bin:/usr/bin:/bin" LANG=C.UTF-8 "${vars[@]}" "$@")
+}
+
+npm_script() { # npm_script NAME [args…]
+  local name=$1
+  shift
+  if (($#)); then app npm run --silent "$name" -- "$@"; else app npm run --silent "$name"; fi
+}
+
+healthy() { curl -fsS --max-time 5 "$1" 2>/dev/null | grep -q '"ok":true'; }
+
+wait_healthy() { # wait_healthy URL SECONDS
+  local i
+  for ((i = 0; i < $2; i += 2)); do
+    healthy "$1" && return 0
+    sleep 2
+  done
+  return 1
+}
+
+service_start() {
+  if have_systemd; then
+    systemctl start "$SERVICE"
+    if wait_healthy "http://127.0.0.1:$APP_PORT/api/health" 90; then ok "Linear Hub is running"; else
+      warn "Linear Hub did not answer within 90 seconds. Its log:"
+      journalctl -u "$SERVICE" -n 30 --no-pager || true
+      return 1
+    fi
+  else
+    warn "No systemd here: start Linear Hub yourself."
+  fi
+}
+
+service_stop() {
+  if have_systemd && systemctl is-active --quiet "$SERVICE"; then
+    systemctl stop "$SERVICE"
+    ok "Linear Hub stopped for this job"
+  fi
+}
+
+# with_service_stopped command…: stop, run, start again (also when the command fails).
+with_service_stopped() {
+  service_stop
+  local rc=0
+  "$@" || rc=$?
+  service_start || true
+  return "$rc"
+}
+
+newest() { # newest DIR PATTERN: the newest matching file name, by name (names carry the date and time)
+  find "$1" -maxdepth 1 -type f -name "$2" -printf '%f\n' 2>/dev/null | sort | tail -n1
+}
+
+cmd_status() {
+  say "Linear Hub on $(hostname) — https://$DOMAIN"
+  if have_systemd; then
+    if systemctl is-active --quiet "$SERVICE"; then ok "service: running (since $(systemctl show -p ActiveEnterTimestamp --value "$SERVICE"))"; else warn "service: $(systemctl is-active "$SERVICE" || true)"; fi
+  fi
+  local body
+  if body=$(curl -fsS --max-time 5 "http://127.0.0.1:$APP_PORT/api/health" 2>/dev/null); then ok "answers on this server: $body"; else warn "does not answer on 127.0.0.1:$APP_PORT"; fi
+  if healthy "https://$DOMAIN/api/health"; then ok "https://$DOMAIN answers (certificate fine)"; else warn "https://$DOMAIN does not answer from here (DNS, certificate or Caddy: journalctl -u caddy -n 50)"; fi
+  ok "code: $(app git -C "$APP_ROOT" describe --tags --always --dirty 2>/dev/null || printf 'unknown')"
+  local b o
+  b=$(newest "$(setting LM_BACKUP_DIR)" 'linear-*.sqlite')
+  o=$(newest "$(setting LM_OFFSITE_DIR)" 'linear-*.lhbk')
+  if [[ -n $b ]]; then ok "newest backup: $b"; else warn "no backup yet (Linear Hub makes one 10 minutes after it starts, then nightly)"; fi
+  if [[ -n $o ]]; then ok "newest encrypted copy: $o"; else warn "no encrypted copy yet (needs LM_OFFSITE_DIR and LM_BACKUP_PASSPHRASE_FILE, and Linear Hub 1.5 or newer)"; fi
+  local status_file
+  status_file=$(offsite_setting STATUS_FILE)
+  if [[ $(offsite_setting OFFSITE_ENABLED) != 1 ]]; then
+    warn "off-site copies: not set up — the backups are on this server only"
+  elif [[ -r $status_file ]]; then
+    local line
+    line=$(cat "$status_file")
+    case $line in ok*) ok "off-site: $line" ;; *) warn "off-site: $line" ;; esac
+  else
+    warn "off-site: no copy made yet (sudo linear-hub offsite-sync)"
+  fi
+  if have_systemd; then
+    say "  next off-site copy: $(systemctl show -p NextElapseUSecRealtime --value linear-hub-offsite.timer 2>/dev/null || printf 'unknown')"
+  fi
+  say "  free disk: $(df -h --output=avail "$DATA_DIR" | tail -n1 | tr -d ' ') in $DATA_DIR"
+  say "  For a full check:  sudo linear-hub doctor"
+}
+
+cmd_update() {
+  local to=${1:-}
+  [[ -z $to || $to =~ ^[A-Za-z0-9][A-Za-z0-9._/-]*$ ]] || die "$to is not a release name"
+  service_stop
+  local rc=0
+  if [[ -n $to ]]; then
+    say "Backing up first…"
+    npm_script backup || rc=$?
+    if ((rc == 0)); then
+      app git fetch --tags --quiet origin && app git checkout --quiet "$to" && app npm run --silent setup || rc=$?
+    fi
+  elif [[ -z $(app git -C "$APP_ROOT" symbolic-ref -q HEAD 2>/dev/null || true) ]]; then
+    service_start || true
+    die "This server runs a fixed release ($(app git describe --tags --always)). Say which release to move to:  sudo linear-hub update v1.5.1"
+  elif grep -q -- '--no-start' "$APP_ROOT/server/src/update.ts" 2>/dev/null; then
+    npm_script latest --no-start || rc=$? # backs up and checks the backup before it changes anything
+  else
+    say "Backing up first…"
+    npm_script backup && app git pull --ff-only && app npm run --silent setup || rc=$?
+  fi
+  service_start || rc=$?
+  ((rc == 0)) && ok "updated to $(app git describe --tags --always)"
+  return "$rc"
+}
+
+cmd_import() {
+  local file=${1:-}
+  [[ -n $file && -f $file ]] || die "Give the file to bring, e.g.  sudo linear-hub import /root/linear-2026-11-02-1400.lhbk"
+  [[ $file == *.lhbk ]] || warn "$file is not an encrypted .lhbk copy; trying it as a plain backup."
+  install -d -m 0700 -o "$SERVICE_USER" -g "$SERVICE_USER" "$DATA_DIR/import"
+  local copy
+  copy=$DATA_DIR/import/$(basename "$file")
+  install -m 0600 -o "$SERVICE_USER" -g "$SERVICE_USER" "$file" "$copy"
+  say "Bringing $(basename "$file") in. It asks for the passphrase that copy was made with, then to confirm."
+  # Without the server's own passphrase file, so restore asks for the passphrase of the copy being brought.
+  local rc=0
+  with_service_stopped app --without LM_BACKUP_PASSPHRASE_FILE npm run --silent restore -- "$copy" || rc=$?
+  rm -f "$copy"
+  ((rc == 0)) && say "Next: end the trial with  sudo linear-hub golive"
+  return "$rc"
+}
+
+cmd_restore_test() {
+  grep -q 'lhbk' "$APP_ROOT/server/src/restore.ts" 2>/dev/null || die "The restore test needs Linear Hub 1.5 or newer (encrypted off-site copies)."
+  local tmp target file source
+  tmp=$(mktemp -d "$DATA_DIR/restore-test.XXXXXX")
+  chown "$SERVICE_USER:$SERVICE_USER" "$tmp"
+  # The scratch folder holds a decrypted copy of the database: it goes whatever happens.
+  trap 'kill "${server_pid:-0}" 2>/dev/null || true; rm -rf "$tmp"' EXIT
+  target=$(offsite_setting OFFSITE_TARGET)
+  if [[ $(offsite_setting OFFSITE_ENABLED) == 1 && -n $target ]]; then
+    file=$(app rclone --config "$RCLONE_CONF" lsf --files-only --include 'linear-*.lhbk' "$target/backups" 2>/dev/null | sort | tail -n1) || true
+    [[ -n $file ]] || die "No encrypted copy found in $target/backups yet (sudo linear-hub offsite-sync)."
+    say "Downloading $file from $target…"
+    app rclone --config "$RCLONE_CONF" copy "$target/backups/$file" "$tmp/"
+    source="the off-site store ($target)"
+  else
+    file=$(newest "$(setting LM_OFFSITE_DIR)" 'linear-*.lhbk')
+    [[ -n $file ]] || die "No encrypted copy on this server yet: check LM_OFFSITE_DIR and LM_BACKUP_PASSPHRASE_FILE, then sudo linear-hub backup."
+    install -m 0600 -o "$SERVICE_USER" -g "$SERVICE_USER" "$(setting LM_OFFSITE_DIR)/$file" "$tmp/$file"
+    source="this server (no off-site store is set up)"
+  fi
+  local scratch=(DB_PATH="$tmp/data/linear.sqlite" LM_APP_SECRET_FILE="$tmp/data/app-secret"
+    LM_UPLOADS_DIR="$tmp/data/uploads" LM_STATEMENTS_DIR="$tmp/data/statements" LM_BACKUP_DIR="$tmp/data/backups"
+    PORT="$TEST_PORT" HOST=127.0.0.1 LM_BACKUP=0 LM_PAYMENTS_JOB=0 LM_STATEMENTS_JOB=0 LM_DEMO_ACCOUNTS=0)
+  app mkdir -p "$tmp/data"
+  say "Opening it in a scratch folder…"
+  app --without LM_OFFSITE_DIR "${scratch[@]}" npm run --silent restore -- "$tmp/$file" --yes >"$tmp/restore.log" 2>&1 || {
+    cat "$tmp/restore.log"
+    die "The restore test FAILED: the copy could not be opened (log above). Tell Noryn today."
+  }
+  ok "decrypted with the passphrase, checked, and its app key found"
+  say "Starting it on 127.0.0.1:$TEST_PORT (payments, Gmail and backups switched off for the test)…"
+  app --without LM_OFFSITE_DIR "${scratch[@]}" NODE_ENV=production "$NODE_BIN" server/src/index.ts >"$tmp/server.log" 2>&1 &
+  server_pid=$!
+  if ! wait_healthy "http://127.0.0.1:$TEST_PORT/api/health" 60; then
+    tail -n 30 "$tmp/server.log"
+    die "The restore test FAILED: the restored copy did not start (log above). Tell Noryn today."
+  fi
+  local counts
+  counts=$(sqlite3 -readonly "$tmp/data/linear.sqlite" \
+    "SELECT (SELECT COUNT(*) FROM users) || ' people, ' || (SELECT COUNT(*) FROM gauge_entries) || ' gauge entries, newest ' || COALESCE((SELECT MAX(date) FROM gauge_entries), 'none')" 2>/dev/null) || counts='(counts not available)'
+  ok "it started and answered: $counts"
+  say "Restore test passed: $file from $source, on $(date '+%d %b %Y'). Write the date in the go-live checklist."
+}
+
+cmd_offsite_sync() {
+  if have_systemd; then
+    systemctl start linear-hub-offsite.service || true
+    journalctl -u linear-hub-offsite.service -n 15 --no-pager -o cat || true
+  else
+    runuser -u "$SERVICE_USER" -- /usr/local/lib/linear-hub/offsite-sync.sh || true
+  fi
+  local status_file
+  status_file=$(offsite_setting STATUS_FILE)
+  [[ -r $status_file ]] && say "Result: $(cat "$status_file")"
+  [[ -r $status_file && $(cat "$status_file") == ok* ]]
+}
+
+cmd=${1:-help}
+shift || true
+case $cmd in
+  status) cmd_status ;;
+  logs) if [[ ${1:-} == -f ]]; then journalctl -u "$SERVICE" -f; else journalctl -u "$SERVICE" -n 200 --no-pager; fi ;;
+  start) service_start ;;
+  stop) service_stop ;;
+  restart) service_stop && service_start ;;
+  update) cmd_update "$@" ;;
+  import) cmd_import "$@" ;;
+  restore-test) cmd_restore_test ;;
+  offsite-sync) cmd_offsite_sync ;;
+  golive | restore | key:restore | seed) with_service_stopped npm_script "$cmd" "$@" ;;
+  doctor | backup | backups | recovery-sheet | setup-code | 2fa:reset | pin:reset | share) npm_script "$cmd" "$@" ;;
+  *) die "Unknown job: $cmd (sudo linear-hub help lists them)" ;;
+esac

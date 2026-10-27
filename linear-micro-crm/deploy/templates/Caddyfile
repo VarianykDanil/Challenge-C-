@@ -1,0 +1,17 @@
+# Linear Hub (written by deploy/install.sh; run the installer again rather than editing this by hand).
+# Caddy gets the HTTPS certificate for the site below by itself, renews it, and sends plain http:// visitors to
+# https://. Linear Hub listens on 127.0.0.1 only, so Caddy is the only way in. Linear Hub compresses its answers and
+# sends the security headers (and HSTS) itself.
+{
+	email @ACME_EMAIL@
+}
+
+@DOMAIN@ {
+	reverse_proxy 127.0.0.1:@APP_PORT@
+	log {
+		output file /var/log/caddy/linear-hub.log {
+			roll_size 10MiB
+			roll_keep 5
+		}
+	}
+}

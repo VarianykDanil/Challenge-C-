@@ -1,0 +1,27 @@
+# Linear Hub (written by deploy/install.sh): copy the encrypted backups off this server. Started by the timer.
+[Unit]
+Description=Linear Hub: copy the encrypted backups off this server
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=@SERVICE_USER@
+Group=@SERVICE_USER@
+ExecStart=@LIB_DIR@/offsite-sync.sh
+Environment=HOME=@HOME_DIR@
+Environment=RCLONE_CACHE_DIR=@DATA_DIR@/.cache/rclone
+Nice=10
+IOSchedulingClass=idle
+TimeoutStartSec=6h
+NoNewPrivileges=yes
+ProtectSystem=strict
+ReadWritePaths=@DATA_DIR@
+ProtectHome=yes
+PrivateTmp=yes
+PrivateDevices=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectControlGroups=yes
+RestrictSUIDSGID=yes
+CapabilityBoundingSet=

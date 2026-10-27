@@ -1,0 +1,53 @@
+# Linear Hub (written by deploy/install.sh; run the installer again rather than editing this by hand).
+[Unit]
+Description=Linear Hub
+Documentation=file://@APP_ROOT@/docs/DEPLOY.md
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=@SERVICE_USER@
+Group=@SERVICE_USER@
+WorkingDirectory=@APP_ROOT@/server
+EnvironmentFile=@ENV_FILE@
+Environment=NODE_ENV=production
+ExecStart=@NODE_BIN@ src/index.ts
+Restart=always
+RestartSec=5
+# Exit code 78: the app key is missing or does not fit the database. Restarting cannot fix that; the log says how
+# to put the key back (sudo linear-hub key:restore).
+RestartPreventExitStatus=78
+TimeoutStopSec=30
+UMask=0077
+
+# Locked down: the app may write only its data folder; it cannot gain privileges, see other processes, change the
+# system, load kernel modules or open raw network sockets.
+NoNewPrivileges=yes
+ProtectSystem=strict
+ReadWritePaths=@DATA_DIR@
+ProtectHome=yes
+PrivateTmp=yes
+PrivateDevices=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectKernelLogs=yes
+ProtectControlGroups=yes
+ProtectClock=yes
+ProtectHostname=yes
+ProtectProc=invisible
+RestrictNamespaces=yes
+RestrictRealtime=yes
+RestrictSUIDSGID=yes
+LockPersonality=yes
+RemoveIPC=yes
+CapabilityBoundingSet=
+AmbientCapabilities=
+SystemCallArchitectures=native
+SystemCallFilter=@system-service
+SystemCallErrorNumber=EPERM
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6 AF_NETLINK
+# MemoryDenyWriteExecute stays off: Node's JavaScript compiler needs memory it can write and then run.
+
+[Install]
+WantedBy=multi-user.target

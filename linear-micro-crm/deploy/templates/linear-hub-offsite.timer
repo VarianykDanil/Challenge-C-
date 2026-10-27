@@ -1,0 +1,12 @@
+# Linear Hub (written by deploy/install.sh): the nightly off-site copy, after the 02:00 backup. Persistent: a night
+# missed while the server was off is caught up when it starts.
+[Unit]
+Description=Linear Hub: nightly off-site copy of the encrypted backups
+
+[Timer]
+OnCalendar=*-*-* 03:15:00 Europe/London
+RandomizedDelaySec=15min
+Persistent=true
+
+[Install]
+WantedBy=timers.target
