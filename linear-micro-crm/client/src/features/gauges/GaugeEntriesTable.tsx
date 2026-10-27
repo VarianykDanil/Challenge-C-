@@ -28,11 +28,13 @@ export function GaugeEntriesTable({ rows, loading, showEvent = true, showPerson 
   // The API blanks `checkedInAt`/`notes` on other people's entries unless the viewer is admin or that team's leader.
   const canSeeCheckIn = (r: GaugeEntryWithMeta) => r.userId === me.id || me.role === 'admin' || (me.role === 'leader' && r.teamId === me.teamId);
   const columns: Column<GaugeEntryWithMeta>[] = [];
-  if (showDate) columns.push({ key: 'date', header: 'Date', render: (r) => <span className="whitespace-nowrap">{formatDate(r.date)}</span>, sortValue: (r) => r.date });
+  if (showDate) columns.push({ key: 'date', header: 'Date', card: 'title', sortWords: ['oldest first', 'newest first'], render: (r) => <span className="whitespace-nowrap">{formatDate(r.date)}</span>, sortValue: (r) => r.date });
   if (showPerson)
     columns.push({
       key: 'user',
       header: 'Rep',
+      card: 'title',
+      sortWords: ['A to Z', 'Z to A'],
       render: (r) => (
         <Link to={`/team/${r.userId}`} className="flex items-center gap-2 hover:underline" onClick={(e) => e.stopPropagation()}>
           <Avatar name={r.userName} color={r.userAvatarColor} size="sm" />
@@ -48,6 +50,8 @@ export function GaugeEntriesTable({ rows, loading, showEvent = true, showPerson 
     columns.push({
       key: 'event',
       header: 'Event',
+      card: 'title',
+      sortWords: ['A to Z', 'Z to A'],
       render: (r) => (
         <Link to={`/events/${r.eventId}`} className="hover:underline" onClick={(e) => e.stopPropagation()}>
           <span className="block font-medium text-fg">{r.eventName}</span>
@@ -62,6 +66,7 @@ export function GaugeEntriesTable({ rows, loading, showEvent = true, showPerson 
   columns.push({
     key: 'conversion',
     header: 'Conv.',
+    cardLabel: 'Conversion',
     align: 'center',
     render: (r) => <RatioCell keyName="overallConversion" value={funnelRatios(r).overallConversion} digits={1} />,
     sortValue: (r) => funnelRatios(r).overallConversion,

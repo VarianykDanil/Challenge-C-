@@ -74,6 +74,7 @@ export function PayrollRunsTable({ rows, loading, showUser, onRowClick, onMarkPa
     const picked = selectable.filter((r) => selection.selected.has(r.id)).length;
     columns.push({
       key: 'select',
+      cardLabel: 'Select all',
       width: '48px',
       header: selectable.length ? (
         <SelectBox
@@ -100,8 +101,8 @@ export function PayrollRunsTable({ rows, loading, showUser, onRowClick, onMarkPa
       },
     });
   }
-  if (!hideWeek) columns.push({ key: 'week', header: 'Week', render: (r) => <span className="whitespace-nowrap font-medium text-fg">{formatRangeLabel(r.weekStart, r.weekEnd)}</span>, sortValue: (r) => r.weekStart });
-  if (showUser) columns.push({ key: 'user', header: 'Person', render: (r) => <span className="flex items-center gap-2"><Avatar name={r.userName} size="xs" /><span>{r.userName}<span className="block text-xs text-muted">{[r.employeeId, r.teamName].filter(Boolean).join(' · ')}</span></span></span>, sortValue: (r) => r.userName });
+  if (!hideWeek) columns.push({ key: 'week', header: 'Week', card: showUser ? 'field' : 'title', sortWords: ['oldest first', 'newest first'], render: (r) => <span className="whitespace-nowrap font-medium text-fg">{formatRangeLabel(r.weekStart, r.weekEnd)}</span>, sortValue: (r) => r.weekStart });
+  if (showUser) columns.push({ key: 'user', header: 'Person', card: 'title', sortWords: ['A to Z', 'Z to A'], render: (r) => <span className="flex items-center gap-2"><Avatar name={r.userName} size="xs" /><span>{r.userName}<span className="block text-xs text-muted">{[r.employeeId, r.teamName].filter(Boolean).join(' · ')}</span></span></span>, sortValue: (r) => r.userName });
   columns.push(
     { key: 'days', header: 'Days', align: 'right', render: (r) => formatNumber(r.daysWorked), sortValue: (r) => r.daysWorked },
     {
@@ -132,6 +133,7 @@ export function PayrollRunsTable({ rows, loading, showUser, onRowClick, onMarkPa
     {
       key: 'gross',
       header: 'Gross',
+      card: 'aside',
       align: 'right',
       render: (r) => {
         const extras = [r.bonus > 0 ? `incl. ${formatGBP(r.bonus, { cents: true })} bonus` : null, (r.adjustmentsTotal ?? 0) !== 0 ? `incl. ${paySignedMoney(r.adjustmentsTotal!)} corrections` : null, r.deductions > 0 ? `after ${formatGBP(r.deductions, { cents: true })} deductions` : null].filter(Boolean);
@@ -144,10 +146,11 @@ export function PayrollRunsTable({ rows, loading, showUser, onRowClick, onMarkPa
       },
       sortValue: (r) => r.gross,
     },
-    { key: 'due', header: 'Due', render: (r) => <span className="whitespace-nowrap">{formatDate(r.dueDate)}</span>, sortValue: (r) => r.dueDate },
+    { key: 'due', header: 'Due', sortWords: ['earliest first', 'latest first'], render: (r) => <span className="whitespace-nowrap">{formatDate(r.dueDate)}</span>, sortValue: (r) => r.dueDate },
     {
       key: 'status',
       header: 'Status',
+      card: 'wide',
       render: (r) => {
         const owed = r.status === 'pending' || r.status === 'failed';
         const adjustedAt = runAdjustedAt(r);

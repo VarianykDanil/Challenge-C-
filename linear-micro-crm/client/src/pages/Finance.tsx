@@ -316,11 +316,11 @@ function Company({ onOpen, scrollToRuns = false, onScrolled }: { onOpen: (r: Pay
   }, [scrollToRuns, settled, onScrolled]);
 
   const expenseColumns: Column<Expense>[] = [
-    { key: 'date', header: 'Date', render: (e) => <span className="whitespace-nowrap">{formatDate(e.date)}</span>, sortValue: (e) => e.date },
+    { key: 'date', header: 'Date', sortWords: ['oldest first', 'newest first'], render: (e) => <span className="whitespace-nowrap">{formatDate(e.date)}</span>, sortValue: (e) => e.date },
     { key: 'category', header: 'Category', render: (e) => <Badge tone={e.category === 'venue' ? 'primary' : e.category === 'travel' ? 'info' : e.category === 'recruitment' ? 'accent' : 'neutral'}>{EXPENSE_CATEGORY_LABELS[e.category]}</Badge>, sortValue: (e) => e.category },
-    { key: 'description', header: 'Description', render: (e) => <span className="text-fg">{e.description}</span>, sortValue: (e) => e.description },
+    { key: 'description', header: 'Description', card: 'title', render: (e) => <span className="text-fg">{e.description}</span>, sortValue: (e) => e.description },
     { key: 'campaign', header: 'Campaign', render: (e) => { const c = campaignName(e.campaignId); return c ? <ColourChip color={c.color} label={c.name} /> : <span className="text-muted">—</span>; }, sortValue: (e) => campaignName(e.campaignId)?.name ?? '' },
-    { key: 'amount', header: 'Amount', align: 'right', render: (e) => <span className="font-medium tabular-nums text-fg">{formatGBP(e.amount, { cents: true })}</span>, sortValue: (e) => e.amount },
+    { key: 'amount', header: 'Amount', card: 'aside', align: 'right', render: (e) => <span className="font-medium tabular-nums text-fg">{formatGBP(e.amount, { cents: true })}</span>, sortValue: (e) => e.amount },
     { key: 'actions', header: <span className="sr-only">Actions</span>, align: 'right', render: (e) => <StopRowEvents className="inline-flex"><Button size="sm" variant="ghost" className="text-danger" aria-label={`Delete expense ${e.description}`} onClick={() => setDeleting(e)}><Trash2 className="h-4 w-4" aria-hidden /></Button></StopRowEvents> },
   ];
 
@@ -460,7 +460,7 @@ function Company({ onOpen, scrollToRuns = false, onScrolled }: { onOpen: (r: Pay
               columns={[
                 { key: 'name', header: 'Campaign', render: (r) => <ColourChip color={r.campaignColor} label={r.campaignName} className="font-medium text-fg" />, sortValue: (r) => r.campaignName },
                 { key: 'sales', header: 'Sales', align: 'right', render: (r) => formatNumber(r.sales), sortValue: (r) => r.sales },
-                { key: 'revenue', header: 'Revenue', align: 'right', render: (r) => <span className="tabular-nums">{formatGBP(r.revenue)}</span>, sortValue: (r) => r.revenue },
+                { key: 'revenue', header: 'Revenue', card: 'aside', align: 'right', render: (r) => <span className="tabular-nums">{formatGBP(r.revenue)}</span>, sortValue: (r) => r.revenue },
                 { key: 'commission', header: 'Commission', align: 'right', render: (r) => <span className="tabular-nums">{formatGBP(r.commission)}</span>, sortValue: (r) => r.commission },
                 { key: 'margin', header: 'Margin', align: 'right', render: (r) => <span className={`font-medium tabular-nums ${r.margin >= 0 ? 'text-success' : 'text-danger'}`}>{formatGBP(r.margin)}{r.revenue ? <span className="ml-1 text-xs font-normal text-muted">({formatPct(r.margin / r.revenue)})</span> : null}</span>, sortValue: (r) => r.margin },
               ]}

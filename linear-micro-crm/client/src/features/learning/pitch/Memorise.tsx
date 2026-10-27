@@ -14,7 +14,7 @@ import { Badge, Button, Card, ProgressBar, Switch } from '@/components/ui';
 import { ConfirmDialog } from '@/features/common/ConfirmDialog';
 import { useMemoriseProgress } from './memoriseStore';
 import { FoldedFactNote, InlineSegments, STEP_NUMBER } from './parts';
-import { useMediaQuery } from './useMediaQuery';
+import { useMediaQuery } from '@/lib/useMediaQuery';
 
 const STEP_LABEL = { introduction: 'Introduction', 'short-story': 'Short story', presentation: 'Presentation', close: 'Close', consolidation: 'Consolidation' } as const;
 

@@ -1,21 +1,10 @@
-import { useEffect, useMemo, useRef, useState, type ReactNode, type SyntheticEvent } from 'react';
+import { Fragment, useEffect, useMemo, useRef, useState, type ReactNode, type SyntheticEvent } from 'react';
 import { ArrowDown, ArrowUp, ChevronsUpDown, Inbox } from 'lucide-react';
 import clsx from 'clsx';
+import { useMediaQuery } from '@/lib/useMediaQuery';
+import { CARD_BREAKPOINT_PX, cardLayout, sortChoices, type CardLayout, type Column } from './tableLayout';
 
-export interface Column<T> {
-  key: string;
-  header: ReactNode;
-  render: (row: T) => ReactNode;
-  align?: 'left' | 'right' | 'center';
-  width?: string;
-  /** value accessor used for client-side sorting; omit to disable sorting on this column */
-  sortValue?: (row: T) => string | number | null;
-  className?: string;
-  /** Hide below the given breakpoint (adds `hidden md:table-cell` etc.). */
-  hideBelow?: 'sm' | 'md' | 'lg' | 'xl';
-  /** Header cell class. */
-  headerClassName?: string;
-}
+export type { CardRole, Column } from './tableLayout';
 
 export interface DataTableProps<T> {
   columns: Column<T>[];
@@ -47,6 +36,11 @@ export interface DataTableProps<T> {
   caption?: string;
   /** Render without the outer border/background (for inside a Card with padded={false}). */
   bare?: boolean;
+  /**
+   * On a phone (narrower than 640 px): 'cards' (the default) shows each row as a card, so every column can be read
+   * without sideways scrolling (columns choose their place with `card`); 'scroll' keeps the table and its swipe hint.
+   */
+  phone?: 'cards' | 'scroll';
 }
 
 /** Descendants that own their own interaction — a click or key inside them must not activate the row. */
@@ -57,7 +51,7 @@ const INTERACTIVE = 'button, a, input, select, textarea, label, [role="dialog"],
  * target lives in a nested control, and events that only reach the row through React's tree (a
  * portaled Modal or Dropdown opened from inside the row bubbles synthetic events to the <tr>).
  */
-function isRowActivation(e: SyntheticEvent<HTMLTableRowElement>): boolean {
+function isRowActivation(e: SyntheticEvent<HTMLElement>): boolean {
   const row = e.currentTarget;
   const target = e.target as HTMLElement | null;
   if (!target || !row.contains(target)) return false;
@@ -78,7 +72,10 @@ function compare(a: string | number | null, b: string | number | null): number {
 export function DataTable<T>({
   columns, rows, rowKey, onRowClick, emptyMessage = 'Nothing to show', empty, loading, loadingRows = 5, dense,
   initialSort, sort: sortProp, onSortChange, footer, className, stickyHeader = true, maxHeight, selectedKey, rowClassName, caption, bare,
+  phone = 'cards',
 }: DataTableProps<T>) {
+  const narrow = useMediaQuery(`(max-width: ${CARD_BREAKPOINT_PX - 0.02}px)`);
+  const asCards = narrow && phone === 'cards';
   const [sortState, setSortState] = useState<{ key: string; dir: 'asc' | 'desc' } | null>(initialSort ?? null);
   const sort = sortProp !== undefined ? sortProp : sortState;
 
@@ -123,12 +120,39 @@ export function DataTable<T>({
     ro?.observe(el);
     if (el.firstElementChild) ro?.observe(el.firstElementChild);
     return () => { el.removeEventListener('scroll', update); ro?.disconnect(); };
-  }, []);
+    // again when the table comes back (a phone turned sideways past 640 px swaps the cards for the table)
+  }, [asCards]);
   const scrollable = edge.left || edge.right;
+
+  const isEmpty = !loading && rows.length === 0;
+  if (asCards) {
+    return (
+      <div className={clsx('relative w-full', !bare && 'rounded-xl border border-border bg-surface shadow-card', className)}>
+        <CardRows
+          columns={columns}
+          rows={sorted}
+          rowKey={rowKey}
+          onRowClick={onRowClick}
+          loading={loading}
+          loadingRows={loadingRows}
+          selectedKey={selectedKey}
+          rowClassName={rowClassName}
+          caption={caption}
+          sort={sort}
+          onSort={setSort}
+        />
+        {isEmpty && <EmptyRows empty={empty} emptyMessage={emptyMessage} />}
+        {footer && !isEmpty && (
+          <div className="scrollbar-thin overflow-x-auto border-t border-border">
+            <table className="w-full text-sm"><tfoot className="[&_td]:bg-surface-2/95 [&_td]:px-4 [&_td]:py-2.5 [&_td]:font-semibold [&_td]:tabular">{footer}</tfoot></table>
+          </div>
+        )}
+      </div>
+    );
+  }
 
   const cellPad = dense ? 'px-3 py-1.5' : 'px-4 py-3';
   const alignClass = (a?: Column<T>['align']) => (a === 'right' ? 'text-right' : a === 'center' ? 'text-center' : 'text-left');
-  const isEmpty = !loading && rows.length === 0;
 
   return (
     <div className={clsx('relative w-full', !bare && 'rounded-xl border border-border bg-surface shadow-card', className)}>
@@ -261,16 +285,7 @@ export function DataTable<T>({
       </div>
       {/* 1.3.1 UI review: the empty state sits under the header row at the table's visible width, not centred across the
           scrolling columns (on a phone it was cut off: "…appear once a we") */}
-      {isEmpty && (
-        <div className="px-4 py-12">
-          {empty ?? (
-            <div className="flex flex-col items-center gap-2 text-center text-muted">
-              <span className="inline-flex h-10 w-10 items-center justify-center rounded-xl bg-surface-2 text-subtle" aria-hidden><Inbox className="h-5 w-5" /></span>
-              <span className="text-sm">{emptyMessage}</span>
-            </div>
-          )}
-        </div>
-      )}
+      {isEmpty && <EmptyRows empty={empty} emptyMessage={emptyMessage} />}
       {/* The hint is a line under the table (it covered the last row's figures as a floating chip), kept while the table
           scrolls so the rows do not jump when it fades; never on an empty table. */}
       {scrollable && !isEmpty && (
@@ -281,5 +296,152 @@ export function DataTable<T>({
         </div>
       )}
     </div>
+  );
+}
+
+function EmptyRows({ empty, emptyMessage }: { empty?: ReactNode; emptyMessage: ReactNode }) {
+  return (
+    <div className="px-4 py-12">
+      {empty ?? (
+        <div className="flex flex-col items-center gap-2 text-center text-muted">
+          <span className="inline-flex h-10 w-10 items-center justify-center rounded-xl bg-surface-2 text-subtle" aria-hidden><Inbox className="h-5 w-5" /></span>
+          <span className="text-sm">{emptyMessage}</span>
+        </div>
+      )}
+    </div>
+  );
+}
+
+interface CardRowsProps<T> {
+  columns: Column<T>[];
+  rows: T[];
+  rowKey: (row: T) => string | number;
+  onRowClick?: (row: T) => void;
+  loading?: boolean;
+  loadingRows: number;
+  selectedKey?: string | number | null;
+  rowClassName?: (row: T) => string | undefined;
+  caption?: string;
+  sort: { key: string; dir: 'asc' | 'desc' } | null;
+  onSort: (sort: { key: string; dir: 'asc' | 'desc' } | null) => void;
+}
+
+/** A field's label in the card: its card label, else the column header (plain text or the header's own element). */
+function FieldLabel<T>({ c }: { c: Column<T> }) {
+  return <>{c.cardLabel ?? c.header}</>;
+}
+
+/**
+ * The phone layout: one card per row (title and the key figure first, then every other column as a labelled field,
+ * then the row's buttons) and a "Sort by" list in place of the column headers. Nothing scrolls sideways.
+ */
+function CardRows<T>({ columns, rows, rowKey, onRowClick, loading, loadingRows, selectedKey, rowClassName, caption, sort, onSort }: CardRowsProps<T>) {
+  const layout: CardLayout<T> = useMemo(() => cardLayout(columns), [columns]);
+  const choices = useMemo(() => sortChoices(columns), [columns]);
+  // a column header that is itself a control (the "select all" box) stays reachable above the cards
+  const toolbarLead = layout.lead.filter((c) => typeof c.header !== 'string');
+  const showSort = choices.length > 0 && rows.length > 1;
+  return (
+    <>
+      {(showSort || toolbarLead.length > 0) && !loading && rows.length > 0 && (
+        <div className="flex flex-wrap items-center gap-x-3 gap-y-2 border-b border-border px-4 py-2">
+          {toolbarLead.map((c) => (
+            <span key={c.key} className="inline-flex items-center gap-1 text-sm text-muted">
+              {c.header}
+              {c.cardLabel && <span aria-hidden>{c.cardLabel}</span>}
+            </span>
+          ))}
+          {showSort && (
+            <label className="ml-auto inline-flex min-w-0 items-center gap-2 text-xs font-medium text-muted">
+              Sort by
+              <select
+                className="focus-ring h-10 min-w-0 max-w-[14rem] cursor-pointer truncate rounded-lg border border-control-border bg-surface px-2 text-sm text-fg"
+                value={sort ? `${sort.key}:${sort.dir}` : ''}
+                onChange={(e) => {
+                  const pick = choices.find((x) => x.value === e.target.value);
+                  onSort(pick ? { key: pick.key, dir: pick.dir } : null);
+                }}
+              >
+                {!sort && <option value="">As listed</option>}
+                {choices.map((x) => <option key={x.value} value={x.value}>{x.label}</option>)}
+              </select>
+            </label>
+          )}
+        </div>
+      )}
+      <ul className="divide-y divide-border" aria-label={caption} aria-busy={loading || undefined}>
+        {loading &&
+          Array.from({ length: Math.min(loadingRows, 4) }).map((_, i) => (
+            <li key={`sk-${i}`} aria-hidden className="space-y-2 px-4 py-3">
+              <div className="skeleton h-4 w-2/3 rounded" style={{ animationDelay: `${i * 60}ms` }} />
+              <div className="skeleton h-3 w-1/2 rounded" style={{ animationDelay: `${i * 60}ms` }} />
+            </li>
+          ))}
+        {!loading &&
+          rows.map((r) => {
+            const key = rowKey(r);
+            const selected = selectedKey != null && selectedKey === key;
+            return (
+              <li
+                key={key}
+                onClick={onRowClick ? (e) => { if (isRowActivation(e)) onRowClick(r); } : undefined}
+                onKeyDown={onRowClick ? (e) => {
+                  if (e.key !== 'Enter' && e.key !== ' ') return;
+                  if (!isRowActivation(e)) return;
+                  e.preventDefault();
+                  onRowClick(r);
+                } : undefined}
+                tabIndex={onRowClick ? 0 : undefined}
+                aria-selected={selected || undefined}
+                data-card-row=""
+                className={clsx(
+                  'px-4 py-3 transition-colors duration-100',
+                  onRowClick && 'focus-ring-inset cursor-pointer outline-none active:bg-surface-2/70',
+                  selected && 'bg-primary-soft/60',
+                  rowClassName?.(r),
+                )}
+              >
+                <div className="flex items-start gap-3">
+                  {layout.lead.map((c) => <div key={c.key} className="-my-1 shrink-0">{c.render(r)}</div>)}
+                  <div className="min-w-0 flex-1 space-y-0.5 text-sm font-medium text-fg [overflow-wrap:anywhere]">
+                    {layout.title.map((c) => <div key={c.key}>{c.render(r)}</div>)}
+                  </div>
+                  {layout.aside.length > 0 && (
+                    <div className="flex max-w-[50%] shrink-0 flex-col items-end gap-1 text-right text-sm tabular">
+                      {layout.aside.map((c) => (
+                        <div key={c.key} className="leading-tight">
+                          <div className="font-semibold text-fg">{c.render(r)}</div>
+                          <div className="mt-0.5 text-[11px] font-semibold uppercase tracking-[0.06em] text-muted"><FieldLabel c={c} /></div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+                {(layout.fields.length > 0 || layout.wide.length > 0) && (
+                  <dl className="mt-2.5 grid grid-cols-[repeat(auto-fill,minmax(6.25rem,1fr))] gap-x-3 gap-y-2">
+                    {layout.fields.map((c) => (
+                      <div key={c.key} className="min-w-0">
+                        <dt className="text-[11px] font-semibold uppercase tracking-[0.06em] text-muted"><FieldLabel c={c} /></dt>
+                        <dd className="mt-0.5 text-sm text-fg tabular [overflow-wrap:anywhere]">{c.render(r)}</dd>
+                      </div>
+                    ))}
+                    {layout.wide.map((c) => (
+                      <div key={c.key} className="col-span-full min-w-0">
+                        <dt className="text-[11px] font-semibold uppercase tracking-[0.06em] text-muted"><FieldLabel c={c} /></dt>
+                        <dd className="mt-1 text-sm text-fg [overflow-wrap:anywhere]">{c.render(r)}</dd>
+                      </div>
+                    ))}
+                  </dl>
+                )}
+                {layout.actions.length > 0 && (
+                  <div className="mt-2 flex flex-wrap items-center justify-end gap-2">
+                    {layout.actions.map((c) => <Fragment key={c.key}>{c.render(r)}</Fragment>)}
+                  </div>
+                )}
+              </li>
+            );
+          })}
+      </ul>
+    </>
   );
 }

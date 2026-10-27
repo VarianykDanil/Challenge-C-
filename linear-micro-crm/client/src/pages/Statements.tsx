@@ -102,7 +102,8 @@ function StatementsList({ onOpen }: { onOpen: (id: number) => void }) {
         ),
       sortValue: (s) => s.unmatchedCount ?? 0,
     },
-    { key: 'status', header: 'Status', render: (s) => <ListStatus s={s} />, sortValue: (s) => s.status, hideBelow: 'md' },
+    // on a phone the campaign cell already shows the status (md:hidden), so the card leaves this column out
+    { key: 'status', header: 'Status', card: 'hidden', render: (s) => <ListStatus s={s} />, sortValue: (s) => s.status, hideBelow: 'md' },
   ];
 
   return (

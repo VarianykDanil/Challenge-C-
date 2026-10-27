@@ -34,13 +34,13 @@ export function TeamPage() {
   const canAdd = canAddPeople(me.role) && (me.role !== 'leader' || me.teamId !== null);
 
   const columns: Column<UserWithTeam>[] = [
-    { key: 'name', header: 'Name', render: (u) => <span className="flex items-center gap-3"><Avatar name={fullName(u)} color={u.avatarColor} size="sm" /><span><span className="block font-medium text-fg">{fullName(u)}{u.id === me.id && <span className="ml-1 text-xs text-primary">(you)</span>}</span><span className="block text-xs text-muted">{u.email}</span></span></span>, sortValue: (u) => fullName(u) },
+    { key: 'name', header: 'Name', sortWords: ['A to Z', 'Z to A'], render: (u) => <span className="flex items-center gap-3"><Avatar name={fullName(u)} color={u.avatarColor} size="sm" /><span><span className="block font-medium text-fg">{fullName(u)}{u.id === me.id && <span className="ml-1 text-xs text-primary">(you)</span>}</span><span className="block text-xs text-muted">{u.email}</span></span></span>, sortValue: (u) => fullName(u) },
     { key: 'position', header: 'Position', render: (u) => POSITION_LABELS[u.position], sortValue: (u) => POSITIONS.indexOf(u.position) },
     { key: 'team', header: 'Team', render: (u) => (u.teamName ? <Badge tone="neutral" dot color={u.teamId ? teamColor.get(u.teamId) : undefined}>{u.teamName}</Badge> : <span className="text-muted">—</span>), sortValue: (u) => u.teamName ?? '' },
     // Employee IDs double as sign-in codes, so the API only returns them to admins (and for yourself).
     ...(list.some((u) => u.employeeId) ? [{ key: 'employeeId', header: 'Employee ID', render: (u: UserWithTeam) => (u.employeeId ? <span className="font-mono text-xs">{u.employeeId}</span> : <span className="text-muted">—</span>), sortValue: (u: UserWithTeam) => u.employeeId }] : []),
-    { key: 'start', header: 'Started', render: (u) => <span className="whitespace-nowrap">{formatDate(u.startDate)}</span>, sortValue: (u) => u.startDate },
-    { key: 'status', header: 'Status', render: (u) => <UserStatusBadge status={u.status} />, sortValue: (u) => u.status },
+    { key: 'start', header: 'Started', sortWords: ['longest serving first', 'newest first'], render: (u) => <span className="whitespace-nowrap">{formatDate(u.startDate)}</span>, sortValue: (u) => u.startDate },
+    { key: 'status', header: 'Status', card: 'aside', render: (u) => <UserStatusBadge status={u.status} />, sortValue: (u) => u.status },
   ];
 
   return (

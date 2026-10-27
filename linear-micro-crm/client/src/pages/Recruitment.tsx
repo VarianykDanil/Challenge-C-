@@ -87,16 +87,16 @@ export function RecruitmentPage() {
 
   const columns = useMemo<Column<CandidateWithMeta>[]>(
     () => [
-      { key: 'name', header: 'Candidate', render: (c) => <span className="flex items-center gap-2 font-medium text-fg">{isOverdue(c) && <AlertCircle className="h-3.5 w-3.5 text-danger" aria-label="Overdue" />}{fullName(c)}</span>, sortValue: (c) => fullName(c) },
+      { key: 'name', header: 'Candidate', sortWords: ['A to Z', 'Z to A'], render: (c) => <span className="flex items-center gap-2 font-medium text-fg">{isOverdue(c) && <AlertCircle className="h-3.5 w-3.5 text-danger" aria-label="Overdue" />}{fullName(c)}</span>, sortValue: (c) => fullName(c) },
       // The idle badge sits under the stage (no extra column, so the list still fits a 1440 px screen).
-      { key: 'stage', header: 'Stage', render: (c) => <span className="flex flex-col items-start gap-1"><StageBadge stage={c.stage} /><IdleBadge candidate={c} /></span>, sortValue: (c) => stageIndex(c.stage) },
+      { key: 'stage', header: 'Stage', card: 'aside', sortWords: ['earliest stage first', 'latest stage first'], render: (c) => <span className="flex flex-col items-start gap-1"><StageBadge stage={c.stage} /><IdleBadge candidate={c} /></span>, sortValue: (c) => stageIndex(c.stage) },
       { key: 'source', header: 'Source', render: (c) => <SourceBadge source={c.source} />, sortValue: (c) => c.source },
       { key: 'rating', header: 'Rating', render: (c) => <StarRating value={c.rating} size="sm" />, sortValue: (c) => c.rating ?? 0 },
       { key: 'owner', header: 'Owner', render: (c) => (c.ownerName ? <span className="flex items-center gap-2"><Avatar name={c.ownerName} size="xs" />{c.ownerName}</span> : <span className="text-muted">Unassigned</span>), sortValue: (c) => c.ownerName ?? '' },
-      { key: 'applied', header: 'Applied', render: (c) => formatDate(c.appliedAt), sortValue: (c) => c.appliedAt },
+      { key: 'applied', header: 'Applied', sortWords: ['oldest first', 'newest first'], render: (c) => formatDate(c.appliedAt), sortValue: (c) => c.appliedAt },
       { key: 'days', header: 'Days', align: 'right', render: (c) => formatNumber(c.daysInPipeline), sortValue: (c) => c.daysInPipeline },
-      { key: 'next', header: 'Next action', render: (c) => (c.nextAction ? <span className={isOverdue(c) ? 'text-danger' : undefined}>{c.nextAction}{c.nextActionAt ? <span className="block text-xs text-muted">{formatDate(c.nextActionAt)}</span> : null}</span> : <span className="text-muted">—</span>), sortValue: (c) => c.nextActionAt ?? '' },
-      ...(canWrite ? [{ key: 'move', header: <span className="sr-only">Move stage</span>, render: (c: CandidateWithMeta) => <StopRowEvents className="w-36"><MoveStageControl candidate={c} compact /></StopRowEvents> }] : []),
+      { key: 'next', header: 'Next action', card: 'wide', render: (c) => (c.nextAction ? <span className={isOverdue(c) ? 'text-danger' : undefined}>{c.nextAction}{c.nextActionAt ? <span className="block text-xs text-muted">{formatDate(c.nextActionAt)}</span> : null}</span> : <span className="text-muted">—</span>), sortValue: (c) => c.nextActionAt ?? '' },
+      ...(canWrite ? [{ key: 'move', header: <span className="sr-only">Move stage</span>, card: 'actions' as const, render: (c: CandidateWithMeta) => <StopRowEvents className="w-36"><MoveStageControl candidate={c} compact /></StopRowEvents> }] : []),
     ],
     [canWrite],
   );

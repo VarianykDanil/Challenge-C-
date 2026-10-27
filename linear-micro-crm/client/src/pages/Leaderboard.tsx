@@ -57,10 +57,12 @@ export function LeaderboardPage() {
 
   const columns = useMemo<Column<LeaderboardRow>[]>(
     () => [
-      { key: 'rank', header: '#', width: '3rem', align: 'center', render: (r) => <span className={clsx('font-semibold tabular-nums', r.rank <= 3 ? 'text-accent' : 'text-muted')}>{r.rank}</span>, sortValue: (r) => r.rank },
+      { key: 'rank', header: '#', cardLabel: 'Rank', card: 'lead', sortWords: ['top first', 'bottom first'], width: '3rem', align: 'center', render: (r) => <span className={clsx('font-semibold tabular-nums', r.rank <= 3 ? 'text-accent' : 'text-muted')}>{r.rank}</span>, sortValue: (r) => r.rank },
       {
         key: 'name',
         header: 'Rep',
+        card: 'title',
+        sortWords: ['A to Z', 'Z to A'],
         render: (r) => {
           const isMe = r.userId === me.id;
           return (
@@ -76,11 +78,11 @@ export function LeaderboardPage() {
         sortValue: (r) => r.userName,
       },
       { key: 'team', header: 'Team', render: (r) => (r.teamName ? <Badge tone="neutral" dot color={r.teamColor ?? undefined}>{r.teamName}</Badge> : <span className="text-muted">—</span>), sortValue: (r) => r.teamName ?? '' },
-      { key: 'sales', header: 'Sales', align: 'right', render: (r) => <span className={clsx('tabular-nums', metric === 'sales' && 'font-semibold text-fg')}>{formatNumber(r.sales)}</span>, sortValue: (r) => r.sales },
+      { key: 'sales', header: 'Sales', card: 'aside', align: 'right', render: (r) => <span className={clsx('tabular-nums', metric === 'sales' && 'font-semibold text-fg')}>{formatNumber(r.sales)}</span>, sortValue: (r) => r.sales },
       { key: 'stops', header: 'Stops', align: 'right', render: (r) => <span className="tabular-nums">{formatNumber(r.stops)}</span>, sortValue: (r) => r.stops },
-      { key: 'conversion', header: 'Conv.', align: 'right', render: (r) => <span className={clsx('tabular-nums', metric === 'conversion' && 'font-semibold text-fg')}>{formatPct(r.conversion, 1)}</span>, sortValue: (r) => r.conversion },
+      { key: 'conversion', header: 'Conv.', cardLabel: 'Conversion', align: 'right', render: (r) => <span className={clsx('tabular-nums', metric === 'conversion' && 'font-semibold text-fg')}>{formatPct(r.conversion, 1)}</span>, sortValue: (r) => r.conversion },
       { key: 'days', header: 'Days', align: 'right', render: (r) => <span className="tabular-nums">{formatNumber(r.days)}</span>, sortValue: (r) => r.days },
-      { key: 'movement', header: 'Move', align: 'center', render: (r) => <Movement value={r.movement} />, sortValue: (r) => r.movement ?? -999 },
+      { key: 'movement', header: 'Move', cardLabel: 'Movement', align: 'center', render: (r) => <Movement value={r.movement} />, sortValue: (r) => r.movement ?? -999 },
     ],
     [me.id, metric],
   );
