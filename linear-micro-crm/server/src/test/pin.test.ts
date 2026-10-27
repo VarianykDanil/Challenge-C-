@@ -8,6 +8,8 @@
  */
 import { after, afterEach, test } from 'node:test';
 import assert from 'node:assert/strict';
+import { sessionKey } from '../lib/sessionKey.ts';
+import { issueSetupCode } from '../lib/setupCodes.ts';
 import { mkdtempSync, rmSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -187,12 +189,17 @@ test('lockout: the login limiter (8 per source and email) and the PIN lock after
   assert.equal(seen.status, 200);
   assert.equal(seen.json.hasPin, true);
   assert.equal(seen.json.locked, true);
-  assert.equal((await admin.post(`/auth/pin/reset/${fx().users.rep}`)).status, 204);
+  // a reset needs the admin's fresh two-step code and hands out a setup code for the next sign-in
+  const reset = await admin.post(`/auth/pin/reset/${fx().users.rep}`, { code: currentCode(srv!.db, fx().users.admin) });
+  assert.equal(reset.status, 200);
   assert.deepEqual({ ...pinHashOf(fx().users.rep) }, { h: null, n: 0 });
   assert.equal(sessionsOf(fx().users.rep), 0, 'reset signs the person out everywhere');
   assert.equal((await rep.get('/auth/me')).status, 401);
   resetLoginFailures();
-  assert.equal((await srv!.anon().post('/auth/login', creds)).status, 200, 'signs in without a PIN, then sets a new one');
+  const back = srv!.anon();
+  assert.deepEqual((await back.post('/auth/login', creds)).json, { requiresSetupCode: true }, 'no PIN now, but the setup code first');
+  const step = await back.post('/auth/login', { ...creds, setupCode: reset.json.setupCode });
+  assert.equal(step.json.requiresTwoFactor, true, 'then two-step, then they set a new PIN');
 });
 
 test('a parallel burst of guesses meets the limits one request at a time', async () => {
@@ -265,9 +272,9 @@ test('"Require a PIN for everyone": admin only, own PIN first, the gate holds ot
   assert.deepEqual((await rep.get('/auth/pin')).json, { hasPin: false, setAt: null, required: true, locked: false });
   assert.equal((await srv!.anon().get('/me/dashboard')).status, 401, 'anonymous requests are not the gate’s business');
 
-  // A fresh sign-in without a PIN gets in, flagged, and is held the same way.
+  // A fresh sign-in without a PIN (with the setup code a new account needs) gets in, flagged, and is held the same way.
   const repA2 = srv!.anon();
-  const login = await repA2.post('/auth/login', FIXTURE_ACCOUNTS.repA2);
+  const login = await repA2.post('/auth/login', { ...FIXTURE_ACCOUNTS.repA2, setupCode: issueSetupCode(srv!.db, fx().users.repA2, { createdBy: null, reason: 'reissue' }).code });
   assert.equal(login.status, 200);
   assert.equal(login.json.user.pinSetupRequired, true);
   assert.equal((await repA2.get('/me/dashboard')).status, 403);
@@ -339,7 +346,8 @@ test('admin PIN status and reset: admin only, never yourself, 404 for nobody', a
   const status = (await admin.get(`/auth/pin/${target}`)).json as Json;
   assert.deepEqual(Object.keys(status).sort(), ['hasPin', 'locked', 'required', 'setAt']);
   assert.equal(status.hasPin, true);
-  assert.equal((await admin.post(`/auth/pin/reset/${target}`)).status, 204);
+  assert.equal((await admin.post(`/auth/pin/reset/${target}`)).status, 400, 'the admin’s fresh two-step code is needed');
+  assert.equal((await admin.post(`/auth/pin/reset/${target}`, { code: currentCode(srv!.db, fx().users.admin) })).status, 200);
   assert.equal((await admin.get(`/auth/pin/${target}`)).json.hasPin, false);
 });
 
@@ -349,7 +357,8 @@ test('session idle timeout: default 12 h, admin sets 1–72, idle sessions end a
   const admin = await srv!.login('admin');
   const rep = await srv!.login('rep');
   const leader = await srv!.login('leader');
-  const tokenOf = (c: TestClient) => c.cookie.replace('lm_session=', '');
+  // the sessions table keeps the token's hash (lib/sessionKey.ts)
+  const tokenOf = (c: TestClient) => sessionKey(c.cookie.replace('lm_session=', ''));
   const seenAt = (c: TestClient) => get<{ s: string | null }>(db, `SELECT last_seen_at AS s FROM sessions WHERE token = ?`, [tokenOf(c)])?.s;
   const ago = (ms: number) => new Date(Date.now() - ms).toISOString();
   const H = 3_600_000;

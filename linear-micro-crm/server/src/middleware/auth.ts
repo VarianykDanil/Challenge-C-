@@ -11,14 +11,13 @@ import { HttpError, forbidden, unauthorized } from '../lib/errors.ts';
 import { clientSafeUser, isDemoClientAccount } from '../lib/client.ts';
 import { isDemoSignInAccount, type DemoSignInSubject } from '../lib/demoTeams.ts';
 import { accountFlags, readSecuritySettings } from '../lib/pin.ts';
+import { sessionKey } from '../lib/sessionKey.ts';
+
+export { sessionKey } from '../lib/sessionKey.ts';
 
 export const SESSION_COOKIE = 'lm_session';
-/**
- * The demo sign-in accounts' session (lib/demoTeams.ts isDemoSignInAccount, while Linear Hub is still the demo), and
- * every session made before 1.4: 14 days.
- */
-const DEMO_SESSION_DAYS = 14;
-export const DEMO_SESSION_MS = DEMO_SESSION_DAYS * 86_400_000;
+/** Sessions made before 1.4 lasted 14 days; a request finds such a session over the hours limit and ends it. */
+const LEGACY_SESSION_MS = 14 * 86_400_000;
 
 /**
  * Release 1.2 (U1): `sessions.last_seen_at` is refreshed at most this often, so the idle timeout costs one small write a
@@ -35,23 +34,24 @@ export interface NewSession {
 }
 
 /**
- * Release 1.4 (package S, owner's decision "every 14 hours everyone gets signed out"): a session ends the admin's
- * `sessionMaxHours` (default 14) after sign-in, whatever the activity, and its cookie's Max-Age is the same. The demo
- * sign-in accounts (while still the demo) keep the 14-day session.
+ * Owner's decision "every 14 hours everyone gets signed out": a session ends the admin's `sessionMaxHours` (default 14)
+ * after sign-in, whatever the activity, and its cookie's Max-Age is the same — the one-tap demo accounts too (they
+ * used to keep 14 days). The cookie carries the token; the table keeps only its hash (lib/sessionKey.ts).
  */
 export function createSession(db: Db, user: DemoSignInSubject): NewSession {
   const token = randomBytes(32).toString('hex');
   const now = new Date();
-  const maxHours = isDemoSignInAccount(db, user) ? null : readSecuritySettings(db).sessionMaxHours;
-  const maxAgeMs = maxHours === null ? DEMO_SESSION_MS : maxHours * 3_600_000;
+  const maxHours = readSecuritySettings(db).sessionMaxHours;
+  const maxAgeMs = maxHours * 3_600_000;
   const signedInAt = now.toISOString();
   const endsAt = new Date(now.getTime() + maxAgeMs).toISOString();
-  run(db, `INSERT INTO sessions (token, user_id, created_at, expires_at, last_seen_at) VALUES (?, ?, ?, ?, ?)`, [token, user.id, signedInAt, endsAt, signedInAt]);
+  run(db, `INSERT INTO sessions (token, user_id, created_at, expires_at, last_seen_at) VALUES (?, ?, ?, ?, ?)`, [sessionKey(token), user.id, signedInAt, endsAt, signedInAt]);
   return { token, maxAgeMs, info: { signedInAt, endsAt, maxHours } };
 }
 
+/** Ends the session whose cookie carries `token`. */
 export function destroySession(db: Db, token: string): void {
-  run(db, `DELETE FROM sessions WHERE token = ?`, [token]);
+  run(db, `DELETE FROM sessions WHERE token = ?`, [sessionKey(token)]);
 }
 
 /** Revoke every live session of one user (used when an admin deactivates them). */
@@ -62,7 +62,7 @@ export function destroyUserSessions(db: Db, userId: number): number {
 /** Revoke every session of one user except `keepToken` (a PIN change keeps the device that made it signed in). */
 export function destroyOtherSessions(db: Db, userId: number, keepToken: string | undefined): number {
   return keepToken
-    ? run(db, `DELETE FROM sessions WHERE user_id = ? AND token <> ?`, [userId, keepToken]).changes
+    ? run(db, `DELETE FROM sessions WHERE user_id = ? AND token <> ?`, [userId, sessionKey(keepToken)]).changes
     : destroyUserSessions(db, userId);
 }
 
@@ -108,7 +108,7 @@ export function cookieSecure(req: Request): boolean {
 }
 
 /** Release 1.4: `maxAgeMs` is the new session's lifetime (createSession), so the cookie ends with the session. */
-export function setSessionCookie(req: Request, res: Response, token: string, maxAgeMs: number = DEMO_SESSION_MS): void {
+export function setSessionCookie(req: Request, res: Response, token: string, maxAgeMs: number = LEGACY_SESSION_MS): void {
   res.cookie(SESSION_COOKIE, token, {
     httpOnly: true,
     sameSite: 'lax',
@@ -129,7 +129,8 @@ export function clearSessionCookie(req: Request, res: Response): void {
  * from its last request); `req.user` also carries the caller's own `hasPin`, `pinSetupRequired` and
  * `twoFactorSetupRequired`, which the PIN gate below and the client read.
  * Release 1.4 (package S): and a session older than the admin's `sessionMaxHours` (default 14) counted from sign-in,
- * whatever the activity (the demo sign-in accounts aside). That request learns why: `req.sessionEnded` makes the 401
+ * whatever the activity (the one-tap demo accounts too). The cookie's token is looked up by its hash
+ * (lib/sessionKey.ts). That request learns why: `req.sessionEnded` makes the 401
  * of requireAuth / requireRole carry the sentence and `details: { sessionEnded: 'max_age', maxHours }`; the cookie is
  * cleared and the sign-out recorded in the audit trail, like the idle one. `req.sessionInfo` says when a live session
  * ends (GET /auth/me answers it). A longer setting applies from the next sign-in: a session signed in under a shorter
@@ -145,7 +146,7 @@ export function authenticate(db: Db): RequestHandler {
         'SELECT ',
         'SELECT s.created_at AS createdAt, s.expires_at AS expiresAt, COALESCE(s.last_seen_at, s.created_at) AS seenAt, (u.totp_enabled_at IS NOT NULL) AS totpOn, (u.pin_hash IS NOT NULL) AS pinOn, u.client_campaign_id AS clientCampaign, ',
       )} JOIN sessions s ON s.user_id = u.id WHERE s.token = ?`,
-      [token],
+      [sessionKey(token)],
     );
     if (!row) return next();
     const now = Date.now();
@@ -155,15 +156,16 @@ export function authenticate(db: Db): RequestHandler {
     const left = row.status === 'left';
     const demoSignIn = !left && isDemoSignInAccount(db, row);
     const expired = row.expiresAt < new Date(now).toISOString();
-    // The session's own lifetime, fixed at sign-in (expires_at and the cookie's Max-Age): 4–24 hours for a session 1.4
-    // made with a limit, 14 days for a demo account's or a 1.3 session.
+    // The session's own lifetime, fixed at sign-in (expires_at and the cookie's Max-Age): 4–24 hours, or 14 days for a
+    // session made before 1.4 or a demo session made before this release.
     const ownHours = Math.round((Date.parse(row.expiresAt) - signedInMs) / 3_600_000);
     const idle = Number.isFinite(seenMs) && isSessionIdle(seenMs, now, settings.sessionIdleHours);
-    // Release 1.4: the hours-from-sign-in limit, whatever the activity (last_seen_at never moves it) — the current
-    // setting, or the session's own 4–24 hours when it was signed in under a shorter limit than today's (the admin raised
-    // it since) and has run out; never a demo account's or a 1.3 session's 14 days.
-    const ranOutOwnLimit = !demoSignIn && expired && ownHours > 0 && ownHours <= SESSION_MAX_HOURS_MAX;
-    const maxAged = !demoSignIn && (isSessionPastMaxAge(signedInMs, now, settings.sessionMaxHours) || ranOutOwnLimit);
+    // The hours-from-sign-in limit, whatever the activity (last_seen_at never moves it), for every session the demo ones
+    // included — the current setting, or the session's own 4–24 hours when it was signed in under a shorter limit than
+    // today's (the admin raised it since) and has run out. A 14-day session older than the limit ends here, with the
+    // sentence, at its next request.
+    const ranOutOwnLimit = expired && ownHours > 0 && ownHours <= SESSION_MAX_HOURS_MAX;
+    const maxAged = isSessionPastMaxAge(signedInMs, now, settings.sessionMaxHours) || ranOutOwnLimit;
     if (expired || left || !Number.isFinite(seenMs) || idle || maxAged) {
       destroySession(db, token);
       if (!left && maxAged) {
@@ -179,7 +181,7 @@ export function authenticate(db: Db): RequestHandler {
       }
       return next(); // requireAuth answers 401
     }
-    if (now - seenMs >= LAST_SEEN_RESOLUTION_MS) run(db, `UPDATE sessions SET last_seen_at = ? WHERE token = ?`, [new Date(now).toISOString(), token]);
+    if (now - seenMs >= LAST_SEEN_RESOLUTION_MS) run(db, `UPDATE sessions SET last_seen_at = ? WHERE token = ?`, [new Date(now).toISOString(), sessionKey(token)]);
     const { createdAt, expiresAt, seenAt: _seen, totpOn, pinOn, clientCampaign, ...user } = row;
     const twoFactorEnabled = Boolean(totpOn);
     // The caller's own flags ride on req.user so /auth/me and the dashboard's `user` carry them; other users' rows never do.
@@ -200,8 +202,8 @@ export function authenticate(db: Db): RequestHandler {
     const ownEnd = expiresAt < limitEnd;
     req.sessionInfo = {
       signedInAt: createdAt,
-      endsAt: demoSignIn || ownEnd ? expiresAt : limitEnd,
-      maxHours: demoSignIn ? null : ownEnd ? ownHours : settings.sessionMaxHours,
+      endsAt: ownEnd ? expiresAt : limitEnd,
+      maxHours: ownEnd ? ownHours : settings.sessionMaxHours,
     };
     next();
   };

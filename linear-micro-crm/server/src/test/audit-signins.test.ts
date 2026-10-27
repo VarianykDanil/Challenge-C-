@@ -7,6 +7,7 @@
  */
 import { after, before, test } from 'node:test';
 import assert from 'node:assert/strict';
+import { sessionKey } from '../lib/sessionKey.ts';
 import { PIN_LOCK_AFTER_FAILURES } from '@lm/shared';
 import http from 'node:http';
 import type { AddressInfo } from 'node:net';
@@ -97,8 +98,8 @@ test('a wrong employee ID, a deactivated account and an unknown email: one sign-
   assert.ok(!r.afterJson!.toLowerCase().includes('lm-0010') && !r.summary.toLowerCase().includes('lm-0010'));
   assert.equal(count(srv.db), n + 4);
 
-  // an "email" with a right-to-left override (it would display as danil.v@linear-mcr.co.uk): never stored or shown
-  const disguised = `‮${[...'danil.v@linear-mcr.co.uk'].reverse().join('')}`;
+  // an "email" with a right-to-left override (it would display as morgan.b@linearhub.example): never stored or shown
+  const disguised = `‮${[...'morgan.b@linearhub.example'].reverse().join('')}`;
   assert.equal((await srv.anon().post('/auth/login', { email: disguised, employeeId: 'x' })).status, 401);
   r = newest(srv.db);
   assert.equal(r.summary, 'Failed sign-in with an unknown email');
@@ -365,7 +366,8 @@ test('a sign-out by the idle timeout is recorded once, under the person, when th
   const s = await startTestServer();
   try {
     const db = s.db;
-    const tokenOf = (c: TestClient) => c.cookie.replace('lm_session=', '');
+    // the sessions table keeps the token's hash (lib/sessionKey.ts)
+    const tokenOf = (c: TestClient) => sessionKey(c.cookie.replace('lm_session=', ''));
     const ago = (h: number) => new Date(Date.now() - h * 3_600_000).toISOString();
     const idleRows = () => rows(db, `WHERE action = ?`, [IDLE_SIGN_OUT_ACTION]);
     const SUMMARY = /^Signed out after 12 hours without activity \(last active \d{2}:\d{2} [A-Z][a-z]{2} \d{1,2} [A-Z][a-z]{2}\)$/;

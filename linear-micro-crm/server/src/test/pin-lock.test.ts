@@ -20,7 +20,7 @@ import { all, get, openDb, run } from '../db/connection.ts';
 import { createSchema } from '../db/schema.ts';
 import { pinLockMinutes, pinLockedMessage, pinUnlockTime } from '../lib/pin.ts';
 import { resetLoginFailures } from '../routes/auth.ts';
-import { FIXTURE_ACCOUNTS, buildFixture, startTestServer, type Json, type TestClient, type TestServer } from './helpers.ts';
+import { FIXTURE_ACCOUNTS, buildFixture, currentCode, startTestServer, type Json, type TestClient, type TestServer } from './helpers.ts';
 
 const GOOD_PIN = '5821';
 const OTHER_PIN = '7390';
@@ -188,7 +188,7 @@ test('an admin reset clears the count and the lock; your own reset points at the
   const seen = (await admin.get(`/auth/pin/${fx().users.rep}`)).json;
   assert.equal(seen.locked, true);
   assert.equal(typeof seen.lockedUntil, 'string');
-  assert.equal((await admin.post(`/auth/pin/reset/${fx().users.rep}`)).status, 204);
+  assert.equal((await admin.post(`/auth/pin/reset/${fx().users.rep}`, { code: currentCode(srv!.db, fx().users.admin) })).status, 200);
   assert.deepEqual({ ...lockOf(fx().users.rep) }, { n: 0, until: null });
 
   const own = await admin.post(`/auth/pin/reset/${fx().users.admin}`);

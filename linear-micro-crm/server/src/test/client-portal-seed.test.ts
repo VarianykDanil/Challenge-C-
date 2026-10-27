@@ -13,6 +13,7 @@ import { CAMPAIGN_BRIEFS, seedClientDemo } from '../db/extensions/client.ts';
 import { createSchema } from '../db/schema.ts';
 import { seed } from '../db/seed.ts';
 import { setBusinessClock } from '../lib/dates.ts';
+import { issueSetupCode } from '../lib/setupCodes.ts';
 import { addClientUser, startTestServer, type Json } from './helpers.ts';
 
 // ───────────────────────────── the PIN rule ─────────────────────────────
@@ -134,7 +135,10 @@ test('demo seed: Hannah signs in without a PIN, her portal shows the demo posts,
     db.prepare(`UPDATE users SET email = 'h.price@breastcancernow.example' WHERE id = ?`).run(hannahId);
     assert.equal(clientPinRequired(db, hannahId), true);
     assert.equal(pinStatusFor(db, hannahId)!.required, true);
-    const signIn = await demo.anon().post('/auth/login', { email: 'h.price@breastcancernow.example', employeeId: 'CL-0001' });
+    // an ordinary client account without two-step signs in with a setup code an admin gave, then creates its PIN
+    const creds = { email: 'h.price@breastcancernow.example', employeeId: 'CL-0001' };
+    assert.deepEqual((await demo.anon().post('/auth/login', creds)).json, { requiresSetupCode: true });
+    const signIn = await demo.anon().post('/auth/login', { ...creds, setupCode: issueSetupCode(db, hannahId, { createdBy: null, reason: 'reissue' }).code });
     assert.equal(signIn.json.user.pinSetupRequired, true);
     assert.equal(clientPinRequired(db, Number((db.prepare(`SELECT id FROM users WHERE employee_id = 'LM-0010'`).get() as { id: number }).id)), false, 'staff: the admin decides');
   } finally {

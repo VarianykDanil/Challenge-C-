@@ -180,15 +180,16 @@ test('admin: payroll:to-pay counts exactly the runs GET /finance/payroll?status=
   }
 });
 
-test('every role: at most 12 statements to build the feed; LM_SMART=0 → empty and disabled', async () => {
+test('every role: at most 12 statements to build the feed (13 for admins, with trial mode); LM_SMART=0 → empty and disabled', async () => {
   const srv = await startTestServer({ seed: true });
   try {
     const now = attentionNow();
-    for (const email of ['danil@linear-mcr.co.uk', 'amelia.hart@linear-mcr.co.uk', 'priya.shah@linear-mcr.co.uk', 'jordan.lee@linear-mcr.co.uk']) {
+    for (const email of ['morgan.blake@linearhub.example', 'amelia.hart@linearhub.example', 'priya.shah@linearhub.example', 'jordan.lee@linearhub.example']) {
       const id = (srv.db.prepare(`SELECT id FROM users WHERE email = ?`).get(email) as { id: number }).id;
       const me: UserWithTeam = { ...getUser(srv.db, id)!, twoFactorEnabled: false };
       const { result, statements } = countStatements(srv.db, () => buildAttentionFeed(srv.db, me, now));
-      assert.ok(statements <= 12, `${me.role}: ${statements} statements`);
+      // admins: one more for the trial-mode item (lib/attention/trial.ts, one cached statement, admins only)
+      assert.ok(statements <= (me.role === 'admin' ? 13 : 12), `${me.role}: ${statements} statements`);
       // Release 1.3: each package's provider (P2 invoices, P3 statements, P6 client posts) takes at most one statement,
       // so the 1.1 budget holds with all of them merged (the admin used 13 when two of them took two).
       for (const p of ATTENTION_PROVIDERS) {

@@ -35,7 +35,7 @@ beforeEach(() => {
 
 const fx = () => srv.fixture!;
 const person = (extra: Record<string, unknown> = {}) => ({
-  firstName: 'Sam', lastName: `Tester${n}`, email: `sam.tester${n}@linear-mcr.co.uk`, position: 'trainee', ...extra,
+  firstName: 'Sam', lastName: `Tester${n}`, email: `sam.tester${n}@linearhub.example`, position: 'trainee', ...extra,
 });
 const usersCount = () => Number(get<{ n: number }>(srv.db, `SELECT COUNT(*) AS n FROM users`)!.n);
 
@@ -62,15 +62,19 @@ test('a leader adds a trainee to their own team: rep, active, the standard plan,
   assert.ok(u.signInInstructions.includes(`your employee ID: ${stored}.`));
   assert.ok(u.signInInstructions.includes(`(${u.email})`));
   assert.doesNotMatch(u.signInInstructions, /PIN/, 'no PIN step while the office does not require one');
-  // Release 1.4: every new account sets up two-step verification at its first sign-in, and the text says so
-  assert.match(u.signInInstructions, /\n3\. The first time, set up two-step verification\. You need an authenticator app on your phone/);
+  // the first sign-in needs the one-time setup code shown here (the email and ID alone are not enough), then two-step
+  assert.match(u.setupCode, /^[A-Z2-9]{4}-[A-Z2-9]{4}-[A-Z2-9]{4}$/);
+  assert.ok(u.signInInstructions.includes(`\n3. The first time, type your one-time setup code: ${u.setupCode}.`));
+  assert.match(u.signInInstructions, /\n4\. Then set up two-step verification\. You need an authenticator app on your phone/);
   // every later read hides it again from the leader
   assert.equal((await leader.get(`/users/${u.id}`)).json.employeeId, '');
   assert.equal(((await leader.get(`/users?teamId=${fx().teams.a}`)).json as { id: number; employeeId: string }[]).find((x) => x.id === u.id)!.employeeId, '');
   assert.equal((await leader.get(`/users/${u.id}/performance`)).json.user.employeeId, '');
   assert.equal((await admin.get(`/users/${u.id}`)).json.employeeId, stored, 'administrators still see it');
-  // the new person can sign in with those details
-  const first = await srv.login({ email: u.email, employeeId: stored }, undefined, { twoFactor: false });
+  // the new person can sign in with those details (email, employee ID and the setup code)
+  const first = srv.anon();
+  assert.deepEqual((await first.post('/auth/login', { email: u.email, employeeId: stored })).json, { requiresSetupCode: true });
+  assert.equal((await first.post('/auth/login', { email: u.email, employeeId: stored, setupCode: u.setupCode })).status, 200);
   assert.equal((await first.get('/auth/me')).json.user.twoFactorSetupRequired, true, 'the two-step setup the instructions describe');
   const fresh = await srv.login({ email: u.email, employeeId: stored });
   assert.equal((await fresh.get('/auth/me')).json.user.employeeId, stored, 'and sees their own');
@@ -134,7 +138,7 @@ test('a recruiter adds to any team, but must choose one', async () => {
   const none = await recruiter.post('/users', person());
   assert.equal(none.status, 400);
   assert.equal(none.json.error, 'Choose a team for them.');
-  const unknown = await recruiter.post('/users', person({ teamId: 99999, email: `unknown.team${n}@linear-mcr.co.uk` }));
+  const unknown = await recruiter.post('/users', person({ teamId: 99999, email: `unknown.team${n}@linearhub.example` }));
   assert.equal(unknown.status, 400);
 });
 
@@ -193,12 +197,12 @@ test('an administrator: as before, and the employee ID is now optional (the next
   assert.equal(chosen.json.role, 'leader');
   assert.equal(chosen.json.avatarColor, '#0E7490');
   assert.equal(chosen.json.employeeId, `LM-09${String(n).padStart(2, '0')}`);
-  const auto = await admin.post('/users', { ...person({ email: `auto${n}@linear-mcr.co.uk` }), role: 'rep', teamId: null });
+  const auto = await admin.post('/users', { ...person({ email: `auto${n}@linearhub.example` }), role: 'rep', teamId: null });
   assert.equal(auto.status, 201, JSON.stringify(auto.json));
   const max = Number(get<{ m: number }>(srv.db, `SELECT MAX(CAST(substr(employee_id, 4) AS INTEGER)) AS m FROM users WHERE employee_id LIKE 'LM-%' AND id <> ?`, [auto.json.id])!.m);
   assert.equal(auto.json.employeeId, `LM-${String(max + 1).padStart(4, '0')}`);
   assert.equal(auto.json.teamId, null, 'an administrator may still add someone with no team');
-  assert.equal((await admin.post('/users', { ...person({ email: `norole${n}@linear-mcr.co.uk` }) })).status, 400, 'an administrator still chooses the role');
+  assert.equal((await admin.post('/users', { ...person({ email: `norole${n}@linearhub.example` }) })).status, 400, 'an administrator still chooses the role');
 });
 
 test('the sign-in instructions add the PIN step while the office requires a PIN for everyone', async () => {
@@ -208,8 +212,9 @@ test('the sign-in instructions add the PIN step while the office requires a PIN 
   try {
     const r = await leader.post('/users', person());
     assert.equal(r.status, 201);
-    assert.match(r.json.signInInstructions, /3\. The first time, create a PIN of 4 to 6 digits\./);
-    assert.match(r.json.signInInstructions, /\n4\. Then set up two-step verification\./, 'after the PIN, as at sign-in');
+    assert.match(r.json.signInInstructions, /\n3\. The first time, type your one-time setup code: /);
+    assert.match(r.json.signInInstructions, /\n4\. Then create a PIN of 4 to 6 digits\./);
+    assert.match(r.json.signInInstructions, /\n5\. Then set up two-step verification\./, 'after the PIN, as at sign-in');
     assert.match(r.json.signInInstructions, /1\. Open the Linear Hub sign-in page\./, 'no address given: the plain wording');
   } finally {
     writeSecuritySettings(srv.db, { requirePin: false });
@@ -260,13 +265,13 @@ test('POST /users over the limit: 429 with the sentence, nothing added', async (
     const c = new TestClient(`http://127.0.0.1:${port}/api`);
     // Release 1.4: the fixture leader signs in with a two-step code (signInWith sets it up and answers it)
     assert.equal((await signInWith(limited.db, c, { email: 'lee.leader@fixture.test', employeeId: 'FX-0002' })).status, 200);
-    const add = (i: number) => c.post('/users', { firstName: 'Lim', lastName: `It${i}`, email: `lim.it${i}@linear-mcr.co.uk`, position: 'trainee' });
+    const add = (i: number) => c.post('/users', { firstName: 'Lim', lastName: `It${i}`, email: `lim.it${i}@linearhub.example`, position: 'trainee' });
     assert.equal((await add(1)).status, 201);
     assert.equal((await add(2)).status, 201);
     const third = await add(3);
     assert.equal(third.status, 429);
     assert.match(third.json.error, /more than 60 changes in a minute|Wait a minute/);
-    assert.equal(get(limited.db, `SELECT 1 FROM users WHERE email = 'lim.it3@linear-mcr.co.uk'`), undefined);
+    assert.equal(get(limited.db, `SELECT 1 FROM users WHERE email = 'lim.it3@linearhub.example'`), undefined);
   } finally {
     server.closeAllConnections();
     await new Promise<void>((resolve) => server.close(() => resolve()));

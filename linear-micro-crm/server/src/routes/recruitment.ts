@@ -1,11 +1,14 @@
 import { Router } from 'express';
 import { z } from 'zod';
-import { PIPELINE_STAGES, POSITIONS, TERMINAL_STAGES, dateOfBirthProblem, defaultNextActionAt, isOverdue, stageIndex, type CandidateSource, type CandidateStage, type Position, type RecruitmentSummary, type UserWithTeam } from '@lm/shared';
+import { PIPELINE_STAGES, POSITIONS, TERMINAL_STAGES, dateOfBirthProblem, defaultNextActionAt, isOverdue, stageIndex, staffSignInInstructions, type CandidateSource, type CandidateStage, type HiredSignIn, type Position, type RecruitmentSummary, type UserWithTeam } from '@lm/shared';
 import { all, get, run, transaction, type Db } from '../db/connection.ts';
 import { Where, getCandidate, getInterview, getUser, listCandidates, listInterviews, listStageChanges } from '../db/queries.ts';
 import { addDays, businessNow, eachMonday, isISODate, mondayOf, nowISO, todayISO } from '../lib/dates.ts';
 import { badRequest, conflict, notFound } from '../lib/errors.ts';
+import { readSecuritySettings } from '../lib/pin.ts';
 import { logInterviewBooked, logInterviewChanges } from '../lib/recruitmentPlus/store.ts';
+import { isSecureRequest } from '../lib/secureRequest.ts';
+import { issueSetupCode, type IssuedSetupCode } from '../lib/setupCodes.ts';
 import { idParam, isoTimestamp, optionalIdQuery, optionalString, parseRange } from '../lib/validate.ts';
 import { currentUser, requireRole } from '../middleware/auth.ts';
 import { defaultPayPlanId, nextEmployeeId, pickAvatarColor } from './users.ts';
@@ -228,6 +231,9 @@ export function recruitmentRouter(db: Db): Router {
     // A move starts the new stage's clock: the deadline is the stage target unless the body sets one (or null for none).
     // It no longer carries the previous stage's date forward, which left most open candidates overdue.
     const nextActionAt = isTerminal ? null : bodyNextActionAt === undefined ? defaultNextActionAt(stage, todayISO()) : bodyNextActionAt;
+    // a hire makes an account: its one-time setup code is shown once, to whoever hired them (never over plain http from
+    // another device)
+    let newAccount: { id: number; issued: IssuedSetupCode | null } | null = null;
     transaction(db, () => {
       let hiredUserId: number | null = candidate.hiredUserId;
       if (stage === 'hired' && hiredUserId === null) {
@@ -251,6 +257,7 @@ export function recruitmentRouter(db: Db): Router {
           ],
         );
         hiredUserId = r.lastInsertRowid;
+        newAccount = { id: hiredUserId, issued: isSecureRequest(req) ? issueSetupCode(db, hiredUserId, { createdBy: me.id, reason: 'new_account' }) : null };
       }
       run(db, `INSERT INTO stage_changes (candidate_id, from_stage, to_stage, changed_at, changed_by_id, note) VALUES (?, ?, ?, ?, ?, ?)`, [
         id, candidate.stage, stage, now, me.id, note ?? null,
@@ -261,7 +268,19 @@ export function recruitmentRouter(db: Db): Router {
         [stage, now, hiredUserId, isTerminal ? null : NEXT_ACTION[stage] ?? null, nextActionAt, id],
       );
     });
-    res.json(getCandidate(db, id));
+    const made = newAccount as { id: number; issued: IssuedSetupCode | null } | null;
+    const user = made ? getUser(db, made.id) : undefined;
+    if (!made || !user) return res.json(getCandidate(db, id));
+    const hiredSignIn: HiredSignIn = {
+      userId: user.id, firstName: user.firstName, lastName: user.lastName, email: user.email, employeeId: user.employeeId, teamName: user.teamName,
+      setupCode: made.issued?.code ?? null,
+      ...(made.issued ? { setupCodeExpiresAt: made.issued.expiresAt } : { setupCodeWithheld: true }),
+      signInInstructions: staffSignInInstructions({
+        firstName: user.firstName, email: user.email, employeeId: user.employeeId, teamName: user.teamName, pinRequired: readSecuritySettings(db).requirePin,
+        setupCode: made.issued?.code ?? null, setupCodeExpiresAt: made.issued?.expiresAt ?? null,
+      }),
+    };
+    res.json({ ...getCandidate(db, id), hiredSignIn });
   });
 
   // ── interviews ──

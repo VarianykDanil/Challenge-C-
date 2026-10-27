@@ -11,12 +11,14 @@ import { provider as clientPosts } from './clientPosts.ts';
 import { provider as invoices } from './invoices.ts';
 import { provider as payments } from './payments.ts';
 import { provider as statements } from './statements.ts';
+import { provider as trial } from './trial.ts';
 import type { AttentionProvider } from './types.ts';
 
 export type { AttentionProvider } from './types.ts';
 
 // Release 1.4 (F): payments (bank details to check, failed payments, bank files waiting, connections to look at)
-export const ATTENTION_PROVIDERS: readonly AttentionProvider[] = [invoices, statements, clientPosts, payments];
+// Trial mode (the demo company is still here: go live before real pay or bank details go in), first.
+export const ATTENTION_PROVIDERS: readonly AttentionProvider[] = [trial, invoices, statements, clientPosts, payments];
 
 /** Every provider's items for `me` (a failing provider contributes nothing). */
 export function providerAttentionItems(db: Db, me: UserWithTeam, now: AttentionNow): AttentionItem[] {

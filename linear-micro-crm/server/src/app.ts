@@ -9,6 +9,7 @@ import type { Db } from './db/connection.ts';
 import { bumpDataVersion, responseCache } from './lib/cache.ts';
 import { compression } from './lib/compress.ts';
 import { HttpError } from './lib/errors.ts';
+import { demoMoneyGuard, secureOnly } from './middleware/accessGuards.ts';
 import { authenticate, pinSetupGate, requireAuth } from './middleware/auth.ts';
 import { perUserWriteLimit } from './middleware/writeLimit.ts';
 import { auditMiddleware } from './lib/audit.ts';
@@ -179,6 +180,10 @@ export function createApp(db: Db, opts: AppOptions = {}): Express {
   // Release 1.2 slots, both pass-through until their packages land: U1's PIN gate (403 until a required PIN is set),
   // then U3's audit recorder (successful writes, with before/after snapshots).
   api.use(pinSetupGate(db));
+  // Money and secret actions only over a secure connection (or on the office computer itself), and never from a one-tap
+  // demo account during the trial (middleware/accessGuards.ts) — by route, before the write limit and the recorder.
+  api.use(secureOnly());
+  api.use(demoMoneyGuard(db));
   // Per person, at most 60 a minute of POST /learning/*, PUT /pitches/*, POST /checkins, POST /auth/pin(/*),
   // POST /gauges/bulk, POST /users(/*) and (1.3.1 fix) the event roster writes and PUT /recruitment/interviews/:id/answers
   // together (429 after that); before the recorder and the cache bump, so a refused write is never recorded and clears

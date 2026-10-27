@@ -27,7 +27,7 @@
  */
 import { Router } from 'express';
 import { z } from 'zod';
-import { MONEY_MAX, type ClientAccountUpdateInput, type ClientPostStatus } from '@lm/shared';
+import { MONEY_MAX, type ClientAccountReset, type ClientAccountUpdateInput, type ClientPostStatus } from '@lm/shared';
 import { get, run, transaction, type Db } from '../db/connection.ts';
 import {
   CLIENT_POSTS_READ_MAX,
@@ -41,8 +41,10 @@ import {
 import { addDays, isISODate, nowISO, todayISO } from '../lib/dates.ts';
 import { badRequest, conflict, notFound } from '../lib/errors.ts';
 import { addCampaignRate, campaignRateOn } from '../lib/payRule.ts';
-import { resetPinAndSignOut } from '../lib/pin.ts';
-import { clearTwoFactor } from '../lib/twofactor.ts';
+import { clearPinAndSessions } from '../lib/pin.ts';
+import { issueSetupCode, requireSetupCodeAtNextSignIn } from '../lib/setupCodes.ts';
+import { assertStepUp } from '../lib/trial.ts';
+import { clearTwoFactorRows } from '../lib/twofactor.ts';
 import { idParam, optionalIdQuery } from '../lib/validate.ts';
 import { currentUser, destroyUserSessions, requireRole } from '../middleware/auth.ts';
 
@@ -193,20 +195,35 @@ export function clientAccountsRouter(db: Db): Router {
     res.json(getClientAccount(db, id));
   });
 
+  // A reset needs this admin's fresh two-step code (never a demo account) and hands out the one-time setup code the
+  // client's next sign-in needs, shown once.
   router.post('/:id/reset-pin', requireRole('admin'), (req, res) => {
+    const me = currentUser(req);
     const id = idParam(req);
     if (!getClientAccount(db, id)) throw notFound('Client account');
-    resetPinAndSignOut(db, id);
-    res.json(getClientAccount(db, id));
+    assertStepUp(db, me, req, 'reset anyone’s PIN');
+    const issued = transaction(db, () => {
+      clearPinAndSessions(db, id);
+      requireSetupCodeAtNextSignIn(db, id);
+      return issueSetupCode(db, id, { createdBy: me.id, reason: 'reset_pin' });
+    });
+    const body: ClientAccountReset = { ...getClientAccount(db, id)!, setupCode: issued.code, setupCodeExpiresAt: issued.expiresAt };
+    res.json(body);
   });
 
   // Release 1.4 (package S): two-step verification is required for client accounts; a lost phone is reset here.
   router.post('/:id/reset-2fa', requireRole('admin'), (req, res) => {
+    const me = currentUser(req);
     const id = idParam(req);
     if (!getClientAccount(db, id)) throw notFound('Client account');
-    clearTwoFactor(db, id); // its own transaction (secrets, recovery codes, open sign-in challenges)
-    destroyUserSessions(db, id);
-    res.json(getClientAccount(db, id));
+    assertStepUp(db, me, req, 'reset anyone’s two-step verification');
+    const issued = transaction(db, () => {
+      clearTwoFactorRows(db, id); // secrets, recovery codes, open sign-in challenges
+      destroyUserSessions(db, id);
+      return issueSetupCode(db, id, { createdBy: me.id, reason: 'reset_2fa' });
+    });
+    const body: ClientAccountReset = { ...getClientAccount(db, id)!, setupCode: issued.code, setupCodeExpiresAt: issued.expiresAt };
+    res.json(body);
   });
 
   return router;

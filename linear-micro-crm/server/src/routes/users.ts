@@ -1,7 +1,7 @@
 import { Router } from 'express';
 import { z } from 'zod';
-import { POSITIONS, addPersonRefusal, staffSignInInstructions, type AddPersonResult, type Position, type UserWithTeam } from '@lm/shared';
-import { all, get, run, type Db } from '../db/connection.ts';
+import { POSITIONS, addPersonRefusal, staffSignInInstructions, type AddPersonResult, type Position, type SetupCodeIssued, type UserWithTeam } from '@lm/shared';
+import { all, get, run, transaction, type Db } from '../db/connection.ts';
 import { USER_SELECT, Where, getUser, listGauges } from '../db/queries.ts';
 import { AVATAR_PALETTE } from '../db/seed-data.ts';
 import { mondayOf, todayISO } from '../lib/dates.ts';
@@ -10,7 +10,10 @@ import { nextEmployeeId, personOrderSql } from '../lib/people.ts';
 import { readSecuritySettings } from '../lib/pin.ts';
 import { punctualityFor, ratiosOf, salesPerDay, summaryRows, totalsFor, trendFor } from '../lib/metrics.ts';
 import { redactEntry, redactUser } from '../lib/scope.ts';
-import { clearTwoFactor } from '../lib/twofactor.ts';
+import { isSecureRequest } from '../lib/secureRequest.ts';
+import { issueSetupCode } from '../lib/setupCodes.ts';
+import { assertStepUp } from '../lib/trial.ts';
+import { clearTwoFactorRows } from '../lib/twofactor.ts';
 import { hexColor, idParam, isoDate, optionalIdQuery, optionalString, parseRange } from '../lib/validate.ts';
 import { currentUser, destroyUserSessions, requireRole } from '../middleware/auth.ts';
 
@@ -161,6 +164,8 @@ export function usersRouter(db: Db): Router {
     const body = parsed.data;
     if (admin && !body.role) throw badRequest('Choose a role', [{ path: 'role', message: 'Choose a role' }]);
     const role = body.role ?? 'rep';
+    // a new administrator: refused for a demo account, and it needs this admin's fresh two-step code
+    if (role === 'admin') assertStepUp(db, me, req, 'create an administrator');
     if (body.employeeId && get(db, `SELECT 1 FROM users WHERE lower(employee_id) = lower(?)`, [body.employeeId])) throw conflict(`Employee ID ${body.employeeId} is already in use`);
     if (get(db, `SELECT 1 FROM users WHERE lower(email) = lower(?)`, [body.email])) throw conflict(`Email ${body.email} is already in use`);
     if (body.teamId !== null && !get(db, `SELECT 1 FROM teams WHERE id = ?`, [body.teamId])) throw badRequest('Unknown teamId');
@@ -169,13 +174,19 @@ export function usersRouter(db: Db): Router {
     const employeeId = body.employeeId ?? nextEmployeeId(db);
     // Release 1.3: staff only, so client portal accounts never shift the avatar colours.
     const count = get<{ n: number }>(db, `SELECT COUNT(*) AS n FROM users WHERE role <> 'client'`)!.n;
-    const r = run(
-      db,
-      `INSERT INTO users (employee_id, email, first_name, last_name, role, position, team_id, pay_plan_id, start_date, status, phone, avatar_color, city)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-      [employeeId, body.email, body.firstName, body.lastName, role, body.position, body.teamId, payPlanId, body.startDate, body.status, body.phone, body.avatarColor ?? pickAvatarColor(Number(count)), body.city],
-    );
-    const created = getUser(db, r.lastInsertRowid)!;
+    // Their one-time setup code, shown once below: over plain http from another device it would cross the network in
+    // clear, so none is made then (an administrator gives them one later from Team, securely).
+    const secure = isSecureRequest(req);
+    const { id, issued } = transaction(db, () => {
+      const r = run(
+        db,
+        `INSERT INTO users (employee_id, email, first_name, last_name, role, position, team_id, pay_plan_id, start_date, status, phone, avatar_color, city)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        [employeeId, body.email, body.firstName, body.lastName, role, body.position, body.teamId, payPlanId, body.startDate, body.status, body.phone, body.avatarColor ?? pickAvatarColor(Number(count)), body.city],
+      );
+      return { id: r.lastInsertRowid, issued: secure ? issueSetupCode(db, r.lastInsertRowid, { createdBy: me.id, reason: 'new_account' }) : null };
+    });
+    const created = getUser(db, id)!;
     const result: AddPersonResult = {
       ...created,
       signInInstructions: staffSignInInstructions({
@@ -185,7 +196,11 @@ export function usersRouter(db: Db): Router {
         teamName: created.teamName,
         signInUrl: body.signInUrl ?? null,
         pinRequired: readSecuritySettings(db).requirePin,
+        setupCode: issued?.code ?? null,
+        setupCodeExpiresAt: issued?.expiresAt ?? null,
       }),
+      setupCode: issued?.code ?? null,
+      ...(issued ? { setupCodeExpiresAt: issued.expiresAt } : { setupCodeWithheld: true }),
     };
     res.status(201).json(result);
   });
@@ -196,6 +211,10 @@ export function usersRouter(db: Db): Router {
     const existing = getStaffUser(db, id);
     if (!existing) throw notFound('User');
     const patch = patchBody.parse(req.body);
+    // making someone an administrator, or changing the email they sign in with: refused for a demo account, and it
+    // needs this admin's fresh two-step code
+    if (patch.role === 'admin' && existing.role !== 'admin') assertStepUp(db, me, req, 'make someone an administrator');
+    if (patch.email !== undefined && patch.email.toLowerCase() !== existing.email.toLowerCase()) assertStepUp(db, me, req, 'change someone’s sign-in email');
     if (patch.lastName === '' && existing.lastName.trim() !== '') {
       throw badRequest('Enter their last name', [{ path: 'lastName', message: 'Enter their last name' }]);
     }
@@ -232,9 +251,33 @@ export function usersRouter(db: Db): Router {
           `or run "npm run 2fa:reset -- ${me.email}" on the server.`,
       );
     }
-    clearTwoFactor(db, id);
-    destroyUserSessions(db, id);
-    res.status(204).end();
+    assertStepUp(db, me, req, 'reset anyone’s two-step verification');
+    // they set it up again with the setup code shown here once: their email and employee ID alone are not enough
+    const issued = transaction(db, () => {
+      clearTwoFactorRows(db, id);
+      destroyUserSessions(db, id);
+      return issueSetupCode(db, id, { createdBy: me.id, reason: 'reset_2fa' });
+    });
+    const body: SetupCodeIssued = { userId: id, setupCode: issued.code, expiresAt: issued.expiresAt };
+    res.json(body);
+  });
+
+  /**
+   * A new one-time setup code for someone (staff or client account) who has not finished setting up, or lost the one
+   * they had: shown once, valid 7 days, any older unused code stops working. Never your own; administrators only; a
+   * fresh two-step code; a secure connection (app.ts).
+   */
+  router.post('/:id/setup-code', requireRole('admin'), (req, res) => {
+    const me = currentUser(req);
+    const id = idParam(req);
+    const person = getUser(db, id);
+    if (!person) throw notFound('User');
+    if (id === me.id) throw badRequest('You cannot give yourself a setup code. Ask another administrator, or run "npm run setup-code -- <your email>" on the server.');
+    if (person.status === 'left') throw conflict(`${person.firstName} has left. Make them active again first.`);
+    assertStepUp(db, me, req, 'give anyone a setup code');
+    const issued = issueSetupCode(db, id, { createdBy: me.id, reason: 'reissue' });
+    const body: SetupCodeIssued = { userId: id, setupCode: issued.code, expiresAt: issued.expiresAt };
+    res.json(body);
   });
 
   return router;

@@ -26,6 +26,8 @@ let client: TestClient;
 let otherClient: TestClient;
 let otherCampaignId: number;
 let clientId: number;
+/** The one-time setup code the invite below showed (Jo's first sign-in needs it). */
+let joSetupCode = '';
 
 const fx = () => srv.fixture!;
 const today = () => todayISO();
@@ -469,8 +471,11 @@ test('invite: the next access code (never a demo code), the instructions, and 40
   );
   assert.match(r.instructions, /1\. Open https:\/\/hub\.example\/login\./);
   assert.match(r.instructions, /\(jo\.bloggs@charity\.example\) and your access code: CL-0061/);
-  // Release 1.4: an invited client account must set up two-step verification after its PIN, and the text says so
-  assert.match(r.instructions, /\n4\. Then set up two-step verification\. You need an authenticator app on your phone/);
+  // the first sign-in needs the one-time setup code shown here once; then the PIN, then two-step verification
+  joSetupCode = r.setupCode;
+  assert.match(joSetupCode, /^[A-Z2-9]{4}-[A-Z2-9]{4}-[A-Z2-9]{4}$/);
+  assert.ok(r.instructions.includes(`\n3. The first time, type your one-time setup code: ${joSetupCode}.`));
+  assert.match(r.instructions, /\n5\. Then set up two-step verification\. You need an authenticator app on your phone/);
   const row = get<{ role: string; position: string; teamId: number | null; payPlanId: number }>(srv.db, `SELECT role, position, team_id AS teamId, pay_plan_id AS payPlanId FROM users WHERE id = ?`, [r.account.id])!;
   assert.deepEqual({ ...row }, { role: 'client', position: 'client', teamId: null, payPlanId: fx().plans.owner });
   is(await admin.post(`/campaigns/${cid}/client-accounts`, { firstName: 'Jo', lastName: 'Again', email: 'jo.bloggs@charity.example' }), 409, 'same email');
@@ -490,7 +495,9 @@ test('invite: the next access code (never a demo code), the instructions, and 40
 test('an invited client’s first sign-in creates the PIN (the gate holds them until then), then every sign-in needs it', async () => {
   const creds = { email: 'jo.bloggs@charity.example', employeeId: 'CL-0061' };
   const jo = srv.anon();
-  const first = is(await jo.post('/auth/login', creds), 200, 'first sign-in');
+  // the email and access code alone start nothing: the setup code from the invite comes with them
+  assert.deepEqual(is(await jo.post('/auth/login', creds), 200, 'asks for the setup code'), { requiresSetupCode: true });
+  const first = is(await jo.post('/auth/login', { ...creds, setupCode: joSetupCode }), 200, 'first sign-in');
   assert.equal(first.user.pinSetupRequired, true, 'a client account must create a PIN');
   assert.equal(first.user.hasPin, false);
   const held = await jo.get('/client/portal');
@@ -530,7 +537,7 @@ test('deactivate signs the client out everywhere and stops sign-in; reactivate; 
   is(await admin.patch(`/client-accounts/${id}`, { email: FIXTURE_ACCOUNTS.rep.email }), 409, 'an email in use');
   is(await admin.patch(`/client-accounts/${id}`, { status: 'gone' }), 400, 'bad status');
   is(await admin.patch(`/client-accounts/${fx().users.rep}`, { status: 'left' }), 404, 'a staff member is not a client account');
-  is(await admin.post(`/client-accounts/${fx().users.rep}/reset-pin`), 404, 'nor for a PIN reset');
+  is(await admin.post(`/client-accounts/${fx().users.rep}/reset-pin`, { code: '123456' }), 404, 'nor for a PIN reset');
   assert.equal(get<{ status: string }>(srv.db, `SELECT status FROM users WHERE id = ?`, [fx().users.rep])!.status, 'active');
   const summaries = auditRows(`action = 'PATCH /client-accounts/:id'`).map((r) => r.summary);
   assert.equal(summaries[0], 'Deactivated the client account of Jo Bloggs (Fixture Charity)');
@@ -544,11 +551,16 @@ test('deactivate signs the client out everywhere and stops sign-in; reactivate; 
 test('reset PIN: cleared, signed out; the next sign-in creates a new one', async () => {
   const id = Number(get<{ id: number }>(srv.db, `SELECT id FROM users WHERE employee_id = 'CL-0061'`)!.id);
   const jo = await srv.login({ email: 'jo@charity.example', employeeId: 'CL-0061', pin: '4826' });
-  const reset = is(await admin.post(`/client-accounts/${id}/reset-pin`), 200, 'reset');
+  // a reset needs the admin's fresh two-step code and hands out the setup code the next sign-in needs
+  is(await admin.post(`/client-accounts/${id}/reset-pin`), 400, 'no code');
+  const reset = is(await admin.post(`/client-accounts/${id}/reset-pin`, { code: currentCode(srv.db, fx().users.admin) }), 200, 'reset');
   assert.equal(reset.hasPin, false);
+  assert.match(reset.setupCode, /^[A-Z2-9]{4}-[A-Z2-9]{4}-[A-Z2-9]{4}$/);
   is(await jo.get('/client/portal'), 401, 'signed out');
   const anon = srv.anon();
-  const step = is(await anon.post('/auth/login', { email: 'jo@charity.example', employeeId: 'CL-0061' }), 200, 'sign in without a PIN');
+  const creds = { email: 'jo@charity.example', employeeId: 'CL-0061' };
+  assert.deepEqual(is(await anon.post('/auth/login', creds), 200, 'the setup code first'), { requiresSetupCode: true });
+  const step = is(await anon.post('/auth/login', { ...creds, setupCode: reset.setupCode }), 200, 'sign in without a PIN');
   assert.equal(step.requiresTwoFactor, true, 'release 1.4: two-step stays on after a PIN reset');
   const back = is(await anon.post('/auth/login/2fa', { challengeToken: step.challengeToken, code: currentCode(srv.db, id) }), 200, 'the code');
   assert.equal(back.user.pinSetupRequired, true);

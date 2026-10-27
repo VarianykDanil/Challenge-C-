@@ -49,7 +49,8 @@ const R3_CORE_COLUMNS: Record<string, string[]> = {
 };
 
 test('extensions: the 1.2 five, then the seven 1.3 ones in package order (and 1.3.1, then 1.4 after them), unique names, the DbExtension shape', () => {
-  assert.deepEqual(EXTENSIONS.map((e) => e.name), [...R2_EXTENSIONS, ...R3_EXTENSIONS, ...R31_EXTENSIONS, ...R4_EXTENSIONS]);
+  // and last, access (setup codes, hashed sessions, trial mode)
+  assert.deepEqual(EXTENSIONS.map((e) => e.name), [...R2_EXTENSIONS, ...R3_EXTENSIONS, ...R31_EXTENSIONS, ...R4_EXTENSIONS, 'access']);
   assert.equal(new Set(EXTENSIONS.map((e) => e.name)).size, EXTENSIONS.length);
   for (const e of EXTENSIONS) {
     assert.equal(typeof e.sql, 'string', `${e.name}.sql`);
@@ -91,7 +92,8 @@ test('a 1.2 database upgrades cleanly: new tables and columns appear, every row 
     db.exec(`INSERT INTO candidates (first_name, last_name, email, applied_at, stage_updated_at) VALUES ('Cand', 'Idate', 'c@example.test', '2026-10-01', '2026-10-01')`);
     const before = db.prepare(`SELECT * FROM payroll_runs`).all();
     const changed = createSchema(db);
-    for (const name of changed) assert.ok(R3_EXTENSIONS.includes(name.split(':')[0]!), `only 1.3 extensions report: ${name}`);
+    // the 1.3 extensions, and access (its users.setup_code_required column)
+    for (const name of changed) assert.ok([...R3_EXTENSIONS, 'access'].includes(name.split(':')[0]!), `only 1.3 extensions and access report: ${name}`);
     for (const [t, cols] of Object.entries(R3_CORE_COLUMNS)) for (const c of cols) assert.ok(changed.some((n) => n.endsWith(`:${t}.${c}`)), `reported ${t}.${c}`);
     for (const t of R3_TABLES) assert.ok(columnsOf(db, t).length > 0, `table ${t}`);
     const afterRows = db.prepare(`SELECT id, user_id, week_start, gross, status, reference, paid_as FROM payroll_runs`).all() as Record<string, unknown>[];
@@ -232,8 +234,8 @@ test('audit registry: package specs first, every 1.2 spec kept, POST /audit/even
   assert.equal(matchAuditSpec('GET', '/finance/payroll/12'), null);
 });
 
-test('attention providers: the three 1.3 ones (and 1.4 payments after them), and with no extra items the 1.1 feed passes through unchanged', () => {
-  assert.deepEqual(ATTENTION_PROVIDERS.map((p) => p.name), ['invoices', 'statements', 'client-posts', 'payments']);
+test('attention providers: trial mode first, the three 1.3 ones (and 1.4 payments after them), and with no extra items the 1.1 feed passes through unchanged', () => {
+  assert.deepEqual(ATTENTION_PROVIDERS.map((p) => p.name), ['trial', 'invoices', 'statements', 'client-posts', 'payments']);
   const core = [{ key: 'a', kind: 'pay' as const, severity: 'info' as const, title: 't', body: 'b', href: '/' }];
   assert.equal(withProviderItems(core, []), core);
   const merged = withProviderItems(core, [{ key: 'client:post:1', kind: 'client', severity: 'warning', title: 'New update', body: 'b', href: '/campaigns/1' }]);

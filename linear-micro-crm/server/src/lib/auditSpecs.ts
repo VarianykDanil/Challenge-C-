@@ -631,12 +631,21 @@ export function lessonLabel(key: unknown): string {
 
 // ───────────────────────────── the registry ─────────────────────────────
 
-const signedIn = (summary: string) => (_db: Db, done: AuditDone): AuditDraft[] => {
+const signedIn = (summary: string) => (db: Db, done: AuditDone): AuditDraft[] => {
   // step one of a two-step sign-in answers a challenge, not a session: nobody is signed in yet
   const user = responseOf(done).user;
   const id = isRecord(user) ? toId(user.id) : null;
-  return id ? [{ entity: 'user', entityId: id, summary, userId: id }] : [];
+  return id ? [{ entity: 'user', entityId: id, summary: withSetupCode(db, done, id, summary), userId: id }] : [];
 };
+
+/** "Signed in with a setup code": the sign-in body carried one and this person's code was used a moment ago. */
+function withSetupCode(db: Db, done: AuditDone, userId: number, summary: string): string {
+  const body = isRecord(done.body) ? done.body : {};
+  if (typeof body.setupCode !== 'string' || !body.setupCode.trim()) return summary;
+  const recent = new Date(Date.now() - 60_000).toISOString();
+  const used = soft(() => Boolean(get(db, `SELECT 1 FROM setup_codes WHERE user_id = ? AND used_at >= ?`, [userId, recent])), false);
+  return used ? `${summary} with a setup code` : summary;
+}
 
 /** Release 1.3 (P9): sign-in, with its failed attempts (lib/audit/signIns.ts). */
 const signIn: AuditRouteSpec<SignInState> = { method: 'POST', pattern: '/auth/login', before: signInBefore, after: signedIn('Signed in'), failed: signInFailed };
