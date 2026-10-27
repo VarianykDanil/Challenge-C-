@@ -257,11 +257,20 @@ function refusal(f: BankFileFormat, row: BankFileRow<unknown>, name: string): st
 /** One CSV cell: the shared CSV guard on text that is already bank-safe (it never needs quotes). */
 const cell = (text: string) => payExportCell(text);
 
+/** The sort code on every line of a TEST file: no bank branch has it, so no bank can pay from the file. */
+export const TEST_FILE_SORT_CODE = '000000';
+/** The account number on every line of a TEST file. */
+export const TEST_FILE_ACCOUNT_NUMBER = '00000000';
+
 /**
  * The file for `formatId`: the header row, then one line per row a bank would take, in the order given (CRLF line
  * ends and a final CRLF). Rows a bank would refuse are left out with the reason; rows past the format's limit too.
+ *
+ * `test`: a TEST file (a connection in test mode). Each row's real bank details are checked as for a real file, but
+ * every line is written with sort code 00-00-00 and account number 00000000, so the file can never pay anyone, even if
+ * it is uploaded by mistake. Names, amounts, references and the layout stay real, so the file can still be checked.
  */
-export function buildBankFile<K>(formatId: BankFileFormatId, rows: readonly BankFileRow<K>[]): BankFileResult<K> {
+export function buildBankFile<K>(formatId: BankFileFormatId, rows: readonly BankFileRow<K>[], opts: { test?: boolean } = {}): BankFileResult<K> {
   const f = bankFileFormat(formatId);
   if (!f) throw new RangeError(`Unknown bank file format: ${String(formatId)}`);
   const lines: string[] = [];
@@ -282,8 +291,8 @@ export function buildBankFile<K>(formatId: BankFileFormatId, rows: readonly Bank
     const reference = bankReference(row.reference, f.referenceMax) || 'LINEAR';
     const cells: BankFileCells = {
       name,
-      sortCode: normaliseSortCode(row.sortCode)!,
-      accountNumber: normaliseAccountNumber(row.accountNumber)!,
+      sortCode: opts.test ? TEST_FILE_SORT_CODE : normaliseSortCode(row.sortCode)!,
+      accountNumber: opts.test ? TEST_FILE_ACCOUNT_NUMBER : normaliseAccountNumber(row.accountNumber)!,
       amount: bankAmount(row.amountPence),
       reference,
     };

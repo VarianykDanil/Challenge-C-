@@ -190,7 +190,7 @@ export function approvalOutcome(
 ): ApprovalOutcome {
   if (b.kind === 'file') {
     return b.mode === 'test'
-      ? { tone: 'success', title: 'Test bank file ready', body: 'For looking at only: do not upload it to your bank. Nobody is paid.' }
+      ? { tone: 'success', title: 'Test bank file ready', body: 'For looking at only. Every line has sort code 00-00-00 and account 00000000, so it pays nobody, even if it is uploaded.' }
       : { tone: 'success', title: 'Bank file ready', body: 'Download it, upload it to your bank and approve it there. Then mark it paid here.' };
   }
   const live = b.items.filter((i) => i.status !== 'cancelled');
@@ -261,7 +261,7 @@ export const PAYMENT_PROVIDERS: readonly PaymentProviderInfo[] = [
     // logic/bankFiles.ts): nothing is paid from Linear Hub, and nothing comes back from the bank by itself.
     id: 'bank_file',
     name: 'Bank payment file',
-    summary: 'Linear Hub makes a bulk payment file. You upload it to your online banking, approve it there, then mark the payment paid here. It starts in test mode: test files say TEST and are never to be uploaded.',
+    summary: 'Linear Hub makes a bulk payment file. You upload it to your online banking, approve it there, then mark the payment paid here. It starts in test mode: test files say TEST and have no real bank details in them, so they can pay nobody.',
     kind: 'file',
     iconKey: 'bank',
     abilities: {
@@ -283,7 +283,7 @@ export const PAYMENT_PROVIDERS: readonly PaymentProviderInfo[] = [
     },
     connectSteps: [
       'Choose your bank’s file format below. Starling and Revolut files follow each bank’s own published guide; the general file is the five things every UK bank asks for, so check its columns with your bank.',
-      'The connection starts in test mode: test files say TEST in their name and in every payment reference, pay nobody and mark no week paid. Try a test payment to see the file.',
+      'The connection starts in test mode: test files say TEST in their name and in every reference, and every line has sort code 00-00-00 and account 00000000 instead of the person’s. They can pay nobody and mark no week paid. Try a test payment to see the file.',
       'Make a 1p test file (one payment of £0.01 to an account you choose), upload it to your bank and approve it there. Then tell Linear Hub whether the bank took it.',
       'Switch to live (type PAY FOR REAL). Treat the first real run as a test too: pay one or two people, check the money arrived, then pay everyone else.',
     ],

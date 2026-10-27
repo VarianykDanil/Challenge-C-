@@ -5,6 +5,8 @@ import assert from 'node:assert/strict';
 import {
   BANK_FILE_FORMATS,
   BANK_FILE_FORMAT_IDS,
+  TEST_FILE_ACCOUNT_NUMBER,
+  TEST_FILE_SORT_CODE,
   bankAmount,
   bankFileFormat,
   bankFileName,
@@ -157,6 +159,37 @@ test('rows a bank would refuse are left out of the file with a plain reason; the
   const none = buildBankFile('generic', [row({ amountPence: 0 })]);
   assert.equal(none.body, '');
   assert.deepEqual(none.included, []);
+});
+
+test('a TEST file can pay nobody: every line has sort code 00-00-00 and account 00000000; the real details are only checked', () => {
+  assert.equal(TEST_FILE_SORT_CODE, '000000');
+  assert.equal(TEST_FILE_ACCOUNT_NUMBER, '00000000');
+  for (const f of BANK_FILE_FORMATS) {
+    const rows = [
+      row({ sortCode: '00-00-99', accountNumber: '00000077', reference: 'TEST 05OCT JL' }),
+      row({ key: 2, payeeName: 'Rita Rep', sortCode: '000098', accountNumber: '00000078', amountPence: 6350, reference: 'TEST 05OCT RR' }),
+      row({ key: 3, sortCode: '12345' }),
+    ];
+    const out = buildBankFile(f.id, rows, { test: true });
+    assert.deepEqual(out.included, [1, 2], f.id);
+    assert.equal(out.rejected[0]!.key, 3, `${f.id}: a line the bank would refuse is still left out, with the reason`);
+    assert.match(out.rejected[0]!.reason, /sort code/i);
+    for (const real of ['000099', '00000077', '000098', '00000078']) assert.ok(!out.body.includes(real), `${f.id}: never a real sort code or account number (${real})`);
+    const [header, ...lines] = cells(out.body);
+    const sortAt = header!.findIndex((h) => /sort code/i.test(h));
+    const accountAt = header!.findIndex((h) => /account number/i.test(h));
+    for (const l of lines) {
+      assert.equal(l[sortAt], '000000', f.id);
+      assert.equal(l[accountAt], '00000000', f.id);
+    }
+    // the layout, names, amounts and references are the real ones, so the file can still be checked
+    assert.ok(out.body.includes('945.50') && out.body.includes('63.50'), f.id);
+    assert.ok(out.body.includes('Jordan Lee') && out.body.includes('Rita Rep'), f.id);
+    assert.equal(out.references.get(1), 'TEST 05OCT JL');
+    // a live file is unchanged
+    const live = buildBankFile(f.id, rows.slice(0, 1));
+    assert.ok(live.body.includes('00000077') && live.body.includes('000099'), `${f.id}: a live file pays the real account`);
+  }
 });
 
 test('a format with a row limit: the rows over it are left out, never split silently', () => {

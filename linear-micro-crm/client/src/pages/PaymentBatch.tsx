@@ -353,7 +353,7 @@ function ApproveCard({ b, provider, providerName, available }: { b: PaymentBatch
         description={b.kind === 'file'
           // review fix (money:3): the test bank file is for looking at only
           ? b.mode === 'test'
-            ? `Test mode: Linear Hub makes a test file for ${whoText(b)} (${formatPence(b.totalPence)}), for looking at only. Do not upload it to your bank: nobody is paid.`
+            ? `Test mode: Linear Hub makes a test file for ${whoText(b)} (${formatPence(b.totalPence)}), for looking at only. Every line has sort code 00-00-00 and account 00000000, so it pays nobody, even if it is uploaded.`
             : `Linear Hub makes the file for ${whoText(b)} (${formatPence(b.totalPence)}). Nothing moves until you upload it to your bank and approve it there.`
           : b.mode === 'test'
             ? `Test mode: ${sandboxName(b.provider, providerName)} gets the payments and nobody is paid. The runs stay on Runs to pay.`

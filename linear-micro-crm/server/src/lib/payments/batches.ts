@@ -489,9 +489,12 @@ export function batchDetail(db: Db, id: number, viewer?: Pick<UserWithTeam, 'id'
   };
 }
 
-/** MON-2: the first download of a live bank file (from then on its people count as sent). */
+/**
+ * MON-2: the first download of a bank file. From then on a LIVE file's people count as sent; a test file's download is
+ * only recorded (its lines carry no real bank details, so it can pay nobody).
+ */
 export function recordDownload(db: Db, me: UserWithTeam, id: number): void {
-  run(db, `UPDATE payment_batches SET downloaded_at = COALESCE(downloaded_at, ?), downloaded_by = COALESCE(downloaded_by, ?) WHERE id = ? AND mode = 'live'`, [nowISO(), me.id, id]);
+  run(db, `UPDATE payment_batches SET downloaded_at = COALESCE(downloaded_at, ?), downloaded_by = COALESCE(downloaded_by, ?) WHERE id = ?`, [nowISO(), me.id, id]);
 }
 
 // ───────────────────────────── 1. the draft ─────────────────────────────

@@ -6,7 +6,7 @@
 // Package A: the Connect form starts with the provider's steps (what happens outside Linear Hub, in order); an API
 // connection is tested as soon as it is saved (Revolut's code only works for 2 minutes); Switch to live shows what
 // live needs for that provider (its own keys).
-// Every connection starts in test mode, a bank file too (its files say TEST and pay nobody; CLM-3). A bank file has a
+// Every connection starts in test mode, a bank file too (its files say TEST and carry sort code 00-00-00 and account 00000000, so they pay nobody; CLM-3). A bank file has a
 // "Make a 1p test file" to check the bank takes the layout before the first real run (MON-6); an API connection shows
 // its first run: test, a sandbox payment, live (it can go live only after the sandbox answered one, MON-5), a small
 // first live run. At the top: "Two people approve each payment" (MONEY-MISSED-2), changed with a fresh code.
@@ -164,7 +164,7 @@ function ConnectionRow({ provider: p, connection: c, onEdit }: { provider: Payme
       </div>
       {!api && bankFileFormatLabel(c.settings) && <p className="mt-1 text-xs text-fg" data-connection-format={c.settings.format}>{bankFileFormatLabel(c.settings)}</p>}
       <p className="mt-1 text-xs text-muted">
-        {c.lastCheckedAt ? `Last tested ${formatDateTime(c.lastCheckedAt)}` : api ? 'Test it before you pay anyone through it.' : c.mode === 'test' ? 'Its files say TEST in the name and every reference, and pay nobody. Switch it to live for real files.' : 'Makes real bank files.'}
+        {c.lastCheckedAt ? `Last tested ${formatDateTime(c.lastCheckedAt)}` : api ? 'Test it before you pay anyone through it.' : c.mode === 'test' ? 'Its files say TEST and have sort code 00-00-00 and account 00000000 on every line, so they pay nobody. Switch it to live for real files.' : 'Makes real bank files.'}
         {/* review fix: only a working test's balance, named for its mode (a sandbox balance is not real money) */}
         {c.balancePence != null && c.status === 'connected' ? ` · ${api && c.mode === 'test' ? 'Sandbox balance' : 'Balance'} ${formatPence(c.balancePence)}` : ''}
       </p>
@@ -268,7 +268,7 @@ function ConnectModal({ provider: p, connection: c, onClose }: { provider: Payme
     for (const f of p.configFields) (f.secret ? secrets : settings)[f.name] = values[f.name] ?? '';
     const done = (saved: PaymentConnection) => {
       if (!testOnSave) {
-        toast.success(c ? 'Connection saved' : 'Connected', p.kind === 'api' ? 'Test it next: it starts in test mode.' : c ? 'Saved.' : 'It starts in test mode: its files say TEST and pay nobody. Make the 1p test file, then switch it to live.');
+        toast.success(c ? 'Connection saved' : 'Connected', p.kind === 'api' ? 'Test it next: it starts in test mode.' : c ? 'Saved.' : 'It starts in test mode: its files have no real bank details, so they pay nobody. Make the 1p test file, then switch it to live.');
         onClose();
         return;
       }
@@ -294,7 +294,7 @@ function ConnectModal({ provider: p, connection: c, onClose }: { provider: Payme
       description={p.testOnly
         ? 'A test provider: it never pays anyone and has no live mode.'
         : p.kind !== 'api'
-        ? 'Linear Hub makes the file; you upload and approve it in your online banking. It starts in test mode: TEST files that pay nobody.'
+        ? 'Linear Hub makes the file; you upload and approve it in your online banking. It starts in test mode: TEST files with no real bank details, which pay nobody.'
         // review fix (UI-3): an existing live connection is not "in test mode"
         : c?.mode === 'live'
           ? 'This connection is live: approving a payment through it moves real money. After you change its details, test it again.'

@@ -16,9 +16,11 @@
  *    for a file (batches.ts answers 409 "mark it paid once your bank has paid it").
  *  - submit is idempotent: making the file again from the same items makes the same file, and it moves no money.
  *  - testConnection: there is nothing to connect to; it answers ok with the format it makes.
- *  - In TEST mode (every new connection) the file is marked: its name starts "TEST-" and every
- *    payment reference starts "TEST" (shared testPaymentReference), so neither Matt nor a bank can take it for a real
- *    run. lib/payments/batches.ts never marks a week paid from a test batch.
+ *  - In TEST mode (every new connection) the file cannot pay anyone: every line has sort code 00-00-00 and account
+ *    number 00000000 instead of the person's (shared buildBankFile `test`), so even a test file uploaded by mistake
+ *    pays nobody. Its name starts "TEST-" and every payment reference starts "TEST" (shared testPaymentReference).
+ *    The real details are still checked, so a line the bank would refuse shows up in the test. lib/payments/batches.ts
+ *    never marks a week paid from a test batch.
  *  - TestFile — the "1p test file": one £0.01 payment to an account the admin chooses, with the
  *    reference LINEAR 1P TEST, to upload to the bank before the first real run.
  */
@@ -68,7 +70,7 @@ export function createBankFileProvider(): PaymentProviderAdapter {
       const out = buildBankFile(id, items.map((i) => ({
         key: i.id, payeeName: i.payeeName, sortCode: i.sortCode, accountNumber: i.accountNumber, amountPence: i.amountPence,
         reference: test ? testPaymentReference(i.reference) : i.reference,
-      })));
+      })), { test });
       const results: ProviderItemResult[] = [
         ...out.included.map((key) => ({ itemId: key, status: 'submitted' as const, providerRef: out.references.get(key) ?? null, failureReason: null })),
         ...out.rejected.map((r) => ({ itemId: r.key, status: 'failed' as const, providerRef: null, failureReason: r.reason })),

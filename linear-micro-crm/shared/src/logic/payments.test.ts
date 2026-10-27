@@ -193,5 +193,5 @@ test('approvalOutcome (review fixes UI-2, SD-3, money:3): the message after Appr
   assert.deepEqual(approvalOutcome(file('live'), o), { tone: 'success', title: 'Bank file ready', body: 'Download it, upload it to your bank and approve it there. Then mark it paid here.' });
   const testFile = approvalOutcome(file('test'), o);
   assert.equal(testFile.title, 'Test bank file ready');
-  assert.equal(testFile.body, 'For looking at only: do not upload it to your bank. Nobody is paid.');
+  assert.equal(testFile.body, 'For looking at only. Every line has sort code 00-00-00 and account 00000000, so it pays nobody, even if it is uploaded.');
 });

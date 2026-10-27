@@ -234,7 +234,7 @@ const batchMarkPaid: AuditRouteSpec<Snap | null> = {
     const failed = Number(after.failed) - Number(before?.failed ?? 0);
     const reason = isRecord(done.body) && typeof done.body.reason === 'string' && done.body.reason.trim() ? `: ${done.body.reason.trim().slice(0, 200)}` : '';
     const parts = [paid ? `${people(paid)} paid by the bank` : '', failed ? `${people(failed)} not paid${reason}` : ''].filter(Boolean);
-    const confirmed = failed && after.downloadedAt ? ' (typed NOT PAID, with a code)' : '';
+    const confirmed = failed && after.mode === 'live' && after.downloadedAt ? ' (typed NOT PAID, with a code)' : '';
     return [{ entity: 'payment_batch', entityId: id, summary: `Marked bank file payment #${id}: ${parts.join('; ') || 'no change'}${confirmed}`, before, after }];
   },
   failed: wrongCode('marking a bank file not paid', 'payment_batch', (done) => toId(done.params.id)),

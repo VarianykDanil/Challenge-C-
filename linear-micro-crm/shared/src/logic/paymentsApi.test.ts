@@ -28,6 +28,9 @@ test('each API provider: how to connect (steps outside Linear Hub included), wha
   assert.match(steps, /1p test file/);
   assert.match(steps, /PAY FOR REAL/);
   assert.match(steps, /own published guide/);
+  // a test file can pay nobody because it carries no real bank details (not just because it says TEST)
+  assert.match(steps, /00-00-00/);
+  assert.match(file.summary, /no real bank details/);
   assert.equal(file.waitingNote, undefined);
 });
 

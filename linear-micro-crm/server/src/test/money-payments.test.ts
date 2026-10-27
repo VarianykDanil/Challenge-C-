@@ -131,6 +131,34 @@ describe('CLM-3: a bank file connection starts in test mode', () => {
     assert.equal(providers.find((p) => p.id === 'bank_file').abilities.testMode, true);
   });
 
+  test('the review probe: a TEST file holds no real bank details, so uploading it by mistake pays nobody', async () => {
+    // the rep's real details (obviously fake ones), different from the test file's 00-00-00 / 00000000
+    run(srv.db, `UPDATE bank_accounts SET sort_code_enc = ?, account_number_enc = ?, last4 = '0077', sort_code_last2 = '99' WHERE user_id = ?`, [encrypt('000099'), encrypt('00000077'), fx.users.rep]);
+    const conn = await fileConnection(false);
+    const runA = addRun(srv.db, fx.users.rep, week, 412.37);
+    const sent = await approvedFile(conn, [runA]);
+    const file = await admin.get(`/payments/batches/${sent.id}/file`);
+    assert.equal(file.status, 200);
+    const body = String(file.json);
+    assert.ok(!body.includes('00000077') && !body.includes('000099'), `never the real account: ${body}`);
+    assert.match(body.trim().split('\r\n')[1]!, /^000000,00000000,Remy Rep,TEST \d\d[A-Z]{3} RR,412\.37$/);
+    // the download of a test file is recorded too (the audit trail and the page), without the live file's rules
+    const page = (await admin.get(`/payments/batches/${sent.id}`)).json;
+    assert.ok(page.downloadedAt, 'a test download is recorded');
+    assert.equal(page.actions.cancelNeedsConfirmation, undefined, 'a test file needs no NOT UPLOADED');
+    assert.equal(page.actions.markNotPaidNeedsConfirmation, undefined);
+    assert.equal(all(srv.db, `SELECT 1 FROM audit_log WHERE action = 'GET /payments/batches/:id/file' AND entity_id = ?`, [sent.id]).length, 1);
+    // marking the test file "not paid" frees nothing that was held, and needs no typed words
+    const marked = await admin.post(`/payments/batches/${sent.id}/mark-paid`, { failed: [sent.items[0].id], reason: 'Only a test' });
+    assert.equal(marked.status, 200, JSON.stringify(marked.json));
+    assert.doesNotMatch(all<{ summary: string }>(srv.db, `SELECT summary FROM audit_log WHERE action = 'POST /payments/batches/:id/mark-paid'`)[0]!.summary, /NOT PAID/);
+    // the same week can then be paid for real, once
+    const live = await fileConnection(true);
+    const real = await approvedFile(live, [runA]);
+    const realBody = String((await admin.get(`/payments/batches/${real.id}/file`)).json);
+    assert.ok(realBody.includes('000099,00000077'), 'a live file pays the real account');
+  });
+
   test('upgrading: a 1.4.0 bank file connection that was live stays live', async () => {
     const id = run(srv.db, `INSERT INTO payment_connections (provider, name, mode, settings_json, status, created_at) VALUES ('bank_file', 'Old file', 'live', '{"format":"generic"}', 'connected', ?)`, [new Date().toISOString()]).lastInsertRowid;
     createSchema(srv.db);
