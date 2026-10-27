@@ -35,6 +35,10 @@
  *  - GET    /users/:id/bank-details                     → BankDetailsView (admin, masked)
  *  - PUT    /users/:id/bank-details       BankDetailsInput       → BankDetailsView (admin; two-step code when on)
  *  - POST   /users/:id/bank-details/confirm             → BankDetailsView (admin: checked, payments may use them)
+ * Release 1.5 (money):
+ *  - POST   /me/bank-details/confirm      BankDetailsConfirmInput → BankDetailsView (the person, for details someone
+ *                                                                    else typed in)
+ *  - POST   /me/bank-details/report       BankDetailsReportInput  → BankDetailsView (the person: "not my details")
  */
 
 /** The four ways to pay. A test build may register more (the fake provider, id 'fake'). */
@@ -368,14 +372,47 @@ export interface BankDetails {
   /** When an administrator last confirmed these details (null: not yet, or changed since). */
   confirmedByAdminAt: string | null;
   confirmedByName: string | null;
-  /** Changed since the admin's last confirmation: payments to these details wait until the admin confirms them. */
+  /** Changed since the last confirmation (or reported as not theirs): payments to these details wait. */
   needsConfirmation: boolean;
+  /**
+   * Release 1.5 (MON-3): who has to confirm them — 'office': the person changed them, an administrator checks them;
+   * 'person_or_other_admin': an administrator typed them in, so the person confirms them in their own account or a
+   * DIFFERENT administrator does. Null when nothing is waiting.
+   */
+  waitingFor?: 'office' | 'person_or_other_admin' | null;
+  /** Release 1.5 (MON-3): the person said these are not their details (held until new ones are typed in). */
+  reportedAt?: string | null;
 }
 
 export interface BankDetailsView {
   details: BankDetails | null;
   /** The person saving must send a current two-step code (they have two-step verification on). */
   codeRequired: boolean;
+  /**
+   * Release 1.5 (MON-3): the viewer may confirm these details now (the person, for details someone else typed in; an
+   * administrator other than the one who changed them). Confirming always needs the viewer's two-step code when on.
+   */
+  canConfirm?: boolean;
+  /** Release 1.5 (MON-3): the person may report these as not theirs (someone else changed them). */
+  canReport?: boolean;
+  /**
+   * Release 1.5 (MON-3): someone else changed the person's details and the person has not said yes or reported them
+   * yet: the "Your bank details were changed by … Confirm or report it" notice (own view only).
+   */
+  changedBySomeoneElse?: boolean;
+}
+
+/** POST /me/bank-details/confirm and POST /users/:id/bank-details/confirm (release 1.5). */
+export interface BankDetailsConfirmInput {
+  /** The changedAt of the details on screen: changed again since → 409. */
+  changedAt?: string;
+  /** A current authenticator code (always for an administrator; for the person when they have two-step on). */
+  code?: string;
+}
+
+/** POST /me/bank-details/report (release 1.5): "These are not my details". */
+export interface BankDetailsReportInput {
+  note?: string;
 }
 
 export interface BankDetailsInput {

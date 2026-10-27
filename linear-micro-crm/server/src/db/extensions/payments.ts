@@ -30,6 +30,11 @@
  *    its provider (NULL: never sent, so it can be cancelled here without asking anyone). No foreign key to payroll_runs or users: an unpaid run may be removed and made again by the pay
  *    rules, and payment history outlives both.
  *
+ * Release 1.5 (money, MON-3): bank_accounts.reported_at / reported_note (the person said the details someone else typed
+ * in are not theirs: held, every administrator told) and person_seen_at (when the person last said yes to, or reported,
+ * a change someone else made). confirmed_by_admin_at / confirmed_by now hold ANY confirmation — by an administrator or,
+ * for details someone else typed in, by the person — and never the one who made the change (lib/payments/bankDetails.ts).
+ * The upgrade holds again, once, details a 1.4.0 administrator typed in and "confirmed" alone.
  * Demo seed (fresh databases only): obviously fake bank details (sort code 00-00-00, account number 0000 + the
  * person's id) for the field people and recruiters — every ninth person has none (to show "skipped: no bank details"),
  * and one changed theirs yesterday and waits for the admin's check (the Needs-attention item). No connection and no
@@ -39,7 +44,8 @@
  */
 import type { Db } from '../connection.ts';
 import { encrypt } from '../../lib/crypto.ts';
-import { addColumnIfMissing, type DbExtension, type SeedContext } from './types.ts';
+import { recordSystemEvent } from '../../lib/audit/events.ts';
+import { addColumnIfMissing, columnsOf, metaFlag, setMetaFlag, type DbExtension, type SeedContext } from './types.ts';
 
 const SQL = `
 CREATE TABLE IF NOT EXISTS bank_accounts (
@@ -52,7 +58,10 @@ CREATE TABLE IF NOT EXISTS bank_accounts (
   changed_at TEXT NOT NULL,
   changed_by INTEGER REFERENCES users(id) ON DELETE SET NULL,
   confirmed_by_admin_at TEXT,
-  confirmed_by INTEGER REFERENCES users(id) ON DELETE SET NULL
+  confirmed_by INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  reported_at TEXT,
+  reported_note TEXT,
+  person_seen_at TEXT
 );
 
 CREATE TABLE IF NOT EXISTS payment_connections (
@@ -153,6 +162,29 @@ function seedDemoBankDetails(db: Db, ctx: SeedContext): void {
   });
 }
 
+/**
+ * MON-3, once: in 1.4.0 details an administrator typed in for someone counted as confirmed by that same administrator
+ * (and an administrator's own change by themself). Nobody confirms their own change now, so those are held again until
+ * the person or another administrator confirms them; the person is told. Recorded as one automatic audit row.
+ */
+function reholdSelfConfirmed(db: Db): number {
+  if (metaFlag(db, 'ext:payments:bank-rehold')) return 0;
+  const n = Number(db.prepare(
+    `UPDATE bank_accounts SET confirmed_by_admin_at = NULL, confirmed_by = NULL
+     WHERE confirmed_by IS NOT NULL AND changed_by IS NOT NULL AND confirmed_by = changed_by`,
+  ).run().changes);
+  setMetaFlag(db, 'ext:payments:bank-rehold');
+  if (n > 0) {
+    recordSystemEvent(db, {
+      name: 'payments.bank_rehold',
+      summary: `Bank details of ${n} ${n === 1 ? 'person' : 'people'} that one administrator typed in and confirmed alone now wait for the person or another administrator to confirm them`,
+      entity: 'bank_account',
+      after: { people: n },
+    });
+  }
+  return n;
+}
+
 export const extension: DbExtension = {
   name: 'payments',
   sql: SQL,
@@ -161,6 +193,17 @@ export const extension: DbExtension = {
     // before the review fixes gains those two columns here
     const payee = addColumnIfMissing(db, 'payment_items', 'payee_enc', 'TEXT');
     const attempted = addColumnIfMissing(db, 'payment_items', 'attempted_at', 'TEXT');
+    // MON-3: "these are not my details", and when the person last saw a change someone else made (the table is
+    // always there after `sql`; a partial database handed to upgrade() alone is left as it is)
+    const hasBank = columnsOf(db, 'bank_accounts').length > 0;
+    const added = hasBank
+      ? [
+          addColumnIfMissing(db, 'bank_accounts', 'reported_at', 'TEXT'),
+          addColumnIfMissing(db, 'bank_accounts', 'reported_note', 'TEXT'),
+          addColumnIfMissing(db, 'bank_accounts', 'person_seen_at', 'TEXT'),
+        ]
+      : [];
+    const reheld = hasBank && reholdSelfConfirmed(db) > 0 ? 'bank_accounts.rehold' : null;
     // items of payments approved before the column existed may have reached their provider: count them as sent
     if (attempted) {
       db.prepare(
@@ -168,7 +211,7 @@ export const extension: DbExtension = {
          WHERE attempted_at IS NULL AND batch_id IN (SELECT id FROM payment_batches WHERE approved_at IS NOT NULL)`,
       ).run();
     }
-    return [payee, attempted].filter((c): c is string => c !== null);
+    return [payee, attempted, ...added, reheld].filter((c): c is string => c !== null);
   },
   seed(db, ctx) {
     seedDemoBankDetails(db, ctx);

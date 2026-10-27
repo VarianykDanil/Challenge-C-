@@ -96,7 +96,8 @@ describe('cross:X-2 — Confirm pins the bank details the admin checked', () => 
     assert.equal(seen.needsConfirmation, true);
     await sleep(5);
     assert.equal((await put('00009999')).status, 200);
-    const stale = await admin.post(`/users/${fx.users.rep}/bank-details/confirm`, { changedAt: seen.changedAt });
+    // release 1.5 (MON-3): an administrator's confirmation always takes a fresh two-step code
+    const stale = await admin.post(`/users/${fx.users.rep}/bank-details/confirm`, { changedAt: seen.changedAt, code: currentCode(srv.db, fx.users.admin) });
     assert.equal(stale.status, 409, JSON.stringify(stale.json));
     assert.match(stale.json.error, /changed their bank details again since you looked: check the new ones before confirming/);
     const still = (await admin.get(`/users/${fx.users.rep}/bank-details`)).json.details;
@@ -104,7 +105,7 @@ describe('cross:X-2 — Confirm pins the bank details the admin checked', () => 
     assert.equal(still.last4, '9999');
     assert.equal(all(srv.db, `SELECT 1 FROM audit_log WHERE action = 'POST /users/:id/bank-details/confirm'`).length, 0, 'nothing confirmed, nothing recorded');
     // the details on screen now: confirmed
-    const ok = await admin.post(`/users/${fx.users.rep}/bank-details/confirm`, { changedAt: still.changedAt });
+    const ok = await admin.post(`/users/${fx.users.rep}/bank-details/confirm`, { changedAt: still.changedAt, code: currentCode(srv.db, fx.users.admin) });
     assert.equal(ok.status, 200, JSON.stringify(ok.json));
     assert.equal(ok.json.details.needsConfirmation, false);
     assert.equal(ok.json.details.last4, '9999');
@@ -112,10 +113,11 @@ describe('cross:X-2 — Confirm pins the bank details the admin checked', () => 
 
   test('an older client that sends no changedAt still confirms what is stored (additive API)', async () => {
     assert.equal((await rep.put('/me/bank-details', { holderName: 'Remy Rep', sortCode: '000000', accountNumber: '00002222', code: currentCode(srv.db, fx.users.rep) })).status, 200);
-    const ok = await admin.post(`/users/${fx.users.rep}/bank-details/confirm`);
+    // (release 1.5, MON-3: with the administrator's fresh code)
+    const ok = await admin.post(`/users/${fx.users.rep}/bank-details/confirm`, { code: currentCode(srv.db, fx.users.admin) });
     assert.equal(ok.status, 200);
     assert.equal(ok.json.details.needsConfirmation, false);
-    const bad = await admin.post(`/users/${fx.users.rep}/bank-details/confirm`, { changedAt: 42 });
+    const bad = await admin.post(`/users/${fx.users.rep}/bank-details/confirm`, { changedAt: 42, code: currentCode(srv.db, fx.users.admin) });
     assert.equal(bad.status, 400);
   });
 });

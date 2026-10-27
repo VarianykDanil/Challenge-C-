@@ -214,7 +214,8 @@ describe('API providers: mode switches, resends after a timeout, Wise cancel', (
     // the rep changes their bank details and the admin confirms them
     const put = await rep.put('/me/bank-details', { holderName: 'Person Test', sortCode: '000000', accountNumber: '00000099', code: repCode() });
     assert.equal(put.status, 200, JSON.stringify(put.json));
-    assert.equal((await admin.post(`/users/${fx.users.rep}/bank-details/confirm`)).status, 200);
+    // release 1.5 (MON-3): an administrator's confirmation takes a fresh two-step code
+    assert.equal((await admin.post(`/users/${fx.users.rep}/bank-details/confirm`, { code: code() })).status, 200);
     const checked = await admin.post(`/payments/batches/${draft.id}/refresh`);
     assert.equal(checked.status, 200, JSON.stringify(checked.json));
     assert.equal(checked.json.items[0].status, 'processing', JSON.stringify(checked.json.items[0]));

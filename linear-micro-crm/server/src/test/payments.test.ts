@@ -334,19 +334,24 @@ describe('bank details', () => {
     assert.match(item.title, /Remy Rep changed their bank details/);
     assert.equal(item.href, `/team/${fx.users.rep}#bank-details`);
     assert.ok(!(await rep.get('/me/attention')).json.items.some((i: Json) => i.kind === 'payments'), 'only the admin sees it');
-    const ok = await admin.post(`/users/${fx.users.rep}/bank-details/confirm`);
+    // release 1.5 (MON-3): an administrator's confirmation takes a fresh two-step code
+    const ok = await admin.post(`/users/${fx.users.rep}/bank-details/confirm`, { code: currentCode(srv.db, fx.users.admin) });
     assert.equal(ok.status, 200);
     assert.equal(ok.json.details.needsConfirmation, false);
     srv.resetCache();
     assert.ok(!(await admin.get('/me/attention')).json.items.some((i: Json) => i.kind === 'payments'));
-    assert.equal((await admin.post(`/users/${fx.users.repB}/bank-details/confirm`)).status, 404, 'nothing to confirm');
+    assert.equal((await admin.post(`/users/${fx.users.repB}/bank-details/confirm`, { code: currentCode(srv.db, fx.users.admin) })).status, 404, 'nothing to confirm');
   });
 
-  test('details an admin types in for someone count as confirmed', async () => {
+  // Release 1.5 (MON-3): this used to assert that details an admin types in count as confirmed by that admin — the
+  // unsafe behaviour the review found (one admin alone could redirect someone's pay). They now wait for the person or
+  // another administrator (money-bank.test.ts covers the whole flow).
+  test('details an admin types in for someone wait for the person or another administrator', async () => {
     const r = await admin.put(`/users/${fx.users.repB}/bank-details`, { holderName: 'Bo Rep', sortCode: '000000', accountNumber: '00000006', code: currentCode(srv.db, fx.users.admin) });
     assert.equal(r.status, 200, JSON.stringify(r.json));
-    assert.equal(r.json.details.needsConfirmation, false);
-    assert.match(all<{ summary: string }>(srv.db, `SELECT summary FROM audit_log WHERE entity = 'bank_account'`)[0]!.summary, /Bo Rep/);
+    assert.equal(r.json.details.needsConfirmation, true);
+    assert.equal(r.json.details.waitingFor, 'person_or_other_admin');
+    assert.match(all<{ summary: string }>(srv.db, `SELECT summary FROM audit_log WHERE entity = 'bank_account'`)[0]!.summary, /Bo Rep.*Bo or another administrator/);
   });
 
   test('with two-step verification on, a change needs a current code (a typing mistake never uses one up)', async () => {

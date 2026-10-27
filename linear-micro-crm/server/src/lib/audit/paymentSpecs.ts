@@ -65,17 +65,18 @@ function batchSnap(db: Db, id: number | null): Snap | null {
 /** Masked bank details (never the numbers). */
 function bankSnap(db: Db, userId: number | null): Snap | null {
   if (!userId) return null;
-  const r = get<{ userId: number; name: string; holderName: string; last4: string; last2: string; changedAt: string; changedBy: number | null; confirmedAt: string | null }>(
+  const r = get<{ userId: number; name: string; holderName: string; last4: string; last2: string; changedAt: string; changedBy: number | null; confirmedAt: string | null; confirmedBy: number | null; reportedAt: string | null; seenAt: string | null }>(
     db,
     `SELECT b.user_id AS userId, TRIM(u.first_name || ' ' || u.last_name) AS name, b.holder_name AS holderName, b.last4, b.sort_code_last2 AS last2,
-            b.changed_at AS changedAt, b.changed_by AS changedBy, b.confirmed_by_admin_at AS confirmedAt
+            b.changed_at AS changedAt, b.changed_by AS changedBy, b.confirmed_by_admin_at AS confirmedAt, b.confirmed_by AS confirmedBy,
+            b.reported_at AS reportedAt, b.person_seen_at AS seenAt
      FROM bank_accounts b JOIN users u ON u.id = b.user_id WHERE b.user_id = ?`,
     [userId],
   );
   if (!r) return null;
   return {
     userId: r.userId, name: r.name, holderName: r.holderName, account: maskAccountNumber(r.last4), sortCodeMask: maskSortCode(r.last2),
-    changedAt: r.changedAt, changedBy: r.changedBy, confirmedAt: r.confirmedAt,
+    changedAt: r.changedAt, changedBy: r.changedBy, confirmedAt: r.confirmedAt, confirmedBy: r.confirmedBy, reportedAt: r.reportedAt, seenAt: r.seenAt,
   };
 }
 
@@ -240,7 +241,14 @@ function bankChange(pattern: string, target: (call: AuditCall) => number | null)
       if (before && before.changedAt === after.changedAt) return []; // the same details again
       const self = done.me?.id === userId;
       const who = self ? 'their own' : `${personName(db, userId)}'s`;
-      const hold = after.confirmedAt ? '' : ' — payments wait until an administrator confirms them';
+      // MON-3: nobody confirms their own change
+      const hold = after.confirmedAt
+        ? ''
+        : self && done.me?.role !== 'admin'
+          ? ' — payments wait until an administrator confirms them'
+          : self
+            ? ' — payments wait until another administrator confirms them'
+            : ` — payments wait until ${personName(db, userId).split(' ')[0]} or another administrator confirms them`;
       return [{ entity: 'bank_account', entityId: userId, summary: `${before ? 'Changed' : 'Added'} ${who} bank details: account ${String(after.account)}, sort code ${String(after.sortCodeMask)}${hold}`, before, after }];
     },
     failed: wrongCode('changing bank details', 'bank_account', (done) => target(done)),
@@ -256,6 +264,37 @@ const bankConfirm: AuditRouteSpec<Snap | null> = {
     const after = bankSnap(db, userId);
     if (!after || (before && before.confirmedAt === after.confirmedAt)) return [];
     return [{ entity: 'bank_account', entityId: userId, summary: `Confirmed ${personName(db, userId)}'s bank details (account ${String(after.account)})`, before, after }];
+  },
+  failed: wrongCode('confirming bank details', 'bank_account', (done) => toId(done.params.id)),
+};
+
+/** MON-3: the person says yes to details someone else typed in. */
+const bankConfirmOwn: AuditRouteSpec<Snap | null> = {
+  method: 'POST',
+  pattern: '/me/bank-details/confirm',
+  before: (db, call) => bankSnap(db, call.me?.id ?? null),
+  after(db, done, before) {
+    const userId = done.me?.id ?? null;
+    const after = bankSnap(db, userId);
+    if (!after || (before && before.confirmedAt === after.confirmedAt && before.seenAt === after.seenAt)) return [];
+    const by = personName(db, (after.changedBy as number | null) ?? null);
+    return [{ entity: 'bank_account', entityId: userId, summary: `${personName(db, userId)} confirmed their own bank details (account ${String(after.account)}), which ${by} had typed in`, before, after }];
+  },
+  failed: wrongCode('confirming bank details', 'bank_account', (done) => done.me?.id ?? null),
+};
+
+/** MON-3: "these are not my details". */
+const bankReport: AuditRouteSpec<Snap | null> = {
+  method: 'POST',
+  pattern: '/me/bank-details/report',
+  before: (db, call) => bankSnap(db, call.me?.id ?? null),
+  after(db, done, before) {
+    const userId = done.me?.id ?? null;
+    const after = bankSnap(db, userId);
+    if (!after || (before && before.reportedAt === after.reportedAt)) return [];
+    const by = personName(db, (after.changedBy as number | null) ?? null);
+    const note = isRecord(done.body) && typeof done.body.note === 'string' && done.body.note.trim() ? `: ${done.body.note.trim().slice(0, 200)}` : '';
+    return [{ entity: 'bank_account', entityId: userId, summary: `${personName(db, userId)} reported the bank details ${by} typed in (account ${String(after.account)}) as not theirs${note}`, before, after }];
   },
 };
 
@@ -273,4 +312,6 @@ export const AUDIT_SPECS: readonly AuditRouteSpec<any>[] = [
   bankChange('/me/bank-details', (call) => call.me?.id ?? null),
   bankChange('/users/:id/bank-details', (call) => toId(call.params.id)),
   bankConfirm,
+  bankConfirmOwn,
+  bankReport,
 ];

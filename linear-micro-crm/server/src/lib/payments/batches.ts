@@ -43,6 +43,7 @@ import {
   payWeekLabel,
   payrollStatusFor,
   poundsToPence,
+  type BankDetails,
   type PaymentBatch,
   type PaymentBatchInput,
   type PaymentBatchStatus,
@@ -427,7 +428,7 @@ interface Candidate {
  */
 function skipReason(
   r: PayrollRunWithUser,
-  ctx: { today: string; live: boolean; inPayment: LivePaymentRow[]; bank: Map<number, { needsConfirmation: boolean; changedAt: string }> },
+  ctx: { today: string; live: boolean; inPayment: LivePaymentRow[]; bank: Map<number, Pick<BankDetails, 'needsConfirmation' | 'changedAt' | 'changedBy' | 'changedByName' | 'reportedAt'>> },
 ): Omit<PaymentSkip, 'runId' | 'userId' | 'userName' | 'weekStart' | 'amountPence'> | null {
   const first = firstName(r.userName);
   if (r.status === 'paid' || r.status === 'late') return { code: 'already_paid', reason: `Already paid${r.paidDate ? ` on ${payDayLabel(r.paidDate)}` : ''}` };
@@ -443,7 +444,15 @@ function skipReason(
   }
   const bank = ctx.bank.get(r.userId);
   if (!bank) return { code: 'no_bank_details', reason: `No bank details yet: ask ${first} to add them in Settings → Bank details` };
-  if (bank.needsConfirmation) return { code: 'bank_details_unconfirmed', reason: `${first} changed their bank details on ${payDayLabel(bank.changedAt.slice(0, 10))}: check them with ${first}, then confirm them in Team` };
+  if (bank.needsConfirmation) {
+    const day = payDayLabel(bank.changedAt.slice(0, 10));
+    // MON-3: say who has to confirm them
+    if (bank.reportedAt) return { code: 'bank_details_unconfirmed', reason: `${first} reported their bank details as not theirs on ${payDayLabel(bank.reportedAt.slice(0, 10))}: type in the right ones with ${first} first` };
+    if (bank.changedBy !== null && bank.changedBy !== r.userId) {
+      return { code: 'bank_details_unconfirmed', reason: `${bank.changedByName ?? 'An administrator'} typed in ${first}’s bank details on ${day}: they wait until ${first} confirms them in Settings, or another administrator confirms them in Team` };
+    }
+    return { code: 'bank_details_unconfirmed', reason: `${first} changed their bank details on ${day}: check them with ${first}, then confirm them in Team` };
+  }
   return null;
 }
 
@@ -481,7 +490,7 @@ export function createDraftBatch(db: Db, me: UserWithTeam, input: PaymentBatchIn
   const userIds = [...new Set(runs.map((r) => r.userId))];
   const inPayment = livePayments(db, runIds, userIds);
   const masked = maskedBankDetails(db, userIds);
-  const bank = new Map([...masked].map(([id, d]) => [id, { needsConfirmation: d.needsConfirmation, changedAt: d.changedAt }]));
+  const bank = new Map([...masked].map(([id, d]) => [id, d]));
   const skipped: PaymentSkip[] = [];
   const pay: Candidate[] = [];
   for (const id of runIds) {
