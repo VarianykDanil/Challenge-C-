@@ -123,15 +123,15 @@ export interface SheetInput {
 
 export function buildRecoverySheet(input: SheetInput): RecoverySheet {
   const steps = [
-    'If Linear Hub will not start and says the app key is missing or wrong: on the server, run  npm run key:restore  and type the key above. ' +
+    'If Linear Hub will not start and says the app key is missing or wrong: on the server, run "npm run key:restore" and type the key above. ' +
       'It checks the key against the database before saving it, so a typing mistake changes nothing.',
     input.offsiteDir
       ? `If the server is lost: set up Linear Hub on a new server (docs/DEPLOY.md), copy the newest file from the off-site folder (${input.offsiteDir}) to it, ` +
-        'run  npm run restore -- <file>.lhbk  and type the off-site backup passphrase. That brings back the database, the uploaded files and the key.'
-      : 'If the server is lost: set up Linear Hub on a new server (docs/DEPLOY.md), copy your newest backup to it, run  npm run restore -- <file> , ' +
-        'then  npm run key:restore  and type the key above.',
+        'run "npm run restore -- <file>.lhbk" and type the off-site backup passphrase. That brings back the database, the uploaded files and the key.'
+      : 'If the server is lost: set up Linear Hub on a new server (docs/DEPLOY.md), copy your newest backup to it, run "npm run restore -- <file>", ' +
+        'then "npm run key:restore" and type the key above.',
     'The off-site backup passphrase is NOT on this sheet: keep it on its own piece of paper, in a different place.',
-    `Check: after npm run key:restore, Linear Hub shows the key fingerprint ${shortFingerprint(secretFingerprint(input.secret))}. It must match the one on this sheet.`,
+    `Check: after "npm run key:restore", Linear Hub shows the key fingerprint ${shortFingerprint(secretFingerprint(input.secret))}. It must match the one on this sheet.`,
   ];
   return {
     madeAt: (input.at ?? new Date()).toISOString(),

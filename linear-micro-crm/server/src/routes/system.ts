@@ -27,6 +27,7 @@ import { isSecureRequest } from '../lib/secureRequest.ts';
 import { currentUser } from '../middleware/auth.ts';
 
 export const OWNER_ONLY_MESSAGE = 'Only the owner can make the recovery sheet. Ask them to do it in Settings › Backups.';
+export const TWO_FACTOR_FOR_SHEET_MESSAGE = 'Set up two-step verification in Settings › Security first: the recovery sheet needs a code from your authenticator app.';
 export const SECURE_ONLY_MESSAGE =
   'The recovery sheet holds the app key, so it is only shown over a secure connection: open Linear Hub with its https:// address, or on the server computer itself.';
 
@@ -96,7 +97,13 @@ export function systemRouter(db: Db): Router {
 
   router.post('/recovery-sheet', (req, res) => {
     const me = requireOwnerSecure(req);
-    assertFreshCode(db, me, (req.body as { code?: unknown } | undefined)?.code, codeSource(req), { required: true });
+    try {
+      assertFreshCode(db, me, (req.body as { code?: unknown } | undefined)?.code, codeSource(req), { required: true });
+    } catch (err) {
+      // the shared message talks about payments; say what this needs instead
+      if (err instanceof HttpError && err.status === 403) throw new HttpError(403, TWO_FACTOR_FOR_SHEET_MESSAGE, err.details);
+      throw err;
+    }
     const key = currentKey();
     const offsite = currentOffsite();
     const sheet = buildRecoverySheet({

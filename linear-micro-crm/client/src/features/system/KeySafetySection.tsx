@@ -115,11 +115,17 @@ export function KeySafetySection() {
 
       {s.canMakeSheet ? (
         s.secure ? (
-          <div className="mt-3 flex flex-wrap items-center gap-3">
-            <Button variant={sheetDone ? 'outline' : 'primary'} onClick={() => setOpen(true)} leftIcon={<Printer aria-hidden />} data-testid="make-recovery-sheet">
+          <div className="mt-3 flex flex-col gap-2 sm:flex-row sm:items-center sm:gap-3">
+            <Button
+              variant={sheetDone ? 'outline' : 'primary'}
+              onClick={() => setOpen(true)}
+              leftIcon={<Printer aria-hidden />}
+              className="w-full sm:w-auto"
+              data-testid="make-recovery-sheet"
+            >
               {sheetDone ? 'Make a new recovery sheet' : 'Make the recovery sheet'}
             </Button>
-            <p className="min-w-0 flex-1 text-xs text-muted">Print it and lock it away. You need a code from your authenticator app.</p>
+            <p className="min-w-0 text-xs text-muted sm:flex-1">Print it and lock it away. You need a code from your authenticator app.</p>
           </div>
         ) : (
           <p className="mt-3 text-xs text-muted" data-testid="sheet-needs-secure">
@@ -145,7 +151,7 @@ function printSheet(sheet: RecoverySheet): boolean {
       <h1 style="font-size:22px;margin:0 0 4px">Linear Hub: recovery sheet</h1>
       <p style="margin:0 0 16px;color:#444">Made ${esc(new Date(sheet.madeAt).toLocaleString('en-GB'))}</p>
       <p style="margin:0 0 6px;font-weight:600">App key (type it exactly; spaces do not matter):</p>
-      <p style="font:20px/1.6 ui-monospace,Menlo,monospace;border:2px solid #000;padding:12px;word-break:break-all;margin:0 0 12px">${esc(sheet.key)}</p>
+      <p style="font:20px/1.6 ui-monospace,Menlo,monospace;border:2px solid #000;padding:12px;overflow-wrap:break-word;margin:0 0 12px">${esc(sheet.key)}</p>
       <p style="margin:0 0 4px">Key fingerprint: <b style="font-family:ui-monospace,Menlo,monospace">${esc(sheet.fingerprint)}</b></p>
       <p style="margin:0 0 4px">${sheet.keySource === 'env' ? 'The server reads the key from LM_APP_SECRET.' : `The server reads the key from: ${esc(sheet.keyFile ?? '')}`}</p>
       <p style="margin:0 0 4px">Database: ${esc(sheet.dbPath)}</p>
@@ -253,7 +259,7 @@ function RecoverySheetModal({ onClose }: { onClose: () => void }) {
       <div className="space-y-4" data-testid="recovery-sheet">
         <div className="rounded-lg border border-border bg-surface-2 p-3">
           <p className="text-xs font-medium text-muted">App key</p>
-          <p className="break-all font-mono text-base leading-relaxed text-fg" data-testid="recovery-sheet-key">{sheet.key}</p>
+          <p className="break-words font-mono text-base leading-relaxed text-fg" data-testid="recovery-sheet-key">{sheet.key}</p>
           <p className="mt-1 text-xs text-muted">Fingerprint <span className="font-mono">{sheet.fingerprint}</span></p>
         </div>
         <ol className="list-decimal space-y-1.5 pl-5 text-sm text-fg">
