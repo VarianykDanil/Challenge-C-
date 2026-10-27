@@ -180,7 +180,9 @@ export function clientAccountsRouter(db: Db): Router {
     if (patch.status === undefined && patch.firstName === undefined && patch.lastName === undefined && patch.email === undefined) {
       throw badRequest('Nothing to change: send a status, a name or an email');
     }
-    if (patch.email && patch.email !== account.email.toLowerCase()) {
+    if (patch.email && patch.email.toLowerCase() !== account.email.toLowerCase()) {
+      // a new sign-in email: the admin's fresh two-step code (never a demo account), as for staff
+      assertStepUp(db, currentUser(req), req, 'change someone’s sign-in email');
       if (get(db, `SELECT 1 FROM users WHERE lower(email) = lower(?) AND id <> ?`, [patch.email, id])) throw conflict(`${patch.email} already has an account`);
     }
     transaction(db, () => {

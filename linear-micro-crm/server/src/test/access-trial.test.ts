@@ -53,6 +53,9 @@ test('admins see trial mode: GET /auth/me carries it and the Needs-attention fee
   const admin = await srv.login('admin');
   const me = await admin.get('/auth/me');
   assert.deepEqual(me.json.trial, { trialMode: true, demoSignIns: true });
+  // the sign-in answer carries it too, so the banner is there from the first page
+  const signIn = await srv.anon().post('/auth/login', DEMO_ACCOUNTS.admin);
+  assert.deepEqual(signIn.json.trial, { trialMode: true, demoSignIns: true });
   const feed = await admin.get('/me/attention');
   const item = feed.json.items.find((i: Json) => i.key.startsWith('security:trial'));
   assert.ok(item, JSON.stringify(feed.json.items.map((i: Json) => i.key)));

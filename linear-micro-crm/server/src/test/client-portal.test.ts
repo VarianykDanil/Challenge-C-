@@ -531,10 +531,13 @@ test('deactivate signs the client out everywhere and stops sign-in; reactivate; 
   assert.equal(off.status, 'left');
   is(await jo.get('/client/portal'), 401, 'their session ended');
   is(await srv.anon().post('/auth/login', { email: 'jo.bloggs@charity.example', employeeId: 'CL-0061', pin: '4826' }), 401, 'no sign-in');
-  is(await admin.patch(`/client-accounts/${id}`, { status: 'active', email: 'jo@charity.example' }), 200, 'reactivate with a new email');
+  // a new sign-in email is a step-up action: the admin's fresh two-step code
+  const noCode = is(await admin.patch(`/client-accounts/${id}`, { status: 'active', email: 'jo@charity.example' }), 400, 'a new email needs the admin’s code');
+  assert.match(noCode.error, /6-digit code/);
+  is(await admin.patch(`/client-accounts/${id}`, { status: 'active', email: 'jo@charity.example', code: currentCode(srv.db, fx().users.admin) }), 200, 'reactivate with a new email');
   is(await srv.anon().post('/auth/login', { email: 'jo@charity.example', employeeId: 'CL-0061', pin: '4826' }), 200, 'signs in again');
   is(await admin.patch(`/client-accounts/${id}`, {}), 400, 'nothing to change');
-  is(await admin.patch(`/client-accounts/${id}`, { email: FIXTURE_ACCOUNTS.rep.email }), 409, 'an email in use');
+  is(await admin.patch(`/client-accounts/${id}`, { email: FIXTURE_ACCOUNTS.rep.email, code: currentCode(srv.db, fx().users.admin) }), 409, 'an email in use');
   is(await admin.patch(`/client-accounts/${id}`, { status: 'gone' }), 400, 'bad status');
   is(await admin.patch(`/client-accounts/${fx().users.rep}`, { status: 'left' }), 404, 'a staff member is not a client account');
   is(await admin.post(`/client-accounts/${fx().users.rep}/reset-pin`, { code: '123456' }), 404, 'nor for a PIN reset');

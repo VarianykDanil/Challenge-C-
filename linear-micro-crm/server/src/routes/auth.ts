@@ -195,6 +195,7 @@ export function authRouter(db: Db): Router {
     const session = createSession(db, user);
     setSessionCookie(req, res, session.token, session.maxAgeMs);
     const body: AuthResponse = { user: withFlags(user, twoFactorEnabled), session: session.info };
+    if (user.role === 'admin' && isTrialMode(db)) body.trial = trialStatus(db); // the banner from the first page
     res.json(body);
   };
 
