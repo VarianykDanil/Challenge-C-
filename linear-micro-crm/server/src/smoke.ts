@@ -23,6 +23,8 @@ import { nextPay, weekPayFor } from './lib/pay.ts';
 import { totp, totpCounter } from './lib/totp.ts';
 import { purgeExpiredChallenges, reencryptLegacySecrets, resetCodeFailures } from './lib/twofactor.ts';
 import { resetLoginFailures } from './routes/auth.ts';
+import { sessionKey } from './lib/sessionKey.ts';
+import { issueSetupCode } from './lib/setupCodes.ts';
 
 /** WCAG contrast ratio of white text on a hex background. */
 function contrastWithWhite(hex: string): number {
@@ -191,7 +193,7 @@ async function main(): Promise<void> {
     status(r, 200, 'demo');
     eq(r.json.accounts.length, 4, 'four accounts');
     eq(r.json.accounts.map((a: Json) => a.role).join(','), 'admin,leader,recruiter,rep', 'roles');
-    eq(r.json.accounts[0].email, 'danil@linear-mcr.co.uk', 'admin email');
+    eq(r.json.accounts[0].email, 'morgan.blake@linearhub.example', 'admin email');
     // Release 1.3.1: the Sapiens team's seven blank demo sign-ins, after the four
     eq(r.json.demoTeams?.[0]?.name, 'Sapiens', 'Sapiens group');
     eq(r.json.demoTeams[0].accounts.map((a: Json) => a.employeeId).join(','), 'LM-0101,LM-0102,LM-0103,LM-0104,LM-0105,LM-0106,LM-0107', 'the seven, in order');
@@ -230,27 +232,27 @@ async function main(): Promise<void> {
     status(bad, 400, 'empty body');
     eq(bad.json.error, 'Validation failed', 'validation error');
     ok(Array.isArray(bad.json.details), 'details array');
-    status(await anon.post('/auth/login', { email: 'danil@linear-mcr.co.uk', employeeId: 'LM-9999' }), 401, 'mismatch');
-    status(await anon.post('/auth/login', { email: 'nobody@linear-mcr.co.uk', employeeId: 'LM-0001' }), 401, 'unknown email');
+    status(await anon.post('/auth/login', { email: 'morgan.blake@linearhub.example', employeeId: 'LM-9999' }), 401, 'mismatch');
+    status(await anon.post('/auth/login', { email: 'nobody@linearhub.example', employeeId: 'LM-0001' }), 401, 'unknown email');
   });
   await check('POST /auth/login rate limit: 8 failures per ip+email in 15 min, 9th → 429', async () => {
-    const email = 'brute.force@linear-mcr.co.uk';
+    const email = 'brute.force@linearhub.example';
     for (let i = 1; i <= 8; i++) status(await anon.post('/auth/login', { email, employeeId: `LM-9${String(i).padStart(3, '0')}` }), 401, `attempt ${i}`);
     const r = await anon.post('/auth/login', { email, employeeId: 'LM-9009' });
     status(r, 429, '9th attempt');
     ok(/^Too many attempts, try again in \d+ minutes?$/.test(r.json.error), `error text (${r.json.error})`);
-    status(await anon.post('/auth/login', { email: 'JORDAN.LEE@linear-mcr.co.uk', employeeId: 'LM-0010' }), 200, 'other email from the same IP unaffected');
+    status(await anon.post('/auth/login', { email: 'JORDAN.LEE@linearhub.example', employeeId: 'LM-0010' }), 200, 'other email from the same IP unaffected');
     status(await anon.post('/auth/logout'), 204, 'logout');
   });
   await check('Session cookie: HttpOnly + Lax; Secure only on HTTPS or COOKIE_SECURE=1', async () => {
     const plain = new Client(base, 'cookie');
-    const r = await plain.post('/auth/login', { email: 'jordan.lee@linear-mcr.co.uk', employeeId: 'LM-0010' });
+    const r = await plain.post('/auth/login', { email: 'jordan.lee@linearhub.example', employeeId: 'LM-0010' });
     status(r, 200, 'login');
     const sc = r.headers.get('set-cookie') ?? '';
     ok(/HttpOnly/i.test(sc) && /SameSite=Lax/i.test(sc) && !/;\s*Secure/i.test(sc), `plain http: HttpOnly, Lax, no Secure (${sc})`);
     process.env.COOKIE_SECURE = '1';
     try {
-      const forced = await new Client(base, 'cookie2').post('/auth/login', { email: 'jordan.lee@linear-mcr.co.uk', employeeId: 'LM-0010' });
+      const forced = await new Client(base, 'cookie2').post('/auth/login', { email: 'jordan.lee@linearhub.example', employeeId: 'LM-0010' });
       ok(/;\s*Secure/i.test(forced.headers.get('set-cookie') ?? ''), 'COOKIE_SECURE=1 → Secure');
     } finally {
       delete process.env.COOKIE_SECURE;
@@ -300,7 +302,7 @@ async function main(): Promise<void> {
     const dist = path.resolve(import.meta.dirname, '../../client/dist');
     if (existsSync(path.join(dist, 'index.html'))) ok(/'sha256-[A-Za-z0-9+/=]+'/.test(contentSecurityPolicy(dist)), 'built client: inline theme script hashed into script-src');
     // the default app ignores X-Forwarded-*: a forged "https" never yields a Secure cookie or HSTS
-    const creds = { email: 'jordan.lee@linear-mcr.co.uk', employeeId: 'LM-0010' };
+    const creds = { email: 'jordan.lee@linearhub.example', employeeId: 'LM-0010' };
     const spoof = await fetch(`${base}/auth/login`, { method: 'POST', headers: { 'content-type': 'application/json', 'x-forwarded-proto': 'https' }, body: JSON.stringify(creds) });
     eq(spoof.status, 200, 'login');
     ok(!/;\s*Secure/i.test(spoof.headers.get('set-cookie') ?? '') && spoof.headers.get('strict-transport-security') === null, 'X-Forwarded-Proto ignored by default');
@@ -320,7 +322,7 @@ async function main(): Promise<void> {
   });
   await check('Login limiter keys on the socket address (X-Forwarded-For cannot bypass it) plus a per-email ceiling across addresses', async () => {
     resetLoginFailures();
-    const email = 'spoof.me@linear-mcr.co.uk';
+    const email = 'spoof.me@linearhub.example';
     const attempt = (i: number, localAddress?: string) => {
       const headers = { 'content-type': 'application/json', 'x-forwarded-for': `203.0.113.${i}` };
       const payload = JSON.stringify({ email, employeeId: `LM-9${String(i).padStart(3, '0')}` });
@@ -335,16 +337,16 @@ async function main(): Promise<void> {
     for (let i = 17; i <= 20; i++) eq((await attempt(i, '127.0.0.3')).status, 401, `attempt ${i} from a third address`);
     const capped = await attempt(21, '127.0.0.3');
     eq(capped.status, 429, '21st failure for the email → 429 from any address (per-email ceiling)');
-    const otherEmail = await requestVia('127.0.0.3', 'POST', `${base}/auth/login`, { 'content-type': 'application/json' }, JSON.stringify({ email: 'jordan.lee@linear-mcr.co.uk', employeeId: 'LM-0010' }));
+    const otherEmail = await requestVia('127.0.0.3', 'POST', `${base}/auth/login`, { 'content-type': 'application/json' }, JSON.stringify({ email: 'jordan.lee@linearhub.example', employeeId: 'LM-0010' }));
     eq(otherEmail.status, 200, 'other emails from that address unaffected');
     run(db, `DELETE FROM sessions WHERE user_id = 10`);
     resetLoginFailures();
   });
   const logins: [Client, string, string, string][] = [
-    [admin, 'DANIL@linear-mcr.co.uk', 'lm-0001', 'admin'],
-    [leader, 'amelia.hart@linear-mcr.co.uk', 'LM-0002', 'leader'],
-    [recruiter, 'priya.shah@linear-mcr.co.uk', 'LM-0003', 'recruiter'],
-    [rep, 'jordan.lee@linear-mcr.co.uk', 'LM-0010', 'rep'],
+    [admin, 'MORGAN.BLAKE@linearhub.example', 'lm-0001', 'admin'],
+    [leader, 'amelia.hart@linearhub.example', 'LM-0002', 'leader'],
+    [recruiter, 'priya.shah@linearhub.example', 'LM-0003', 'recruiter'],
+    [rep, 'jordan.lee@linearhub.example', 'LM-0010', 'rep'],
   ];
   for (const [client, email, employeeId, role] of logins) {
     await check(`POST /auth/login as ${role}`, async () => {
@@ -539,15 +541,15 @@ async function main(): Promise<void> {
   await check('POST/PATCH /users (reps never; leaders add to their own team; PATCH admin only; 409 on duplicates)', async () => {
     status(await rep.post('/users', {}), 403, 'rep forbidden');
     // Release 1.3.1: a leader adds a trainee to their own team; the employee ID shows once, then is hidden again
-    const added = await leader.post('/users', { firstName: 'Smoke', lastName: 'Trainee', email: 'smoke.trainee@linear-mcr.co.uk', position: 'trainee' });
+    const added = await leader.post('/users', { firstName: 'Smoke', lastName: 'Trainee', email: 'smoke.trainee@linearhub.example', position: 'trainee' });
     status(added, 201, 'leader adds a trainee');
     eq(added.json.teamName, 'Northern Lights', "the leader's own team");
     ok(/^LM-\d{4}$/.test(added.json.employeeId), 'employee ID in the answer');
     eq((await leader.get(`/users/${added.json.id}`)).json.employeeId, '', 'hidden on every later read');
-    status(await leader.post('/users', { firstName: 'Smoke', lastName: 'Other', email: 'smoke.other@linear-mcr.co.uk', position: 'trainee', teamId: 2 }), 403, 'not another team');
+    status(await leader.post('/users', { firstName: 'Smoke', lastName: 'Other', email: 'smoke.other@linearhub.example', position: 'trainee', teamId: 2 }), 403, 'not another team');
     status(await leader.patch(`/users/${added.json.id}`, { city: 'Bury' }), 403, 'PATCH stays admin only');
     const body = {
-      employeeId: 'LM-0900', email: 'test.user@linear-mcr.co.uk', firstName: 'Test', lastName: 'User', role: 'rep', position: 'trainee',
+      employeeId: 'LM-0900', email: 'test.user@linearhub.example', firstName: 'Test', lastName: 'User', role: 'rep', position: 'trainee',
       teamId: 2, startDate: today, status: 'active', phone: null, city: 'Manchester',
     };
     const r = await admin.post('/users', body);
@@ -574,14 +576,15 @@ async function main(): Promise<void> {
   });
   await check('PATCH status=left revokes sessions; admins cannot deactivate themselves', async () => {
     const body = {
-      employeeId: 'LM-0910', email: 'smoke.leaver@linear-mcr.co.uk', firstName: 'Smoke', lastName: 'Leaver', role: 'rep', position: 'trainee',
+      employeeId: 'LM-0910', email: 'smoke.leaver@linearhub.example', firstName: 'Smoke', lastName: 'Leaver', role: 'rep', position: 'trainee',
       teamId: 1, startDate: today, status: 'active', phone: null, city: 'Manchester',
     };
     const created = await admin.post('/users', body);
     status(created, 201, 'create');
     leaverId = created.json.id;
     const leaver = new Client(base, 'leaver');
-    status(await leaver.post('/auth/login', { email: body.email, employeeId: body.employeeId }), 200, 'login');
+    ok(typeof created.json.setupCode === 'string', 'a one-time setup code for the new account');
+    status(await leaver.post('/auth/login', { email: body.email, employeeId: body.employeeId, setupCode: created.json.setupCode }), 200, 'login');
     status(await leaver.get('/auth/me'), 200, 'session works while active');
     status(await admin.patch(`/users/${leaverId}`, { status: 'left' }), 200, 'patch left');
     eq(get<Json>(db, `SELECT COUNT(*) AS n FROM sessions WHERE user_id = ?`, [leaverId])!.n, 0, 'sessions deleted on deactivation');
@@ -589,19 +592,19 @@ async function main(): Promise<void> {
     status(await leaver.get('/me/dashboard'), 401, 'dashboard rejected');
     status(await leaver.post('/auth/login', { email: body.email, employeeId: body.employeeId }), 401, 'login rejected');
     // a session that survived the delete is still rejected (and removed) by authenticate
-    run(db, `INSERT INTO sessions (token, user_id, created_at, expires_at) VALUES ('stale-left-token', ?, ?, ?)`, [leaverId, new Date().toISOString(), new Date(Date.now() + 86_400_000).toISOString()]);
+    run(db, `INSERT INTO sessions (token, user_id, created_at, expires_at) VALUES (?, ?, ?, ?)`, [sessionKey('stale-left-token'), leaverId, new Date().toISOString(), new Date(Date.now() + 86_400_000).toISOString()]);
     const stale = await fetch(`${base}/auth/me`, { headers: { cookie: 'lm_session=stale-left-token' } });
     eq(stale.status, 401, 'stale session of a left user is rejected');
-    eq(get<Json>(db, `SELECT COUNT(*) AS n FROM sessions WHERE token = 'stale-left-token'`)!.n, 0, 'and deleted');
+    eq(get<Json>(db, `SELECT COUNT(*) AS n FROM sessions WHERE token = ?`, [sessionKey('stale-left-token')])!.n, 0, 'and deleted');
     const self = await admin.patch('/users/1', { status: 'left' });
     status(self, 400, 'admin cannot deactivate themselves');
     eq((await admin.get('/users/1')).json.status, 'active', 'admin still active');
     status(await admin.get('/auth/me'), 200, 'admin session intact');
   });
   await check('Login answers one 401 message for an unknown email, a wrong ID and a deactivated account', async () => {
-    const unknown = await anon.post('/auth/login', { email: 'nobody.here@linear-mcr.co.uk', employeeId: 'LM-0910' });
-    const wrong = await anon.post('/auth/login', { email: 'smoke.leaver@linear-mcr.co.uk', employeeId: 'LM-9999' });
-    const left = await anon.post('/auth/login', { email: 'smoke.leaver@linear-mcr.co.uk', employeeId: 'LM-0910' });
+    const unknown = await anon.post('/auth/login', { email: 'nobody.here@linearhub.example', employeeId: 'LM-0910' });
+    const wrong = await anon.post('/auth/login', { email: 'smoke.leaver@linearhub.example', employeeId: 'LM-9999' });
+    const left = await anon.post('/auth/login', { email: 'smoke.leaver@linearhub.example', employeeId: 'LM-0910' });
     for (const [what, r] of [['unknown', unknown], ['wrong id', wrong], ['deactivated', left]] as const) {
       status(r, 401, what);
       eq(r.json.error, 'Invalid email or employee ID', `${what} message`);
@@ -611,13 +614,13 @@ async function main(): Promise<void> {
   await check('GET /teams', async () => {
     const r = await rep.get('/teams');
     status(r, 200, 'teams');
-    // Release 1.3.1: the four demo teams and Sapiens (seven blank accounts, Theo leads)
+    // the four demo teams and Sapiens (the example starter team: seven blank accounts, Ava leads)
     eq(r.json.length, 5, 'four teams and Sapiens');
     const nl = r.json.find((t: Json) => t.name === 'Northern Lights');
     eq(nl.leaderName, 'Amelia Hart', 'leader name');
     ok(nl.memberCount >= 5, 'member count');
     const sapiens = r.json.find((t: Json) => t.name === 'Sapiens');
-    eq(sapiens?.leaderName, 'Theo', 'Sapiens leader, no trailing space');
+    eq(sapiens?.leaderName, 'Ava', 'Sapiens leader, no trailing space');
     eq(sapiens?.memberCount, 7, 'seven Sapiens accounts');
   });
 
@@ -1045,6 +1048,9 @@ async function main(): Promise<void> {
     const pending = await admin.get('/finance/payroll?status=pending');
     ok(pending.json.length > 0 && pending.json.every((p: Json) => p.status === 'pending' && p.paidDate === null), 'pending filter');
     pendingRunId = pending.json[0].id;
+    // the demo has no failed transfers (every past week is paid): bounce one so the filter and the repay have one
+    run(db, `UPDATE payroll_runs SET status = 'failed', paid_date = NULL WHERE id = (SELECT id FROM payroll_runs WHERE status = 'paid' AND week_start >= ? ORDER BY week_start DESC, id LIMIT 1)`, [twelveWeeksAgo]);
+    bumpDataVersion();
     const unpaid = await admin.get(`/finance/payroll?status=pending,failed&from=${twelveWeeksAgo}&to=${today}`);
     status(unpaid, 200, 'comma list');
     ok(unpaid.json.length > pending.json.length && unpaid.json.every((p: Json) => p.status === 'pending' || p.status === 'failed'), 'status=pending,failed returns both');
@@ -1196,7 +1202,7 @@ async function main(): Promise<void> {
     const summary = await admin.get(`/finance/summary?from=${lastCompletedMonday}&to=${addDays(lastCompletedMonday, 6)}`);
     eq(summary.json.weeks[0].payroll, round2(Number(get<Json>(db, `SELECT SUM(gross) AS g FROM payroll_runs WHERE week_start = ?`, [lastCompletedMonday])!.g)), 'finance week payroll moved with the runs');
     // a complete week with work but no run yet → a pending run is created; removing the work removes it again
-    const starter = await admin.post('/users', { employeeId: 'LM-0930', email: 'smoke.starter@linear-mcr.co.uk', firstName: 'Smoke', lastName: 'Starter', role: 'rep', position: 'trainee', teamId: 1, startDate: lastCompletedMonday, status: 'active', phone: null, city: 'Manchester' });
+    const starter = await admin.post('/users', { employeeId: 'LM-0930', email: 'smoke.starter@linearhub.example', firstName: 'Smoke', lastName: 'Starter', role: 'rep', position: 'trainee', teamId: 1, startDate: lastCompletedMonday, status: 'active', phone: null, city: 'Manchester' });
     status(starter, 201, 'new starter');
     eq(runOf(starter.json.id), undefined, 'no run yet');
     const g = await admin.post('/gauges', { eventId: syncEventId, userId: starter.json.id, date: syncDate, stops: 20, table: 8, presentations: 4, closes: 2, taps: 2, sales: 2 });
@@ -1469,7 +1475,7 @@ async function main(): Promise<void> {
     status(await recruiter.post(`/recruitment/candidates/${first.json.id}/stage`, { stage: 'rejected' }), 200, 'close the first');
     const again = await recruiter.post('/recruitment/candidates', dup);
     status(again, 201, 'may re-apply once closed');
-    const twin = await recruiter.post('/recruitment/candidates', { firstName: 'Jordan', lastName: 'Twin', email: 'jordan.lee@linear-mcr.co.uk' });
+    const twin = await recruiter.post('/recruitment/candidates', { firstName: 'Jordan', lastName: 'Twin', email: 'jordan.lee@linearhub.example' });
     status(twin, 201, 'candidate with an existing user\'s email');
     status(await recruiter.post(`/recruitment/candidates/${twin.json.id}/stage`, { stage: 'offer' }), 200, 'to offer');
     const hire = await recruiter.post(`/recruitment/candidates/${twin.json.id}/stage`, { stage: 'hired' });
@@ -1562,7 +1568,7 @@ async function main(): Promise<void> {
   // on and can never turn it off (only an admin reset clears it); switching it off is checked on a demo Sapiens
   // account, which is exempt while the database is still the demo. ──
   const tfa = {
-    employeeId: 'LM-0920', email: 'smoke.totp@linear-mcr.co.uk', firstName: 'Smoke', lastName: 'Totp', role: 'rep', position: 'field_rep',
+    employeeId: 'LM-0920', email: 'smoke.totp@linearhub.example', firstName: 'Smoke', lastName: 'Totp', role: 'rep', position: 'field_rep',
     teamId: 2, startDate: today, status: 'active', phone: null, city: 'Manchester',
   };
   const tfaLogin = { email: tfa.email, employeeId: tfa.employeeId };
@@ -1595,16 +1601,49 @@ async function main(): Promise<void> {
   };
   let tfaSecret = '';
   let tfaCodes: string[] = [];
+  /** A one-time setup code for the smoke user, as an administrator would hand over (npm run setup-code does the same). */
+  const freshSetupCode = (): string => issueSetupCode(db, tfaUserId, { createdBy: null, reason: 'command' }).code;
+  /**
+   * A real administrator (not one of the demo company's people) with two-step on: a demo administrator may not reset
+   * anyone's sign-in, and a real one needs a fresh code from their own authenticator for it.
+   */
+  const owner = new Client(base, 'owner');
+  let ownerId = 0;
+  let ownerSecret = '';
+  const ownerCode = (): string => {
+    run(db, `UPDATE users SET totp_last_counter = NULL WHERE id = ?`, [ownerId]);
+    return totp(ownerSecret);
+  };
+  const signInOwner = async (): Promise<void> => {
+    if (ownerId) return;
+    ownerId = Number(run(
+      db,
+      `INSERT INTO users (employee_id, email, first_name, last_name, role, position, team_id, pay_plan_id, start_date, status, phone, avatar_color, city)
+       SELECT 'LM-0990', 'smoke.owner@linearhub.example', 'Smoke', 'Owner', 'admin', 'owner', NULL, pay_plan_id, ?, 'active', NULL, '#0E7490', NULL FROM users WHERE id = 1`,
+      [today],
+    ).lastInsertRowid);
+    bumpDataVersion();
+    const setupCode = issueSetupCode(db, ownerId, { createdBy: null, reason: 'command' }).code;
+    status(await owner.post('/auth/login', { email: 'smoke.owner@linearhub.example', employeeId: 'LM-0990', setupCode }), 200, 'owner signs in with a setup code');
+    ownerSecret = (await enable2fa(owner)).secret;
+  };
 
   await check('2FA setup → enable: QR + otpauth, wrong code 400, 10 recovery codes, other sessions signed out', async () => {
     const created = await admin.post('/users', tfa);
     status(created, 201, 'create user');
     tfaUserId = created.json.id;
+    ok(/^[A-HJ-NP-Z2-9]{4}-[A-HJ-NP-Z2-9]{4}-[A-HJ-NP-Z2-9]{4}$/.test(created.json.setupCode), `a one-time setup code (${created.json.setupCode})`);
     const other = new Client(base, 'totp-other');
-    const login = await tfaUser.post('/auth/login', tfaLogin);
-    status(login, 200, 'login');
+    const asked = await tfaUser.post('/auth/login', tfaLogin);
+    status(asked, 200, 'email and employee ID alone: asked for the setup code');
+    eq(asked.json.requiresSetupCode, true, 'requiresSetupCode');
+    ok(!asked.headers.get('set-cookie') && asked.json.user === undefined, 'no session without the code');
+    const login = await tfaUser.post('/auth/login', { ...tfaLogin, setupCode: created.json.setupCode.toLowerCase().replace(/-/g, ' ') });
+    status(login, 200, 'login with the setup code (any case, spaces)');
     eq(login.json.user.twoFactorEnabled, false, 'login carries twoFactorEnabled=false');
-    status(await other.post('/auth/login', tfaLogin), 200, 'second session');
+    status(await other.post('/auth/login', { ...tfaLogin, setupCode: created.json.setupCode }), 401, 'the code works once');
+    status(await other.post('/auth/login', { ...tfaLogin, setupCode: freshSetupCode() }), 200, 'second session');
+    resetLoginFailures();
     eq((await tfaUser.get('/auth/me')).json.user.twoFactorEnabled, false, '/auth/me flag off');
     const off = await tfaUser.get('/auth/2fa');
     status(off, 200, 'status');
@@ -1617,7 +1656,7 @@ async function main(): Promise<void> {
     const first = await tfaUser.post('/auth/2fa/setup');
     status(first, 201, 'setup');
     ok(/^[A-Z2-7]{32}$/.test(first.json.secret), `base32 secret (${first.json.secret})`);
-    ok(first.json.otpauthUrl.startsWith('otpauth://totp/Linear%20Hub:smoke.totp%40linear-mcr.co.uk?'), `otpauth label (${first.json.otpauthUrl})`);
+    ok(first.json.otpauthUrl.startsWith('otpauth://totp/Linear%20Hub:smoke.totp%40linearhub.example?'), `otpauth label (${first.json.otpauthUrl})`);
     ok(first.json.otpauthUrl.includes(`secret=${first.json.secret}`) && first.json.otpauthUrl.includes('issuer=Linear%20Hub'), 'otpauth params');
     ok(typeof first.json.qrSvg === 'string' && first.json.qrSvg.startsWith('<svg') && first.json.qrSvg.length > 500, 'inline SVG QR');
     eq((await tfaUser.get('/auth/2fa')).json.pendingSetup, true, 'pendingSetup after setup');
@@ -1781,7 +1820,7 @@ async function main(): Promise<void> {
     eq((await y.get('/auth/2fa')).json.enabled, false, 'off again');
     status(await y.post('/auth/logout'), 204, 'logout');
   });
-  await check('Admin reset: 403 for non-admins, 400 for own account, 404 unknown, 204 clears 2FA and signs the user out everywhere', async () => {
+  await check('Admin reset: 403 for non-admins and demo administrators, 400 for own account, 404 unknown; a real admin needs a fresh code, and the person gets a setup code and is signed out everywhere', async () => {
     const secret = tfaSecret; // still on (release 1.4: it cannot be turned off)
     const c = new Client(base, 'totp-second');
     const step1 = await c.post('/auth/login', tfaLogin);
@@ -1790,18 +1829,28 @@ async function main(): Promise<void> {
     status(await leader.post(`/users/${tfaUserId}/2fa/reset`), 403, 'leader cannot reset');
     status(await admin.post('/users/1/2fa/reset'), 400, 'admin cannot reset their own via this route');
     status(await admin.post('/users/99999/2fa/reset'), 404, 'unknown user');
-    status(await admin.post(`/users/${tfaUserId}/2fa/reset`), 204, 'reset');
+    const demo = await admin.post(`/users/${tfaUserId}/2fa/reset`);
+    status(demo, 403, 'the demo administrator cannot reset anyone (trial mode)');
+    eq(demo.json.details?.code, 'demo_account', 'demo refusal');
+    await signInOwner();
+    status(await owner.post(`/users/${tfaUserId}/2fa/reset`, {}), 400, 'a real admin needs a fresh code');
+    status(await owner.post(`/users/${tfaUserId}/2fa/reset`, { code: '000000' }), 400, 'a wrong code');
+    const reset = await owner.post(`/users/${tfaUserId}/2fa/reset`, { code: ownerCode() });
+    status(reset, 200, 'reset');
+    ok(typeof reset.json.setupCode === 'string' && typeof reset.json.expiresAt === 'string', 'a one-time setup code to hand over');
     status(await tfaUser.get('/auth/me'), 401, 'signed out everywhere (1)');
     status(await c.get('/auth/me'), 401, 'signed out everywhere (2)');
     eq(get<Json>(db, `SELECT COUNT(*) AS n FROM sessions WHERE user_id = ?`, [tfaUserId])!.n, 0, 'no sessions left');
     const row = tfaDbRow();
     ok(row.s === null && row.p === null && row.e === null, 'secret columns cleared');
     eq(recoveryRows(), 0, 'recovery codes deleted');
-    const login = await tfaUser.post('/auth/login', tfaLogin);
-    status(login, 200, 'one-step login again');
+    eq((await tfaUser.post('/auth/login', tfaLogin)).json.requiresSetupCode, true, 'email and ID alone are not enough after a reset');
+    const login = await tfaUser.post('/auth/login', { ...tfaLogin, setupCode: reset.json.setupCode });
+    status(login, 200, 'one-step login again with the setup code');
     eq(login.json.user.twoFactorEnabled, false, 'flag off');
     eq(login.json.user.twoFactorSetupRequired, true, 'release 1.4: set it up again before carrying on');
     status(await admin.get('/auth/me'), 200, 'admin session intact');
+    resetLoginFailures();
   });
   await check('Code limiters: 6 wrong codes exhaust the challenge (410) and lock the source (429); another address is unaffected; wrong codes count for the login limiter', async () => {
     resetCodeFailures();
@@ -1855,9 +1904,9 @@ async function main(): Promise<void> {
     status(await c.post('/auth/login/2fa', { challengeToken: live, code: code(tfaSecret) }), 200, 'fresh challenge works');
     status(await c.post('/auth/logout'), 204, 'logout');
     // Release 1.4: the account cannot switch it off; the admin reset leaves it off (it sets it up at its next sign-in)
-    status(await admin.post(`/users/${tfaUserId}/2fa/reset`), 204, 'leave 2FA off (admin reset)');
+    status(await owner.post(`/users/${tfaUserId}/2fa/reset`, { code: ownerCode() }), 200, 'leave 2FA off (admin reset)');
     eq((await anon.get('/auth/demo-accounts')).json.accounts.length, 4, 'demo accounts untouched (2FA off for all four)');
-    eq(get<Json>(db, `SELECT COUNT(*) AS n FROM users WHERE totp_enabled_at IS NOT NULL`)!.n, 0, 'no user has 2FA on');
+    eq(get<Json>(db, `SELECT COUNT(*) AS n FROM users WHERE totp_enabled_at IS NOT NULL AND id <> ?`, [ownerId])!.n, 0, 'no user but the real owner has 2FA on');
   });
   await check('Schema upgrade: a first-release database gains every later column, index and the rate backfill on createSchema (idempotent, rows kept)', async () => {
     const legacySql = SCHEMA_SQL
