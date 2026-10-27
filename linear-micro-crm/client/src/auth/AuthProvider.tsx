@@ -1,7 +1,7 @@
 // Owned by the Frontend Developer. Contract: useAuth() shape is used by Login (Designer) and AppShell.
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
-import type { AuthResponse, LoginInput, LoginPinChallenge, TwoFactorChallenge, UserWithTeam } from '@lm/shared';
+import type { AuthResponse, LoginInput, LoginPinChallenge, LoginSetupCodeChallenge, TrialStatus, TwoFactorChallenge, UserWithTeam } from '@lm/shared';
 import { api, ApiError } from '@/api/client';
 import { forgetSession, rememberSession } from '@/api/sessionEnd';
 
@@ -10,13 +10,16 @@ import { forgetSession, rememberSession } from '@/api/sessionEnd';
  * two-step verification on gets a short-lived challenge instead and must finish with `completeTwoFactor()`.
  * Release 1.2 (U1): an account with a PIN signed in without one gets `requiresPin` (no session yet) and calls
  * `login()` again with the same details plus `pin`.
- * Every member carries `requiresTwoFactor` and `requiresPin`, so `if (result.requiresPin)` / `if (result.requiresTwoFactor)`
- * narrow cleanly.
+ * An account that has not finished setting up gets `requiresSetupCode` (no session yet) and calls `login()` again with
+ * its one-time setup code.
+ * Every member carries `requiresTwoFactor`, `requiresPin` and `requiresSetupCode`, so `if (result.requiresPin)` and the
+ * like narrow cleanly.
  */
 export type LoginResult =
-  | { ok: true; requiresTwoFactor: false; requiresPin: false }
-  | { ok: false; requiresTwoFactor: true; requiresPin: false; challengeToken: string }
-  | { ok: false; requiresTwoFactor: false; requiresPin: true; attemptsLeft: number };
+  | { ok: true; requiresTwoFactor: false; requiresPin: false; requiresSetupCode: false }
+  | { ok: false; requiresTwoFactor: true; requiresPin: false; requiresSetupCode: false; challengeToken: string }
+  | { ok: false; requiresTwoFactor: false; requiresPin: true; requiresSetupCode: false; attemptsLeft: number }
+  | { ok: false; requiresTwoFactor: false; requiresPin: false; requiresSetupCode: true };
 
 export interface TwoFactorCompletion {
   challengeToken: string;
@@ -28,6 +31,8 @@ export interface TwoFactorCompletion {
 
 export interface AuthContextValue {
   user: UserWithTeam | null;
+  /** Administrators while the database is still the trial (the banner); null otherwise. */
+  trial: TrialStatus | null;
   loading: boolean;
   /** Callers that only `await login(...)` keep working; the result tells the Login page whether a second step is needed. */
   login: (input: LoginInput) => Promise<LoginResult>;
@@ -47,6 +52,7 @@ const VISIBLE_REFRESH_MS = 60_000;
 export function AuthProvider({ children }: { children: ReactNode }) {
   const qc = useQueryClient();
   const [user, setUser] = useState<UserWithTeam | null>(null);
+  const [trial, setTrial] = useState<TrialStatus | null>(null);
   const [loading, setLoading] = useState(true);
 
   const refresh = useCallback(async () => {
@@ -55,6 +61,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       // Release 1.4: when this session ends, so the sign-in page can say why once it has (api/sessionEnd.ts)
       rememberSession(res.session);
       setUser(res.user);
+      setTrial(res.trial?.trialMode ? res.trial : null);
     } catch (e) {
       if (e instanceof ApiError && e.status === 401) setUser(null);
       // Network / server errors keep the current user and let pages surface the error.
@@ -91,23 +98,28 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       qc.clear();
       rememberSession(res.session);
       setUser(res.user);
+      setTrial(res.trial?.trialMode ? res.trial : null);
     },
     [qc],
   );
 
   const login = useCallback(
     async (input: LoginInput): Promise<LoginResult> => {
-      const res = await api<AuthResponse | TwoFactorChallenge | LoginPinChallenge>('/auth/login', { method: 'POST', json: input });
+      const res = await api<AuthResponse | TwoFactorChallenge | LoginPinChallenge | LoginSetupCodeChallenge>('/auth/login', { method: 'POST', json: input });
       if ('requiresPin' in res && res.requiresPin) {
         // No session cookie yet: the account has a PIN and none was sent.
-        return { ok: false, requiresTwoFactor: false, requiresPin: true, attemptsLeft: res.attemptsLeft };
+        return { ok: false, requiresTwoFactor: false, requiresPin: true, requiresSetupCode: false, attemptsLeft: res.attemptsLeft };
+      }
+      if ('requiresSetupCode' in res && res.requiresSetupCode) {
+        // No session cookie yet: the account has not finished setting up and needs its one-time setup code.
+        return { ok: false, requiresTwoFactor: false, requiresPin: false, requiresSetupCode: true };
       }
       if ('requiresTwoFactor' in res && res.requiresTwoFactor) {
         // No session cookie yet: the user has to prove the second factor first.
-        return { ok: false, requiresTwoFactor: true, requiresPin: false, challengeToken: res.challengeToken };
+        return { ok: false, requiresTwoFactor: true, requiresPin: false, requiresSetupCode: false, challengeToken: res.challengeToken };
       }
       signedIn(res as AuthResponse);
-      return { ok: true, requiresTwoFactor: false, requiresPin: false };
+      return { ok: true, requiresTwoFactor: false, requiresPin: false, requiresSetupCode: false };
     },
     [signedIn],
   );
@@ -126,18 +138,20 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     } finally {
       forgetSession(); // signed out by hand: nothing to explain at the next sign-in
       setUser(null);
+      setTrial(null);
       qc.clear();
     }
   }, [qc]);
 
   const clearSession = useCallback(() => {
     setUser(null);
+    setTrial(null);
     qc.clear();
   }, [qc]);
 
   const value = useMemo(
-    () => ({ user, loading, login, completeTwoFactor, logout, refresh, clearSession }),
-    [user, loading, login, completeTwoFactor, logout, refresh, clearSession],
+    () => ({ user, trial, loading, login, completeTwoFactor, logout, refresh, clearSession }),
+    [user, trial, loading, login, completeTwoFactor, logout, refresh, clearSession],
   );
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
 }

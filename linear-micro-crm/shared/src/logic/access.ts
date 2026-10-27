@@ -34,7 +34,7 @@ export const ACCESS_MESSAGES = {
     'For safety this only works over a secure connection. Open Linear Hub on the office computer itself, or use its https:// address.',
   /** A setup code made over plain http from another device is not shown. */
   setupCodeWithheld:
-    'The setup code is not shown over an insecure connection. Give them one from Team → their name → Sign-in details on the office computer, or over https.',
+    'The setup code is not shown over an insecure connection. An administrator gives them one on the office computer or over https: Team → their name → Edit profile → Give a setup code.',
   /** Recovery codes made over plain http from another device are not shown. */
   recoveryCodesWithheld:
     'Two-step verification is on. Your recovery codes are not shown over an insecure connection: make new ones in Settings → Security on a secure connection.',
