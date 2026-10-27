@@ -9,7 +9,9 @@ import { DEFAULT_DB_PATH, seed } from './db/seed.ts';
 import { findPortHolder, installExitDiagnostics, listeningUrl, networkUrls, portBusyMessage } from './lib/boot.ts';
 import { backupDirFor, backupHour, backupsEnabled, configureBackupDir, scheduleBackups, whenBackupIdle } from './lib/backup.ts';
 import { clientBuildStatus, staleBuildMessage } from './lib/buildStatus.ts';
-import { announceAppSecret, appSecretFile, configureAppSecret } from './lib/crypto.ts';
+import { KEY_REFUSAL_EXIT_CODE, appKeyRefusal, checkCurrentAppKey, recordFingerprint } from './lib/appKey.ts';
+import { announceAppSecret, appKeyFingerprint, appSecretFile, configureAppSecret, setKeyCreation } from './lib/crypto.ts';
+import { warnIfUnsupportedNode } from './lib/nodeSupport.ts';
 import { businessClockPinned, businessNow } from './lib/dates.ts';
 import { purgeExpiredChallenges, reencryptLegacySecrets } from './lib/twofactor.ts';
 import { purgeAuditLog } from './lib/audit.ts';
@@ -20,15 +22,31 @@ import { startPaymentsJob } from './lib/payments/job.ts';
 import { purgeExpiredSessions } from './middleware/auth.ts';
 
 const dbPath = process.env.DB_PATH ? path.resolve(process.env.DB_PATH) : DEFAULT_DB_PATH;
-// The encryption key for two-step secrets: LM_APP_SECRET, else a generated key kept next to the database
-// (server/data/app-secret by default; LM_APP_SECRET_FILE relocates it).
-configureAppSecret(process.env.LM_APP_SECRET_FILE ? path.resolve(process.env.LM_APP_SECRET_FILE) : path.join(path.dirname(dbPath), 'app-secret'));
+// The app key (two-step secrets, bank details, payment connections, PIN pepper): LM_APP_SECRET, else a generated key
+// kept next to the database (server/data/app-secret by default; LM_APP_SECRET_FILE relocates it).
+const keyFile = process.env.LM_APP_SECRET_FILE ? path.resolve(process.env.LM_APP_SECRET_FILE) : path.join(path.dirname(dbPath), 'app-secret');
+configureAppSecret(keyFile);
 if (businessClockPinned()) {
   console.warn(`LM_BUSINESS_NOW is set: "today" for events, gauges and pay is ${businessNow().toString()}, not the real date. Unset it for real use.`);
 }
+warnIfUnsupportedNode();
 const db = openDb(dbPath);
+// The key and the database must belong together (lib/appKey.ts). Checked before anything reads or makes a key: a
+// missing or different key for a database with locked data stops the start with the recovery steps.
+const keyCheck = checkCurrentAppKey(db);
+if (keyCheck.status === 'missing' || keyCheck.status === 'mismatch') {
+  console.error(appKeyRefusal(keyCheck, { dbPath, keyFile: process.env.LM_APP_SECRET ? null : keyFile, backupDir: backupDirFor(dbPath) }));
+  db.close();
+  process.exit(KEY_REFUSAL_EXIT_CODE);
+}
+// Only a database with nothing locked yet may get a new key.
+setKeyCreation(keyCheck.status === 'create');
 const upgraded = createSchema(db, { demoSteps: true }); // the server's start: the demo-account steps may run (UpgradeOptions)
 if (upgraded.length) console.log(`Upgraded schema: added ${upgraded.join(', ')}`);
+const keyFingerprint = appKeyFingerprint(); // makes the key here on a brand-new database
+setKeyCreation(false);
+if (keyCheck.status === 'create' || keyCheck.record) recordFingerprint(db, keyFingerprint);
+if (keyCheck.note) console.log(keyCheck.note);
 announceAppSecret();
 const rekeyed = reencryptLegacySecrets(db);
 if (rekeyed) console.log(`Re-encrypted ${rekeyed} two-step secret(s) written under the old development key`);

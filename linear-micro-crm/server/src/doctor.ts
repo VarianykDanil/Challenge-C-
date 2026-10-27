@@ -15,6 +15,9 @@ import { BACKUP_RULES, backupDirFor, backupStatus, backupsEnabled, formatBytes, 
 import { findPortHolder, portBusyMessage } from './lib/boot.ts';
 import { clientBuildStatus, depsStatus, shortStamp, staleBuildMessage } from './lib/buildStatus.ts';
 import { installedServiceFile, staleNodeWarning } from './service.ts';
+import { appKeyRefusal, checkAppKey } from './lib/appKey.ts';
+import { readSecretFile, secretFingerprint, shortFingerprint } from './lib/crypto.ts';
+import { sheetStatus } from './lib/recoverySheet.ts';
 
 type Status = 'ok' | 'info' | 'warn' | 'fail';
 interface Check {
@@ -118,18 +121,51 @@ console.log(`Linear Hub doctor — ${new Date().toISOString()}\n`);
   }
 }
 
-// 5. The app secret (the two-step and PIN key)
+// 5. The app key (two-step sign-in, PINs, bank details, payment connections) and the database
 {
-  if (process.env.LM_APP_SECRET) {
-    report('ok', 'LM_APP_SECRET is set (two-step secrets are encrypted and sign-in PINs peppered with it)');
+  const file = process.env.LM_APP_SECRET_FILE ? path.resolve(process.env.LM_APP_SECRET_FILE) : path.join(path.dirname(dbPath), 'app-secret');
+  const envSecret = process.env.LM_APP_SECRET || null;
+  const secret = envSecret ?? readSecretFile(file);
+  const where = envSecret ? 'LM_APP_SECRET' : `app key file ${file}`;
+  if (!envSecret && existsSync(file)) {
+    const mode = statSync(file).mode & 0o777;
+    if (process.platform !== 'win32' && mode !== 0o600) report('warn', `The app key file ${file} can be read by others (mode ${mode.toString(8)})`, `Run:  chmod 600 "${file}"`);
+  }
+  if (!existsSync(dbPath)) {
+    report('ok', secret ? `App key: ${where} (fingerprint ${shortFingerprint(secretFingerprint(secret))})` : `App key not made yet (${file}): made on first start`);
   } else {
-    const file = process.env.LM_APP_SECRET_FILE ? path.resolve(process.env.LM_APP_SECRET_FILE) : path.join(path.dirname(dbPath), 'app-secret');
-    if (!existsSync(file)) {
-      report('ok', `App secret file (the two-step and PIN key) not created yet (${file}): generated on first start`);
-    } else {
-      const mode = statSync(file).mode & 0o777;
-      const tight = process.platform === 'win32' || mode === 0o600;
-      report(tight ? 'ok' : 'warn', `App secret file (the two-step and PIN key) ${file} (mode ${mode.toString(8)})`, tight ? undefined : `Run:  chmod 600 "${file}"`);
+    try {
+      const { DatabaseSync } = await import('node:sqlite');
+      const db = new DatabaseSync(dbPath, { readOnly: true });
+      let check: ReturnType<typeof checkAppKey>;
+      let sheet: ReturnType<typeof sheetStatus>;
+      try {
+        check = checkAppKey(db, secret);
+        sheet = sheetStatus(db, secret ? secretFingerprint(secret) : null);
+      } finally {
+        db.close();
+      }
+      if (check.status === 'missing' || check.status === 'mismatch') {
+        report(
+          'fail',
+          check.status === 'missing' ? 'The app key is missing for this database' : 'The app key does not match this database',
+          appKeyRefusal(check, { dbPath, keyFile: envSecret ? null : file, backupDir: backupDirFor(dbPath) }),
+        );
+      } else if (check.status === 'create') {
+        report('ok', `App key not made yet (${file}): nothing in the database is locked yet, so it is made on first start`);
+      } else {
+        report('ok', `App key matches the database: ${where} (fingerprint ${shortFingerprint(check.fingerprint)})`);
+        if (!sheet.confirmedForThisKey) {
+          report(
+            'warn',
+            'No recovery sheet confirmed for this key yet',
+            'Without a copy of the key kept away from this computer, losing the computer loses the locked data (bank details, two-step sign-in). ' +
+              'Make one: Settings › Backups › Recovery sheet (the owner), or  npm run recovery-sheet  here, and keep it locked away.',
+          );
+        }
+      }
+    } catch (err) {
+      report('warn', 'Could not compare the app key with the database', String(err));
     }
   }
 }

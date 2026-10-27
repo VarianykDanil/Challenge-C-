@@ -24,6 +24,8 @@
     "backup": "npm run backup -w server",
     "backups": "npm run backups -w server",
     "restore": "npm run restore -w server --",
+    "key:restore": "npm run key:restore -w server --",
+    "recovery-sheet": "npm run recovery-sheet -w server --",
     "pin:reset": "npm run pin:reset -w server --",
     "2fa:reset": "npm run 2fa:reset -w server --",
     "service:install": "npm run service:install -w server --",

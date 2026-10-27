@@ -7,11 +7,14 @@
  *  2. otherwise a 32-byte random key generated once and persisted in the app-secret file (default
  *     `server/data/app-secret`, next to the database; `configureAppSecret` points it elsewhere) with mode 0600 and
  *     reused on every later start. The server logs a one-line notice saying which file holds it.
+ * A new key is only ever made where that is allowed: the server checks the database first (lib/appKey.ts) and then
+ * turns creation off (`setKeyCreation(false)`), so a missing key file can never quietly become a new key for a
+ * database that holds data locked with the old one.
  * There is no usable built-in default key any more: `DEV_SECRET` only survives to *decrypt* rows written by earlier
  * releases so they can be re-encrypted under the real key (`decryptLegacy`).
  */
 import { createCipheriv, createDecipheriv, createHash, createHmac, randomBytes } from 'node:crypto';
-import { chmodSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { chmodSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 
 const DEV_SECRET = 'linear-hub-development-secret-not-for-production';
@@ -24,6 +27,20 @@ let secretFile = DEFAULT_APP_SECRET_FILE;
 let cachedKey: Buffer | null = null;
 let cachedSource: string | null = null;
 let announced = false;
+let creationAllowed = true;
+
+/** Thrown when the key is needed, the key file is missing and making a new one is not allowed. */
+export class AppKeyMissingError extends Error {
+  constructor(file: string) {
+    super(`The app key file is missing (${file}) and a new key is not made for an existing database.`);
+    this.name = 'AppKeyMissingError';
+  }
+}
+
+/** Whether a missing key file may be replaced by a newly generated key (the server turns this off after its check). */
+export function setKeyCreation(allowed: boolean): void {
+  creationAllowed = allowed;
+}
 
 /** True when `LM_APP_SECRET` is set (non-empty). */
 export function hasAppSecret(): boolean {
@@ -41,20 +58,69 @@ export function appSecretFile(): string {
   return secretFile;
 }
 
-function loadOrCreateFileSecret(): string {
-  if (existsSync(secretFile)) {
-    const text = readFileSync(secretFile, 'utf8').trim();
-    if (text) return text;
+/** The secret in a key file (trimmed), or null when the file is missing or empty. */
+export function readSecretFile(file: string): string | null {
+  try {
+    const text = readFileSync(file, 'utf8').trim();
+    return text || null;
+  } catch {
+    return null;
   }
+}
+
+/** Writes a key file with mode 0600 (made private before the secret is in it, then renamed into place). */
+export function writeSecretFile(file: string, secret: string): void {
+  mkdirSync(path.dirname(file), { recursive: true });
+  const tmp = `${file}.${process.pid}.tmp`;
+  writeFileSync(tmp, '', { mode: 0o600 });
+  chmodSync(tmp, 0o600); // umask-proof
+  writeFileSync(tmp, `${secret}\n`);
+  renameSync(tmp, file);
+}
+
+function loadOrCreateFileSecret(): string {
+  const existing = readSecretFile(secretFile);
+  if (existing) return existing;
+  if (!creationAllowed) throw new AppKeyMissingError(secretFile);
   const secret = randomBytes(32).toString('hex');
-  mkdirSync(path.dirname(secretFile), { recursive: true });
-  writeFileSync(secretFile, `${secret}\n`, { mode: 0o600 });
-  chmodSync(secretFile, 0o600); // umask-proof
+  writeSecretFile(secretFile, secret);
   return secret;
 }
 
 function deriveKey(secret: string): Buffer {
   return createHash('sha256').update(secret, 'utf8').digest();
+}
+
+/**
+ * A fingerprint of a secret: HMAC-SHA256 of a fixed label under the key the secret makes. It tells keys apart (it is
+ * stored in the database and printed on the recovery sheet) but cannot be turned back into the key.
+ */
+export function secretFingerprint(secret: string): string {
+  return createHmac('sha256', deriveKey(secret)).update('linear-hub:key-fingerprint', 'utf8').digest('hex');
+}
+
+/** `3F2A-91BC-07DE`: the first 12 characters of a fingerprint, for people to compare. */
+export function shortFingerprint(fingerprint: string): string {
+  return (fingerprint.slice(0, 12).toUpperCase().match(/.{1,4}/g) ?? []).join('-');
+}
+
+/**
+ * The secret the key comes from right now (LM_APP_SECRET, else the key file), or null when there is none yet. Never
+ * creates one. Only the recovery sheet and the encrypted off-site backup read it.
+ */
+export function currentAppSecret(): { secret: string; source: 'env' | 'file'; file: string | null } | null {
+  const env = process.env.LM_APP_SECRET;
+  if (env) return { secret: env, source: 'env', file: null };
+  const text = readSecretFile(secretFile);
+  return text ? { secret: text, source: 'file', file: secretFile } : null;
+}
+
+/** The fingerprint of the key in use (creating the key file only where that is allowed). */
+export function appKeyFingerprint(): string {
+  key();
+  const current = currentAppSecret();
+  if (!current) throw new AppKeyMissingError(secretFile);
+  return secretFingerprint(current.secret);
 }
 
 function key(): Buffer {
@@ -78,12 +144,13 @@ export function deriveAppKey(purpose: string): Buffer {
 export function announceAppSecret(): void {
   if (announced) return;
   announced = true;
-  if (hasAppSecret()) return;
   key();
+  const current = currentAppSecret();
+  const fingerprint = current ? ` (fingerprint ${shortFingerprint(secretFingerprint(current.secret))})` : '';
   console.log(
-    `LM_APP_SECRET is not set: two-step verification secrets and sign-in PINs are protected with the key in ${secretFile} ` +
-      '(generated on first start, mode 0600). Back that file up with the database (the built-in backups put a copy in the ' +
-      'backups folder, so keep that folder private), or set LM_APP_SECRET to manage the key yourself.',
+    `${hasAppSecret() ? 'The app key comes from LM_APP_SECRET' : `The app key is in ${secretFile} (mode 0600)`}${fingerprint}. It locks two-step ` +
+      'sign-in, PINs, bank details and payment connections: without it they cannot be read. Make a recovery sheet ' +
+      '(Settings › Backups, or npm run recovery-sheet) and keep it locked away.',
   );
 }
 
@@ -117,6 +184,11 @@ export function encrypt(text: string): string {
 /** Throws on a malformed payload, a wrong key or a tampered ciphertext (GCM authentication fails). */
 export function decrypt(payload: string): string {
   return decryptWith(payload, key());
+}
+
+/** Decrypts with the key a given secret makes (checking a key that is not in use yet); throws on a wrong key. */
+export function decryptWithSecret(payload: string, secret: string): string {
+  return decryptWith(payload, deriveKey(secret));
 }
 
 /** Decrypts a row written by a release that still ran on the built-in development key; throws for anything else. */

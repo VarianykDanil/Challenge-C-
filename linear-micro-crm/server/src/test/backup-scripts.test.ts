@@ -1,18 +1,20 @@
 /**
- * `npm run backup` and `npm run restore` as Matt runs them: both say that the 1.3 folders outside the database
- * (learning videos, client statement PDFs, the signature image) are not in the backups, the folders they name are the
- * ones the server really uses, and a restore refused for want of --yes says so once.
+ * `npm run backup` and `npm run restore` as Matt runs them. The folders they name are the ones the server really uses;
+ * since 1.5 the backups hold the uploaded files (client statement PDFs, the signature image) beside the database and
+ * restore puts them back, while learning videos stay out unless LM_BACKUP_VIDEOS=1 (both commands say so); a restore
+ * refused for want of --yes says so once. (Before 1.5 these tests checked that the files were left out of the backups:
+ * RELIABILITY-MISSED-2.)
  */
 import { after, before, test } from 'node:test';
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { mkdirSync, mkdtempSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import net from 'node:net';
 import os from 'node:os';
 import path from 'node:path';
 import { openDb } from '../db/connection.ts';
 import { createSchema } from '../db/schema.ts';
-import { backupFolderNote, foldersOutsideBackup, restoreFolderNotes } from '../lib/backup.ts';
+import { backupContentsNote, foldersOutsideBackup, restoreFolderNotes } from '../lib/backup.ts';
 import { configureAppSecret } from '../lib/crypto.ts';
 import { uploadsDir } from '../lib/invoices.ts';
 import { statementsDir } from '../lib/statements/files.ts';
@@ -91,37 +93,50 @@ test('foldersOutsideBackup names the folders the server itself uses (defaults an
   }
 });
 
-test('the backup note says the app secret is in the backups only when the folder has a copy of it', () => {
+test('the backup note says what is in the backup: files, the key (or where it is instead), and the videos left out', () => {
   const f = { media: '/d/media', statements: '/d/statements', uploads: '/d/uploads' };
-  assert.match(backupFolderNote(f, true), /the backups hold the database and the app secret only\.$/);
-  assert.match(backupFolderNote(f, false), /the backups hold the database only\.$/);
-  assert.match(backupFolderNote(f, false, true), /the backups hold the database only\. LM_APP_SECRET is not in them: keep it in your password manager\.$/);
-  assert.ok(!/LM_APP_SECRET/.test(backupFolderNote(f, true, true)), 'a copied key file is in them');
+  const files = { dir: '/b/x.files', files: 3, bytes: 10, linked: 0 };
+  const withKey = backupContentsNote(f, { files, secret: 'copied' }, { includeVideos: false, envSecret: false });
+  assert.match(withKey, /^This backup holds the database, 3 uploaded files \(client statement PDFs and the signature image\) and the app key\./);
+  assert.match(withKey, /Learning videos \(\/d\/media\) are not in it: .*LM_BACKUP_VIDEOS=1/);
+  assert.match(backupContentsNote(f, { files, secret: 'none' }, { includeVideos: false, envSecret: true }), /LM_APP_SECRET is not in them: keep it on your recovery sheet\./);
+  assert.match(backupContentsNote(f, { files, secret: 'removed' }, { includeVideos: true, envSecret: false }), /not in the local backups: it is on your recovery sheet/);
+  assert.doesNotMatch(backupContentsNote(f, { files, secret: 'removed' }, { includeVideos: true, envSecret: false }), /Learning videos/);
+  // a backup without a files snapshot names the folders to copy by hand
+  assert.match(backupContentsNote(f, { files: null, secret: 'none' }, { includeVideos: false, envSecret: false }), /Copy \/d\/statements .* and \/d\/uploads .* yourself too/);
 });
 
-test('the orphan-video sentence appears only when the media folder holds videos', () => {
+test('restore notes: files put back from the snapshot, or the old note for a backup without one; the orphan-video sentence only when videos exist', () => {
   const f = { media: '/d/media', statements: '/d/statements', uploads: '/d/uploads' };
-  const none = restoreFolderNotes(f, () => false);
+  const none = restoreFolderNotes(f, null, () => false);
   assert.equal(none.length, 1);
   assert.match(none[0]!, /^Learning videos \(/);
-  assert.ok(!/Only the database/.test(none[0]!), 'the app secret may have been restored too');
   assert.match(none[0]!, /\/d\/media.*\/d\/statements.*\/d\/uploads/);
-  const some = restoreFolderNotes(f, () => true);
+  const some = restoreFolderNotes(f, null, () => true);
   assert.equal(some.length, 2);
   assert.match(some[1]!, /Videos uploaded after this backup stay in \/d\/media\/videos/);
+  const back = restoreFolderNotes(f, { restored: 2, unchanged: 1, setAside: 1, parts: ['statements', 'uploads'] }, () => false);
+  assert.match(back[0]!, /^Uploaded files: 2 put back from the backup, 1 already the same, 1 that differed kept beside them/);
+  assert.match(back[1]!, /Learning videos \(\/d\/media\) are not in this backup/);
 });
 
-test('npm run backup ends by naming the folders the backup leaves out', () => {
+test('npm run backup copies the uploaded files beside the database and names the videos folder it leaves out', () => {
+  mkdirSync(path.join(dataDir, 'statements', 'ab'), { recursive: true });
+  writeFileSync(path.join(dataDir, 'statements', 'ab', 'abcd.pdf'), '%PDF-statement');
+  mkdirSync(path.join(dataDir, 'uploads'), { recursive: true });
+  writeFileSync(path.join(dataDir, 'uploads', '0123456789abcdef.png'), 'png');
   const r = run('src/backup.ts', []);
   assert.equal(r.status, 0, r.stderr);
   const out = r.stdout;
   assert.match(out, /Backed up /);
-  for (const name of ['media', 'statements', 'uploads']) assert.ok(out.includes(path.join(dataDir, name)), `${name} named:\n${out}`);
-  // no app-secret file in this test's data folder, so none was copied: the note says the database only
-  assert.match(out, /the backups hold the database only\./i);
-  assert.match(out, /learning videos/);
-  assert.match(out, /client statement PDFs/);
-  assert.match(out, /signature image/);
+  assert.match(out, /Uploaded files: 2 /);
+  const snapshot = readdirSync(backupDir).find((n) => n.endsWith('.files'));
+  assert.ok(snapshot, 'a files snapshot beside the database file');
+  assert.equal(readFileSync(path.join(backupDir, snapshot!, 'statements', 'ab', 'abcd.pdf'), 'utf8'), '%PDF-statement');
+  assert.equal(readFileSync(path.join(backupDir, snapshot!, 'uploads', '0123456789abcdef.png'), 'utf8'), 'png');
+  assert.match(out, /This backup holds the database and 2 uploaded files \(client statement PDFs and the signature image\)\./);
+  assert.ok(out.includes(path.join(dataDir, 'media')), `the videos folder is named:\n${out}`);
+  assert.match(out, /No off-site copy/);
 });
 
 test('npm run restore: without --yes and no terminal it says why once; with --yes it names the folders it left alone', async () => {
@@ -136,11 +151,17 @@ test('npm run restore: without --yes and no terminal it says why once; with --ye
 
   mkdirSync(path.join(dataDir, 'media', 'videos'), { recursive: true });
   writeFileSync(path.join(dataDir, 'media', 'videos', '00000000-0000-4000-8000-000000000000.mp4'), 'x');
+  // the statement PDF is lost and the signature image replaced after the backup
+  rmSync(path.join(dataDir, 'statements'), { recursive: true });
+  writeFileSync(path.join(dataDir, 'uploads', '0123456789abcdef.png'), 'changed');
   const ok = run('src/restore.ts', [file!, '--yes'], { PORT });
   assert.equal(ok.status, 0, ok.stderr + ok.stdout);
   assert.match(ok.stdout, /^Restored\./m);
-  assert.match(ok.stdout, /are not in the backups and were left as they are/);
-  for (const name of ['media', 'statements', 'uploads']) assert.ok(ok.stdout.includes(path.join(dataDir, name)), `${name} named:\n${ok.stdout}`);
+  assert.match(ok.stdout, /Uploaded files: 2 put back from the backup, 0 already the same, 1 that differed kept beside them/);
+  assert.equal(readFileSync(path.join(dataDir, 'statements', 'ab', 'abcd.pdf'), 'utf8'), '%PDF-statement');
+  assert.equal(readFileSync(path.join(dataDir, 'uploads', '0123456789abcdef.png'), 'utf8'), 'png');
+  assert.ok(readdirSync(path.join(dataDir, 'uploads')).some((n) => n.startsWith('0123456789abcdef.png.before-restore-')));
+  assert.ok(ok.stdout.includes(path.join(dataDir, 'media')), `media named:\n${ok.stdout}`);
   assert.match(ok.stdout, /Videos uploaded after this backup stay in .*media[/\\]videos/);
   const lines = ok.stdout.trim().split('\n');
   assert.match(lines.at(-1)!, /^Start it again: npm start$/, 'the start hint stays last');
