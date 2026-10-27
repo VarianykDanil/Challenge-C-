@@ -57,10 +57,12 @@ const EDGE: Record<KpiTone, string> = {
 };
 
 // clamp(): the number shrinks with the viewport instead of truncating (desktop sizes stay 20 / 28 / 36px).
+// The figure scales with the tile's own width (container units), never the screen's, and never wraps: a narrow tile
+// (six in a row at 1280 px) used to break "£10,440" into "£10,44" over "0".
 const VALUE_SIZE = {
-  sm: 'text-[clamp(1.125rem,1.8vw,1.25rem)]',
-  md: 'text-[clamp(1.25rem,2.2vw,1.75rem)]',
-  lg: 'text-[clamp(1.5rem,2.8vw,2.25rem)]',
+  sm: 'text-[clamp(1rem,13cqi,1.25rem)]',
+  md: 'text-[clamp(1.0625rem,14cqi,1.75rem)]',
+  lg: 'text-[clamp(1.25rem,16cqi,2.25rem)]',
 } as const;
 
 export function KpiTile({ label, value, delta, deltaLabel, invertDelta, icon, hint, hintLines = 2, tone = 'default', sparkline, className, loading, size = 'md', onClick, suffix }: KpiTileProps) {
@@ -70,7 +72,7 @@ export function KpiTile({ label, value, delta, deltaLabel, invertDelta, icon, hi
       type={onClick ? 'button' : undefined}
       onClick={onClick}
       className={clsx(
-        'relative flex w-full flex-col overflow-hidden rounded-xl border border-border bg-surface text-left shadow-card',
+        '@container relative flex w-full flex-col overflow-hidden rounded-xl border border-border bg-surface text-left shadow-card',
         size === 'sm' ? 'p-4' : 'p-5',
         tone !== 'default' && 'before:absolute before:inset-y-0 before:left-0 before:w-1 before:content-[""]',
         EDGE[tone],
@@ -94,7 +96,7 @@ export function KpiTile({ label, value, delta, deltaLabel, invertDelta, icon, hi
             <div className={clsx('skeleton rounded-md', size === 'sm' ? 'h-6 w-20' : 'h-8 w-28')} aria-hidden />
           ) : (
             <div className={clsx('kpi-number flex min-w-0 flex-wrap items-baseline gap-1 text-fg', VALUE_SIZE[size])}>
-              <span className="min-w-0 break-words">{value}</span>
+              <span className="min-w-0 whitespace-nowrap">{value}</span>
               {suffix && <span className="font-sans text-sm font-medium text-muted">{suffix}</span>}
             </div>
           )}
