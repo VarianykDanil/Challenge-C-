@@ -12,7 +12,7 @@
  *  - review fix: a run whose figures changed after its payment was approved (the run is frozen while the money is on
  *    its way, and paid as approved): "Jordan Lee's pay changed while payment #3 was on its way" (warning; one line
  *    for several), until a correction for that week is added (a line whose "week it corrects" is that week).
- * Release 1.5 (money):
+ * Checks before paying and safer payments:
  *  - MON-1, leaders and the office: "3 days to confirm" — gauge days people logged themselves with no booking, no
  *    check-in or nothing logged, in unpaid weeks of the last five weeks (a leader: their own team, not their own days;
  *    the office: everyone), linking to Pay → Days to confirm;

@@ -102,7 +102,7 @@ export function financeRouter(db: Db): Router {
     }
     // Release 1.3 (P2): each run carries its self-billing invoice summary once one is issued (lib/invoices.ts).
     // Release 1.4 (F): unpaid runs carry their latest payment from Linear Hub for the admin (lib/payments/batches.ts).
-    // Release 1.5 (money): unpaid runs carry what to check before paying, for the admin (lib/payChecks.ts).
+    // Unpaid runs carry what to check before paying, for the admin (lib/payChecks.ts).
     res.json(withPayrollChecks(db, withPaymentStatus(db, withInvoiceSummaries(db, withPayrollFlags(db, listPayroll(db, `${where}`, where.params).map((r) => redactPayroll(me, r)), me), me), me), me));
   });
 

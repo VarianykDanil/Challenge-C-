@@ -8,7 +8,7 @@
  *    the `changedAt` of the details the admin checked (optional): changed again since → 409, nothing confirmed.
  * A change needs the changer's current two-step code when they have two-step verification on; an administrator typing in
  * someone else's details, and every administrator's confirmation, always needs a fresh code (MON-3).
- * Release 1.5 (MON-3): POST /me/bank-details/confirm ("yes, these are mine", for details someone else typed in) and
+ * POST /me/bank-details/confirm ("yes, these are mine", for details someone else typed in) and
  * POST /me/bank-details/report ("these are not mine"). Audit specs: lib/audit/paymentSpecs.ts (never the numbers).
  * Write limit: middleware/writeLimit.ts.
  */

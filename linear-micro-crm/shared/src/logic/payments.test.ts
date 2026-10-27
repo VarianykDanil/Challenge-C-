@@ -185,7 +185,7 @@ test('approvalOutcome (review fixes UI-2, SD-3, money:3): the message after Appr
   assert.deepEqual(none, { tone: 'warning', title: 'Payment approved', body: 'Approved, but Wise Business has not confirmed them yet: Linear Hub tries again every 5 minutes.' });
   assert.doesNotMatch(none.body, /could not be reached/);
   // every item sent: the provider's own next step, test mode, or who and how much
-  assert.deepEqual(approvalOutcome(api(['processing', 'cancelled']), o), { tone: 'success', title: 'Payment approved', body: 'Now open Wise Business and pay the transfers there.' });
+  assert.deepEqual(approvalOutcome(api(['processing', 'cancelled']), o), { tone: 'success', title: 'Payment approved', body: 'Linear Hub created the transfers. Now open Wise Business and fund them: transfers you do not fund go back to Runs to pay.' });
   assert.equal(approvalOutcome(api(['processing'], 'test'), o).body, 'Test mode: nobody is paid.');
   assert.equal(approvalOutcome(api(['paid']), { ...o, createsOnly: false }).body, '2 people, £600.00.');
   // a bank file: live says upload it; the test bank file says never upload it

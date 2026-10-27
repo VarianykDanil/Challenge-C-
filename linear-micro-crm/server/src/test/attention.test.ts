@@ -180,7 +180,7 @@ test('admin: payroll:to-pay counts exactly the runs GET /finance/payroll?status=
   }
 });
 
-// Release 1.5 (money): the budget is 13. A leader's feed now also asks, in the payments provider's one statement, for
+// The budget is 13. A leader's feed now also asks, in the payments provider's one statement, for
 // the days their team logged with no booking or check-in (MON-1) and for their own bank details changed by someone
 // else (MON-3); the leader's feed was already at 12. Every provider still takes at most one statement.
 test('every role: at most 13 statements to build the feed; LM_SMART=0 → empty and disabled', async () => {

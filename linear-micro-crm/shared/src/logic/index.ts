@@ -91,5 +91,5 @@ export * from './people.ts';
 // Release 1.4
 export * from './payments.ts';
 export * from './bankFiles.ts';
-// Release 1.5: money checks after the 1.4 review (office days, VAT, bank file confirmations, unconfirmed subs)
+// money checks: office days, VAT, bank file confirmations, unconfirmed subs
 export * from './moneyChecks.ts';

@@ -181,7 +181,7 @@ export interface ApprovalOutcome {
  * Review fixes (UI-2, SD-3, money:3): what an approval did, from the item statuses it answered with. Sent: submitted,
  * processing or paid; failed: refused, never counted as sent; waiting: still queued — the provider has not confirmed
  * it yet, either because it was not reached or because its answer was lost (a payment sent without an answer may still
- * exist there), so the words stay neutral. The provider's next step (`createsOnly`: Wise, pay the transfers there) or
+ * exist there), so the words stay neutral. The provider's next step (`createsOnly`: Wise, fund the transfers there) or
  * `success` (who and how much) only when every item was really sent. A test bank file is never to be uploaded.
  */
 export function approvalOutcome(
@@ -218,7 +218,7 @@ export function approvalOutcome(
     ].filter(Boolean);
     return { tone: 'warning', title: 'Payment approved', body: `${parts.join('; ')}.` };
   }
-  return { tone: 'success', title: 'Payment approved', body: b.mode === 'test' ? 'Test mode: nobody is paid.' : o.createsOnly ? `Now open ${X} and pay the transfers there.` : o.success };
+  return { tone: 'success', title: 'Payment approved', body: b.mode === 'test' ? 'Test mode: nobody is paid.' : o.createsOnly ? `Linear Hub created the transfers. Now open ${X} and fund them: transfers you do not fund go back to Runs to pay.` : o.success };
 }
 
 /** The live switch: PAYMENT_LIVE_CONFIRMATION typed exactly (surrounding spaces ignored). */
@@ -261,24 +261,33 @@ export const PAYMENT_PROVIDERS: readonly PaymentProviderInfo[] = [
     // logic/bankFiles.ts): nothing is paid from Linear Hub, and nothing comes back from the bank by itself.
     id: 'bank_file',
     name: 'Bank payment file',
-    summary: 'Linear Hub makes a bulk payment file. You upload it to your online banking, approve it there, then mark the payment paid here.',
+    summary: 'Linear Hub makes a bulk payment file. You upload it to your online banking, approve it there, then mark the payment paid here. It starts in test mode: test files say TEST and are never to be uploaded.',
     kind: 'file',
     iconKey: 'bank',
     abilities: {
       paysFromApp: false,
       confirmsAutomatically: false,
       needsBankApproval: true,
-      testMode: false,
+      // a bank file connection starts in test mode like the others; live needs PAY FOR REAL typed
+      testMode: true,
       checksBalance: false,
       sameDay: true,
       anyUkBank: true,
       fees: 'No fees from Linear Hub. Your bank’s own charges for bulk payments apply (Starling, for one, charges a monthly fee for Bulk Payments).',
       setup: [
         'Online banking for your business account that takes a bulk payment file',
-        'Choose your bank’s file format: Starling Bank, Revolut Business, or the general Faster Payments file for any other bank',
+        'Choose your bank’s file format: Starling Bank or Revolut Business (made from each bank’s own published guide), or the general Faster Payments file for any other bank (not any bank’s own template: check its columns with your bank)',
+        'Before the first real run, make a 1p test file and upload it to your bank, to check the bank takes the layout',
       ],
-      limits: 'You upload and approve every file in your bank yourself, then mark who was paid here. Linear Hub keeps no passwords or keys for your bank: only the file, stored encrypted so you can download it again. Your bank’s own limits apply.',
+      limits: 'You upload and approve every file in your bank yourself, then mark who was paid here. No layout has been tried with a bank yet: the first real run is a test, so start with the 1p test file. Once a file is downloaded its weeks count as sent. Linear Hub keeps no passwords or keys for your bank: only the file, stored encrypted so you can download it again. Your bank’s own limits apply.',
     },
+    connectSteps: [
+      'Choose your bank’s file format below. Starling and Revolut files follow each bank’s own published guide; the general file is the five things every UK bank asks for, so check its columns with your bank.',
+      'The connection starts in test mode: test files say TEST in their name and in every payment reference, pay nobody and mark no week paid. Try a test payment to see the file.',
+      'Make a 1p test file (one payment of £0.01 to an account you choose), upload it to your bank and approve it there. Then tell Linear Hub whether the bank took it.',
+      'Switch to live (type PAY FOR REAL). Treat the first real run as a test too: pay one or two people, check the money arrived, then pay everyone else.',
+    ],
+    liveNote: 'Live files pay real money once you upload and approve them in your bank. Make the 1p test file first if you have not, and treat the first real run as a test: one or two people, then everyone else.',
   },
   // Package A: checked against each provider's documentation on 23 Oct 2026 (URLs in server/src/lib/payments/revolut.ts,
   // wise.ts and truelayer.ts). `connectSteps` say plainly what is done outside Linear Hub.
@@ -308,15 +317,16 @@ export const PAYMENT_PROVIDERS: readonly PaymentProviderInfo[] = [
       'On a computer, make a key pair as Revolut’s guide says (openssl), then in Revolut Business open Settings → APIs → Business API and add an API certificate: upload the public certificate and type an OAuth redirect URI (any website address you control, e.g. your company website).',
       'Revolut shows a client ID. Copy it, the redirect URI and your private key into the form below.',
       'In Revolut, choose Enable access for that certificate and allow it. Revolut opens your redirect address with a code in it: copy the whole address into “Code from Revolut” and save straight away (the code works for 2 minutes). Linear Hub tests it when you save.',
-      'Test mode uses the Revolut sandbox (sandbox-business.revolut.com), which has its own certificate and client ID.',
+      'Test mode uses the Revolut sandbox (sandbox-business.revolut.com), which has its own certificate and client ID. Make a test payment through the sandbox first: Linear Hub switches to live only after the sandbox has answered one.',
+      'Linear Hub was built from Revolut’s published API and checked against a copy of it, not yet against Revolut itself: the sandbox payment is the first real check. Treat the first live run as a test too: one or two people, then everyone else.',
     ],
-    liveNote: 'Your sandbox certificate does not work live. After switching, choose Edit and enter the client ID, private key and a new code from your real Revolut Business account, then test.',
+    liveNote: 'Your sandbox certificate does not work live. After switching, choose Edit and enter the client ID, private key and a new code from your real Revolut Business account, then test. Make the first live run small: one or two people.',
     waitingNote: 'Revolut sends each payment as soon as you approve. If your Revolut Business makes payments wait for an approver, approve them in Revolut too. Linear Hub checks with Revolut every 5 minutes and marks each week paid when Revolut has completed the payment.',
   },
   {
     id: 'wise',
     name: 'Wise Business',
-    summary: 'Linear Hub creates each transfer in your Wise Business account. You pay (fund) them in Wise, then Linear Hub sees when Wise has sent the money.',
+    summary: 'Linear Hub creates the transfers in your Wise Business account; you fund them in Wise. Transfers you do not fund go back to Runs to pay. Linear Hub sees when Wise has sent the money.',
     kind: 'api',
     iconKey: 'wise',
     abilities: {
@@ -330,20 +340,21 @@ export const PAYMENT_PROVIDERS: readonly PaymentProviderInfo[] = [
       setup: [
         'A Wise Business account',
         'A personal API token made in Wise on a computer (Your account → Connect and manage apps → API tokens)',
-        'After each approval in Linear Hub, paying the transfers in Wise yourself',
+        'After each approval in Linear Hub, funding the transfers in Wise yourself (Linear Hub cannot fund them)',
         'For test mode, a Wise sandbox account and its own token',
       ],
-      limits: 'For UK businesses Wise does not let an API token pay (fund) transfers, so you pay each transfer Linear Hub made in Wise. Wise cancels transfers that are not paid in time. If your Wise account needs payments approved, Wise refuses transfers made with a token. Linear Hub cannot show your Wise balance.',
+      limits: 'Linear Hub creates the transfers; you fund them in Wise: for UK businesses Wise does not let an API token fund a transfer. Transfers you do not fund in time are cancelled by Wise and go back to Runs to pay. If your Wise account needs payments approved, Wise refuses transfers made with a token. Linear Hub cannot show your Wise balance.',
     },
     connectSteps: [
       'In Wise Business on a computer, open Your account → Connect and manage apps → API tokens and add a token with full access (Wise asks for its own code).',
       'Paste the token below. Leave the business profile empty unless you run more than one business in Wise. Linear Hub tests it when you save.',
-      'After you approve a payment in Linear Hub, open Wise and pay the transfers it made. Linear Hub marks each week paid once Wise has sent the money.',
-      'Test mode uses the Wise sandbox (wise-sandbox.com), which needs its own account and token.',
+      'After you approve a payment in Linear Hub, open Wise and fund the transfers it created. Linear Hub marks each week paid once Wise has sent the money; transfers you do not fund go back to Runs to pay.',
+      'Test mode uses the Wise sandbox (wise-sandbox.com), which needs its own account and token. Make a test payment through the sandbox first: Linear Hub switches to live only after the sandbox has answered one.',
+      'Linear Hub was built from Wise’s published API and checked against a copy of it, not yet against Wise itself: the sandbox payment is the first real check. Treat the first live run as a test too: one or two people, then everyone else.',
     ],
-    liveNote: 'Your sandbox token does not work live. After switching, choose Edit and paste a token from your real Wise Business account, then test.',
-    approveNote: 'Nobody is paid until you open Wise and pay the transfers there.',
-    waitingNote: 'Now open Wise and pay the transfers Linear Hub made: they wait there until you do, and Wise cancels any that are not paid in time. Linear Hub checks with Wise every 5 minutes and marks each week paid once Wise has sent the money.',
+    liveNote: 'Your sandbox token does not work live. After switching, choose Edit and paste a token from your real Wise Business account, then test. Make the first live run small: one or two people.',
+    approveNote: 'Linear Hub creates the transfers; nobody is paid until you fund them in Wise. Transfers you do not fund go back to Runs to pay.',
+    waitingNote: 'Now open Wise and fund the transfers Linear Hub created: they wait there until you do. Transfers you do not fund in time are cancelled by Wise and go back to Runs to pay. Linear Hub checks with Wise every 5 minutes and marks each week paid once Wise has sent the money.',
   },
   {
     id: 'truelayer',
@@ -371,9 +382,10 @@ export const PAYMENT_PROVIDERS: readonly PaymentProviderInfo[] = [
       'Ask TrueLayer to switch on payouts and open a GBP merchant account for your business, then top it up from your bank.',
       'On a computer, make a signing key with openssl (the commands are under “Signing key ID” below) and upload the public key in the TrueLayer Console (Payments → Settings). Copy the key ID it shows.',
       'Copy the client ID and client secret from the Console, and paste them, the key ID and the private key below. Linear Hub tests them when you save.',
-      'Test mode uses the TrueLayer sandbox, which has its own client ID, secret and signing key.',
+      'Test mode uses the TrueLayer sandbox, which has its own client ID, secret and signing key. Make a test payment through the sandbox first: Linear Hub switches to live only after the sandbox has answered one.',
+      'Linear Hub was built from TrueLayer’s published API and checked against a copy of it, not yet against TrueLayer itself: the sandbox payment is the first real check. Treat the first live run as a test too: one or two people, then everyone else.',
     ],
-    liveNote: 'Sandbox details do not work live. After switching, choose Edit and enter the live client ID, secret, signing key ID and private key from the TrueLayer Console, then test.',
+    liveNote: 'Sandbox details do not work live. After switching, choose Edit and enter the live client ID, secret, signing key ID and private key from the TrueLayer Console, then test. Make the first live run small: one or two people.',
     waitingNote: 'TrueLayer pays each person from your merchant account. A payout fails if the merchant account runs short: top it up and pay that week again. Linear Hub checks with TrueLayer every 5 minutes and marks each week paid when TrueLayer has sent the money.',
   },
 ];

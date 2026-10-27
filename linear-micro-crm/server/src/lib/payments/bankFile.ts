@@ -16,8 +16,13 @@
  *    for a file (batches.ts answers 409 "mark it paid once your bank has paid it").
  *  - submit is idempotent: making the file again from the same items makes the same file, and it moves no money.
  *  - testConnection: there is nothing to connect to; it answers ok with the format it makes.
+ *  - In TEST mode (every new connection) the file is marked: its name starts "TEST-" and every
+ *    payment reference starts "TEST" (shared testPaymentReference), so neither Matt nor a bank can take it for a real
+ *    run. lib/payments/batches.ts never marks a week paid from a test batch.
+ *  - TestFile — the "1p test file": one £0.01 payment to an account the admin chooses, with the
+ *    reference LINEAR 1P TEST, to upload to the bank before the first real run.
  */
-import { BANK_FILE_FORMATS, bankFileFormat, bankFileName, buildBankFile, paymentProviderInfo, type BankFileFormatId, type PaymentConfigField, type PaymentProviderInfo } from '@lm/shared';
+import { BANK_FILE_FORMATS, PENNY_TEST_REFERENCE, bankFileFormat, bankFileName, buildBankFile, paymentProviderInfo, testPaymentReference, type BankFileFormatId, type PaymentConfigField, type PaymentProviderInfo } from '@lm/shared';
 import { ProviderConfigError, validateConfigFields, type PaymentProviderAdapter, type ProviderItemResult } from './provider.ts';
 
 /** The connection form: the format, as a list of choices with the bank's logo (Settings → Payments → Connect). */
@@ -59,8 +64,10 @@ export function createBankFileProvider(): PaymentProviderAdapter {
     },
     async submit(conn, batch, items) {
       const id = formatOf(conn.settings);
+      const test = batch.mode === 'test';
       const out = buildBankFile(id, items.map((i) => ({
-        key: i.id, payeeName: i.payeeName, sortCode: i.sortCode, accountNumber: i.accountNumber, amountPence: i.amountPence, reference: i.reference,
+        key: i.id, payeeName: i.payeeName, sortCode: i.sortCode, accountNumber: i.accountNumber, amountPence: i.amountPence,
+        reference: test ? testPaymentReference(i.reference) : i.reference,
       })));
       const results: ProviderItemResult[] = [
         ...out.included.map((key) => ({ itemId: key, status: 'submitted' as const, providerRef: out.references.get(key) ?? null, failureReason: null })),
@@ -69,8 +76,15 @@ export function createBankFileProvider(): PaymentProviderAdapter {
       return {
         items: results,
         providerRef: null,
-        file: out.body ? { name: bankFileName(id, batch.id, batch.today), contentType: 'text/csv; charset=utf-8', body: out.body } : undefined,
+        file: out.body ? { name: `${test ? 'TEST-' : ''}${bankFileName(id, batch.id, batch.today)}`, contentType: 'text/csv; charset=utf-8', body: out.body } : undefined,
       };
+    },
+    testFile(conn, payee, today) {
+      const id = formatOf(conn.settings);
+      const out = buildBankFile(id, [{ key: 1, payeeName: payee.holderName, sortCode: payee.sortCode, accountNumber: payee.accountNumber, amountPence: 1, reference: PENNY_TEST_REFERENCE }]);
+      if (!out.body) throw new ProviderConfigError([{ path: 'holderName', message: out.rejected[0]?.reason ?? 'The bank would not take this line' }]);
+      const f = bankFileFormat(id)!;
+      return { fileName: `linear-hub-1p-test-${/^\d{4}-\d{2}-\d{2}$/.test(today) ? today : 'today'}-${f.fileSuffix}.csv`, contentType: 'text/csv; charset=utf-8', body: out.body };
     },
     // a file is never checked automatically (batches.ts does not call this for kind 'file'): nothing changes
     async refresh() {

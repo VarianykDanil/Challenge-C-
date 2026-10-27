@@ -7,7 +7,7 @@
  *    (masked) and may change anyone's. Leaders and recruiters see nothing of anyone else's.
  *  - A change needs the changer's current two-step code when they have two-step verification on; an administrator
  *    typing in someone else's details always needs a fresh code.
- *  - The hold (release 1.5, MON-3): no change is ever confirmed by the person who made it.
+ *  - The hold (MON-3): no change is ever confirmed by the person who made it.
  *     · The person's own change waits for an administrator (POST /users/:id/bank-details/confirm, fresh code).
  *     · Details an administrator types in for someone (or an administrator's own change) wait for the person to
  *       confirm them in their own account (POST /me/bank-details/confirm) or a DIFFERENT administrator.

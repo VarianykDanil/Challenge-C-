@@ -27,6 +27,7 @@ import { createFakeProvider, type FakeProvider } from '../lib/payments/fake.ts';
 import { providerFetch } from '../lib/payments/http.ts';
 import { demoFakeProviders, registerPaymentProvider, unregisterPaymentProvider } from '../lib/payments/registry.ts';
 import { currentCode, startTestServer, type Json, type TestClient, type TestServer } from './helpers.ts';
+import { recordSandboxRun } from './moneyTestUtils.ts';
 
 function addRun(db: Db, p: { userId: number; weekStart: string; gross: number }): number {
   return run(
@@ -79,6 +80,7 @@ async function liveFake(fake: FakeProvider): Promise<number> {
   assert.equal(made.status, 201, JSON.stringify(made.json));
   const id = made.json.id as number;
   assert.equal((await admin.post(`/payments/connections/${id}/test`)).json.ok, true);
+  recordSandboxRun(srv.db, id, fx.users.admin);
   assert.equal((await admin.patch(`/payments/connections/${id}`, { mode: 'live', confirm: PAYMENT_LIVE_CONFIRMATION })).status, 200);
   assert.equal((await admin.post(`/payments/connections/${id}/test`)).json.ok, true);
   return id;
@@ -96,7 +98,7 @@ describe('cross:X-2 — Confirm pins the bank details the admin checked', () => 
     assert.equal(seen.needsConfirmation, true);
     await sleep(5);
     assert.equal((await put('00009999')).status, 200);
-    // release 1.5 (MON-3): an administrator's confirmation always takes a fresh two-step code
+    // an administrator's confirmation always takes a fresh two-step code
     const stale = await admin.post(`/users/${fx.users.rep}/bank-details/confirm`, { changedAt: seen.changedAt, code: currentCode(srv.db, fx.users.admin) });
     assert.equal(stale.status, 409, JSON.stringify(stale.json));
     assert.match(stale.json.error, /changed their bank details again since you looked: check the new ones before confirming/);
@@ -113,7 +115,7 @@ describe('cross:X-2 — Confirm pins the bank details the admin checked', () => 
 
   test('an older client that sends no changedAt still confirms what is stored (additive API)', async () => {
     assert.equal((await rep.put('/me/bank-details', { holderName: 'Remy Rep', sortCode: '000000', accountNumber: '00002222', code: currentCode(srv.db, fx.users.rep) })).status, 200);
-    // (release 1.5, MON-3: with the administrator's fresh code)
+    // (MON-3: with the administrator's fresh code)
     const ok = await admin.post(`/users/${fx.users.rep}/bank-details/confirm`, { code: currentCode(srv.db, fx.users.admin) });
     assert.equal(ok.status, 200);
     assert.equal(ok.json.details.needsConfirmation, false);
@@ -196,6 +198,7 @@ describe('cross:X-4, UI-1, UI-4 — a bank file with a refused line', () => {
     setBank(srv.db, fx.users.rep, 'Remy Rep', '00000001');
     setBank(srv.db, fx.users.repA2, 'Rita', '00000002'); // Revolut needs a first and last name: refused
     const made = await admin.post('/payments/connections', { provider: 'bank_file', settings: { format: 'revolut' } });
+    assert.equal((await admin.patch(`/payments/connections/${made.json.id}`, { mode: 'live', confirm: PAYMENT_LIVE_CONFIRMATION })).status, 200);
     const runA = addRun(srv.db, { userId: fx.users.rep, weekStart: week, gross: 945.5 });
     const runB = addRun(srv.db, { userId: fx.users.repA2, weekStart: week, gross: 63.5 });
     const draft = (await admin.post('/payments/batches', { connectionId: made.json.id, runIds: [runA, runB] })).json;
@@ -306,6 +309,7 @@ describe('UI-2, UI-7, UI-9 — saying plainly what is waiting and why', () => {
     const draft = (await admin.post('/payments/batches', { connectionId: id, runIds: [runId] })).json;
     assert.equal(draft.actions.approve, true);
     assert.equal(draft.actions.approveBlocked ?? null, null);
+    recordSandboxRun(srv.db, id, fx.users.admin);
     assert.equal((await admin.patch(`/payments/connections/${id}`, { mode: 'live', confirm: PAYMENT_LIVE_CONFIRMATION })).status, 200);
     assert.equal((await admin.post(`/payments/connections/${id}/test`)).json.ok, true);
     const blocked = (await admin.get(`/payments/batches/${draft.id}`)).json;

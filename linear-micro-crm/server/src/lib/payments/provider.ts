@@ -170,6 +170,11 @@ export interface PaymentProviderAdapter {
   refresh(conn: ProviderConnection, items: readonly ProviderItem[], ctx: ProviderContext): Promise<ProviderItemResult[]>;
   /** Optional: stops items not yet paid (answered 'failed' with a reason when stopped). */
   cancel?(conn: ProviderConnection, items: readonly ProviderItem[], ctx: ProviderContext): Promise<ProviderItemResult[]>;
+  /**
+   * Bank files only: the "1p test file" — one £0.01 payment to `payee` in the connection's
+   * layout, to upload to the bank before the first real run. Nothing is stored.
+   */
+  testFile?(conn: ProviderConnection, payee: { holderName: string; sortCode: string; accountNumber: string }, today: string): { fileName: string; contentType: string; body: string };
 }
 
 /** A plain-words failure talking to a provider (the batch keeps it as last_error; secrets are redacted before). */

@@ -35,11 +35,18 @@
  *  - GET    /users/:id/bank-details                     → BankDetailsView (admin, masked)
  *  - PUT    /users/:id/bank-details       BankDetailsInput       → BankDetailsView (admin; two-step code when on)
  *  - POST   /users/:id/bank-details/confirm             → BankDetailsView (admin: checked, payments may use them)
- * Release 1.5 (money):
+ * Bank details you confirm, test files, two approvals:
  *  - POST   /me/bank-details/confirm      BankDetailsConfirmInput → BankDetailsView (the person, for details someone
  *                                                                    else typed in)
  *  - POST   /me/bank-details/report       BankDetailsReportInput  → BankDetailsView (the person: "not my details")
+ *  - GET    /payments/settings                          → PaymentsSettings (MONEY-MISSED-2: two approvals)
+ *  - PUT    /payments/settings            PaymentsSettingsInput   → PaymentsSettings (fresh code)
+ *  - POST   /payments/connections/:id/test-file PaymentTestFileInput → PaymentTestFile (MON-6: the 1p test; fresh code)
+ *  - POST   /payments/connections/:id/test-file-result PaymentTestFileResultInput → PaymentConnection
+ *  - POST   /payments/batches/:id/cancel and /mark-paid take { confirm, code } once a bank file was downloaded (MON-2)
  */
+
+import type { PayrollRunChecks } from './pay.ts';
 
 /** The four ways to pay. A test build may register more (the fake provider, id 'fake'). */
 export type PaymentProviderId = 'bank_file' | 'revolut' | 'wise' | 'truelayer';
@@ -171,6 +178,52 @@ export interface PaymentConnection {
   liveConfirmedAt: string | null;
   liveConfirmedBy: number | null;
   disconnectedAt: string | null;
+  /** A bank file connection's last "1p test file", and what the bank did with it. */
+  testFileAt?: string | null;
+  testFileResult?: 'accepted' | 'refused' | null;
+  /**
+   * The guided first run — when a test-mode payment through it first got an answer from the
+   * provider's sandbox (an API connection goes live only after one), and when the first real payment was approved.
+   */
+  firstRun?: { sandboxPaymentAt: string | null; livePaymentAt: string | null };
+}
+
+/** POST /payments/connections/:id/test-file (MON-6): one £0.01 payment to an account the owner chooses. */
+export interface PaymentTestFileInput {
+  holderName: string;
+  sortCode: string;
+  accountNumber: string;
+  /** The admin's current two-step code (the file pays real money: 1p). */
+  code?: string;
+}
+
+/** The 1p test file (it holds the account number the admin typed: never stored, never logged). */
+export interface PaymentTestFile {
+  fileName: string;
+  contentType: string;
+  body: string;
+}
+
+/** POST /payments/connections/:id/test-file-result: what the bank did with the 1p test file. */
+export interface PaymentTestFileResultInput {
+  result: 'accepted' | 'refused';
+}
+
+/**
+ * GET / PUT /payments/settings (MONEY-MISSED-2): "Two people approve each payment". Unset, it is on
+ * when two or more administrators use two-step verification. Changing it needs the admin's fresh code.
+ */
+export interface PaymentsSettings {
+  twoApprovals: boolean;
+  /** false: the default is in use (on with 2+ administrators with two-step). */
+  explicit: boolean;
+  /** Active administrators with two-step verification on (who can approve). */
+  adminsWithTwoStep: number;
+}
+
+export interface PaymentsSettingsInput {
+  twoApprovals: boolean;
+  code?: string;
 }
 
 export interface PaymentConnectionInput {
@@ -210,7 +263,9 @@ export type PaymentSkipCode =
   | 'invoice_not_accepted'
   | 'invoice_disputed'
   | 'no_bank_details'
-  | 'bank_details_unconfirmed';
+  | 'bank_details_unconfirmed'
+  /** In a bank file downloaded in the last 7 days that was freed without confirming it was not used. */
+  | 'recent_file';
 
 export interface PaymentSkip {
   runId: number;
@@ -250,6 +305,26 @@ export interface PaymentItem {
    * as paid (`paidAt` is when it was marked). Null otherwise.
    */
   runPaidDate?: string | null;
+  /**
+   * What to check before paying — days waiting for a leader (not in this pay) and
+   * pay resting on subs no client statement has confirmed. Absent when there is nothing to check.
+   */
+  checks?: PayrollRunChecks;
+}
+
+/** A bonus or adjustment added in the last 7 days to a week in this payment. */
+export interface PaymentRecentChange {
+  adjustmentId: number;
+  userId: number;
+  userName: string;
+  weekStart: string;
+  kind: 'cancellation' | 'statement' | 'bonus' | 'dispute' | 'manual';
+  /** £, negative takes money off. */
+  amount: number;
+  note: string;
+  createdAt: string;
+  createdBy: number | null;
+  createdByName: string | null;
 }
 
 export interface PaymentBatchSummary {
@@ -283,9 +358,29 @@ export interface PaymentBatchSummary {
   queuedCount?: number;
   /** The last error talking to the provider (plain words, secrets redacted). */
   lastError?: string | null;
+  /** A bank file's first download (from then on its weeks count as sent). */
+  downloadedAt?: string | null;
+  downloadedByName?: string | null;
+  /** The admin confirmed the file was NOT uploaded to the bank (typed and with a code). */
+  voidedAt?: string | null;
+  voidedByName?: string | null;
+  voidReason?: string | null;
+  /** 2 when "Two people approve each payment" applies to it (live), else 1. */
+  approvalsNeeded?: 1 | 2;
+  /** The first of two approvals, while the second is awaited (or once sent). */
+  firstApprovedAt?: string | null;
+  firstApprovedBy?: number | null;
+  firstApprovedByName?: string | null;
 }
 
 export interface PaymentBatch extends PaymentBatchSummary {
+  /** Bonuses and adjustments added in the last 7 days to the weeks in it, newest first. */
+  recentChanges?: PaymentRecentChange[];
+  /** Pay resting on subs no client statement confirmed, in all (pence), and the subs. */
+  unconfirmedPence?: number;
+  unconfirmedSubs?: number;
+  /** Days waiting for a leader's confirmation in the weeks of this payment (not in it). */
+  daysWaiting?: number;
   items: PaymentItem[];
   /** The runs left out when the draft was made, and why. */
   skipped: PaymentSkip[];
@@ -316,7 +411,26 @@ export interface PaymentBatch extends PaymentBatchSummary {
      * payment: Wise), so the page shows it greyed out with `cancelBlocked`. Absent otherwise.
      */
     cancelWaits?: boolean;
+    /**
+     * The bank file was downloaded, so Cancel the rest needs FILE_NOT_UPLOADED_CONFIRMATION typed
+     * and a fresh code, and Mark as paid with anyone not paid needs FILE_NOT_PAID_CONFIRMATION and a fresh code.
+     */
+    cancelNeedsConfirmation?: boolean;
+    markNotPaidNeedsConfirmation?: boolean;
+    /**
+     * A downloaded file whose people were freed (1.4.0) without confirming it was not uploaded:
+     * "Confirm it was not uploaded" (the same body as a cancel) makes it void and lets those weeks be paid again.
+     */
+    voidable?: boolean;
+    /** Why the signed-in admin cannot approve now (e.g. they gave the first approval). */
+    approveWaitsFor?: string | null;
   };
+}
+
+/** POST /payments/batches/:id/cancel: after a bank file's download, the typed words and a fresh code. */
+export interface PaymentCancelInput {
+  confirm?: string;
+  code?: string;
 }
 
 export interface PaymentBatchInput {
@@ -338,6 +452,9 @@ export interface PaymentMarkPaidInput {
   failed?: number[];
   reason?: string;
   paidDate?: string;
+  /** After a download, marking anyone NOT paid needs FILE_NOT_PAID_CONFIRMATION and a fresh code. */
+  confirm?: string;
+  code?: string;
 }
 
 /**
@@ -375,12 +492,12 @@ export interface BankDetails {
   /** Changed since the last confirmation (or reported as not theirs): payments to these details wait. */
   needsConfirmation: boolean;
   /**
-   * Release 1.5 (MON-3): who has to confirm them — 'office': the person changed them, an administrator checks them;
+   * Who has to confirm them — 'office': the person changed them, an administrator checks them;
    * 'person_or_other_admin': an administrator typed them in, so the person confirms them in their own account or a
    * DIFFERENT administrator does. Null when nothing is waiting.
    */
   waitingFor?: 'office' | 'person_or_other_admin' | null;
-  /** Release 1.5 (MON-3): the person said these are not their details (held until new ones are typed in). */
+  /** The person said these are not their details (held until new ones are typed in). */
   reportedAt?: string | null;
 }
 
@@ -389,20 +506,20 @@ export interface BankDetailsView {
   /** The person saving must send a current two-step code (they have two-step verification on). */
   codeRequired: boolean;
   /**
-   * Release 1.5 (MON-3): the viewer may confirm these details now (the person, for details someone else typed in; an
+   * The viewer may confirm these details now (the person, for details someone else typed in; an
    * administrator other than the one who changed them). Confirming always needs the viewer's two-step code when on.
    */
   canConfirm?: boolean;
-  /** Release 1.5 (MON-3): the person may report these as not theirs (someone else changed them). */
+  /** The person may report these as not theirs (someone else changed them). */
   canReport?: boolean;
   /**
-   * Release 1.5 (MON-3): someone else changed the person's details and the person has not said yes or reported them
+   * Someone else changed the person's details and the person has not said yes or reported them
    * yet: the "Your bank details were changed by … Confirm or report it" notice (own view only).
    */
   changedBySomeoneElse?: boolean;
 }
 
-/** POST /me/bank-details/confirm and POST /users/:id/bank-details/confirm (release 1.5). */
+/** POST /me/bank-details/confirm and POST /users/:id/bank-details/confirm. */
 export interface BankDetailsConfirmInput {
   /** The changedAt of the details on screen: changed again since → 409. */
   changedAt?: string;
@@ -410,7 +527,7 @@ export interface BankDetailsConfirmInput {
   code?: string;
 }
 
-/** POST /me/bank-details/report (release 1.5): "These are not my details". */
+/** POST /me/bank-details/report: "These are not my details". */
 export interface BankDetailsReportInput {
   note?: string;
 }

@@ -30,7 +30,7 @@
  *    its provider (NULL: never sent, so it can be cancelled here without asking anyone). No foreign key to payroll_runs or users: an unpaid run may be removed and made again by the pay
  *    rules, and payment history outlives both.
  *
- * Release 1.5 (money, MON-3): bank_accounts.reported_at / reported_note (the person said the details someone else typed
+ * Bank_accounts.reported_at / reported_note (the person said the details someone else typed
  * in are not theirs: held, every administrator told) and person_seen_at (when the person last said yes to, or reported,
  * a change someone else made). confirmed_by_admin_at / confirmed_by now hold ANY confirmation — by an administrator or,
  * for details someone else typed in, by the person — and never the one who made the change (lib/payments/bankDetails.ts).
@@ -79,7 +79,10 @@ CREATE TABLE IF NOT EXISTS payment_connections (
   created_by INTEGER REFERENCES users(id) ON DELETE SET NULL,
   live_confirmed_at TEXT,
   live_confirmed_by INTEGER REFERENCES users(id) ON DELETE SET NULL,
-  disconnected_at TEXT
+  disconnected_at TEXT,
+  test_file_at TEXT,
+  test_file_by INTEGER,
+  test_file_result TEXT
 );
 
 CREATE TABLE IF NOT EXISTS payment_batches (
@@ -102,7 +105,14 @@ CREATE TABLE IF NOT EXISTS payment_batches (
   last_error TEXT,
   updated_at TEXT NOT NULL,
   cancelled_at TEXT,
-  cancelled_by INTEGER REFERENCES users(id) ON DELETE SET NULL
+  cancelled_by INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  downloaded_at TEXT,
+  downloaded_by INTEGER,
+  voided_at TEXT,
+  voided_by INTEGER,
+  void_reason TEXT,
+  first_approved_at TEXT,
+  first_approved_by INTEGER
 );
 CREATE INDEX IF NOT EXISTS idx_payment_batches_status ON payment_batches(status, created_at);
 
@@ -124,7 +134,9 @@ CREATE TABLE IF NOT EXISTS payment_items (
   note TEXT,
   live INTEGER NOT NULL DEFAULT 1 CHECK (live IN (0, 1)),
   payee_enc TEXT,
-  attempted_at TEXT
+  attempted_at TEXT,
+  freed_confirmed_at TEXT,
+  freed_by INTEGER
 );
 CREATE INDEX IF NOT EXISTS idx_payment_items_batch ON payment_items(batch_id);
 CREATE INDEX IF NOT EXISTS idx_payment_items_user_week ON payment_items(user_id, week_start);
@@ -185,6 +197,25 @@ function reholdSelfConfirmed(db: Db): number {
   return n;
 }
 
+/**
+ * MON-2, once: in 1.4.0 a bank file's download was only written to the audit trail. Its first download there becomes
+ * the batch's downloaded_at, so a file downloaded then cancelled before this release still counts as sent (a new file
+ * for those weeks within 7 days is refused until someone confirms the old one was not uploaded).
+ */
+function backfillDownloads(db: Db): number {
+  if (metaFlag(db, 'ext:payments:downloads')) return 0;
+  if (!columnsOf(db, 'audit_log').length) return 0;
+  const n = Number(db.prepare(
+    `UPDATE payment_batches SET
+       downloaded_at = (SELECT MIN(a.at) FROM audit_log a WHERE a.action = 'GET /payments/batches/:id/file' AND a.entity = 'payment_batch' AND a.entity_id = payment_batches.id),
+       downloaded_by = (SELECT a.user_id FROM audit_log a WHERE a.action = 'GET /payments/batches/:id/file' AND a.entity = 'payment_batch' AND a.entity_id = payment_batches.id ORDER BY a.at LIMIT 1)
+     WHERE downloaded_at IS NULL AND mode = 'live'
+       AND EXISTS (SELECT 1 FROM audit_log a WHERE a.action = 'GET /payments/batches/:id/file' AND a.entity = 'payment_batch' AND a.entity_id = payment_batches.id)`,
+  ).run().changes);
+  setMetaFlag(db, 'ext:payments:downloads');
+  return n;
+}
+
 export const extension: DbExtension = {
   name: 'payments',
   sql: SQL,
@@ -204,6 +235,22 @@ export const extension: DbExtension = {
         ]
       : [];
     const reheld = hasBank && reholdSelfConfirmed(db) > 0 ? 'bank_accounts.rehold' : null;
+    // the 1p test file (MON-6), downloads and void files (MON-2), two approvals (MONEY-MISSED-2)
+    const more: (string | null)[] = [];
+    if (columnsOf(db, 'payment_connections').length) {
+      more.push(addColumnIfMissing(db, 'payment_connections', 'test_file_at', 'TEXT'));
+      more.push(addColumnIfMissing(db, 'payment_connections', 'test_file_by', 'INTEGER'));
+      more.push(addColumnIfMissing(db, 'payment_connections', 'test_file_result', 'TEXT'));
+    }
+    const hasBatches = columnsOf(db, 'payment_batches').includes('connection_id');
+    if (hasBatches) {
+      for (const [c, t] of [['downloaded_at', 'TEXT'], ['downloaded_by', 'INTEGER'], ['voided_at', 'TEXT'], ['voided_by', 'INTEGER'], ['void_reason', 'TEXT'], ['first_approved_at', 'TEXT'], ['first_approved_by', 'INTEGER']] as const) {
+        more.push(addColumnIfMissing(db, 'payment_batches', c, t));
+      }
+      more.push(addColumnIfMissing(db, 'payment_items', 'freed_confirmed_at', 'TEXT'));
+      more.push(addColumnIfMissing(db, 'payment_items', 'freed_by', 'INTEGER'));
+      if (backfillDownloads(db) > 0) more.push('payment_batches.downloaded_at');
+    }
     // items of payments approved before the column existed may have reached their provider: count them as sent
     if (attempted) {
       db.prepare(
@@ -211,7 +258,7 @@ export const extension: DbExtension = {
          WHERE attempted_at IS NULL AND batch_id IN (SELECT id FROM payment_batches WHERE approved_at IS NOT NULL)`,
       ).run();
     }
-    return [payee, attempted, ...added, reheld].filter((c): c is string => c !== null);
+    return [payee, attempted, ...added, reheld, ...more].filter((c): c is string => c !== null);
   },
   seed(db, ctx) {
     seedDemoBankDetails(db, ctx);

@@ -15,7 +15,7 @@
  *    adjustments_total — NULL on runs calculated by the 1.2 plan rules (queries.ts leaves them out of the payload).
  *  - meta: `ext:pay:rule_from` (PAY_RULE_FROM, the Monday of the week the upgrade first runs; a fresh demo seed uses the
  *    new rule for all history) and `ext:pay:day_rate` (default 63.5) — written by P1.
- *  - Release 1.5 (money):
+ *  - Which days count for pay:
  *    · pay_day_checks (MON-1, lib/payDays.ts): a leader's or the office's decision on a day logged with gauges —
  *      'confirmed' (a base day) or 'not_worked' — with who, when and why; source 'leader' / 'office' (by hand),
  *      'logged' (a leader or the office logged the gauges for the person) or 'before' (the day already had gauges when

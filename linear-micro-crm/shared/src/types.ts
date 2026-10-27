@@ -334,7 +334,7 @@ export interface PayrollRunWithUser extends PayrollRun {
    */
   payment?: PayrollRunPayment;
   /**
-   * Release 1.5 (money): on an unpaid run, for admins only — days waiting for a leader's confirmation and pay resting
+   * On an unpaid run, for admins only — days waiting for a leader's confirmation and pay resting
    * on subs no client statement has confirmed. Absent otherwise.
    */
   checks?: PayrollRunChecks;
