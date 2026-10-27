@@ -47,6 +47,7 @@
 import { randomUUID } from 'node:crypto';
 import {
   FILE_NOT_PAID_CONFIRMATION,
+  amountToPayPence,
   FILE_NOT_UPLOADED_CONFIRMATION,
   FILE_REPEAT_DAYS,
   batchStatusFromItems,
@@ -84,7 +85,7 @@ import { bumpDataVersion } from '../cache.ts';
 import { decrypt, encrypt } from '../crypto.ts';
 import { addDays, businessNow, isISODate, nowISO, todayISO } from '../dates.ts';
 import { HttpError, badRequest, conflict, notFound } from '../errors.ts';
-import { withInvoiceSummaries } from '../invoices.ts';
+import { invoiceVatByRun, withInvoiceSummaries } from '../invoices.ts';
 import { markPayrollRunPaid } from '../markPaid.ts';
 import { payrollChecksFor } from '../payChecks.ts';
 import { syncPersonWeek } from '../payRule.ts';
@@ -638,7 +639,8 @@ export function createDraftBatch(db: Db, me: UserWithTeam, input: PaymentBatchIn
       continue;
     }
     const why = skipReason(r, { today, live, inPayment, recent, bank });
-    const amountPence = Number.isFinite(r.gross) ? poundsToPence(r.gross) : null;
+    // the week's pay, plus VAT when the person's self-billed invoice charges VAT (MON-7)
+    const amountPence = Number.isFinite(r.gross) ? amountToPayPence(r.gross, r.invoice) : null;
     if (why) {
       skipped.push({ runId: r.id, userId: r.userId, userName: r.userName, weekStart: r.weekStart, amountPence, ...why });
       continue;
@@ -699,7 +701,7 @@ function recheck(db: Db, me: UserWithTeam, b: BatchRow, items: ItemRow[]): strin
       continue;
     }
     if (r.status === 'paid' || r.status === 'late') problems.push(`${name}'s pay for ${week} was marked paid${r.paidDate ? ` on ${payDayLabel(r.paidDate)}` : ''}`);
-    else if (poundsToPence(r.gross) !== i.amountPence) problems.push(`${name}'s pay for ${week} changed: now ${formatPence(poundsToPence(r.gross))}, was ${formatPence(i.amountPence)}`);
+    else if (amountToPayPence(r.gross, r.invoice) !== i.amountPence) problems.push(`${name}'s pay for ${week} changed: now ${formatPence(amountToPayPence(r.gross, r.invoice))}, was ${formatPence(i.amountPence)}`);
     else if (r.invoice && !isInvoicePayable(r.invoice.status)) problems.push(`${name}'s invoice ${r.invoice.number} is ${r.invoice.status === 'disputed' ? 'disputed' : 'not accepted'} now`);
     const d = masked.get(i.userId);
     if (!d) problems.push(`${name}'s bank details were removed`);
@@ -934,7 +936,7 @@ function settlePaid(db: Db, b: BatchRow, i: ItemRow, paidDate: string, actor: Us
   if (runNow.adjustedAt && b.approvedAt && runNow.adjustedAt > b.approvedAt) {
     notes.push(`The week’s figures changed while the money was on its way: ${formatPence(i.amountPence)} was paid, as approved. Put any difference on a later week as an adjustment.`);
   }
-  const nowPence = poundsToPence(runNow.gross);
+  const nowPence = amountToPayPence(runNow.gross, { vatAmount: invoiceVatByRun(db, [runNow.id]).get(runNow.id) ?? null });
   if (nowPence !== i.amountPence) notes.push(`Sent ${formatPence(i.amountPence)}; the week now comes to ${formatPence(nowPence)}. Add an adjustment for the difference on a later week.`);
   const before = payrollSnapshot(db, runNow.id);
   const date = paidDate < runNow.weekEnd ? addDays(runNow.weekEnd, 1) : paidDate;

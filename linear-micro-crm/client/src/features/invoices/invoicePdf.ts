@@ -7,7 +7,7 @@ import { INVOICE_STATUS_LABELS, invoiceLineNote } from '@lm/shared';
 import { pdfDocument, type PdfLineRow } from '@/lib/pdf';
 import { formatNumber } from '@/lib/format';
 import { reportAuditEvent } from '@/api/auditEvents';
-import { WITHHELD_SUPPLIER, acceptanceSentence, customerExtraLines, invoiceDay, money, signedMoney, supplierTaxLines, weekRange } from './invoiceText';
+import { WITHHELD_SUPPLIER, acceptanceSentence, customerExtraLines, invoiceDay, money, signedMoney, supplierTaxLines, vatLine, weekRange } from './invoiceText';
 
 /** A same-origin image (the signature) as a data URL for jsPDF; null when it cannot be read. */
 async function dataUrlOf(url: string | null): Promise<string | null> {
@@ -69,8 +69,14 @@ export async function downloadInvoicePdf(inv: Invoice): Promise<void> {
       ],
       rows,
     )
-    .totals([{ label: 'Total due', value: money(inv.total), strong: true }])
-    .paragraph(inv.supplier.vatNumber ? 'No VAT has been added to this invoice.' : 'No VAT: the supplier is not VAT registered.', { muted: true, size: 9 })
+    .totals(inv.vat
+      ? [
+          { label: 'Total before VAT', value: money(inv.vat.net) },
+          { label: `VAT at ${inv.vat.ratePercent}%`, value: money(inv.vat.vat) },
+          { label: 'Total due', value: money(inv.vat.gross), strong: true },
+        ]
+      : [{ label: 'Total due', value: money(inv.total), strong: true }])
+    .paragraph(vatLine(inv), { muted: true, size: 9 })
     .paragraph(inv.selfBillingNote, { muted: true, size: 9 })
     .signatureBlock(
       { label: `For ${inv.customer.name}`, name: inv.signatory.name || 'Authorised signatory', imageDataUrl: signature, note: 'Authorised signatory' },

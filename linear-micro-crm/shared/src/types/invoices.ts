@@ -103,6 +103,25 @@ export interface InvoiceSummary {
    */
   deemedAcceptedAt: string;
   total: number;
+  /**
+   * The VAT on this invoice (£) when the supplier is VAT registered: what is paid is `total` + `vatAmount`. Absent when
+   * they are not (no VAT is charged).
+   */
+  vatAmount?: number;
+}
+
+/**
+ * The VAT block of a self-billed invoice to a VAT-registered supplier: VAT at the standard rate on the total, rounded
+ * down to the penny, and HMRC's sentence for self-billed invoices (SELF_BILLING_VAT_STATEMENT).
+ */
+export interface InvoiceVatBlock {
+  /** The total before VAT (the week's pay). */
+  net: number;
+  ratePercent: number;
+  vat: number;
+  /** What is paid: net + VAT. */
+  gross: number;
+  statement: string;
 }
 
 /** P2: GET /invoices — a summary with the person and the pay week it is for. */
@@ -193,6 +212,8 @@ export interface Invoice extends InvoiceSummary {
   previousVersions?: InvoiceVersionNote[];
   /** P2: what the viewer may do. */
   actions?: InvoiceActions;
+  /** VAT, when the supplier is VAT registered (their VAT number is on the invoice); null when no VAT is charged. */
+  vat?: InvoiceVatBlock | null;
   /** P2: the supplier only — whether they accepted the current self-billing agreement (needed to accept). */
   agreementAccepted?: boolean;
   /** P2, admin only: the run's gross as it stands now (what Fix and reissue would issue). */

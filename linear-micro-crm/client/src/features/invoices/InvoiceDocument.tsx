@@ -9,7 +9,7 @@ import { INVOICE_STATUS_LABELS, invoiceLineNote } from '@lm/shared';
 import { Badge } from '@/components/ui';
 import { formatNumber } from '@/lib/format';
 import {
-  WITHHELD_SUPPLIER, acceptanceSentence, customerExtraLines, invoiceDay, invoiceMoment, money, signedMoney, statusTone, supplierTaxLines, weekRange,
+  WITHHELD_SUPPLIER, acceptanceSentence, customerExtraLines, invoiceDay, invoiceMoment, money, signedMoney, statusTone, supplierTaxLines, vatLine, weekRange,
 } from './invoiceText';
 
 function Party({ heading, party, extra, missing }: { heading: string; party: InvoiceParty; extra: string[]; missing?: string }) {
@@ -107,14 +107,28 @@ export function InvoiceDocument({ invoice: inv, mine, className }: InvoiceDocume
           })}
         </tbody>
         <tfoot>
+          {inv.vat && (
+            <>
+              <tr>
+                <th scope="row" colSpan={1} className="pt-3 text-left font-medium text-fg sm:hidden print:hidden">Total before VAT</th>
+                <th scope="row" colSpan={3} className="hidden pt-3 text-left font-medium text-fg sm:table-cell print:table-cell">Total before VAT</th>
+                <td className="whitespace-nowrap pt-3 text-right tabular-nums text-fg">{money(inv.vat.net)}</td>
+              </tr>
+              <tr>
+                <th scope="row" colSpan={1} className="pt-1 text-left font-medium text-fg sm:hidden print:hidden">VAT at {inv.vat.ratePercent}%</th>
+                <th scope="row" colSpan={3} className="hidden pt-1 text-left font-medium text-fg sm:table-cell print:table-cell">VAT at {inv.vat.ratePercent}%</th>
+                <td className="whitespace-nowrap pt-1 text-right tabular-nums text-fg" data-invoice-vat="">{money(inv.vat.vat)}</td>
+              </tr>
+            </>
+          )}
           <tr>
             <th scope="row" colSpan={1} className="pt-3 text-left text-base font-semibold text-fg sm:hidden print:hidden">Total due</th>
             <th scope="row" colSpan={3} className="hidden pt-3 text-left text-base font-semibold text-fg sm:table-cell print:table-cell">Total due</th>
-            <td className="whitespace-nowrap pt-3 text-right text-base font-semibold tabular-nums text-fg" data-invoice-total="">{money(inv.total)}</td>
+            <td className="whitespace-nowrap pt-3 text-right text-base font-semibold tabular-nums text-fg" data-invoice-total="">{money(inv.vat ? inv.vat.gross : inv.total)}</td>
           </tr>
           <tr>
             <td colSpan={4} className="pt-1 text-xs text-muted">
-              {inv.supplier.vatNumber ? 'No VAT has been added to this invoice.' : 'No VAT: the supplier is not VAT registered.'}
+              {vatLine(inv)}
               {notPaid.length > 0 && ' Lines marked "Not paid" are not part of the total.'}
             </td>
           </tr>

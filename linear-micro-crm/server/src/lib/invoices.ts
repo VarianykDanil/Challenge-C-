@@ -20,6 +20,12 @@
  * invoice is open (issued or disputed) its supplier and customer blocks follow the person's and the company's details;
  * once accepted they are frozen. When an unpaid run's figures change, its invoice is reissued (the person accepts
  * again) — by the job, and at once when someone accepts, disputes or pays it.
+ *
+ * VAT (MON-7): a supplier with a VAT number on the invoice is charged VAT at the standard rate on the total, rounded
+ * down to the penny (shared invoiceVatFor), worked out from the stored total and supplier block, so it is frozen with
+ * them. The invoice carries HMRC's sentence for self-billed invoices; payments pay total + VAT (invoiceVatByRun). When
+ * someone registers for VAT or stops, their open invoices that do not count as accepted yet are reissued; ones already
+ * accepted (or counting as accepted, or in a payment on its way) keep what was accepted.
  */
 import { createHash } from 'node:crypto';
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
@@ -30,6 +36,7 @@ import {
   INVOICED_ROLES,
   MONEY_MAX,
   SELF_BILLING_AGREEMENT_VERSION,
+  SELF_BILLING_VAT_STATEMENT,
   canDisputeInvoice,
   deemedAcceptanceMoment,
   deemedAcceptedAt,
@@ -38,6 +45,7 @@ import {
   invoiceDeadline,
   invoiceDeadlineText,
   invoiceLinesFor,
+  invoiceVatFor,
   isInvoicePayable,
   isInvoicedRole,
   normalisePostcode,
@@ -60,6 +68,7 @@ import {
   type InvoiceProfileInput,
   type InvoiceStatus,
   type InvoiceSummary,
+  type InvoiceVatBlock,
   type InvoiceVersionNote,
   type PayrollRunWithUser,
   type PayrollStatus,
@@ -68,7 +77,7 @@ import {
   type WeekPayBreakdown,
 } from '@lm/shared';
 import { all, get, placeholders, run, transaction, type Db } from '../db/connection.ts';
-import { ensurePayrollMaterialised, paymentOnItsWay } from '../db/maintenance.ts';
+import { ensurePayrollMaterialised, paymentOnItsWay, runInPayment } from '../db/maintenance.ts';
 import { getPayroll } from '../db/queries.ts';
 import { recordSystemEvent } from './audit/events.ts';
 import { bumpDataVersion } from './cache.ts';
@@ -212,7 +221,7 @@ const runChanged = (r: Pick<InvoiceRow, 'runFingerprint' | 'currentFingerprint'>
 
 function summaryOf(r: InvoiceRow, nowLocal: string): InvoiceSummary {
   const deadline = deadlineOf(r);
-  return {
+  const summary: InvoiceSummary = {
     id: r.id,
     number: r.number,
     status: effectiveInvoiceStatus(r.status, deadline, nowLocal),
@@ -223,6 +232,38 @@ function summaryOf(r: InvoiceRow, nowLocal: string): InvoiceSummary {
     deemedAcceptedAt: deadline,
     total: r.total,
   };
+  const vat = vatOf(r);
+  if (vat) summary.vatAmount = vat.vat;
+  return summary;
+}
+
+/** The supplier's VAT number as printed on this invoice (null: not VAT registered). */
+const supplierVatNumber = (supplierJson: string | null): string | null => parseJson<Partial<InvoiceParty>>(supplierJson, {}).vatNumber ?? null;
+
+/** MON-7: the invoice's VAT block, from its stored total and supplier (null: no VAT is charged). */
+function vatOf(r: Pick<InvoiceRow, 'total' | 'supplierJson'>): InvoiceVatBlock | null {
+  const vat = invoiceVatFor(r.total, supplierVatNumber(r.supplierJson));
+  return vat ? { ...vat, statement: SELF_BILLING_VAT_STATEMENT } : null;
+}
+
+/**
+ * MON-7: the VAT (£) each run's invoice charges, for the runs whose invoice charges any. One grouped read; payments add
+ * it to what they pay (shared amountToPayPence).
+ */
+export function invoiceVatByRun(db: Db, runIds: readonly number[]): Map<number, number> {
+  const ids = [...new Set(runIds)];
+  if (!ids.length) return new Map();
+  const rows = all<{ runId: number; total: number; supplierJson: string | null }>(
+    db,
+    `SELECT payroll_run_id AS runId, total, supplier_json AS supplierJson FROM invoices WHERE payroll_run_id IN (${placeholders(ids.length)})`,
+    ids,
+  );
+  const out = new Map<number, number>();
+  for (const r of rows) {
+    const vat = vatOf(r);
+    if (vat) out.set(Number(r.runId), vat.vat);
+  }
+  return out;
 }
 
 // ───────────────────────────── files: the signature image ─────────────────────────────
@@ -491,13 +532,53 @@ export function saveInvoiceProfile(db: Db, userId: number, input: InvoiceProfile
       next.vatNumber = vat;
     }
   }
+  // registering for VAT (or stopping) changes what is paid; a new VAT number alone does not
+  const vatRegistrationChanged = Boolean(current.vatNumber) !== Boolean(next.vatNumber);
+  let reissued = 0;
   transaction(db, () => {
     run(db, `UPDATE users SET address_line1 = ?, address_line2 = ?, address_town = ?, postcode = ?, utr = ?, vat_number = ? WHERE id = ?`, [
       next.addressLine1, next.addressLine2, next.addressTown, next.postcode, next.utr, next.vatNumber, userId,
     ]);
-    refreshOpenParties(db, userId);
+    if (vatRegistrationChanged) reissued = reissueForVatChange(db, userId, businessNow());
+    else refreshOpenParties(db, userId);
   });
+  if (reissued) bumpDataVersion();
   return invoiceProfile(db, userId)!;
+}
+
+const VAT_REISSUE_REASON = 'The supplier’s VAT registration changed';
+
+/**
+ * MON-7: the person registered for VAT or stopped. Their open invoices that do not count as accepted yet get a new
+ * version (VAT added or taken off: the person accepts again); a disputed one takes the new details and waits for the
+ * office as before. One that counts as accepted already (its deadline passed) or whose run is in a payment on its way
+ * keeps what was accepted. Returns how many were reissued.
+ */
+function reissueForVatChange(db: Db, userId: number, at: Date): number {
+  const rows = all<InvoiceRow>(db, `${INVOICE_SELECT} WHERE i.user_id = ? AND i.status IN ('issued', 'disputed') AND p.status IN ${UNPAID_SQL}`, [userId]);
+  if (!rows.length) return 0;
+  const local = businessLocal(at);
+  const profile = get<ProfileRow>(db, `${PROFILE_SELECT} WHERE id = ?`, [userId]);
+  if (!profile) return 0;
+  let reissued = 0;
+  for (const r of rows) {
+    if (runInPayment(db, r.payrollRunId)) continue;
+    const status = effectiveInvoiceStatus(r.status, deadlineOf(r), local);
+    if (status === 'disputed') {
+      run(db, `UPDATE invoices SET supplier_json = ? WHERE id = ?`, [JSON.stringify(supplierParty(profile)), r.id]);
+      continue;
+    }
+    if (status !== 'issued') continue;
+    reissueInvoice(db, r.id, at, { reason: VAT_REISSUE_REASON });
+    reissued++;
+    recordSystemEvent(db, {
+      name: 'invoices.reissue',
+      summary: `Reissued invoice ${r.number} for ${r.userName} (${formatWeek(r.weekStart)}): their VAT registration changed`,
+      entity: 'invoice',
+      entityId: r.id,
+    });
+  }
+  return reissued;
 }
 
 /**
@@ -886,6 +967,7 @@ function toInvoice(db: Db, r: InvoiceRow, me: UserWithTeam, local: string): Invo
       ? { reason: r.paidOverrideReason, by: r.paidOverrideBy, byName: r.paidOverrideByName, at: r.paidOverrideAt }
       : null,
     actions: actionsFor(r, me, status, local),
+    vat: vatOf(r),
   };
   if (r.version > 1) invoice.previousVersions = previousVersions(db, r.id);
   if (me.id === r.userId) invoice.agreementAccepted = agreementAcceptedAt(db, r.userId) !== null;

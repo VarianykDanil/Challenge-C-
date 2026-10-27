@@ -78,7 +78,7 @@ export function InvoiceProfileForm({ profile, userId, self }: { profile: Invoice
         <Field label="Unique Taxpayer Reference (UTR)" optional htmlFor={`${uid}-utr`} hint={self ? '10 digits, from HMRC. Leave it empty if you do not have one yet.' : '10 digits, from HMRC.'} error={errs.utr}>
           <Input id={`${uid}-utr`} value={d.utr} onChange={set('utr')} inputMode="numeric" maxLength={14} invalid={!!errs.utr} />
         </Field>
-        <Field label="VAT number" optional htmlFor={`${uid}-vat`} hint="Only if VAT registered. Empty: the invoice says Not VAT registered." error={errs.vatNumber}>
+        <Field label="VAT number" optional htmlFor={`${uid}-vat`} hint="Only if VAT registered: VAT at 20% is then added to your invoices and paid with your pay. Invoices you have not accepted yet are issued again for you to check. Empty: Not VAT registered." error={errs.vatNumber}>
           <Input id={`${uid}-vat`} value={d.vatNumber} onChange={set('vatNumber')} maxLength={20} invalid={!!errs.vatNumber} className="uppercase" />
         </Field>
       </div>

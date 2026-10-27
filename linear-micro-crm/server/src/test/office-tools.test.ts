@@ -1,10 +1,10 @@
 /**
- * U5 office-tools — GET /search (command palette) and GET /finance/payroll/export (Xero / Sage CSV) on the small
+ * U5 office-tools — GET /search (command palette) and GET /finance/payroll/export (the payroll spreadsheet) on the small
  * fixture (known names, so scoping can be asserted exactly), plus shape and caps on the full demo seed.
  */
 import { after, before, test } from 'node:test';
 import assert from 'node:assert/strict';
-import { PAY_EXPORT_HEADERS, SEARCH_KIND_LIMITS, SEARCH_MAX_RESULTS, type SearchResponse, type SearchResult } from '@lm/shared';
+import { PAY_EXPORT_HEADER, SEARCH_KIND_LIMITS, SEARCH_MAX_RESULTS, type SearchResponse, type SearchResult } from '@lm/shared';
 import { all, get, run, type Db } from '../db/connection.ts';
 import { currentDataVersion } from '../lib/cache.ts';
 import { addDays, mondayOf, todayISO } from '../lib/dates.ts';
@@ -222,52 +222,64 @@ test('export: admin only (leader, recruiter, rep → 403; signed out → 401)', 
   assert.equal((await admin.get(url)).status, 200);
 });
 
-test('export: 400 for a missing or non-Monday week, an unknown format or runs value', async () => {
+test('export: 400 for a missing or non-Monday week, an unknown format, runs or people value', async () => {
   for (const q of [
-    'format=xero',
-    `weekStart=${addDays(lastMonday, 1)}&format=xero`,
-    'weekStart=2026-02-30&format=xero',
-    `weekStart=${lastMonday}`,
-    `weekStart=${lastMonday}&format=csv`,
-    `weekStart=${lastMonday}&format=xero&runs=some`,
+    'format=csv',
+    `weekStart=${addDays(lastMonday, 1)}&format=csv`,
+    'weekStart=2026-02-30',
+    `weekStart=${lastMonday}&format=xlsx`,
+    `weekStart=${lastMonday}&runs=some`,
+    `weekStart=${lastMonday}&people=everyone`,
   ]) {
     const r = await admin.get(`/finance/payroll/export?${q}`);
     assert.equal(r.status, 400, q);
   }
 });
 
-test('export (xero): the week\'s runs still to pay, by surname, as an attachment with Xero headers', async () => {
-  const r = await admin.get(`/finance/payroll/export?weekStart=${lastMonday}&format=xero`);
+// changed (MON-4, CLM-10): one honest spreadsheet with plain headers instead of two guessed import layouts
+test('export: the week\'s runs still to pay, by surname, as an attachment with plain headers', async () => {
+  const r = await admin.get(`/finance/payroll/export?weekStart=${lastMonday}`);
   assert.equal(r.status, 200);
   assert.match(r.headers.get('content-type')!, /^text\/csv; charset=utf-8/);
-  assert.equal(r.headers.get('content-disposition'), `attachment; filename="linear-hub-payroll-xero-${lastMonday}.csv"`);
+  assert.equal(r.headers.get('content-disposition'), `attachment; filename="linear-hub-payroll-${lastMonday}.csv"`);
   assert.equal(r.headers.get('cache-control'), 'no-store');
   assert.equal(r.headers.get('x-total-count'), '2');
   const lines = String(r.json).split('\r\n');
-  assert.equal(lines[0], PAY_EXPORT_HEADERS.xero.join(','));
+  assert.equal(lines[0], PAY_EXPORT_HEADER.join(','));
   assert.equal(lines.length, 4, 'header + 2 runs + final CRLF');
   const uk = (iso: string) => `${iso.slice(8, 10)}/${iso.slice(5, 7)}/${iso.slice(0, 4)}`;
   // Rep, Remy and Rep, Rita: same surname, then first name. The paid run (Bo) and the older week are left out.
-  assert.equal(lines[1], `Remy Rep,FX-0004,${uk(lastMonday)},${uk(addDays(lastMonday, 6))},600.00,240.00,360.00,0.00,0.00,0.00,PAY-FX-REMY`);
+  assert.equal(lines[1], `Remy Rep,FX-0004,Self-employed (self-billed),${uk(lastMonday)},${uk(addDays(lastMonday, 6))},240.00,360.00,0.00,0.00,0.00,0.00,600.00,0.00,600.00,,PAY-FX-REMY`);
   assert.ok(lines[2]!.startsWith('Rita Rep,FX-0005,'), lines[2]);
-  assert.ok(lines[2]!.includes(',450.50,240.00,210.50,'), lines[2]);
+  assert.ok(lines[2]!.includes(',240.00,210.50,0.00,0.00,0.00,0.00,450.50,0.00,450.50,'), lines[2]);
   assert.ok(lines[2]!.endsWith(`,"'=HYPERLINK(""x"")"`), `formula guarded: ${lines[2]}`);
+  // older links (format=xero / sage) get the same file
+  for (const f of ['xero', 'sage', 'csv']) assert.equal(String((await admin.get(`/finance/payroll/export?weekStart=${lastMonday}&format=${f}`)).json), String(r.json), f);
 });
 
-test('export (sage, runs=all): every run of the week with Sage headers', async () => {
-  const r = await admin.get(`/finance/payroll/export?weekStart=${lastMonday}&format=sage&runs=all`);
+test('export (runs=all): every run of the week', async () => {
+  const r = await admin.get(`/finance/payroll/export?weekStart=${lastMonday}&runs=all`);
   assert.equal(r.status, 200);
   assert.equal(r.headers.get('x-total-count'), '3');
   const lines = String(r.json).split('\r\n');
-  assert.equal(lines[0], PAY_EXPORT_HEADERS.sage.join(','));
+  assert.equal(lines[0], PAY_EXPORT_HEADER.join(','));
   assert.deepEqual(lines.slice(1, 4).map((l) => l.split(',')[0]), ['Bo Rep', 'Remy Rep', 'Rita Rep']);
 });
 
+test('export (people=): the self-billed field people and the office staff apart', async () => {
+  const self = await admin.get(`/finance/payroll/export?weekStart=${lastMonday}&runs=all&people=self_billed`);
+  assert.equal(self.headers.get('x-total-count'), '3');
+  assert.equal(self.headers.get('content-disposition'), `attachment; filename="linear-hub-payroll-${lastMonday}-self-billed.csv"`);
+  const office = await admin.get(`/finance/payroll/export?weekStart=${lastMonday}&runs=all&people=office`);
+  assert.equal(office.headers.get('x-total-count'), '0', 'the reps are not office staff');
+  assert.equal(String(office.json), `${PAY_EXPORT_HEADER.join(',')}\r\n`);
+});
+
 test('export: a week without runs answers the header line alone', async () => {
-  const r = await admin.get(`/finance/payroll/export?weekStart=${addDays(lastMonday, -70)}&format=sage`);
+  const r = await admin.get(`/finance/payroll/export?weekStart=${addDays(lastMonday, -70)}`);
   assert.equal(r.status, 200);
   assert.equal(r.headers.get('x-total-count'), '0');
-  assert.equal(String(r.json), `${PAY_EXPORT_HEADERS.sage.join(',')}\r\n`);
+  assert.equal(String(r.json), `${PAY_EXPORT_HEADER.join(',')}\r\n`);
 });
 
 test('export: when the runs exist already it changes nothing — the runs are byte-for-byte the same afterwards', async () => {
@@ -338,11 +350,26 @@ test('demo seed: at most 20 results, per-kind caps, every href in-app, role kind
     // The pay export of the latest materialised week has a line per run still to pay.
     const week = all<{ w: string; n: number }>(demo.db, `SELECT week_start AS w, COUNT(*) AS n FROM payroll_runs WHERE status IN ('pending','failed') GROUP BY week_start ORDER BY week_start DESC LIMIT 1`)[0];
     if (week) {
-      const r = await dAdmin.get(`/finance/payroll/export?weekStart=${week.w}&format=xero`);
+      const r = await dAdmin.get(`/finance/payroll/export?weekStart=${week.w}`);
       assert.equal(r.status, 200);
       assert.equal(r.headers.get('x-total-count'), String(week.n));
       assert.equal(String(r.json).split('\r\n').length, week.n + 2);
     }
+    // MON-4: every row of every week adds up (the review found 49 of 675 runs that did not, all corrections)
+    const weeks = all<{ w: string }>(demo.db, `SELECT DISTINCT week_start AS w FROM payroll_runs ORDER BY w`);
+    let rows = 0;
+    for (const { w } of weeks) {
+      const csv = String((await dAdmin.get(`/finance/payroll/export?weekStart=${w}&runs=all`)).json);
+      for (const line of csv.trim().split('\r\n').slice(1)) {
+        const cells = line.split(',');
+        const n = (i: number) => Number(cells[i]);
+        // Base, Commission, Bonus, Overrides, Deductions, Adjustments, Gross, VAT, Total (columns 5–13)
+        assert.ok(Math.abs(n(5) + n(6) + n(7) + n(8) - n(9) + n(10) - n(11)) < 0.005, `${w}: ${line}`);
+        assert.ok(Math.abs(n(11) + n(12) - n(13)) < 0.005, `${w}: ${line}`);
+        rows++;
+      }
+    }
+    assert.ok(rows > 100, `checked ${rows} rows`);
   } finally {
     await demo.close();
   }

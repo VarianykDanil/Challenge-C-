@@ -33,6 +33,14 @@ export function supplierTaxLines(p: InvoiceParty): string[] {
   return lines;
 }
 
+/**
+ * The VAT sentence under the total when no VAT is charged. With a VAT number on the invoice the VAT block (Invoice.vat)
+ * is shown instead, with HMRC's sentence for self-billed invoices.
+ */
+export function vatLine(inv: Pick<Invoice, 'supplier' | 'vat'>): string {
+  return inv.vat ? inv.vat.statement : 'No VAT: the supplier is not VAT registered.';
+}
+
 /** Shown instead of the address when it is withheld from this viewer. */
 export const WITHHELD_SUPPLIER = 'Home address and UTR: only the supplier and the office see them';
 

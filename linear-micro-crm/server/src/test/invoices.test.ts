@@ -246,7 +246,9 @@ test('supplier details: own and (admin) anyone; formats checked; open invoices f
   assert.ok(!('withheld' in asOffice.supplier));
   // admin: anyone's; nobody else
   assert.equal((await admin.get(`/invoices/profile/${fx().users.rep}`)).json.utr, '1234567890');
-  const byAdmin = await admin.put(`/invoices/profile/${fx().users.repA2}`, { addressLine1: '3 Mill Street', postcode: 'SK11AA', vatNumber: 'GB 123 4567 89' });
+  // changed: a VAT number now charges VAT, and registering reissues the person's open invoices (money-vat.test.ts), so
+  // the format check uses the recruiter, who has no invoices, to leave Rita's invoices for the tests below
+  const byAdmin = await admin.put(`/invoices/profile/${fx().users.recruiter}`, { addressLine1: '3 Mill Street', postcode: 'SK11AA', vatNumber: 'GB 123 4567 89' });
   assert.equal(byAdmin.status, 200);
   assert.equal(byAdmin.json.vatNumber, 'GB123456789');
   assert.equal(byAdmin.json.postcode, 'SK1 1AA');
@@ -260,7 +262,7 @@ test('supplier details: own and (admin) anyone; formats checked; open invoices f
   const audit = auditRows('PUT /invoices/profile');
   assert.equal(audit.length, 1, 'failed saves write nothing');
   assert.match(audit[0]!.summary, /^Updated their invoice details: address, town, postcode, UTR$/);
-  assert.match(auditRows('PUT /invoices/profile/:userId')[0]!.summary, /^Updated invoice details for Rita Rep: address, postcode, VAT number$/);
+  assert.match(auditRows('PUT /invoices/profile/:userId')[0]!.summary, /^Updated invoice details for Rae Recruiter: address, postcode, VAT number$/);
   await rep.put('/invoices/profile', { addressLine1: '12 Oak Road' });
   assert.equal(auditRows('PUT /invoices/profile').length, 1, 'saved unchanged: no row');
 });
