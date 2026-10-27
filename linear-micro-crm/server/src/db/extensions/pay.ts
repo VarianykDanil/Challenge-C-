@@ -15,12 +15,35 @@
  *    adjustments_total — NULL on runs calculated by the 1.2 plan rules (queries.ts leaves them out of the payload).
  *  - meta: `ext:pay:rule_from` (PAY_RULE_FROM, the Monday of the week the upgrade first runs; a fresh demo seed uses the
  *    new rule for all history) and `ext:pay:day_rate` (default 63.5) — written by P1.
+ *  - Release 1.5 (money):
+ *    · pay_day_checks (MON-1, lib/payDays.ts): a leader's or the office's decision on a day logged with gauges —
+ *      'confirmed' (a base day) or 'not_worked' — with who, when and why; source 'leader' / 'office' (by hand),
+ *      'logged' (a leader or the office logged the gauges for the person) or 'before' (the day already had gauges when
+ *      the check started: kept as it was). meta `ext:pay:day_checks` = 'on' once the check applies (set by the upgrade
+ *      of an existing database, the end of a fresh demo seed, or the first gauge write).
+ *    · staff_absences (MON-8, lib/staffDays.ts): weekdays an office person was away (holiday, sick, unpaid, other);
+ *      users.leaving_date: their last working day. Neither is ever paid.
  * Rules: ./types.ts. Paid runs never change; corrections go to the next unpaid week as adjustment lines.
  */
 import { mondayOf, nowISO, todayISO } from '../../lib/dates.ts';
+import { PAY_DAY_CHECKS_SQL, ensureDayChecks } from '../../lib/payDays.ts';
 import type { Db } from '../connection.ts';
 import type { DbExtension } from './types.ts';
 import { addColumnIfMissing } from './types.ts';
+
+/** MON-8: the weekdays an office person was away (lib/staffDays.ts; never paid). */
+const STAFF_ABSENCES_SQL = `
+CREATE TABLE IF NOT EXISTS staff_absences (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  date TEXT NOT NULL,
+  kind TEXT NOT NULL DEFAULT 'other' CHECK (kind IN ('holiday', 'sick', 'unpaid', 'other')),
+  note TEXT,
+  created_by INTEGER,
+  created_at TEXT NOT NULL,
+  UNIQUE (user_id, date)
+);
+CREATE INDEX IF NOT EXISTS idx_staff_absences_user ON staff_absences(user_id, date);`;
 
 const SQL = `
 CREATE TABLE IF NOT EXISTS campaign_rates (
@@ -64,6 +87,8 @@ CREATE TABLE IF NOT EXISTS sale_confirmations (
 );
 CREATE INDEX IF NOT EXISTS idx_sale_confirmations_week ON sale_confirmations(week_start);
 CREATE INDEX IF NOT EXISTS idx_pay_adjustments_source ON pay_adjustments(user_id, source_week_start);
+${PAY_DAY_CHECKS_SQL}
+${STAFF_ABSENCES_SQL}
 `;
 
 /** meta keys (lib/payWeek.ts reads them). */
@@ -89,6 +114,9 @@ function dataSteps(db: Db): string[] {
      FROM campaigns c WHERE NOT EXISTS (SELECT 1 FROM campaign_rates r WHERE r.campaign_id = c.id)`,
   ).run(nowISO());
   if (Number(rates.changes) > 0) changed.push('campaign_rates.seed');
+  // MON-1: base days need evidence from now on; every day that already has gauges keeps counting. Like PAY_RULE_FROM
+  // above, switching a rule on is not reported as a changed row (the kept days are bookkeeping, nothing is recalculated)
+  ensureDayChecks(db);
   return changed;
 }
 
@@ -104,7 +132,13 @@ export const extension: DbExtension = {
       addColumnIfMissing(db, 'payroll_runs', 'adjustments_total', 'REAL'),
       // P1: the week as it was calculated (lines, per campaign, paid as) — a paid run keeps it as paid
       addColumnIfMissing(db, 'payroll_runs', 'breakdown_json', 'TEXT'),
+      // MON-8: an office person's last working day (days after it are never paid)
+      addColumnIfMissing(db, 'users', 'leaving_date', 'TEXT'),
       ...dataSteps(db),
     ].filter((name): name is string => name !== null);
+  },
+  seed(db, ctx) {
+    // MON-1: the demo's history counts as it was seeded; days logged from now on need evidence
+    ensureDayChecks(db, [], ctx.nowIso);
   },
 };

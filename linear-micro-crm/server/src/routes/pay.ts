@@ -11,23 +11,34 @@
  *  POST   /pay/bonuses   BonusInput              → 201 PayAdjustment (admin; kind 'bonus', an unpaid week)
  *  POST   /pay/adjustments ManualAdjustmentInput → 201 PayAdjustment (admin; kind 'manual', an unpaid week)
  *  DELETE /pay/adjustments/:id                   → 204 (admin; a bonus or manual line on an unpaid week)
+ *  GET    /pay/day-checks                        → PayDayToCheck[] (leader: own team; admin: everyone) — MON-1
+ *  POST   /pay/day-checks PayDayCheckInput       → PayDayCheck (the person's team leader, not their own day; admin)
+ *  GET    /pay/staff/:userId                     → StaffDays (admin; the person themself) — MON-8
+ *  PUT    /pay/staff/:userId/leaving-date        → StaffDays (admin) { leavingDate: YYYY-MM-DD | null }
+ *  POST   /pay/staff/:userId/absences StaffAbsenceInput → StaffDays (admin)
+ *  DELETE /pay/staff/:userId/absences/:id        → StaffDays (admin)
  * Types: shared/src/types/pay.ts. Helpers: lib/payRule.ts. Audit specs: lib/audit/paySpecs.ts. A client account never
  * gets here (the client guard answers 403 first).
  */
 import { Router } from 'express';
 import { z } from 'zod';
 import { MONEY_MAX, type UserWithTeam } from '@lm/shared';
-import type { Db } from '../db/connection.ts';
+import { get, transaction, type Db } from '../db/connection.ts';
 import { getUser } from '../db/queries.ts';
-import { addDays, mondayOf, todayISO } from '../lib/dates.ts';
+import { bumpDataVersion } from '../lib/cache.ts';
+import { addDays, mondayOf, sundayOf, todayISO } from '../lib/dates.ts';
 import { badRequest, forbidden, notFound } from '../lib/errors.ts';
+import { dayCheck, daysToCheck, saveDayCheck } from '../lib/payDays.ts';
+import { addAbsences, removeAbsence, setLeavingDate, staffDays } from '../lib/staffDays.ts';
 import {
   addCampaignRate,
   addPayAdjustment,
   listCampaignRates,
+  assertWeekUnpaid,
   listPayAdjustments,
   payRuleSettings,
   removePayAdjustment,
+  syncPersonWeek,
   updatePaySettings,
   weekPayBreakdown,
 } from '../lib/payRule.ts';
@@ -62,6 +73,19 @@ const adjustmentBody = z.object({
   amount: z.number().finite().refine((n) => n !== 0, 'The amount cannot be £0').refine((n) => Math.abs(n) <= MONEY_MAX, 'That amount is too large'),
   note,
 });
+
+const dayCheckBody = z.object({
+  userId: z.number().int().positive(),
+  date: isoDate,
+  decision: z.enum(['confirmed', 'not_worked']),
+  note: z.string().trim().max(300, 'Keep the note under 300 characters').optional(),
+});
+
+/** Brings the person's unpaid runs of these weeks up to date (paid runs never change). */
+function resync(db: Db, userId: number, weeks: readonly string[]): void {
+  const today = todayISO();
+  for (const w of weeks) if (sundayOf(w) < today) syncPersonWeek(db, userId, w, today);
+}
 
 /** Whose pay `me` may read: their own; a leader their own team's; an admin anyone's. 403 otherwise. */
 function assertCanSeePay(me: UserWithTeam, target: UserWithTeam): void {
@@ -146,6 +170,71 @@ export function payRouter(db: Db): Router {
   router.delete('/adjustments/:id', requireRole('admin'), (req, res) => {
     removePayAdjustment(db, idParam(req));
     res.status(204).end();
+  });
+
+  // ── MON-1: days worked that need a leader's (or the office's) check ──
+  router.get('/day-checks', requireRole('admin', 'leader'), (req, res) => {
+    res.json(daysToCheck(db, currentUser(req), todayISO()));
+  });
+
+  router.post('/day-checks', requireRole('admin', 'leader'), (req, res) => {
+    const me = currentUser(req);
+    const body = dayCheckBody.parse(req.body);
+    const target = getUser(db, body.userId);
+    if (!target || target.role === 'client') throw notFound('User');
+    if (me.role === 'leader') {
+      if (target.id === me.id) throw forbidden('Your own days are confirmed by the office');
+      if (me.teamId === null || target.teamId !== me.teamId) throw forbidden('Leaders confirm days for their own team only');
+    }
+    if (!get(db, `SELECT 1 FROM gauge_entries WHERE user_id = ? AND date = ?`, [target.id, body.date])) throw notFound('Gauges for that day');
+    const monday = mondayOf(body.date);
+    assertWeekUnpaid(db, target.id, monday);
+    transaction(db, () => {
+      saveDayCheck(db, me, { userId: target.id, date: body.date, decision: body.decision, note: body.note || null });
+      resync(db, target.id, [monday]);
+    });
+    bumpDataVersion();
+    res.json(dayCheck(db, target.id, body.date));
+  });
+
+  // ── MON-8: office staff's leaving date and days off ──
+  const staffId = (raw: unknown) => {
+    const n = Number(raw);
+    if (!Number.isSafeInteger(n) || n <= 0) throw badRequest('Invalid person id');
+    return n;
+  };
+
+  router.get('/staff/:userId', (req, res) => {
+    const me = currentUser(req);
+    const id = staffId(req.params.userId);
+    if (me.role !== 'admin' && me.id !== id) throw forbidden('Only an administrator can see other people’s days off');
+    res.json(staffDays(db, id));
+  });
+
+  router.put('/staff/:userId/leaving-date', requireRole('admin'), (req, res) => {
+    const id = staffId(req.params.userId);
+    const raw = req.body && typeof req.body === 'object' ? (req.body as { leavingDate?: unknown }).leavingDate : undefined;
+    if (raw === undefined) throw badRequest('Send leavingDate: a date, or null to clear it');
+    transaction(db, () => resync(db, id, setLeavingDate(db, id, raw === '' ? null : raw, todayISO())));
+    bumpDataVersion();
+    res.json(staffDays(db, id));
+  });
+
+  router.post('/staff/:userId/absences', requireRole('admin'), (req, res) => {
+    const me = currentUser(req);
+    const id = staffId(req.params.userId);
+    const body = (req.body && typeof req.body === 'object' ? req.body : {}) as Record<string, unknown>;
+    transaction(db, () => resync(db, id, addAbsences(db, me, id, body)));
+    bumpDataVersion();
+    res.status(201).json(staffDays(db, id));
+  });
+
+  router.delete('/staff/:userId/absences/:id', requireRole('admin'), (req, res) => {
+    const userId = staffId(req.params.userId);
+    const absenceId = staffId(req.params.id);
+    transaction(db, () => resync(db, userId, removeAbsence(db, userId, absenceId)));
+    bumpDataVersion();
+    res.json(staffDays(db, userId));
   });
 
   return router;

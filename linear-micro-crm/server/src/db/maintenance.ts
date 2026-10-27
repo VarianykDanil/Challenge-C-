@@ -5,6 +5,7 @@ import { bumpDataVersion } from '../lib/cache.ts';
 import { addDays, isoWeek, mondayOf, nowHHMM, nowISO, sundayOf, todayISO } from '../lib/dates.ts';
 import { conflict } from '../lib/errors.ts';
 import { payableUsers, weekPayFor, type PayUser, type WeekPay } from '../lib/pay.ts';
+import { ensureDayChecks } from '../lib/payDays.ts';
 import { payCalcContext, ruleColumnsOf, type PayCalcContext, type RuleColumns } from '../lib/payWeek.ts';
 
 /**
@@ -325,6 +326,7 @@ export function affectedPayUsers(db: Db, entry: { userId: number; eventId: numbe
  * as adjusted. Returns what happened per affected person.
  */
 export function syncPayrollForEntry(db: Db, entry: { userId: number; eventId: number; date: string }, today = todayISO()): RunSync[] {
+  ensureDayChecks(db); // MON-1 (a no-op once on; the gauge routes switch it on first, see lib/payDays.ts noteGaugeWrite)
   const monday = mondayOf(entry.date);
   const ctx = payCalcContext(db);
   return affectedPayUsers(db, entry).map((u) => syncPayrollRun(db, u, monday, today, { flagPaid: true, ctx }));
@@ -358,6 +360,8 @@ export function payrollRunsLogLine(r: MaterialiseResult): string | null {
 
 export function materialisePayrollRuns(db: Db, today = todayISO()): MaterialiseResult {
   const result: MaterialiseResult = { created: 0, updated: 0, deleted: 0 };
+  // MON-1: base days need evidence from the moment there are people (the days already logged keep counting)
+  ensureDayChecks(db);
   const firstGauge = get<{ d: string | null }>(db, `SELECT MIN(date) AS d FROM gauge_entries`)!.d;
   if (!firstGauge) return result;
   const firstWeek = mondayOf(firstGauge);

@@ -203,6 +203,13 @@ export interface WeekPayBreakdown extends PayrollBreakdown {
   salaried?: boolean;
   /** Campaign codes whose statement for this week has not arrived yet ("Not yet confirmed by BCN"), as of now. */
   awaiting?: string[];
+  /**
+   * Days with gauges that are not paid as base days yet: nobody booked the person on the event and they did not check
+   * in, or they logged nothing. A leader or the office confirms them (YYYY-MM-DD, oldest first).
+   */
+  daysWaiting?: string[];
+  /** Days a leader or the office said were not worked (not paid as base days). */
+  daysNotWorked?: string[];
 }
 
 /**
@@ -313,4 +320,107 @@ export interface ManualAdjustmentInput {
   sourceWeekStart?: string | null;
   amount: number;
   note: string;
+}
+
+// ───────────────────────────── days worked that need a check (MON-1) ─────────────────────────────
+
+/**
+ * A base day comes from a gauge entry only when there is evidence the person worked: they were booked on the event or
+ * checked in to it (and logged something), or a leader or the office confirmed the day. Otherwise the day waits.
+ */
+export type PayDayDecision = 'confirmed' | 'not_worked';
+
+/** Why a day is waiting, in plain words for the leader. */
+export type PayDayWaitReason = 'not_booked' | 'nothing_logged';
+
+/** GET /pay/day-checks: one day waiting for a leader (or the office) to confirm it. */
+export interface PayDayToCheck {
+  userId: number;
+  userName: string;
+  teamId: number | null;
+  teamName: string | null;
+  /** YYYY-MM-DD */
+  date: string;
+  /** Monday of the pay week. */
+  weekStart: string;
+  reason: PayDayWaitReason;
+  /** The gauge entries logged that day. */
+  events: { eventId: number; eventName: string; stops: number; sales: number; booked: boolean; checkedIn: boolean }[];
+  /** The leader asking cannot decide this one (their own day): only the office can. */
+  officeOnly?: boolean;
+}
+
+/** POST /pay/day-checks */
+export interface PayDayCheckInput {
+  userId: number;
+  date: string;
+  decision: PayDayDecision;
+  /** Optional, at most 300 characters. */
+  note?: string;
+}
+
+export interface PayDayCheck {
+  userId: number;
+  date: string;
+  decision: PayDayDecision;
+  by: number | null;
+  byName: string | null;
+  at: string;
+  note: string | null;
+}
+
+// ───────────────────────────── office staff: days off and leaving date (MON-8) ─────────────────────────────
+
+export type StaffAbsenceKind = 'holiday' | 'sick' | 'unpaid' | 'other';
+
+/** A weekday an office member of staff (paid a day rate) was away: not paid. */
+export interface StaffAbsence {
+  id: number;
+  userId: number;
+  /** YYYY-MM-DD, a weekday. */
+  date: string;
+  kind: StaffAbsenceKind;
+  note: string | null;
+  createdBy: number | null;
+  createdByName?: string | null;
+  createdAt: string;
+}
+
+/** GET /pay/staff/:userId — the days off and the leaving date that decide an office person's paid days. */
+export interface StaffDays {
+  userId: number;
+  /** Their last working day (YYYY-MM-DD), or null. Days after it are never paid. */
+  leavingDate: string | null;
+  absences: StaffAbsence[];
+}
+
+export interface StaffAbsenceInput {
+  /** One day, or the first of a run of days (`to` inclusive); weekends are skipped. */
+  date: string;
+  to?: string;
+  kind: StaffAbsenceKind;
+  note?: string;
+}
+
+// ───────────────────────────── what to check before paying (MON-1, MONEY-MISSED-3) ─────────────────────────────
+
+/** Pay resting on subs the rep logged that no client statement has confirmed (shared unconfirmedPay). */
+export interface UnconfirmedSubsPay {
+  subs: number;
+  /** £ of the week's pay that would not be paid without those subs. */
+  amount: number;
+  /** Campaigns still waiting for their client's statement. */
+  awaiting: string[];
+  /** Campaigns whose client sends no statements: nothing will ever confirm them. */
+  neverConfirmed: string[];
+}
+
+/**
+ * On an unpaid run, for the office (GET /finance/payroll, the payment page): what to look at before paying. Absent
+ * when there is nothing to check.
+ */
+export interface PayrollRunChecks {
+  /** Days logged with no booking or check-in, waiting for a leader: not in this pay until confirmed. */
+  daysWaiting: number;
+  unconfirmed?: UnconfirmedSubsPay | null;
 }

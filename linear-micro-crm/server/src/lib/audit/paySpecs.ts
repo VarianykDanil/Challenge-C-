@@ -130,6 +130,53 @@ interface RemoveState {
   run: Snap | null;
 }
 
+/** MON-1: a day check's run before the decision, to record what it moved. */
+interface DayCheckState {
+  run: Snap | null;
+  userId: number | null;
+  date: string | null;
+}
+
+/** MON-8: an office person's leaving date and days off, before a change. */
+function staffSnap(db: Db, userId: number | null): Snap | null {
+  if (!userId) return null;
+  const u = get<{ leavingDate: string | null }>(db, `SELECT leaving_date AS leavingDate FROM users WHERE id = ?`, [userId]);
+  if (!u) return null;
+  const days = all<{ date: string; kind: string }>(db, `SELECT date, kind FROM staff_absences WHERE user_id = ? ORDER BY date`, [userId]);
+  return { userId, leavingDate: u.leavingDate, absences: days.map((d) => `${d.date} ${d.kind}`) };
+}
+
+/** The unpaid runs of a person (id → gross), to record what a staff change recalculated. */
+function personRuns(db: Db, userId: number | null): Map<number, number> {
+  if (!userId) return new Map();
+  return new Map(all<{ id: number; gross: number }>(db, `SELECT id, gross FROM payroll_runs WHERE user_id = ? AND status IN ('pending', 'failed')`, [userId]).map((r) => [Number(r.id), Number(r.gross)]));
+}
+
+interface StaffState {
+  before: Snap | null;
+  runs: Map<number, number>;
+}
+
+function staffSpec(method: 'PUT' | 'POST' | 'DELETE', pattern: string, what: (before: Snap | null, after: Snap | null) => string): AuditRouteSpec<StaffState> {
+  return {
+    method,
+    pattern,
+    before: (db, call) => {
+      const userId = toId(call.params.userId);
+      return { before: staffSnap(db, userId), runs: personRuns(db, userId) };
+    },
+    after(db, done, state) {
+      const userId = toId(done.params.userId);
+      const after = staffSnap(db, userId);
+      if (!after) return [];
+      return [
+        { entity: 'user', entityId: userId, summary: `${what(state?.before ?? null, after)}: ${personName(db, userId)}`, before: state?.before ?? null, after },
+        ...recalculatedDraft(db, state?.runs, `${personName(db, userId)}'s days changed`),
+      ];
+    },
+  };
+}
+
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 export const AUDIT_SPECS: readonly AuditRouteSpec<any>[] = [
   {
@@ -182,4 +229,33 @@ export const AUDIT_SPECS: readonly AuditRouteSpec<any>[] = [
       ];
     },
   } satisfies AuditRouteSpec<RemoveState>,
+  {
+    method: 'POST',
+    pattern: '/pay/day-checks',
+    before(db, call): DayCheckState {
+      const body = isRecord(call.body) ? call.body : {};
+      const userId = toId(body.userId);
+      const date = isoDay(body.date);
+      return { run: runFor(db, userId, date), userId, date };
+    },
+    after(db, done, state: DayCheckState | undefined) {
+      const r = isRecord(done.response) ? done.response : null;
+      if (!r || !state?.userId || !state.date) return [];
+      const worked = r.decision === 'confirmed';
+      const note = typeof r.note === 'string' && r.note ? ` — ${r.note}` : '';
+      return [
+        { entity: 'user', entityId: state.userId, summary: `${worked ? 'Confirmed a day worked' : 'Marked a day as not worked'}: ${personName(db, state.userId)}, ${state.date}${note}`, before: null, after: r },
+        ...runDraft(db, state.run, state.userId, state.date, worked ? 'after a day was confirmed' : 'after a day was marked not worked'),
+      ];
+    },
+  } satisfies AuditRouteSpec<DayCheckState>,
+  staffSpec('PUT', '/pay/staff/:userId/leaving-date', (_b, a) => (a?.leavingDate ? `Set the leaving date to ${String(a.leavingDate)}` : 'Cleared the leaving date')),
+  staffSpec('POST', '/pay/staff/:userId/absences', (b, a) => {
+    const added = ((a?.absences as string[]) ?? []).filter((x) => !((b?.absences as string[]) ?? []).includes(x));
+    return `Added ${added.length === 1 ? 'a day off' : `${added.length} days off`} (${added.join(', ')})`;
+  }),
+  staffSpec('DELETE', '/pay/staff/:userId/absences/:id', (b, a) => {
+    const gone = ((b?.absences as string[]) ?? []).filter((x) => !((a?.absences as string[]) ?? []).includes(x));
+    return `Removed a day off (${gone.join(', ')})`;
+  }),
 ];

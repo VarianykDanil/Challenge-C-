@@ -145,6 +145,9 @@ test('weekPayForecast: null without a team, a constant number of statements, no 
 
 test('logging today removes today from the days left', async () => {
   const id = addGauge(srv.db, { eventId: fx().events.todayA, userId: fx().users.rep, date: TODAY, stops: 40, sales: 2 });
+  // 1.5 (MON-1): a self-logged day pays a base day only with evidence: Remy checked in to today's event
+  const ci = srv.db.prepare(`INSERT INTO check_ins (user_id, event_id, date, checked_in_at, source, created_at) VALUES (?, ?, ?, ?, 'button', ?)`)
+    .run(fx().users.rep, fx().events.todayA, TODAY, `${TODAY}T09:00:00`, new Date().toISOString()).lastInsertRowid;
   try {
     const f = (await rep.get('/finance/me')).json.forecast;
     assert.equal(f.remainingDays, 1);
@@ -156,6 +159,7 @@ test('logging today removes today from the days left', async () => {
     assert.equal(f.rule.beatBaseProbability, 1);
   } finally {
     srv.db.prepare('DELETE FROM gauge_entries WHERE id = ?').run(id);
+    srv.db.prepare('DELETE FROM check_ins WHERE id = ?').run(ci);
   }
 });
 
@@ -187,6 +191,9 @@ test('a gauge row added after the run was calculated → stale_amount', async ()
   const f = fx();
   const fri = addEvent(srv.db, { campaignId: f.campaignId, teamId: f.teams.a, date: '2026-09-11' });
   addGauge(srv.db, { eventId: fri, userId: f.users.rep, date: '2026-09-11', stops: 50, sales: 3 });
+  // 1.5 (MON-1): the day counts as a base day once someone confirmed it (here: the leader)
+  srv.db.prepare(`INSERT INTO pay_day_checks (user_id, date, decision, source, decided_by, decided_at) VALUES (?, '2026-09-11', 'confirmed', 'leader', ?, ?)`)
+    .run(f.users.rep, f.users.leader, new Date().toISOString());
   const runs = (await admin.get('/finance/payroll?status=pending,failed')).json;
   const stale = byWeek(runs, f.users.rep).get('2026-09-07')!;
   const flag = stale.flags.find((x: Json) => x.code === 'stale_amount');

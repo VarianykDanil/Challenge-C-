@@ -55,6 +55,7 @@ import { bumpDataVersion } from './cache.ts';
 import { addDays, isISODate, mondayOf, nowISO, sundayOf, todayISO } from './dates.ts';
 import { HttpError, badRequest, conflict, notFound } from './errors.ts';
 import { paidWeekOf, type ExtraCampaign, type PaidRunColumns } from './paidWeek.ts';
+import { weekDayStatus } from './payDays.ts';
 import {
   ADJUSTMENT_SELECT,
   DAY_RATE_KEY,
@@ -369,6 +370,19 @@ export function weekPayBreakdown(db: Db, userId: number, weekStart: string, opts
     explanation.push(`${a.kind === 'bonus' ? 'Bonus' : 'Correction'} ${paySignedMoney(a.amount)}${a.note ? ` (${a.note})` : ''} on the pay for ${payWeekLabel(a.targetWeekStart)}.`);
   }
 
+  // MON-1: gauge days not paid as base days (yet): while the week is unpaid, what a leader can still confirm
+  const dayStatus = paid ? { waiting: [] as string[], notWorked: [] as string[] } : weekDayStatus(db, userId, monday, sunday);
+  if (dayStatus.waiting.length && !salaried) {
+    const n = dayStatus.waiting.length;
+    const list = dayStatus.waiting.map(payDayLabel).join(', ');
+    explanation.push(own
+      ? `${n === 1 ? '1 day is' : `${n} days are`} waiting for your leader to confirm ${n === 1 ? 'it' : 'them'} (${list}): nobody booked you on the event and you did not check in, or nothing was logged. ${n === 1 ? 'It is' : 'They are'} paid as base days once confirmed.`
+      : `${n === 1 ? `1 of ${user.firstName}'s days is` : `${n} of ${user.firstName}'s days are`} waiting for a leader to confirm ${n === 1 ? 'it' : 'them'} (${list}): not booked on the event and no check-in, or nothing logged. Not paid as base days until confirmed.`);
+  }
+  if (dayStatus.notWorked.length && !salaried) {
+    explanation.push(`${dayStatus.notWorked.map(payDayLabel).join(', ')}: marked as not worked by a leader or the office, so not paid as ${dayStatus.notWorked.length === 1 ? 'a base day' : 'base days'}.`);
+  }
+
   // campaigns still waiting for their statement for this week (a paid week may have been confirmed since)
   const awaiting = result.perCampaign
     .filter((c) => !c.statementConfirmed && c.awaitsStatement !== false && c.logged > 0 && !confirmedNow.has(c.campaignId))
@@ -407,6 +421,8 @@ export function weekPayBreakdown(db: Db, userId: number, weekStart: string, opts
     asCalculated: asPaid,
     salaried,
     awaiting,
+    ...(dayStatus.waiting.length ? { daysWaiting: dayStatus.waiting } : {}),
+    ...(dayStatus.notWorked.length ? { daysNotWorked: dayStatus.notWorked } : {}),
   };
 }
 

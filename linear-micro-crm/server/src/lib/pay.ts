@@ -27,8 +27,9 @@ export interface WeekPay {
 /**
  * People who can earn in the Mon–Sun week starting `monday`: started by that Sunday and either still active, or with
  * gauges recorded that week (so a leaver's final week is still paid), or with a correction or bonus landing on that
- * week (1.3: money owed after a statement still reaches a leaver). Optionally limited to one team. Release 1.3: never a
- * client portal account (role 'client').
+ * week (1.3: money owed after a statement still reaches a leaver), or whose leaving date falls in or after that week
+ * (MON-8: an office leaver's last days are paid). Optionally limited to one team. Release 1.3: never a client portal
+ * account (role 'client').
  */
 export function payableUsers(db: Db, monday: string, teamId: number | null = null): (PayUser & { employeeId: string })[] {
   const sunday = sundayOf(monday);
@@ -39,10 +40,11 @@ export function payableUsers(db: Db, monday: string, teamId: number | null = nul
      WHERE u.start_date <= ? AND u.role <> 'client'
        AND (u.status = 'active'
             OR EXISTS (SELECT 1 FROM gauge_entries g WHERE g.user_id = u.id AND g.date BETWEEN ? AND ?)
-            OR EXISTS (SELECT 1 FROM pay_adjustments a WHERE a.user_id = u.id AND a.target_week_start = ?))
+            OR EXISTS (SELECT 1 FROM pay_adjustments a WHERE a.user_id = u.id AND a.target_week_start = ?)
+            OR (u.leaving_date IS NOT NULL AND u.leaving_date >= ?))
        ${teamId ? 'AND u.team_id = ?' : ''}
      ORDER BY u.id`,
-    teamId ? [sunday, monday, sunday, monday, teamId] : [sunday, monday, sunday, monday],
+    teamId ? [sunday, monday, sunday, monday, monday, teamId] : [sunday, monday, sunday, monday, monday],
   );
 }
 
