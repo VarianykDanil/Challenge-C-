@@ -10,6 +10,7 @@
     "typecheck": "tsc --noEmit -p tsconfig.json"
   },
   "dependencies": {
+    "@fontsource-variable/inter": "5.2.8",
     "@lm/shared": "*",
     "@tanstack/react-query": "^5.76.1",
     "clsx": "^2.1.1",

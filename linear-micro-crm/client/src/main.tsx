@@ -4,6 +4,8 @@ import { BrowserRouter } from 'react-router-dom';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import App from './App';
 import { ApiError } from './api/client';
+// Inter (variable weight, Latin and other scripts split by unicode-range) served from this app, not Google Fonts.
+import '@fontsource-variable/inter/wght.css';
 import './index.css';
 
 const queryClient = new QueryClient({
