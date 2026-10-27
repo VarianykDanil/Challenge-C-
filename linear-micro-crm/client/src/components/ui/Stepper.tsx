@@ -1,6 +1,7 @@
 import { useEffect, useId, useRef, useState, type ChangeEvent, type KeyboardEvent } from 'react';
 import { Minus, Plus } from 'lucide-react';
 import clsx from 'clsx';
+import { typedStepperValue } from './stepperValue';
 
 export interface StepperProps {
   value: number;
@@ -72,6 +73,7 @@ export function Stepper({ value, onChange, min = 0, max = Number.MAX_SAFE_INTEGE
   };
 
   const s = SIZE[size];
+  const outOfRange = draft != null && typedStepperValue(draft, min, max, step).outOfRange;
   const atMin = value <= min;
   const atMax = value >= max;
   const btnBase = clsx(
@@ -92,7 +94,7 @@ export function Stepper({ value, onChange, min = 0, max = Number.MAX_SAFE_INTEGE
         className={clsx(
           'inline-flex items-stretch overflow-hidden rounded-xl border bg-surface shadow-card transition-[border-color,box-shadow] duration-150',
           'focus-within:border-primary focus-within:ring-[3px] focus-within:ring-primary/20',
-          invalid ? 'border-danger' : 'border-control-border',
+          invalid || outOfRange ? 'border-danger' : 'border-control-border',
           disabled && 'opacity-60',
           fullWidth && 'w-full',
           s.h,
@@ -122,10 +124,16 @@ export function Stepper({ value, onChange, min = 0, max = Number.MAX_SAFE_INTEGE
           aria-valuenow={value}
           aria-valuemin={min}
           aria-valuemax={max === Number.MAX_SAFE_INTEGER ? undefined : max}
-          aria-invalid={invalid || undefined}
+          aria-invalid={invalid || outOfRange || undefined}
           disabled={disabled}
           value={draft ?? String(value)}
-          onChange={(e: ChangeEvent<HTMLInputElement>) => setDraft(e.target.value.replace(/[^\d-]/g, ''))}
+          onChange={(e: ChangeEvent<HTMLInputElement>) => {
+            // the form sees each keystroke (its checks run as you type), not only when the field is left
+            const raw = e.target.value.replace(/[^\d-]/g, '');
+            setDraft(raw);
+            const typed = typedStepperValue(raw, min, max, step);
+            if (typed.value != null && typed.value !== latest.current) onChange(typed.value);
+          }}
           onFocus={(e) => e.target.select()}
           onBlur={commitDraft}
           onKeyDown={onKeyDown}
@@ -146,6 +154,11 @@ export function Stepper({ value, onChange, min = 0, max = Number.MAX_SAFE_INTEGE
           <Plus strokeWidth={2.5} aria-hidden />
         </button>
       </div>
+      {outOfRange && (
+        <p className="mt-1 text-xs text-danger" role="alert">
+          {max === Number.MAX_SAFE_INTEGER ? `Use ${min} or more.` : `Use a number from ${min} to ${max}.`}
+        </p>
+      )}
     </div>
   );
 }
