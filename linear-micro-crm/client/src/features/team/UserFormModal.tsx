@@ -1,11 +1,12 @@
 // Admin-only create / edit user form. Release 1.3.1: recruiters and leaders add people with AddPersonModal instead.
-// Making an administrator (new or promoted) and changing someone's sign-in email need the admin's fresh two-step code;
+// Making, demoting or setting as left an administrator, and changing someone's sign-in email or employee ID, need the
+// admin's fresh two-step code;
 // a new person's Sign-in details (with their one-time setup code) show once after saving.
 import { useId, useState } from 'react';
 import { ShieldCheck, ShieldOff } from 'lucide-react';
 import type { AddPersonResult, Position, Role, SetupCodeIssued, UserStatus, UserWithTeam } from '@lm/shared';
 // Release 1.3: the staff roles only — client portal accounts are invited from the campaign page (P6), never here.
-import { POSITIONS, POSITION_LABELS, ROLE_LABELS, STAFF_ROLES } from '@lm/shared';
+import { POSITIONS, POSITION_LABELS, ROLE_LABELS, STAFF_ROLES, staffEditStepUp } from '@lm/shared';
 import { Badge, Button, Field, Input, Modal, Select, useToast } from '@/components/ui';
 import { useCreateUser, usePayPlans, useResetUserTwoFactor, useTeams, useUpdateUser } from '@/api/hooks';
 import { useCurrentUser } from '@/auth/AuthProvider';
@@ -58,11 +59,11 @@ function UserForm({ onClose, user, onSaved, onCreated }: { onClose: () => void; 
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [stepUp, setStepUp] = useState('');
   const set = (k: keyof typeof f) => (v: string) => setF((s) => ({ ...s, [k]: v }));
-  // the admin's fresh two-step code: a new administrator, a promotion to administrator, or a new sign-in email
-  const makingAdmin = f.role === 'admin' && user?.role !== 'admin';
-  const newEmail = !!user && f.email.trim().toLowerCase() !== user.email.toLowerCase();
-  const needsStepUp = makingAdmin || newEmail;
-  const stepUpWhy = makingAdmin ? 'Making someone an administrator needs your code.' : 'Changing someone’s sign-in email needs your code.';
+  // the admin's fresh two-step code (shared staffEditStepUp, the server's rule): making, demoting or setting as left an
+  // administrator, or a new sign-in email or employee ID
+  const stepUpReason = staffEditStepUp(user ?? null, { role: f.role, status: f.status, email: f.email, ...(user ? { employeeId: f.employeeId } : {}) });
+  const needsStepUp = stepUpReason !== null;
+  const stepUpWhy = stepUpReason?.why ?? '';
 
   const submit = async () => {
     const e: Record<string, string> = {};

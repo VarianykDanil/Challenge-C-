@@ -2,7 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
   ACCESS_MESSAGES, SETUP_CODE_ALPHABET, SETUP_CODE_LENGTH, clientInviteInstructions, isSetupCodeComplete, normaliseSetupCode, setupCodeExpiryText,
-  staffSignInInstructions, trialHeadline,
+  staffEditStepUp, staffSignInInstructions, trialHeadline,
 } from '../index.ts';
 
 test('setup codes: forgiving to type (case, spaces, dashes), strict about the symbols', () => {
@@ -63,4 +63,25 @@ test('client invite instructions carry the setup code too', () => {
   assert.match(text, /\n5\. Then set up two-step verification\./);
   const none = clientInviteInstructions({ firstName: 'Jo', email: 'jo@charity.example', accessCode: 'CL-0002', campaignName: 'A Charity' });
   assert.match(none, /\n3\. The first time, type the one-time setup code Linear MCR gives you\./);
+});
+
+test('editing someone: who is an administrator and what they sign in with need the admin’s code', () => {
+  const admin = { role: 'admin', status: 'active', email: 'sam@office.example', employeeId: 'LM-0002' } as const;
+  const rep = { role: 'rep', status: 'active', email: 'kit@office.example', employeeId: 'LM-0600' } as const;
+  // nothing sensitive: no code
+  assert.equal(staffEditStepUp(rep, {}), null);
+  assert.equal(staffEditStepUp(rep, { role: 'leader', status: 'left', phone: '07700 900111' }), null, 'a rep becoming a leader or leaving');
+  assert.equal(staffEditStepUp(rep, { email: 'KIT@office.example', employeeId: 'lm-0600' }), null, 'the same email or ID in other letters');
+  assert.equal(staffEditStepUp(admin, { role: 'admin', status: 'active' }), null);
+  assert.equal(staffEditStepUp(null, { role: 'rep' }), null, 'a new non-admin');
+  // each sensitive change
+  assert.equal(staffEditStepUp(null, { role: 'admin' })?.what, 'make someone an administrator');
+  assert.equal(staffEditStepUp(rep, { role: 'admin' })?.what, 'make someone an administrator');
+  assert.equal(staffEditStepUp(admin, { role: 'rep' })?.what, 'stop someone being an administrator');
+  assert.equal(staffEditStepUp(admin, { status: 'left' })?.what, 'set an administrator as left');
+  assert.equal(staffEditStepUp(rep, { email: 'kit.lane@office.example' })?.what, 'change someone’s sign-in email');
+  assert.equal(staffEditStepUp(rep, { employeeId: 'LM-0999' })?.what, 'change someone’s employee ID');
+  // the sentence the form shows, and one code for a change that is sensitive twice over
+  assert.equal(staffEditStepUp(admin, { role: 'rep', email: 'x@office.example' })?.why, 'Stopping someone being an administrator needs your code.');
+  assert.equal(staffEditStepUp(rep, { employeeId: 'LM-0999' })?.why, 'Changing someone’s employee ID needs your code.');
 });

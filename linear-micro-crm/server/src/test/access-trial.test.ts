@@ -151,14 +151,16 @@ test('a demo admin cannot create or promote an admin, reset anyone’s sign-in o
   assert.equal(rep.status, 201, JSON.stringify(rep.json));
 });
 
-test('a demo admin cannot switch a payment connection to live or approve a payment', async () => {
+test('a demo admin cannot add or change a payment connection, or approve a payment', async () => {
   srv = await startTestServer({ seed: true });
   const admin = await srv.login('admin');
   const adminId = idOf(DEMO_ACCOUNTS.admin.employeeId);
   registerPaymentProvider(createFakeProvider({ kind: 'api', submitStatus: 'paid' }));
-  const conn = await admin.post('/payments/connections', { provider: 'fake', name: 'Fake' });
-  assert.equal(conn.status, 201, JSON.stringify(conn.json));
-  assert.equal((await admin.post(`/payments/connections/${conn.json.id}/test`)).json.ok, true);
+  // payment connections are office-wide settings: a demo account neither adds nor changes one (review of SEC-1; it
+  // used to add and test them, only going live was refused)
+  assert.ok(isDemoRefusal(await admin.post('/payments/connections', { provider: 'fake', name: 'Fake' })));
+  const conn = { json: { id: run(db(), `INSERT INTO payment_connections (provider, name, mode, settings_json, status, created_at) VALUES ('fake', 'Fake', 'test', '{}', 'connected', ?)`, [new Date().toISOString()]).lastInsertRowid } };
+  assert.ok(isDemoRefusal(await admin.post(`/payments/connections/${conn.json.id}/test`)));
   const live = await admin.patch(`/payments/connections/${conn.json.id}`, { mode: 'live', confirm: PAYMENT_LIVE_CONFIRMATION });
   assert.ok(isDemoRefusal(live), JSON.stringify(live));
   assert.equal(get<{ mode: string }>(db(), `SELECT mode FROM payment_connections WHERE id = ?`, [conn.json.id])!.mode, 'test');

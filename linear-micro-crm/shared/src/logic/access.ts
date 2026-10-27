@@ -56,3 +56,42 @@ export function setupCodeExpiryText(expiresAt: string): string {
   const time = new Intl.DateTimeFormat('en-GB', { timeZone: 'Europe/London', hour: '2-digit', minute: '2-digit', hourCycle: 'h23' }).format(d);
   return `Valid until ${day}, ${time}`;
 }
+
+/** The parts of a staff account an edit can change that decide who runs the office and how someone signs in. */
+export interface StaffAccess {
+  role: string;
+  status: string;
+  email: string;
+  employeeId: string;
+}
+
+/** What needs the admin's code: `what` finishes "Demo accounts cannot …"; `why` is the form's sentence. */
+export interface StaffEditStepUp {
+  what: string;
+  why: string;
+}
+
+const STEP_UP_REASONS = {
+  makeAdmin: { what: 'make someone an administrator', why: 'Making someone an administrator needs your code.' },
+  stopAdmin: { what: 'stop someone being an administrator', why: 'Stopping someone being an administrator needs your code.' },
+  adminLeft: { what: 'set an administrator as left', why: 'Setting an administrator as left needs your code.' },
+  email: { what: 'change someone’s sign-in email', why: 'Changing someone’s sign-in email needs your code.' },
+  employeeId: { what: 'change someone’s employee ID', why: 'Changing someone’s employee ID needs your code.' },
+} as const satisfies Record<string, StaffEditStepUp>;
+
+/**
+ * Whether adding (`existing` null) or editing a staff account needs the acting admin's fresh two-step code: making,
+ * demoting or setting as left an administrator, and changing the email or employee ID someone signs in with (case
+ * does not count). The first reason, or null. One code covers a change that is sensitive in several ways.
+ */
+export function staffEditStepUp(existing: StaffAccess | null, patch: Partial<StaffAccess> & Record<string, unknown>): StaffEditStepUp | null {
+  const same = (a: string, b: string) => a.trim().toLowerCase() === b.trim().toLowerCase();
+  if (!existing) return patch.role === 'admin' ? STEP_UP_REASONS.makeAdmin : null;
+  const wasAdmin = existing.role === 'admin';
+  if (!wasAdmin && patch.role === 'admin') return STEP_UP_REASONS.makeAdmin;
+  if (wasAdmin && patch.role !== undefined && patch.role !== 'admin') return STEP_UP_REASONS.stopAdmin;
+  if (wasAdmin && patch.status === 'left' && existing.status !== 'left') return STEP_UP_REASONS.adminLeft;
+  if (typeof patch.email === 'string' && !same(patch.email, existing.email)) return STEP_UP_REASONS.email;
+  if (typeof patch.employeeId === 'string' && !same(patch.employeeId, existing.employeeId)) return STEP_UP_REASONS.employeeId;
+  return null;
+}

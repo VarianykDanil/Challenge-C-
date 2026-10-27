@@ -1,6 +1,6 @@
 import { Router } from 'express';
 import { z } from 'zod';
-import { POSITIONS, addPersonRefusal, staffSignInInstructions, type AddPersonResult, type Position, type SetupCodeIssued, type UserWithTeam } from '@lm/shared';
+import { POSITIONS, addPersonRefusal, staffEditStepUp, staffSignInInstructions, type AddPersonResult, type Position, type SetupCodeIssued, type UserWithTeam } from '@lm/shared';
 import { all, get, run, transaction, type Db } from '../db/connection.ts';
 import { USER_SELECT, Where, getUser, listGauges } from '../db/queries.ts';
 import { AVATAR_PALETTE } from '../db/seed-data.ts';
@@ -211,10 +211,10 @@ export function usersRouter(db: Db): Router {
     const existing = getStaffUser(db, id);
     if (!existing) throw notFound('User');
     const patch = patchBody.parse(req.body);
-    // making someone an administrator, or changing the email they sign in with: refused for a demo account, and it
-    // needs this admin's fresh two-step code
-    if (patch.role === 'admin' && existing.role !== 'admin') assertStepUp(db, me, req, 'make someone an administrator');
-    if (patch.email !== undefined && patch.email.toLowerCase() !== existing.email.toLowerCase()) assertStepUp(db, me, req, 'change someone’s sign-in email');
+    // who is an administrator, and what someone signs in with (shared staffEditStepUp): refused for a demo account, and
+    // it needs this admin's fresh two-step code
+    const sensitive = staffEditStepUp(existing, patch);
+    if (sensitive) assertStepUp(db, me, req, sensitive.what);
     if (patch.lastName === '' && existing.lastName.trim() !== '') {
       throw badRequest('Enter their last name', [{ path: 'lastName', message: 'Enter their last name' }]);
     }

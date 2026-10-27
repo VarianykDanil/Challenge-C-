@@ -120,7 +120,7 @@ const WRITE_BODY = { provider: 'fake', name: 'x', holderName: 'Someone Test', so
 
 // Trial mode: the demo admin is a one-tap account anyone on the network can open, so it never approves a payment or
 // switches a connection to live, with or without two-step (it used to be able to, once it had set two-step up).
-test('the demo admin is exempt from two-step, but never switches a connection to live or approves a payment, two-step or not', async () => {
+test('the demo admin is exempt from two-step, but never touches a payment connection or approves a payment, two-step or not', async () => {
   srv = await startTestServer({ seed: true });
   const adminId = idOf(DEMO_ACCOUNTS.admin.employeeId);
   const jordanId = idOf(DEMO_ACCOUNTS.rep.employeeId);
@@ -137,10 +137,15 @@ test('the demo admin is exempt from two-step, but never switches a connection to
 
   const fake = createFakeProvider({ kind: 'api', submitStatus: 'paid' });
   registerPaymentProvider(fake);
+  // 1.5: payment connections are office-wide settings, so the demo admin neither adds nor tests nor changes one; the
+  // office's own administrator set this one up
   const made = await admin.post('/payments/connections', { provider: 'fake', name: 'Fake' });
-  assert.equal(made.status, 201, JSON.stringify(made.json));
-  const conn = made.json.id as number;
-  assert.equal((await admin.post(`/payments/connections/${conn}/test`)).json.ok, true, 'testing in test mode is fine for the demo');
+  assert.equal(made.status, 403);
+  assert.equal(made.json.details.code, 'demo_account');
+  const conn = run(db(), `INSERT INTO payment_connections (provider, name, mode, settings_json, status, created_at) VALUES ('fake', 'Fake', 'test', '{}', 'connected', ?)`, [
+    new Date().toISOString(),
+  ]).lastInsertRowid;
+  assert.equal((await admin.post(`/payments/connections/${conn}/test`)).json.details.code, 'demo_account');
   const live = await admin.patch(`/payments/connections/${conn}`, { mode: 'live', confirm: PAYMENT_LIVE_CONFIRMATION });
   assert.equal(live.status, 403);
   assert.equal(live.json.details.code, 'demo_account');
