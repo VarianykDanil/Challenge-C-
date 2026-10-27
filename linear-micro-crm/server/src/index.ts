@@ -1,5 +1,6 @@
 /** Linear Hub API — bootstrap: open the SQLite database, create/seed it, run maintenance, mount the app. */
 import http from 'node:http';
+import https from 'node:https';
 import path from 'node:path';
 import { createApp, parseTrustProxy } from './app.ts';
 import { openDb } from './db/connection.ts';
@@ -10,7 +11,7 @@ import { findPortHolder, installExitDiagnostics, listeningUrl, networkUrls, port
 import { backupDirFor, backupHour, backupsEnabled, configureBackupDir, scheduleBackups, whenBackupIdle } from './lib/backup.ts';
 import { clientBuildStatus, staleBuildMessage } from './lib/buildStatus.ts';
 import { announceAppSecret, appSecretFile, configureAppSecret } from './lib/crypto.ts';
-import { businessClockPinned, businessNow } from './lib/dates.ts';
+import { businessClockPinned, businessNow, todayISO } from './lib/dates.ts';
 import { purgeExpiredChallenges, reencryptLegacySecrets } from './lib/twofactor.ts';
 import { purgeAuditLog } from './lib/audit.ts';
 // Release 1.3: background jobs (invoices: issue on week close and deem accepted; statements: the Gmail check).
@@ -18,8 +19,21 @@ import { startInvoiceJobs } from './lib/invoices.ts';
 import { startStatementJob } from './lib/statements/job.ts';
 import { startPaymentsJob } from './lib/payments/job.ts';
 import { purgeExpiredSessions } from './middleware/auth.ts';
+import { readTlsFiles, tlsFilesFromEnv } from './lib/tls.ts';
+import { loadStarterTeam, starterTeamFileFor } from './lib/starterTeam.ts';
 
 const dbPath = process.env.DB_PATH ? path.resolve(process.env.DB_PATH) : DEFAULT_DB_PATH;
+// Built-in HTTPS when LM_TLS_CERT_FILE and LM_TLS_KEY_FILE are both set (lib/tls.ts): checked before anything opens, so
+// a typo in a path stops the start with a sentence instead of serving plain http by mistake.
+let tls: { cert: Buffer; key: Buffer } | null = null;
+try {
+  const files = tlsFilesFromEnv();
+  tls = files ? readTlsFiles(files) : null;
+} catch (err) {
+  console.error(err instanceof Error ? err.message : String(err));
+  process.exit(1);
+}
+const scheme = tls ? 'https' : 'http';
 // The encryption key for two-step secrets: LM_APP_SECRET, else a generated key kept next to the database
 // (server/data/app-secret by default; LM_APP_SECRET_FILE relocates it).
 configureAppSecret(process.env.LM_APP_SECRET_FILE ? path.resolve(process.env.LM_APP_SECRET_FILE) : path.join(path.dirname(dbPath), 'app-secret'));
@@ -27,14 +41,15 @@ if (businessClockPinned()) {
   console.warn(`LM_BUSINESS_NOW is set: "today" for events, gauges and pay is ${businessNow().toString()}, not the real date. Unset it for real use.`);
 }
 const db = openDb(dbPath);
-const upgraded = createSchema(db, { demoSteps: true }); // the server's start: the demo-account steps may run (UpgradeOptions)
+// the server's start: the demo-account steps may run (UpgradeOptions), with the office's own starter team if it has one
+const upgraded = createSchema(db, { demoSteps: true, starterTeamFile: starterTeamFileFor(dbPath) });
 if (upgraded.length) console.log(`Upgraded schema: added ${upgraded.join(', ')}`);
 announceAppSecret();
 const rekeyed = reencryptLegacySecrets(db);
 if (rekeyed) console.log(`Re-encrypted ${rekeyed} two-step secret(s) written under the old development key`);
 if (!isSeeded(db)) {
   const started = performance.now();
-  const stats = seed(db);
+  const stats = seed(db, todayISO(), { starterTeam: loadStarterTeam(starterTeamFileFor(dbPath)) });
   console.log(
     `Seeded ${dbPath} in ${Math.round(performance.now() - started)}ms ` +
       `(${stats.users} users, ${stats.events} events, ${stats.gauges} gauges, ${stats.payrollRuns} payroll runs, ${stats.candidates} candidates)`,
@@ -121,7 +136,8 @@ if (holder) {
 // listener too, so a failed bind (EADDRINUSE) would call it with the error, print "listening", swallow the error and
 // let the process end with exit code 0 and nothing on the terminal. Here the server's 'error' event is reported
 // by installExitDiagnostics and the callback only ever runs on 'listening'.
-const server = http.createServer(app);
+// With built-in HTTPS the same port speaks TLS (there is no plain-http port): cookies are Secure and answers carry HSTS.
+const server = tls ? https.createServer({ cert: tls.cert, key: tls.key }, app) : http.createServer(app);
 
 let stopping = false;
 function shutdown(): void {
@@ -145,13 +161,20 @@ installExitDiagnostics({ server, shutdown });
 const host = process.env.HOST?.trim() || undefined;
 server.listen(port, host, () => {
   console.log(
-    `Linear Hub API listening on ${listeningUrl(server, port)}${isProduction ? ' (serving client/dist)' : ''}. Press Ctrl+C to stop.`,
+    `Linear Hub API listening on ${listeningUrl(server, port, scheme)}${isProduction ? ' (serving client/dist)' : ''}. Press Ctrl+C to stop.`,
   );
-  const urls = networkUrls(port, host);
+  const urls = networkUrls(port, host, scheme);
   if (urls.length) {
     console.log(`On your network (same Wi-Fi or hotspot): ${urls.map((u) => u.url).join('  ')}`);
     console.log('Run  npm run share  in another terminal for a QR code to open it on a phone.');
+    if (!tls && !process.env.TRUST_PROXY?.trim()) {
+      console.log(
+        'Plain http: bank details, payments and setup codes work only on this computer itself. Other devices need https ' +
+          '(LM_TLS_CERT_FILE and LM_TLS_KEY_FILE, or a reverse proxy: docs/DEPLOY.md).',
+      );
+    }
   } else if (host) {
     console.log(`Bound to ${host} only: other devices cannot reach it (unset HOST to allow them).`);
   }
+  if (tls) console.log('HTTPS is on (LM_TLS_CERT_FILE): sign-in cookies are Secure and browsers are told to keep using https.');
 });

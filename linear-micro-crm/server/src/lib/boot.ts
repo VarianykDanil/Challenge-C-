@@ -15,6 +15,7 @@
  */
 import { execFileSync } from 'node:child_process';
 import type { Server } from 'node:http';
+import https from 'node:https';
 import net from 'node:net';
 import os from 'node:os';
 
@@ -100,18 +101,41 @@ export function looksLikeLinearHub(command: string | null): boolean {
   return !!command && /(^|[\s/])(node|tsx)\b.*\bsrc\/index\.ts\b|linear-micro-crm[\/]server/.test(command);
 }
 
-/** Does the process answering on host:port look like this app (GET /api/health → {ok:true, version})? */
+/**
+ * Does the process answering on host:port look like this app (GET /api/health → {ok:true, version})? Plain http first,
+ * then https (built-in HTTPS, LM_TLS_CERT_FILE): a liveness probe of this very machine, so the certificate is not checked.
+ */
 export async function isLinearHub(host: string, port: number, timeoutMs = 1500): Promise<boolean> {
+  const where = host.includes(':') ? `[${host}]` : host;
   try {
-    const url = `http://${host.includes(':') ? `[${host}]` : host}:${port}/api/health`;
-    const res = await fetch(url, { signal: AbortSignal.timeout(timeoutMs) });
+    const res = await fetch(`http://${where}:${port}/api/health`, { signal: AbortSignal.timeout(timeoutMs) });
     if (!res.ok) return false;
     const body = (await res.json()) as { ok?: boolean; version?: string };
     return body?.ok === true && typeof body.version === 'string';
   } catch (err) {
     if (process.env.LM_DEBUG) console.error(`health probe ${host}:${port} failed: ${err instanceof Error ? `${err.message}${err.cause instanceof Error ? ` (${err.cause.message})` : ''}` : String(err)}`);
-    return false;
+    return isLinearHubOverHttps(host, port, timeoutMs);
   }
+}
+
+function isLinearHubOverHttps(host: string, port: number, timeoutMs: number): Promise<boolean> {
+  return new Promise((resolve) => {
+    const req = https.get({ host, port, path: '/api/health', rejectUnauthorized: false, timeout: timeoutMs }, (res) => {
+      let data = '';
+      res.setEncoding('utf8');
+      res.on('data', (c: string) => (data += c));
+      res.on('end', () => {
+        try {
+          const body = JSON.parse(data) as { ok?: boolean; version?: string };
+          resolve(res.statusCode === 200 && body?.ok === true && typeof body.version === 'string');
+        } catch {
+          resolve(false);
+        }
+      });
+    });
+    req.on('timeout', () => req.destroy());
+    req.on('error', () => resolve(false));
+  });
 }
 
 /** Something already answers on the port (checked on 127.0.0.1 and ::1), or null when it is free. */
@@ -256,26 +280,26 @@ export interface NetworkUrl {
  * Addresses other devices on the same Wi-Fi or hotspot can use: every non-internal IPv4 address plus the
  * machine's `.local` name (Bonjour/mDNS, which phones and Macs resolve without knowing the IP).
  */
-export function networkUrls(port: number, host?: string): NetworkUrl[] {
+export function networkUrls(port: number, host?: string, scheme: 'http' | 'https' = 'http'): NetworkUrl[] {
   if (host && !['0.0.0.0', '::', ''].includes(host)) return [];
   const urls: NetworkUrl[] = [];
   for (const [name, addresses] of Object.entries(os.networkInterfaces())) {
     for (const a of addresses ?? []) {
       if (a.internal || a.family !== 'IPv4') continue;
-      urls.push({ via: name, url: `http://${a.address}:${port}` });
+      urls.push({ via: name, url: `${scheme}://${a.address}:${port}` });
     }
   }
   const hostname = os.hostname();
   if (urls.length && hostname && hostname !== 'localhost') {
     const local = hostname.endsWith('.local') ? hostname : `${hostname}.local`;
-    urls.push({ via: 'hostname', url: `http://${local.toLowerCase()}:${port}` });
+    urls.push({ via: 'hostname', url: `${scheme}://${local.toLowerCase()}:${port}` });
   }
   return urls;
 }
 
-/** Human-readable bound address of a listening server (`http://localhost:4000`). */
-export function listeningUrl(server: Server, fallbackPort: number): string {
+/** Human-readable bound address of a listening server (`http://localhost:4000`, or https with built-in HTTPS). */
+export function listeningUrl(server: Server, fallbackPort: number, scheme: 'http' | 'https' = 'http'): string {
   const address = server.address();
   const port = typeof address === 'object' && address ? address.port : fallbackPort;
-  return `http://localhost:${port}`;
+  return `${scheme}://localhost:${port}`;
 }
