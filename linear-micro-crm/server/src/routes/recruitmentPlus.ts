@@ -51,7 +51,7 @@ import {
   saveInterviewAnswers,
   scheduleItems,
 } from '../lib/recruitmentPlus/store.ts';
-import { idParam, isoDate } from '../lib/validate.ts';
+import { idParam, isoDate, parsePatch } from '../lib/validate.ts';
 import { currentUser, requireRole } from '../middleware/auth.ts';
 
 const RECRUITMENT = requireRole('admin', 'leader', 'recruiter');
@@ -182,7 +182,7 @@ export function recruitmentPlusRouter(db: Db): Router {
     const id = idParam(req);
     const existing = getQuestion(db, id);
     if (!existing) throw notFound('Question');
-    const patch = questionBody.partial().parse(req.body);
+    const patch = parsePatch(questionBody, req.body);
     const next = { ...existing, ...patch, position: patch.position === undefined ? existing.position : patch.position };
     // Moving a question to another type puts it at the end of that type's list unless a place is given.
     const sort = patch.sort ?? (patch.interviewType && patch.interviewType !== existing.interviewType ? nextQuestionSort(db, patch.interviewType) : existing.sort);

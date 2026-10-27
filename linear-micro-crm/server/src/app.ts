@@ -4,11 +4,12 @@ import path from 'node:path';
 import cookieParser from 'cookie-parser';
 import cors from 'cors';
 import express, { type ErrorRequestHandler, type Express, type RequestHandler } from 'express';
-import { ZodError } from 'zod';
+import { ZodError, z } from 'zod';
 import type { Db } from './db/connection.ts';
 import { bumpDataVersion, responseCache } from './lib/cache.ts';
 import { compression } from './lib/compress.ts';
 import { HttpError } from './lib/errors.ts';
+import { plainMessage } from './lib/validate.ts';
 import { authenticate, pinSetupGate, requireAuth } from './middleware/auth.ts';
 import { perUserWriteLimit } from './middleware/writeLimit.ts';
 import { auditMiddleware } from './lib/audit.ts';
@@ -154,6 +155,7 @@ const CACHED_PATHS = [
 ];
 
 export function createApp(db: Db, opts: AppOptions = {}): Express {
+  z.config({ customError: plainMessage }); // zod's own messages in plain words (lib/validate.ts)
   const app = express();
   app.disable('x-powered-by');
   app.set('trust proxy', opts.trustProxy ?? false);
@@ -277,12 +279,15 @@ export function createApp(db: Db, opts: AppOptions = {}): Express {
   return app;
 }
 
+/** At most this many problems in a refused request: enough to fix a form, never a list as long as the request. */
+const MAX_DETAILS = 20;
+
 const errorHandler: ErrorRequestHandler = (err: unknown, _req, res, _next) => {
   if (err instanceof ZodError) {
-    res.status(400).json({
-      error: 'Validation failed',
-      details: err.issues.map((i) => ({ path: i.path.join('.'), message: i.message })),
-    });
+    const details = err.issues.slice(0, MAX_DETAILS).map((i) => ({ path: i.path.join('.'), message: i.message }));
+    const more = err.issues.length - details.length;
+    if (more > 0) details.push({ path: '', message: `And ${more} more ${more === 1 ? 'problem' : 'problems'}` });
+    res.status(400).json({ error: 'Validation failed', details });
     return;
   }
   if (err instanceof HttpError) {

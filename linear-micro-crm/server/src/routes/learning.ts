@@ -124,8 +124,7 @@ function canView(me: UserWithTeam, target: Pick<Person, 'id' | 'teamId'>): boole
 const quizSchema = z.object({
   answers: z
     .array(z.number().int().min(0).max(LEARNING_LIMITS.quizMaxOptions - 1), {
-      required_error: 'Send answers: the option picked for each question',
-      invalid_type_error: 'answers must be a list of option numbers',
+      error: (issue) => (issue.input === undefined ? 'Send answers: the option picked for each question' : 'answers must be a list of option numbers'),
     })
     .max(LEARNING_LIMITS.quizMaxQuestions),
 });

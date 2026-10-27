@@ -43,7 +43,7 @@ type Row = z.infer<typeof rowBody>;
 
 const FIELD_LABELS: Record<string, string> = { ...GAUGE_LABELS, userId: 'Person', checkedInAt: 'Check-in', notes: 'Notes' };
 
-/** "Stops: Number must be less than or equal to 2000" — zod's message with the field named as the form names it. */
+/** "Stops: Must be 2000 or less": zod's message with the field named as the form names it. */
 function zodRowErrors(err: z.ZodError): string[] {
   return err.issues.map((i) => {
     const field = i.path.length ? FIELD_LABELS[String(i.path[0])] ?? String(i.path[0]) : null;

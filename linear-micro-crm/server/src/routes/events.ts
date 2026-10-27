@@ -10,7 +10,7 @@ import { eventPlans } from '../lib/venueInsights.ts';
 import { canManageTeam, redactEntry } from '../lib/scope.ts';
 import { smartEnabled } from '../lib/smart/enabled.ts';
 import { eventForecasts, eventHeadcounts, eventRosters, forecastFor } from '../lib/smart/eventForecast.ts';
-import { idParam, isoDate, optionalIdQuery, optionalString, parseRange, positiveInt, targetSalesCount, timeHHMM } from '../lib/validate.ts';
+import { idParam, isoDate, optionalIdQuery, optionalString, parseRange, positiveInt, targetSalesCount, timeHHMM, parsePatch } from '../lib/validate.ts';
 import { currentUser, requireRole } from '../middleware/auth.ts';
 
 const EVENT_TYPES = ['private_site', 'event', 'b2b', 'residential', 'retail'] as const;
@@ -177,7 +177,7 @@ export function eventsRouter(db: Db): Router {
     const existing = getEvent(db, id);
     if (!existing) throw notFound('Event');
     if (!canManageTeam(me, existing.teamId)) throw forbidden('Leaders can only edit events of their own team');
-    const patch = eventBody.partial().parse(req.body);
+    const patch = parsePatch(eventBody, req.body);
     if (patch.teamId !== undefined && !canManageTeam(me, patch.teamId)) throw forbidden('Leaders cannot move events to another team');
     if (patch.campaignId !== undefined && !get(db, `SELECT 1 FROM campaigns WHERE id = ?`, [patch.campaignId])) throw badRequest('Unknown campaignId');
     if (patch.teamId !== undefined && !get(db, `SELECT 1 FROM teams WHERE id = ?`, [patch.teamId])) throw badRequest('Unknown teamId');

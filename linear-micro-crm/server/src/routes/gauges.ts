@@ -9,7 +9,7 @@ import { badRequest, conflict, forbidden, notFound } from '../lib/errors.ts';
 import { GAUGE_FROM, summaryRows, type SummaryGroup } from '../lib/metrics.ts';
 import { assertCanWriteGauge, canManageTeam, isAdmin, redactEntry } from '../lib/scope.ts';
 import { assertCheckInNotLocked, stampCheckInAuthor } from '../lib/shiftCheckIns.ts';
-import { gaugeCount, idParam, isoDate, isoTimestamp, limitQuery, offsetQuery, optionalIdQuery, parseRange } from '../lib/validate.ts';
+import { gaugeCount, idParam, isoDate, isoTimestamp, limitQuery, offsetQuery, optionalIdQuery, parseRange, parsePatch } from '../lib/validate.ts';
 import { currentUser } from '../middleware/auth.ts';
 
 /** The POST /gauges body (exported for POST /gauges/bulk, release 1.2 U2). */
@@ -189,7 +189,7 @@ export function gaugesRouter(db: Db): Router {
     const id = idParam(req);
     const existing = getGauge(db, id);
     if (!existing) throw notFound('Gauge entry');
-    const { id: _bodyId, ...patch } = gaugeBody.partial().parse(req.body); // the path decides which entry; nulls clear fields
+    const { id: _bodyId, ...patch } = parsePatch(gaugeBody, req.body); // the path decides which entry; nulls clear fields
     const next = { ...existing, ...patch };
     const event = getEvent(db, next.eventId);
     if (!event) throw notFound('Event');
