@@ -1,5 +1,5 @@
 import { GAUGE_MAX_PER_DAY } from '@lm/shared';
-import type { Db } from './connection.ts';
+import { transaction, type Db } from './connection.ts';
 import { upgradeExtensions, type UpgradeOptions } from './extensions/index.ts';
 
 /** One gauge column: a whole number between 0 and the daily plausibility ceiling (CHECK constraints on new databases). */
@@ -281,9 +281,13 @@ export function upgradeSchema(db: Db): string[] {
  * pin:reset command, the seed, tests by default) leaves them out.
  */
 export function createSchema(db: Db, opts: UpgradeOptions = {}): string[] {
-  db.exec(SCHEMA_SQL);
-  const added = upgradeSchema(db);
-  return [...added, ...upgradeExtensions(db, opts)];
+  // One transaction for the whole upgrade: if any step fails, nothing is changed and the next start tries again from
+  // the same place (an extension's own transaction() nests as a savepoint inside this one).
+  return transaction(db, () => {
+    db.exec(SCHEMA_SQL);
+    const added = upgradeSchema(db);
+    return [...added, ...upgradeExtensions(db, opts)];
+  });
 }
 
 export function isSeeded(db: Db): boolean {
