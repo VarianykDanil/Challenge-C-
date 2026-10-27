@@ -11,13 +11,15 @@ import { existsSync, mkdirSync, mkdtempSync, rmSync, statSync, statfsSync, unlin
 import os from 'node:os';
 import path from 'node:path';
 import { DEFAULT_DB_PATH } from './db/seed.ts';
-import { BACKUP_RULES, backupDirFor, backupStatus, backupsEnabled, formatBytes, hoursSince } from './lib/backup.ts';
+import { BACKUP_RULES, backupDirFor, backupStatus, backupsEnabled, formatBytes, hoursSince, lastBackupFailure } from './lib/backup.ts';
+import { OFFSITE_RULES, listArchives, offsiteConfig, offsiteProblem } from './lib/offsite.ts';
 import { findPortHolder, portBusyMessage } from './lib/boot.ts';
 import { clientBuildStatus, depsStatus, shortStamp, staleBuildMessage } from './lib/buildStatus.ts';
 import { installedServiceFile, staleNodeWarning } from './service.ts';
 import { appKeyRefusal, checkAppKey } from './lib/appKey.ts';
 import { readSecretFile, secretFingerprint, shortFingerprint } from './lib/crypto.ts';
 import { sheetStatus } from './lib/recoverySheet.ts';
+import { NODE_ENGINES, nodeSupport, sqliteStatus } from './lib/nodeSupport.ts';
 
 type Status = 'ok' | 'info' | 'warn' | 'fail';
 interface Check {
@@ -40,14 +42,13 @@ const port = Number(process.env.PORT ?? 4000);
 
 console.log(`Linear Hub doctor — ${new Date().toISOString()}\n`);
 
-// 1. Runtime
+// 1. Runtime: the Node version (supported lines only) and what this Node says about node:sqlite
 {
-  const [major = 0, minor = 0] = process.versions.node.split('.').map(Number);
-  const supported = major > 22 || (major === 22 && minor >= 18);
+  const support = nodeSupport();
   report(
-    supported ? 'ok' : 'fail',
-    `Node ${process.versions.node} on ${process.platform}/${process.arch} (${process.execPath})`,
-    supported ? undefined : 'Linear Hub needs Node 22.18 or newer (type stripping + node:sqlite). Install the current LTS from https://nodejs.org.',
+    support.status,
+    `Node ${process.versions.node} on ${process.platform}/${process.arch} (${process.execPath})${support.status === 'ok' ? `: a supported version (${NODE_ENGINES})` : ''}`,
+    support.message ?? undefined,
   );
   const injected = ['NODE_OPTIONS', 'NODE_EXTRA_CA_CERTS', 'VSCODE_INSPECTOR_OPTIONS']
     .filter((k) => process.env[k])
@@ -62,14 +63,21 @@ console.log(`Linear Hub doctor — ${new Date().toISOString()}\n`);
   } else {
     report('ok', 'No NODE_OPTIONS injected into node processes');
   }
-  try {
-    const sqlite = await import('node:sqlite');
-    report(typeof sqlite.DatabaseSync === 'function' ? 'ok' : 'fail', 'node:sqlite is available');
-    if (typeof (sqlite as { backup?: unknown }).backup !== 'function') {
-      report('warn', 'This Node has no node:sqlite backup(), so backups cannot run', 'Backups need Node 22.16 or newer. Install the current LTS from https://nodejs.org.');
-    }
-  } catch (err) {
-    report('fail', 'node:sqlite is not available in this Node', String(err));
+  const sqlite = sqliteStatus();
+  if (!sqlite.available) {
+    report('fail', 'node:sqlite does not work in this Node', `${sqlite.error ?? ''}\nLinear Hub keeps its data with node:sqlite. Install Node 22 or 24 LTS from https://nodejs.org.`);
+  } else {
+    report(
+      sqlite.experimental ? 'info' : 'ok',
+      `node:sqlite works (SQLite ${sqlite.sqliteVersion ?? 'unknown'})${sqlite.experimental ? '; this Node still marks it experimental' : ''}`,
+      sqlite.experimental
+        ? 'Node labels node:sqlite "experimental" (the npm scripts hide that warning). Linear Hub supports only the Node versions it is tested on, so a Node update cannot change it unnoticed: npm run doctor warns about any other version.'
+        : undefined,
+    );
+  }
+  const backup = await import('node:sqlite').then((m) => (m as { backup?: unknown }).backup).catch(() => undefined);
+  if (sqlite.available && typeof backup !== 'function') {
+    report('fail', 'This Node has no node:sqlite backup(), so backups cannot run', 'Install Node 22 or 24 LTS from https://nodejs.org.');
   }
 }
 
@@ -231,6 +239,37 @@ console.log(`Linear Hub doctor — ${new Date().toISOString()}\n`);
   if (service) {
     const stale = staleNodeWarning(service);
     report(stale ? 'warn' : 'ok', stale ? 'The background service runs a different Node' : `Background service installed (${service})`, stale ?? undefined);
+  }
+}
+
+// 6b. Off-site copies (LM_OFFSITE_DIR) and the last backup failure
+{
+  const offsite = offsiteConfig();
+  if (!offsite) {
+    report('info', 'Off-site copies are off: the backups stay on this computer', 'Set LM_OFFSITE_DIR and LM_BACKUP_PASSPHRASE_FILE to keep an encrypted copy of every backup somewhere else (docs/DEPLOY.md).');
+  } else {
+    const problem = offsiteProblem(offsite);
+    const copies = listArchives(offsite.dir);
+    if (problem) report('fail', 'Off-site copies are switched on but cannot be written', problem);
+    else if (!copies.length) report('warn', `No off-site copy yet in ${offsite.dir}`, 'Make one now with:  npm run backup');
+    else {
+      const ageH = (Date.now() - copies[0]!.mtimeMs) / 3_600_000;
+      report(ageH > OFFSITE_RULES.staleHours ? 'warn' : 'ok', `Newest off-site copy ${copies[0]!.name} (${Math.round(ageH)} h ago, ${copies.length} kept in ${offsite.dir})`);
+    }
+  }
+  if (existsSync(dbPath)) {
+    try {
+      const { DatabaseSync } = await import('node:sqlite');
+      const db = new DatabaseSync(dbPath, { readOnly: true });
+      try {
+        const failure = lastBackupFailure(db);
+        if (failure) report('warn', `The last backup failed (${failure.at})`, failure.message);
+      } finally {
+        db.close();
+      }
+    } catch {
+      // the database check above says what is wrong with it
+    }
   }
 }
 
