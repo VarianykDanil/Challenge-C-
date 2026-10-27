@@ -31,7 +31,7 @@ LIB_DIR=/usr/local/lib/linear-hub
 CLI_PATH=/usr/local/bin/linear-hub
 RCLONE_CONF=$HOME_DIR/.config/rclone/rclone.conf
 SSH_DIR=$HOME_DIR/.ssh
-APP_PORT=4000
+APP_PORT=''
 NODE_MAJOR=22
 NODE_MIN=22.18.0
 LOG_FILE=/var/log/linear-hub-install.log
@@ -63,7 +63,7 @@ CHANGED=0
 OFFSITE_READY=0
 APP_ROOT=''
 NODE_BIN=/usr/bin/node
-NEW_PASSPHRASE=0
+NEW_PASSPHRASE=0 # 1: made this run; 2: made and shown on the screen
 
 usage() {
   cat <<'EOF'
@@ -86,6 +86,7 @@ Questions (asked when not given; kept for the next run):
   --offsite-path PATH       folder inside the off-site store (default: linear-hub)
   --heartbeat-url URL       optional: pinged after each good off-site copy (e.g. a Healthchecks.io check)
   --ssh-keys-only yes|no    turn off password log-in for SSH (only offered when an SSH key is set up)
+  --port N                  the port Linear Hub listens on behind Caddy, on 127.0.0.1 only (default: 4000)
 
 Switches:
   --yes                     do not ask; use the answers given or kept from the last run
@@ -118,6 +119,7 @@ valid_url() { [[ $1 =~ ^https://[^[:space:]\'\"]+$ ]]; }
 valid_bucket() { [[ $1 =~ ^[a-z0-9][a-z0-9.-]{1,61}[a-z0-9]$ ]]; }
 valid_path() { [[ $1 =~ ^[A-Za-z0-9][A-Za-z0-9._/-]*$ && $1 != *..* ]]; }
 valid_user() { [[ $1 =~ ^[a-z0-9][a-z0-9_-]{0,31}$ ]]; }
+valid_port() { [[ $1 =~ ^[0-9]{4,5}$ ]] && (($1 >= 1024 && $1 <= 65535)); }
 
 # version_ge A B: true when version A >= version B (both like 22.18.0).
 version_ge() { [[ $(printf '%s\n%s\n' "$2" "$1" | sort -V | head -n1) == "$2" ]]; }
@@ -399,7 +401,7 @@ load_answers() {
     v=${line#*=}
     case $k in
       DOMAIN | ACME_EMAIL | REPO_URL | REPO_REF | OFFSITE | OFFSITE_PATH | STORAGEBOX_HOST | STORAGEBOX_USER | \
-        S3_ENDPOINT | S3_BUCKET | S3_REGION | S3_ACCESS_KEY_ID | HEARTBEAT_URL | SSH_KEYS_ONLY)
+        S3_ENDPOINT | S3_BUCKET | S3_REGION | S3_ACCESS_KEY_ID | HEARTBEAT_URL | SSH_KEYS_ONLY | APP_PORT)
         [[ -n ${!k} ]] || printf -v "$k" '%s' "$v"
         ;;
     esac
@@ -414,6 +416,8 @@ gather_answers() {
   ask ACME_EMAIL "Email for HTTPS certificate notices" "" valid_email "is not an email address"
   ask REPO_URL "Code repository (Noryn gives you this)" "" valid_repo "is not a repository address"
   ask REPO_REF "Branch or release tag" "main" valid_ref "is not a branch or tag name"
+  APP_PORT=${APP_PORT:-4000}
+  valid_port "$APP_PORT" || die "--port must be a number from 1024 to 65535."
   if [[ -z $OFFSITE ]] && interactive; then
     say "  Where should the encrypted backups be copied every night?"
     say "    1) a Hetzner Storage Box   2) an S3-compatible bucket   3) an rclone remote already set up   4) nowhere yet"
@@ -457,8 +461,8 @@ gather_answers() {
 save_answers() {
   {
     say "# Answers given to deploy/install.sh (no secrets). Run the installer again to change them."
-    for k in DOMAIN ACME_EMAIL REPO_URL REPO_REF OFFSITE OFFSITE_PATH STORAGEBOX_HOST STORAGEBOX_USER S3_ENDPOINT \
-      S3_BUCKET S3_REGION S3_ACCESS_KEY_ID HEARTBEAT_URL SSH_KEYS_ONLY; do
+    for k in DOMAIN ACME_EMAIL REPO_URL REPO_REF APP_PORT OFFSITE OFFSITE_PATH STORAGEBOX_HOST STORAGEBOX_USER \
+      S3_ENDPOINT S3_BUCKET S3_REGION S3_ACCESS_KEY_ID HEARTBEAT_URL SSH_KEYS_ONLY; do
       printf '%s=%s\n' "$k" "${!k}"
     done
   } | put_file "$INSTALL_CONF" 0600 root root || true
@@ -470,7 +474,7 @@ step_packages() {
   local wanted=(ca-certificates curl gnupg git ufw unattended-upgrades rclone openssh-client sqlite3) missing=()
   local p
   for p in "${wanted[@]}"; do
-    if [[ $DRY_RUN == 1 ]] || ! dpkg-query -W -f='${Status}' "$p" 2>/dev/null | grep -q 'install ok installed'; then missing+=("$p"); fi
+    if [[ $DRY_RUN == 1 || $(dpkg-query -W -f='${Status}' "$p" 2>/dev/null) != *'install ok installed'* ]]; then missing+=("$p"); fi
   done
   if ((${#missing[@]} == 0)); then
     ok "already installed"
@@ -655,10 +659,21 @@ step_code() {
 }
 
 # ── step 7: the app key and the backup passphrase ──────────────────────────────────────────────────────────────────
+# own_secret FILE: a key file put in place by hand (say, the passphrase typed from paper on a replacement server) is
+# readable by the service and nobody else.
+own_secret() {
+  if [[ $(stat -c '%a %U:%G' "$1") != "600 $SERVICE_USER:$SERVICE_USER" ]]; then
+    chown "$SERVICE_USER:$SERVICE_USER" "$1"
+    chmod 600 "$1"
+    note "$1 set to 600, $SERVICE_USER only"
+  fi
+}
+
 step_keys() {
   step "App key and backup passphrase"
   local key=$KEYS_DIR/app-secret pass=$KEYS_DIR/backup-passphrase
   if [[ $DRY_RUN == 0 && -s $key ]]; then
+    own_secret "$key"
     ok "app key: kept ($key)"
   elif [[ $DRY_RUN == 0 && -e $DATA_DIR/linear.sqlite ]]; then
     warn "There is a database but no app key at $key. A new key would make bank details and two-step sign-in unreadable,"
@@ -674,6 +689,7 @@ step_keys() {
     fi
   fi
   if [[ $DRY_RUN == 0 && -s $pass ]]; then
+    own_secret "$pass"
     ok "backup passphrase: kept ($pass)"
     return 0
   fi
@@ -705,6 +721,7 @@ step_keys() {
         printf '  That is not the last group. Look again at the paper.\n' >/dev/tty
       done
     fi
+    NEW_PASSPHRASE=2
     ok "backup passphrase made (it is not in the install log)"
   else
     ok "backup passphrase made. Read it once and write it down:  sudo cat $pass"
@@ -724,7 +741,7 @@ step_env() {
 wait_for_health() { # wait_for_health URL SECONDS
   local url=$1 tries=$(($2 / 2)) i
   for ((i = 0; i < tries; i++)); do
-    if curl -fsS --max-time 5 "$url" 2>/dev/null | grep -q '"ok":true'; then return 0; fi
+    [[ $(curl -fsS --max-time 5 "$url" 2>/dev/null) == *'"ok":true'* ]] && return 0
     sleep 2
   done
   return 1
@@ -815,7 +832,12 @@ check_dns() {
 # ── step 11: off-site copies ───────────────────────────────────────────────────────────────────────────────────────
 rclone_linear() { as_linear rclone --config "$RCLONE_CONF" "$@"; }
 passphrase_text() { [[ $DRY_RUN == 1 ]] || tr -d '\n' <"$KEYS_DIR/backup-passphrase"; }
-remote_exists() { as_linear_quiet rclone --config "$RCLONE_CONF" listremotes 2>/dev/null | grep -qx "$1:"; }
+# (Output is read whole before matching: with pipefail, `| grep -q` can fail when grep stops reading early.)
+remote_exists() {
+  local remotes
+  remotes=$(as_linear_quiet rclone --config "$RCLONE_CONF" listremotes 2>/dev/null) || return 1
+  grep -qx "$1:" <<<"$remotes"
+}
 
 step_offsite() {
   step "Off-site copies of the backups"
@@ -877,12 +899,19 @@ step_offsite() {
     enabled=1
     # Learning videos are not inside the nightly backup (they are large), so they get their own encrypted copy,
     # locked with the same passphrase as the backups.
+    # (rclone takes the password as an argument for a moment; on this single-purpose server only root could see it.)
     local mverb=create
     remote_exists offsite-media && mverb=update
-    local media_args=(offsite-media crypt remote="$target/media-encrypted" filename_encryption=standard
-      directory_name_encryption=true)
-    as_linear_masked "rclone --config $RCLONE_CONF config $mverb ${media_args[*]} password=*** --obscure --non-interactive" \
-      rclone --config "$RCLONE_CONF" config "$mverb" "${media_args[@]}" password="$(passphrase_text)" --obscure --non-interactive
+    local media_now=''
+    [[ $mverb == update ]] && media_now=$(as_linear_quiet rclone --config "$RCLONE_CONF" config show offsite-media 2>/dev/null)
+    if grep -qx "remote = $target/media-encrypted" <<<"$media_now"; then
+      ok "the encrypted copy of the learning videos is set up"
+    else
+      local media_args=(offsite-media crypt remote="$target/media-encrypted" filename_encryption=standard
+        directory_name_encryption=true)
+      as_linear_masked "rclone --config $RCLONE_CONF config $mverb ${media_args[*]} password=*** --obscure --non-interactive" \
+        rclone --config "$RCLONE_CONF" config "$mverb" "${media_args[@]}" password="$(passphrase_text)" --obscure --non-interactive
+    fi
     if [[ $DRY_RUN == 1 ]]; then
       rclone_linear mkdir "$target/backups"
       OFFSITE_READY=1
@@ -942,9 +971,13 @@ EOF
     warn "Off-site copies are not set up: the encrypted backups stay on this server. If the server is lost, so are they."
     warn "Run the installer again with --offsite storagebox (or s3) to fix that."
   fi
-  if [[ $NEW_PASSPHRASE == 1 ]]; then
+  if [[ $NEW_PASSPHRASE == 2 ]]; then
     say ""
     say "  Remember: the off-site passphrase shown above goes on paper, apart from the recovery sheet."
+  elif [[ $NEW_PASSPHRASE == 1 ]]; then
+    say ""
+    say "  Read the new off-site passphrase once and write it on paper, apart from the recovery sheet:"
+    say "    sudo cat $KEYS_DIR/backup-passphrase"
   fi
 }
 
@@ -965,6 +998,7 @@ parse_args() {
       --s3-access-key-id) S3_ACCESS_KEY_ID=${2:-}; shift ;;
       --heartbeat-url) HEARTBEAT_URL=${2:-}; shift ;;
       --ssh-keys-only) SSH_KEYS_ONLY=${2:-}; shift ;;
+      --port) APP_PORT=${2:-}; shift ;;
       --yes | -y) ASSUME_YES=1 ;;
       --dry-run) DRY_RUN=1 ;;
       --preview) PREVIEW=${2:-}; shift ;;
@@ -1003,4 +1037,5 @@ main() {
   summary
 }
 
-if [[ ${BASH_SOURCE[0]} == "$0" ]]; then main "$@"; fi
+# One line, so bash has read it all before main runs (the script may be replaced while it runs).
+if [[ ${BASH_SOURCE[0]} == "$0" ]]; then main "$@"; exit $?; fi

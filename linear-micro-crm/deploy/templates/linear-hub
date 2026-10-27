@@ -15,7 +15,8 @@ APP_PORT=@APP_PORT@
 NODE_BIN=@NODE_BIN@
 RCLONE_CONF=@RCLONE_CONF@
 SERVICE=linear-hub.service
-TEST_PORT=4100
+# The restore test starts its scratch copy here (LH_RESTORE_TEST_PORT moves it).
+TEST_PORT=${LH_RESTORE_TEST_PORT:-$((APP_PORT + 100))}
 
 say() { printf '%s\n' "$*"; }
 ok() { printf '  ✔ %s\n' "$*"; }
@@ -33,7 +34,9 @@ linear-hub: everyday jobs on this Linear Hub server (https://$DOMAIN). Run with 
   logs [-f]           the service log (-f keeps following it)
   start | stop | restart
   update [TAG]        back up, check the backup, update the code, start again (TAG: move to that release)
-  import FILE.lhbk    bring a database from another computer (asks that copy's passphrase), then start
+  import FILE.lhbk [--passphrase-file FILE]
+                      bring a database from another computer (asks that copy's passphrase, or reads it from the
+                      file), then start; add --yes --forget-payments to confirm without a terminal
   golive              end the trial: removes the demo company, makes the first owner (stops the service meanwhile)
   restore FILE        put a backup back (stops the service meanwhile; lists any payments it would forget)
   restore-test        open the newest off-site copy in a scratch folder, start it, check it, then delete it
@@ -81,7 +84,7 @@ npm_script() { # npm_script NAME [args…]
   if (($#)); then app npm run --silent "$name" -- "$@"; else app npm run --silent "$name"; fi
 }
 
-healthy() { curl -fsS --max-time 5 "$1" 2>/dev/null | grep -q '"ok":true'; }
+healthy() { [[ $(curl -fsS --max-time 5 "$1" 2>/dev/null) == *'"ok":true'* ]]; }
 
 wait_healthy() { # wait_healthy URL SECONDS
   local i
@@ -183,29 +186,59 @@ cmd_update() {
 }
 
 cmd_import() {
-  local file=${1:-}
+  local file='' passfile='' extra=() a
+  while (($#)); do
+    a=$1
+    case $a in
+      --passphrase-file) passfile=${2:-}; shift ;;
+      --yes | --forget-payments) extra+=("$a") ;;
+      -*) die "Unknown option for import: $a" ;;
+      *) file=$a ;;
+    esac
+    shift
+  done
   [[ -n $file && -f $file ]] || die "Give the file to bring, e.g.  sudo linear-hub import /root/linear-2026-11-02-1400.lhbk"
+  [[ -z $passfile || -f $passfile ]] || die "There is no passphrase file at $passfile."
   [[ $file == *.lhbk ]] || warn "$file is not an encrypted .lhbk copy; trying it as a plain backup."
   install -d -m 0700 -o "$SERVICE_USER" -g "$SERVICE_USER" "$DATA_DIR/import"
-  local copy
+  local copy passcopy=''
   copy=$DATA_DIR/import/$(basename "$file")
-  install -m 0600 -o "$SERVICE_USER" -g "$SERVICE_USER" "$file" "$copy"
-  say "Bringing $(basename "$file") in. It asks for the passphrase that copy was made with, then to confirm."
-  # Without the server's own passphrase file, so restore asks for the passphrase of the copy being brought.
+  # A copy the service user can read (unless the file was fetched straight into the import folder).
+  if [[ $(realpath "$file") != "$(realpath -m "$copy")" ]]; then
+    install -m 0600 -o "$SERVICE_USER" -g "$SERVICE_USER" "$file" "$copy"
+  fi
+  # Never the server's own passphrase file: the copy being brought was locked with its own (the move passphrase).
+  local pass_env=()
+  if [[ -n $passfile ]]; then
+    passcopy=$DATA_DIR/import/move-passphrase
+    install -m 0600 -o "$SERVICE_USER" -g "$SERVICE_USER" "$passfile" "$passcopy"
+    pass_env=(LM_BACKUP_PASSPHRASE_FILE="$passcopy")
+    say "Bringing $(basename "$file") in with the passphrase in $passfile. It asks you to confirm."
+  else
+    say "Bringing $(basename "$file") in. It asks for the passphrase that copy was made with, then to confirm."
+  fi
   local rc=0
-  with_service_stopped app --without LM_BACKUP_PASSPHRASE_FILE npm run --silent restore -- "$copy" || rc=$?
-  rm -f "$copy"
+  with_service_stopped app --without LM_BACKUP_PASSPHRASE_FILE "${pass_env[@]}" npm run --silent restore -- "$copy" "${extra[@]}" || rc=$?
+  rm -f "$copy" ${passcopy:+"$passcopy"}
   ((rc == 0)) && say "Next: end the trial with  sudo linear-hub golive"
   return "$rc"
+}
+
+# Set by the restore test; cleared up on exit whatever happens (the scratch folder holds a decrypted database).
+RESTORE_TMP=''
+RESTORE_PID=''
+restore_test_cleanup() {
+  if [[ -n $RESTORE_PID ]]; then kill "$RESTORE_PID" 2>/dev/null || true; fi
+  if [[ -n $RESTORE_TMP ]]; then rm -rf "$RESTORE_TMP"; fi
 }
 
 cmd_restore_test() {
   grep -q 'lhbk' "$APP_ROOT/server/src/restore.ts" 2>/dev/null || die "The restore test needs Linear Hub 1.5 or newer (encrypted off-site copies)."
   local tmp target file source
+  trap restore_test_cleanup EXIT
   tmp=$(mktemp -d "$DATA_DIR/restore-test.XXXXXX")
+  RESTORE_TMP=$tmp
   chown "$SERVICE_USER:$SERVICE_USER" "$tmp"
-  # The scratch folder holds a decrypted copy of the database: it goes whatever happens.
-  trap 'kill "${server_pid:-0}" 2>/dev/null || true; rm -rf "$tmp"' EXIT
   target=$(offsite_setting OFFSITE_TARGET)
   if [[ $(offsite_setting OFFSITE_ENABLED) == 1 && -n $target ]]; then
     file=$(app rclone --config "$RCLONE_CONF" lsf --files-only --include 'linear-*.lhbk' "$target/backups" 2>/dev/null | sort | tail -n1) || true
@@ -231,7 +264,7 @@ cmd_restore_test() {
   ok "decrypted with the passphrase, checked, and its app key found"
   say "Starting it on 127.0.0.1:$TEST_PORT (payments, Gmail and backups switched off for the test)…"
   app --without LM_OFFSITE_DIR "${scratch[@]}" NODE_ENV=production "$NODE_BIN" server/src/index.ts >"$tmp/server.log" 2>&1 &
-  server_pid=$!
+  RESTORE_PID=$!
   if ! wait_healthy "http://127.0.0.1:$TEST_PORT/api/health" 60; then
     tail -n 30 "$tmp/server.log"
     die "The restore test FAILED: the restored copy did not start (log above). Tell Noryn today."
@@ -268,7 +301,8 @@ case $cmd in
   import) cmd_import "$@" ;;
   restore-test) cmd_restore_test ;;
   offsite-sync) cmd_offsite_sync ;;
-  golive | restore | key:restore | seed) with_service_stopped npm_script "$cmd" "$@" ;;
-  doctor | backup | backups | recovery-sheet | setup-code | 2fa:reset | pin:reset | share) npm_script "$cmd" "$@" ;;
+  # (Not seed or share: a live server never needs the demo company, and it is reached by its address, not the LAN.)
+  golive | restore | key:restore) with_service_stopped npm_script "$cmd" "$@" ;;
+  doctor | backup | backups | recovery-sheet | setup-code | 2fa:reset | pin:reset) npm_script "$cmd" "$@" ;;
   *) die "Unknown job: $cmd (sudo linear-hub help lists them)" ;;
 esac
