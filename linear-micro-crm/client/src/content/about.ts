@@ -1,4 +1,4 @@
-// Owned by Marketing & Content. Product story and facts for the About page and README.
+// Product story and facts for the About page and README.
 import type { Role } from '@lm/shared';
 
 export const APP_VERSION = '1.4.0';

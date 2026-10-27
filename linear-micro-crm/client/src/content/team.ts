@@ -1,5 +1,4 @@
-// Owned by Marketing & Content. The five-person squad who built Linear Hub.
-// Names here must match docs/TEAM.md and README.md.
+// How Linear Hub was built, for the About page. Keep it in step with docs/TEAM.md: no invented people.
 
 export interface TeamMember {
   name: string;
@@ -12,38 +11,38 @@ export interface TeamMember {
 
 export const TEAM_MEMBERS: TeamMember[] = [
   {
-    name: 'Tomasz Nowak',
-    role: 'Backend Developer',
-    focus: 'Express 5 API, SQLite schema, deterministic seed data, auth and role rules.',
-    initials: 'TN',
+    name: 'Noryn System Ltd',
+    role: 'Builds, owns and supports it',
+    focus: 'Licensed to Linear MCR Limited under a written agreement, with a monthly service for fixes, updates and the connections.',
+    initials: 'NS',
     color: '#2563EB',
   },
   {
-    name: 'Aisha Rahman',
-    role: 'Frontend Developer',
-    focus: 'React pages, data hooks, routing, auth flow and the gauge-entry experience.',
-    initials: 'AR',
+    name: 'One lead developer',
+    role: 'Directs the work',
+    focus: 'Agrees the scope with Linear MCR, splits each release into work packages and decides what ships.',
+    initials: 'OL',
     color: '#8B5CF6',
   },
   {
-    name: 'Callum Reid',
-    role: 'Product Designer (Brand & UI)',
-    focus: 'Design tokens, light and dark themes, UI kit, app shell and the sign-in screen.',
-    initials: 'CR',
+    name: 'AI coding agents',
+    role: 'Write the code',
+    focus: 'Build the work packages side by side, tests first, each in its own copy of the code.',
+    initials: 'AC',
     color: '#EC4899',
   },
   {
-    name: 'Mei-Ling Chen',
-    role: 'Logic Builder (Data & Charts)',
-    focus: 'Funnel maths, benchmark ratios, payroll calculation and the chart components.',
-    initials: 'MC',
+    name: 'Automated tests',
+    role: 'Check every change',
+    focus: 'Over 1,300 tests of the pay, gauge and permission rules, the server and the API run on every change.',
+    initials: 'AT',
     color: '#10B981',
   },
   {
-    name: 'Sophie Whitfield',
-    role: 'Marketing & Content',
-    focus: 'Product story, microcopy, user guide, business case and this About page.',
-    initials: 'SW',
+    name: 'Independent reviews',
+    role: 'Look for what is wrong',
+    focus: 'Claims, security, money, reliability, phone use and code are reviewed after each release; a second reviewer checks the first.',
+    initials: 'IR',
     color: '#F59E0B',
   },
 ];
