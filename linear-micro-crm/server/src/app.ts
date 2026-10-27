@@ -102,7 +102,7 @@ export function contentSecurityPolicy(staticDir?: string): string {
     "default-src 'self'",
     `script-src 'self'${hashes.length ? ` ${hashes.join(' ')}` : ''}`,
     "style-src 'self' 'unsafe-inline'",
-    // Inter is bundled with the app (client/src/fonts.css): nothing is fetched from Google.
+    // Inter is bundled with the app (client/src/main.tsx imports @fontsource-variable/inter): nothing is fetched from Google.
     "font-src 'self'",
     // The offline service worker (client/dist/sw.js) and the home-screen manifest.
     "worker-src 'self'",
