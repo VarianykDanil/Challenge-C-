@@ -390,10 +390,12 @@ over plain `http://`:
 ## For developers: testing the installer
 
 - `bash deploy/tests/run.sh` — no root, no network: shellcheck on every script, the installer's helpers, and a full
-  `--dry-run` on a pretend fresh server (every file it would write, every command it would run).
+  `--dry-run` on a pretend fresh server (every file it would write, every command it would run). `npm test` runs it
+  too on Linux, so CI checks the installer on every change.
 - `bash deploy/tests/container-test.sh <repository folder> <branch>` — needs Docker: installs from scratch in a
   throwaway Ubuntu 24.04 container, runs it twice more to prove it changes nothing the second time, checks the files
   and modes, `caddy validate`, starts Linear Hub as the service does, makes an encrypted backup, copies it off-site,
-  passes `linear-hub restore-test`, goes live, and starts again with only the data folder writable. Containers have
+  passes `linear-hub restore-test` (and checks its scratch copy is stopped), brings in a trial database made by a
+  stand-in Mac with `linear-hub import`, goes live, and starts again with only the data folder writable. Containers have
   no systemd, so the service, timer and firewall commands are checked by the dry run instead.
 - `bash deploy/install.sh --dry-run --yes --domain … --email … --repo …` shows what a run would do on a real server.

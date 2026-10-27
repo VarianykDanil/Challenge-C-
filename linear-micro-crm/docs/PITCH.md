@@ -186,8 +186,9 @@ audit trail.
 in a car park: large tap targets, a dark theme, tables that read as cards on a small screen, and saves that wait when
 the signal drops.
 
-**Can we get the data out?** Every main table exports to a spreadsheet or PDF, and there is a payroll spreadsheet for
-the accountant. The database is a standard SQLite file you own.
+**Can we get the data out?** The main lists (people, gauges, pay, campaigns, candidates, venues, the leaderboard)
+export to a spreadsheet or PDF, and there is a payroll spreadsheet for the accountant. The database is a standard
+SQLite file you own.
 
 **What if someone logs the wrong numbers?** The form refuses impossible funnels and dates. A rep corrects their own
 entry; a leader corrects their team's; the office corrects any. A day that looks like it should not be paid waits for
