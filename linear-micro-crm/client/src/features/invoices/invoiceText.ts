@@ -38,7 +38,9 @@ export function supplierTaxLines(p: InvoiceParty): string[] {
  * is shown instead, with HMRC's sentence for self-billed invoices.
  */
 export function vatLine(inv: Pick<Invoice, 'supplier' | 'vat'>): string {
-  return inv.vat ? inv.vat.statement : 'No VAT: the supplier is not VAT registered.';
+  if (inv.vat) return inv.vat.statement;
+  // an invoice from before VAT was charged can print a VAT number without charging VAT
+  return inv.supplier.vatNumber ? 'No VAT is charged on this invoice.' : 'No VAT: the supplier is not VAT registered.';
 }
 
 /** Shown instead of the address when it is withheld from this viewer. */

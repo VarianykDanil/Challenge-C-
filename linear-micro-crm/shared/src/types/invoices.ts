@@ -14,6 +14,8 @@
  *  - POST /invoices/agreement/accept         → SelfBillingAgreement (records version, time, IP)
  *  - GET  /invoices/profile                  → InvoiceProfile (mine); PUT /invoices/profile InvoiceProfileInput
  *  - GET  /invoices/profile/:userId          → InvoiceProfile (admin); PUT /invoices/profile/:userId (admin)
+ *  - POST /invoices/profile/:userId/vat/confirm InvoiceVatConfirmInput → InvoiceProfile (an administrator who is not
+ *    the person, with a fresh code: VAT is charged only from then on)
  *  - GET  /invoices?userId=&weekStart=&status= → InvoiceSummary[] (own; leader: own team; admin: all)
  *  - GET  /invoices/by-run/:runId            → Invoice (scoped like the payslip)
  *  - GET  /invoices/:id                      → Invoice
@@ -61,6 +63,12 @@ export interface InvoiceParty {
   utr?: string | null;
   /** null → the invoice says "Not VAT registered". */
   vatNumber?: string | null;
+  /**
+   * Supplier only: VAT is charged on this invoice version, because the office had confirmed the supplier's VAT number
+   * when it was issued (MON-7). Missing or false: no VAT, even with a VAT number printed (a number still waiting for
+   * the office, or an invoice from before VAT was charged).
+   */
+  vatCharged?: boolean;
   /**
    * P2: the supplier's home address and UTR are not shown to this viewer (a team leader): only the person and the
    * office see them. The name and VAT registration stay.
@@ -275,9 +283,34 @@ export interface InvoiceProfile {
   invoiced?: boolean;
   /** P2: the self-billing agreement they accepted (the current version), if any. */
   agreement?: { version: string; acceptedAt: string | null };
+  /**
+   * MON-7: where the VAT number stands. 'waiting': typed in (by the person or an administrator) and not yet confirmed
+   * by an administrator who is not the person, so no VAT is charged; 'confirmed': VAT at 20% is charged on invoices
+   * issued from then on; 'none': no VAT number.
+   */
+  vat?: InvoiceVatStatus;
 }
 
-export type InvoiceProfileInput = Partial<Omit<InvoiceProfile, 'userId' | 'name' | 'invoiced' | 'agreement'>>;
+export interface InvoiceVatStatus {
+  status: 'none' | 'waiting' | 'confirmed';
+  /** When the number was last typed in, and by whom (null for a number typed before release 1.5). */
+  changedAt: string | null;
+  changedByName: string | null;
+  confirmedAt: string | null;
+  confirmedByName: string | null;
+}
+
+export type InvoiceProfileInput = Partial<Omit<InvoiceProfile, 'userId' | 'name' | 'invoiced' | 'agreement' | 'vat'>>;
+
+/**
+ * POST /invoices/profile/:userId/vat/confirm (an administrator who is not the person, MON-7): the number the
+ * administrator checked on HMRC's "Check a UK VAT number" service (409 when the person's number is different now) and a
+ * fresh two-step code.
+ */
+export interface InvoiceVatConfirmInput {
+  vatNumber: string;
+  code: string;
+}
 
 /** Settings → Company (meta `ext:invoices:company`). */
 export interface CompanySettings {

@@ -21,11 +21,16 @@
  * once accepted they are frozen. When an unpaid run's figures change, its invoice is reissued (the person accepts
  * again) — by the job, and at once when someone accepts, disputes or pays it.
  *
- * VAT (MON-7): a supplier with a VAT number on the invoice is charged VAT at the standard rate on the total, rounded
+ * VAT (MON-7): VAT at the standard rate is charged on an invoice whose supplier block says so (vatCharged), rounded
  * down to the penny (shared invoiceVatFor), worked out from the stored total and supplier block, so it is frozen with
- * them. The invoice carries HMRC's sentence for self-billed invoices; payments pay total + VAT (invoiceVatByRun). When
- * someone registers for VAT or stops, their open invoices that do not count as accepted yet are reissued; ones already
- * accepted (or counting as accepted, or in a payment on its way) keep what was accepted.
+ * them. The invoice carries HMRC's sentence for self-billed invoices; payments pay total + VAT (invoiceVatByRun).
+ * A VAT number adds 20% to what is paid, so nobody adds it to their own pay: a number typed in (by the person, or by an
+ * administrator for them) waits, with no VAT, until an administrator who is not the person and did not type it in
+ * confirms it with a fresh two-step code (confirmInvoiceVat), after checking it on HMRC's "Check a UK VAT number"
+ * service. The number must also pass HMRC's check digits (shared normaliseVatNumber). Taking a number off is at once.
+ * When VAT starts or stops, the open invoices that do not count as accepted yet are reissued; ones already accepted
+ * (or counting as accepted, or in a payment on its way) keep what was accepted. A refresh of the supplier's address
+ * never changes an invoice's VAT.
  */
 import { createHash } from 'node:crypto';
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
@@ -51,6 +56,7 @@ import {
   normalisePostcode,
   normaliseUtr,
   normaliseVatNumber,
+  formatVatNumber,
   round2,
   sameInvoicePayment,
   selfBillingAgreementText,
@@ -69,6 +75,7 @@ import {
   type InvoiceStatus,
   type InvoiceSummary,
   type InvoiceVatBlock,
+  type InvoiceVatStatus,
   type InvoiceVersionNote,
   type PayrollRunWithUser,
   type PayrollStatus,
@@ -82,7 +89,7 @@ import { getPayroll } from '../db/queries.ts';
 import { recordSystemEvent } from './audit/events.ts';
 import { bumpDataVersion } from './cache.ts';
 import { appSecretFile } from './crypto.ts';
-import { businessNow, formatWeek, toBusinessISO } from './dates.ts';
+import { businessNow, formatWeek, nowISO, toBusinessISO } from './dates.ts';
 import { HttpError, badRequest, conflict, forbidden, notFound } from './errors.ts';
 import { weekPayBreakdown } from './payRule.ts';
 import { personOrderSql } from './people.ts';
@@ -237,12 +244,18 @@ function summaryOf(r: InvoiceRow, nowLocal: string): InvoiceSummary {
   return summary;
 }
 
-/** The supplier's VAT number as printed on this invoice (null: not VAT registered). */
-const supplierVatNumber = (supplierJson: string | null): string | null => parseJson<Partial<InvoiceParty>>(supplierJson, {}).vatNumber ?? null;
+/**
+ * The VAT number this invoice charges VAT for: only when its supplier block says VAT is charged (the office had
+ * confirmed the number when the version was issued). An invoice from before 1.5 may print a number without charging.
+ */
+function chargedVatNumber(supplierJson: string | null): string | null {
+  const s = parseJson<Partial<InvoiceParty>>(supplierJson, {});
+  return s.vatCharged === true ? s.vatNumber ?? null : null;
+}
 
 /** MON-7: the invoice's VAT block, from its stored total and supplier (null: no VAT is charged). */
 function vatOf(r: Pick<InvoiceRow, 'total' | 'supplierJson'>): InvoiceVatBlock | null {
-  const vat = invoiceVatFor(r.total, supplierVatNumber(r.supplierJson));
+  const vat = invoiceVatFor(r.total, chargedVatNumber(r.supplierJson));
   return vat ? { ...vat, statement: SELF_BILLING_VAT_STATEMENT } : null;
 }
 
@@ -455,26 +468,56 @@ interface ProfileRow {
   postcode: string | null;
   utr: string | null;
   vatNumber: string | null;
+  vatChangedAt: string | null;
+  vatChangedBy: number | null;
+  vatChangedByName: string | null;
+  vatConfirmedAt: string | null;
+  vatConfirmedBy: number | null;
+  vatConfirmedByName: string | null;
 }
 
 const PROFILE_SELECT = `
-  SELECT id AS userId, TRIM(first_name || ' ' || last_name) AS name, role, address_line1 AS addressLine1, address_line2 AS addressLine2,
-         address_town AS addressTown, postcode, utr, vat_number AS vatNumber
-  FROM users`;
+  SELECT users.id AS userId, TRIM(users.first_name || ' ' || users.last_name) AS name, users.role, users.address_line1 AS addressLine1,
+         users.address_line2 AS addressLine2, users.address_town AS addressTown, users.postcode, users.utr, users.vat_number AS vatNumber,
+         users.vat_changed_at AS vatChangedAt, users.vat_changed_by AS vatChangedBy, TRIM(vc.first_name || ' ' || vc.last_name) AS vatChangedByName,
+         users.vat_confirmed_at AS vatConfirmedAt, users.vat_confirmed_by AS vatConfirmedBy, TRIM(vk.first_name || ' ' || vk.last_name) AS vatConfirmedByName
+  FROM users
+  LEFT JOIN users vc ON vc.id = users.vat_changed_by
+  LEFT JOIN users vk ON vk.id = users.vat_confirmed_by`;
 
+/** The office has confirmed the person's VAT number: VAT is charged on invoices issued from then on. */
+const vatConfirmed = (p: Pick<ProfileRow, 'vatNumber' | 'vatConfirmedAt'>): boolean => Boolean(p.vatNumber && p.vatConfirmedAt);
+
+/**
+ * The supplier block an invoice prints. The VAT number is printed, and VAT charged, only once the office has confirmed
+ * it; a number still waiting for the office prints as "Not VAT registered" and adds nothing.
+ */
 function supplierParty(p: ProfileRow): InvoiceParty {
+  const charged = vatConfirmed(p);
   return {
     name: p.name,
     addressLines: [p.addressLine1, p.addressLine2, p.addressTown].filter((l): l is string => !!l && !!l.trim()),
     postcode: p.postcode,
     utr: p.utr,
-    vatNumber: p.vatNumber,
+    vatNumber: charged ? p.vatNumber : null,
+    vatCharged: charged,
+  };
+}
+
+/** Where the person's VAT number stands (InvoiceProfile.vat). */
+function vatStatusOf(p: ProfileRow): InvoiceVatStatus {
+  return {
+    status: !p.vatNumber ? 'none' : vatConfirmed(p) ? 'confirmed' : 'waiting',
+    changedAt: p.vatNumber ? p.vatChangedAt : null,
+    changedByName: p.vatNumber && p.vatChangedBy ? p.vatChangedByName || null : null,
+    confirmedAt: vatConfirmed(p) ? p.vatConfirmedAt : null,
+    confirmedByName: vatConfirmed(p) && p.vatConfirmedBy ? p.vatConfirmedByName || null : null,
   };
 }
 
 /** The person's supplier details (null for an unknown id or a client account). */
 export function invoiceProfile(db: Db, userId: number): InvoiceProfile | null {
-  const p = get<ProfileRow>(db, `${PROFILE_SELECT} WHERE id = ? AND role <> 'client'`, [userId]);
+  const p = get<ProfileRow>(db, `${PROFILE_SELECT} WHERE users.id = ? AND users.role <> 'client'`, [userId]);
   if (!p) return null;
   const accepted = agreementAcceptedAt(db, userId);
   return {
@@ -488,6 +531,7 @@ export function invoiceProfile(db: Db, userId: number): InvoiceProfile | null {
     vatNumber: p.vatNumber,
     invoiced: isInvoicedRole(p.role),
     agreement: { version: SELF_BILLING_AGREEMENT_VERSION, acceptedAt: accepted },
+    vat: vatStatusOf(p),
   };
 }
 
@@ -497,9 +541,13 @@ const text = (v: string | null | undefined, max: number, label: string): string 
   return t || null;
 };
 
-/** Saves the supplier details (fields left out stay as they are) and refreshes the person's open invoices. */
-export function saveInvoiceProfile(db: Db, userId: number, input: InvoiceProfileInput): InvoiceProfile {
-  const current = get<ProfileRow>(db, `${PROFILE_SELECT} WHERE id = ? AND role <> 'client'`, [userId]);
+/**
+ * Saves the supplier details (fields left out stay as they are) and refreshes the person's open invoices. `by` is who
+ * saved them (the person, or an administrator). A new VAT number waits for the office (no VAT until confirmInvoiceVat);
+ * taking the number off stops VAT at once.
+ */
+export function saveInvoiceProfile(db: Db, userId: number, input: InvoiceProfileInput, by: number): InvoiceProfile {
+  const current = get<ProfileRow>(db, `${PROFILE_SELECT} WHERE users.id = ? AND users.role <> 'client'`, [userId]);
   if (!current) throw notFound('User');
   const next = { ...current };
   if (input.addressLine1 !== undefined) next.addressLine1 = text(input.addressLine1, 100, 'Address line 1');
@@ -528,19 +576,68 @@ export function saveInvoiceProfile(db: Db, userId: number, input: InvoiceProfile
     if (!raw) next.vatNumber = null;
     else {
       const vat = normaliseVatNumber(raw);
-      if (!vat) throw badRequest('A UK VAT number is GB followed by 9 digits, e.g. GB123456789');
+      if (!vat) throw badRequest(VAT_NUMBER_MESSAGE);
       next.vatNumber = vat;
     }
   }
-  // registering for VAT (or stopping) changes what is paid; a new VAT number alone does not
-  const vatRegistrationChanged = Boolean(current.vatNumber) !== Boolean(next.vatNumber);
+  const numberChanged = next.vatNumber !== current.vatNumber;
+  if (numberChanged) {
+    // a different number is not confirmed: it waits for the office; no number at all needs nobody
+    next.vatChangedAt = next.vatNumber ? nowISO() : null;
+    next.vatChangedBy = next.vatNumber ? by : null;
+    next.vatConfirmedAt = null;
+    next.vatConfirmedBy = null;
+  }
+  // VAT stops (a confirmed number changed or taken off): the open invoices are reissued without it
+  const vatStops = numberChanged && vatConfirmed(current);
   let reissued = 0;
   transaction(db, () => {
-    run(db, `UPDATE users SET address_line1 = ?, address_line2 = ?, address_town = ?, postcode = ?, utr = ?, vat_number = ? WHERE id = ?`, [
-      next.addressLine1, next.addressLine2, next.addressTown, next.postcode, next.utr, next.vatNumber, userId,
-    ]);
-    if (vatRegistrationChanged) reissued = reissueForVatChange(db, userId, businessNow());
+    run(
+      db,
+      `UPDATE users SET address_line1 = ?, address_line2 = ?, address_town = ?, postcode = ?, utr = ?, vat_number = ?,
+         vat_changed_at = ?, vat_changed_by = ?, vat_confirmed_at = ?, vat_confirmed_by = ? WHERE id = ?`,
+      [
+        next.addressLine1, next.addressLine2, next.addressTown, next.postcode, next.utr, next.vatNumber,
+        next.vatChangedAt, next.vatChangedBy, next.vatConfirmedAt, next.vatConfirmedBy, userId,
+      ],
+    );
+    if (vatStops) reissued = reissueForVatChange(db, userId, businessNow());
     else refreshOpenParties(db, userId);
+  });
+  if (reissued) bumpDataVersion();
+  return invoiceProfile(db, userId)!;
+}
+
+/** What a VAT number that fails the format or HMRC's check digits gets. */
+export const VAT_NUMBER_MESSAGE = 'That is not a UK VAT number. It is GB and 9 digits, e.g. GB 999 9999 73: copy it from your VAT certificate.';
+
+/**
+ * MON-7: an administrator confirms someone's VAT number, after checking it on HMRC's "Check a UK VAT number" service.
+ * Never the person themself, and never the administrator who typed it in (403); `vatNumber` is the number they checked
+ * (409 when the person's number is a different one now). `verifyCode` checks the administrator's fresh two-step code;
+ * it runs last, so a refused confirmation does not use up the code. From then on VAT at 20% is charged: the open
+ * invoices that do not count as accepted yet are reissued with it.
+ */
+export function confirmInvoiceVat(db: Db, me: UserWithTeam, userId: number, vatNumber: unknown, verifyCode: () => void): InvoiceProfile {
+  if (me.role !== 'admin') throw forbidden('Only an administrator confirms a VAT number');
+  const p = get<ProfileRow>(db, `${PROFILE_SELECT} WHERE users.id = ? AND users.role <> 'client'`, [userId]);
+  if (!p) throw notFound('User');
+  if (p.userId === me.id) throw forbidden('Your own VAT number is confirmed by another administrator: nobody adds VAT to their own pay.');
+  if (!p.vatNumber) throw conflict(`${p.name} has no VAT number to confirm`);
+  if (vatConfirmed(p)) throw conflict(`${p.name}'s VAT number is already confirmed`);
+  if (p.vatChangedBy === me.id) {
+    throw forbidden(`You typed this VAT number in, so another administrator confirms it. Or ${p.name.split(' ')[0]} can type it in on their own Settings → Invoices, and you confirm it.`);
+  }
+  const checked = typeof vatNumber === 'string' ? normaliseVatNumber(vatNumber) : null;
+  if (!checked) throw badRequest('Type the VAT number you checked on HMRC\'s "Check a UK VAT number" service', [{ path: 'vatNumber', message: VAT_NUMBER_MESSAGE }]);
+  if (checked !== p.vatNumber) {
+    throw conflict(`${p.name}'s VAT number is ${formatVatNumber(p.vatNumber)} now, not ${formatVatNumber(checked)}. Check that one on HMRC's service.`);
+  }
+  verifyCode();
+  let reissued = 0;
+  transaction(db, () => {
+    run(db, `UPDATE users SET vat_confirmed_at = ?, vat_confirmed_by = ? WHERE id = ? AND vat_number = ?`, [nowISO(), me.id, userId, p.vatNumber]);
+    reissued = reissueForVatChange(db, userId, businessNow());
   });
   if (reissued) bumpDataVersion();
   return invoiceProfile(db, userId)!;
@@ -549,16 +646,16 @@ export function saveInvoiceProfile(db: Db, userId: number, input: InvoiceProfile
 const VAT_REISSUE_REASON = 'The supplier’s VAT registration changed';
 
 /**
- * MON-7: the person registered for VAT or stopped. Their open invoices that do not count as accepted yet get a new
- * version (VAT added or taken off: the person accepts again); a disputed one takes the new details and waits for the
- * office as before. One that counts as accepted already (its deadline passed) or whose run is in a payment on its way
- * keeps what was accepted. Returns how many were reissued.
+ * MON-7: VAT starts (the office confirmed the number) or stops (the number changed or was taken off). The person's open
+ * invoices that do not count as accepted yet get a new version (VAT added or taken off: the person accepts again); a
+ * disputed one takes the new details and waits for the office as before. One that counts as accepted already (its
+ * deadline passed) or whose run is in a payment on its way keeps what was accepted. Returns how many were reissued.
  */
 function reissueForVatChange(db: Db, userId: number, at: Date): number {
   const rows = all<InvoiceRow>(db, `${INVOICE_SELECT} WHERE i.user_id = ? AND i.status IN ('issued', 'disputed') AND p.status IN ${UNPAID_SQL}`, [userId]);
   if (!rows.length) return 0;
   const local = businessLocal(at);
-  const profile = get<ProfileRow>(db, `${PROFILE_SELECT} WHERE id = ?`, [userId]);
+  const profile = get<ProfileRow>(db, `${PROFILE_SELECT} WHERE users.id = ?`, [userId]);
   if (!profile) return 0;
   let reissued = 0;
   for (const r of rows) {
@@ -583,7 +680,9 @@ function reissueForVatChange(db: Db, userId: number, at: Date): number {
 
 /**
  * Open invoices (issued or disputed, run unpaid) print the current details: after a profile edit (userId) or a company
- * edit (null), their supplier / customer blocks are brought up to date. Accepted ones keep what was accepted.
+ * edit (null), their supplier / customer blocks are brought up to date. Accepted ones keep what was accepted. Each
+ * invoice keeps its own VAT (number and whether VAT is charged): only a reissue (reissueForVatChange) changes what is
+ * paid, so an invoice that already counts as accepted never gains VAT from an address change.
  */
 function refreshOpenParties(db: Db, userId: number | null): void {
   const open = all<{ id: number; userId: number }>(
@@ -594,10 +693,19 @@ function refreshOpenParties(db: Db, userId: number | null): void {
   );
   if (!open.length) return;
   if (userId) {
-    const p = get<ProfileRow>(db, `${PROFILE_SELECT} WHERE id = ?`, [userId]);
+    const p = get<ProfileRow>(db, `${PROFILE_SELECT} WHERE users.id = ?`, [userId]);
     if (!p) return;
-    const supplier = JSON.stringify(supplierParty(p));
-    run(db, `UPDATE invoices SET supplier_json = ? WHERE id IN (${placeholders(open.length)})`, [supplier, ...open.map((o) => o.id)]);
+    const fresh = supplierParty(p);
+    const stored = all<{ id: number; supplierJson: string | null }>(
+      db,
+      `SELECT id, supplier_json AS supplierJson FROM invoices WHERE id IN (${placeholders(open.length)})`,
+      open.map((o) => o.id),
+    );
+    const update = db.prepare(`UPDATE invoices SET supplier_json = ? WHERE id = ?`);
+    for (const o of stored) {
+      const before = parseJson<Partial<InvoiceParty>>(o.supplierJson, {});
+      update.run(JSON.stringify({ ...fresh, vatNumber: before.vatNumber ?? null, vatCharged: before.vatCharged === true }), o.id);
+    }
   } else {
     const customer = JSON.stringify(customerSnapshot(db));
     run(db, `UPDATE invoices SET customer_json = ? WHERE id IN (${placeholders(open.length)})`, [customer, ...open.map((o) => o.id)]);
@@ -657,7 +765,7 @@ export function issueInvoiceForRun(db: Db, runId: number, at: Date = businessNow
   if (existing) return existing.id;
   const r = getPayroll(db, runId);
   if (!r) return null;
-  const profile = get<ProfileRow>(db, `${PROFILE_SELECT} WHERE id = ?`, [r.userId]);
+  const profile = get<ProfileRow>(db, `${PROFILE_SELECT} WHERE users.id = ?`, [r.userId]);
   if (!profile) return null;
   const { lines, total } = linesForRun(db, r);
   const local = businessLocal(at);
@@ -685,7 +793,7 @@ export function reissueInvoice(
   if (!r) throw notFound('Invoice');
   const pay = computed?.pay ?? getPayroll(db, r.payrollRunId);
   if (!pay) throw notFound('Payroll run');
-  const profile = get<ProfileRow>(db, `${PROFILE_SELECT} WHERE id = ?`, [r.userId])!;
+  const profile = get<ProfileRow>(db, `${PROFILE_SELECT} WHERE users.id = ?`, [r.userId])!;
   const local = businessLocal(at);
   run(
     db,

@@ -27,7 +27,10 @@
  *    total, lines and (versions_json) every earlier version, copied before invoice_versions cascades away — so every
  *    number ever issued, and every version of it, is accounted for (no silent gap in the sequence).
  *  - users columns (the supplier block): address_line1, address_line2, address_town, postcode, utr (optional),
- *    vat_number (optional; none → "Not VAT registered").
+ *    vat_number (optional; none → "Not VAT registered"). A VAT number moves money (VAT at 20% is paid on top), so it
+ *    is only charged once an administrator who is not the person (and did not type it in) has confirmed it:
+ *    vat_changed_at / vat_changed_by (when and by whom it was typed in) and vat_confirmed_at / vat_confirmed_by. A
+ *    number typed in before these columns existed has no confirmation, so it waits for the office (no VAT until then).
  *  - meta: `ext:invoices:company` (Settings → Company as JSON: legal name, address, company number, signatory name,
  *    signature file under uploads/) and `ext:invoices:seq:<YYYY>` (the number sequence).
  *
@@ -348,6 +351,11 @@ export const extension: DbExtension = {
       addColumnIfMissing(db, 'users', 'postcode', 'TEXT'),
       addColumnIfMissing(db, 'users', 'utr', 'TEXT'),
       addColumnIfMissing(db, 'users', 'vat_number', 'TEXT'),
+      // a VAT number is charged only once the office confirms it (NULL on an upgraded database: it waits)
+      addColumnIfMissing(db, 'users', 'vat_changed_at', 'TEXT'),
+      addColumnIfMissing(db, 'users', 'vat_changed_by', 'INTEGER'),
+      addColumnIfMissing(db, 'users', 'vat_confirmed_at', 'TEXT'),
+      addColumnIfMissing(db, 'users', 'vat_confirmed_by', 'INTEGER'),
       // P2: on its own table (so a database created at the foundation commit gets them too)
       addColumnIfMissing(db, 'invoices', 'deem_at', 'TEXT'),
       addColumnIfMissing(db, 'invoices', 'run_fingerprint', 'TEXT'),

@@ -6,6 +6,8 @@
  *  POST /invoices/agreement/accept              → SelfBillingAgreement (records version, time, IP; once)
  *  GET  /invoices/profile, PUT /invoices/profile InvoiceProfileInput → InvoiceProfile (mine)
  *  GET  /invoices/profile/:userId, PUT …        → InvoiceProfile (admin)
+ *  POST /invoices/profile/:userId/vat/confirm InvoiceVatConfirmInput → InvoiceProfile (an administrator who is not the
+ *       person and did not type the number in, with a fresh two-step code: VAT is charged from then on)
  *  GET  /invoices/company                       → CompanySettings (every staff role: the customer block of an invoice)
  *  PUT  /invoices/company CompanySettingsInput  → CompanySettings (admin; signatureImage = data:image/png;base64, ≤ 200 KB)
  *  GET  /invoices/signatures/:file              → the signature PNG an invoice prints (staff)
@@ -43,7 +45,9 @@ import {
   resolveInvoice,
   saveCompanySettings,
   saveInvoiceProfile,
+  confirmInvoiceVat,
 } from '../lib/invoices.ts';
+import { assertFreshCode, codeSource } from '../lib/payments/code.ts';
 import { idParam, isoDate, optionalIdQuery, optionalString, parseRange } from '../lib/validate.ts';
 import { currentUser, requireRole } from '../middleware/auth.ts';
 import { WRITE_LIMIT_MESSAGE, WRITE_LIMIT_PER_MINUTE, WRITE_LIMIT_WINDOW_MS } from '../middleware/writeLimit.ts';
@@ -133,7 +137,8 @@ export function invoicesRouter(db: Db): Router {
     res.json(invoiceProfile(db, currentUser(req).id));
   });
   router.put('/profile', limited, (req, res) => {
-    res.json(saveInvoiceProfile(db, currentUser(req).id, profileBody.parse(req.body ?? {})));
+    const me = currentUser(req);
+    res.json(saveInvoiceProfile(db, me.id, profileBody.parse(req.body ?? {}), me.id));
   });
   router.get('/profile/:userId', requireRole('admin'), (req, res) => {
     const profile = invoiceProfile(db, idParam(req, 'userId'));
@@ -141,7 +146,13 @@ export function invoicesRouter(db: Db): Router {
     res.json(profile);
   });
   router.put('/profile/:userId', requireRole('admin'), (req, res) => {
-    res.json(saveInvoiceProfile(db, idParam(req, 'userId'), profileBody.parse(req.body ?? {})));
+    res.json(saveInvoiceProfile(db, idParam(req, 'userId'), profileBody.parse(req.body ?? {}), currentUser(req).id));
+  });
+  // MON-7: a VAT number adds 20% to what is paid, so another person (an administrator) confirms it, with a fresh code
+  router.post('/profile/:userId/vat/confirm', requireRole('admin'), (req, res) => {
+    const me = currentUser(req);
+    const body = (req.body ?? {}) as { vatNumber?: unknown; code?: unknown };
+    res.json(confirmInvoiceVat(db, me, idParam(req, 'userId'), body.vatNumber, () => assertFreshCode(db, me, body.code, codeSource(req), { required: true })));
   });
 
   // ── Settings → Company ──

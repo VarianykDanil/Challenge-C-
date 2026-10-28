@@ -22,6 +22,7 @@ import {
   isInvoicedRole,
   normalisePostcode,
   normaliseUtr,
+  isValidVatCheckDigits,
   normaliseVatNumber,
   sameInvoicePayment,
   selfBillingAgreementText,
@@ -269,9 +270,27 @@ test('supplier details: postcode, UTR and VAT number formats', () => {
   assert.equal(normaliseUtr('12345 67890'), '1234567890');
   assert.equal(normaliseUtr('123456789'), null);
   assert.equal(formatUtr('1234567890'), '12345 67890');
-  assert.equal(normaliseVatNumber('gb 123 4567 89'), 'GB123456789');
-  assert.equal(normaliseVatNumber('123456789'), 'GB123456789');
-  assert.equal(normaliseVatNumber('GB123456789012'), 'GB123456789012');
+  // VAT numbers: HMRC's published example GB 999 9999 73, and numbers made up to pass (or fail) the check digits
+  assert.equal(normaliseVatNumber('gb 999 9999 73'), 'GB999999973');
+  assert.equal(normaliseVatNumber('999999973'), 'GB999999973');
+  assert.equal(normaliseVatNumber('GB999999973001'), 'GB999999973001', 'a branch: the first 9 digits are checked');
   assert.equal(normaliseVatNumber('FR123'), null);
-  assert.equal(formatVatNumber('GB123456789'), 'GB 123 4567 89');
+  assert.equal(formatVatNumber('GB999999973'), 'GB 999 9999 73');
+});
+
+test('VAT numbers pass HMRC\'s check digits (the mod 97 and the newer 9755 schemes), so a made-up one is refused', () => {
+  // weights 8,7,6,5,4,3,2 on the first seven digits, plus the last two as a number: 0 (mod 97), or 42 for the
+  // 9755 scheme used for numbers from 100 000 000
+  assert.equal(isValidVatCheckDigits('999999973'), true, '315 + 73 = 388 = 4 × 97');
+  assert.equal(isValidVatCheckDigits('999999918'), true, '315 + 18 = 333, 333 mod 97 = 42 (9755)');
+  assert.equal(isValidVatCheckDigits('123456782'), true, '112 + 82 = 194 = 2 × 97');
+  assert.equal(isValidVatCheckDigits('123456789'), false);
+  assert.equal(isValidVatCheckDigits('999999974'), false);
+  assert.equal(isValidVatCheckDigits('000000000'), false, 'all zeros is no number');
+  assert.equal(isValidVatCheckDigits('001234589'), false, '50 + 89 = 139, mod 97 = 42: the 9755 scheme is only for numbers from 100 000 000');
+  assert.equal(isValidVatCheckDigits('12345678'), false);
+  assert.equal(normaliseVatNumber('GB 000 0000 00'), null);
+  assert.equal(normaliseVatNumber('GB123456789'), null);
+  assert.equal(normaliseVatNumber('GB123456789012'), null);
+  assert.equal(normaliseVatNumber('GB 999 9999 18'), 'GB999999918');
 });

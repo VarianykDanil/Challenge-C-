@@ -3,7 +3,7 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import type {
   CompanySettings, CompanySettingsInput, Invoice, InvoiceDisputeInput, InvoiceDisputeRow, InvoiceListRow, InvoiceProfile, InvoiceProfileInput,
-  InvoiceResolveInput, InvoiceStatus, PayrollRunWithUser, SelfBillingAgreement,
+  InvoiceResolveInput, InvoiceStatus, InvoiceVatConfirmInput, PayrollRunWithUser, SelfBillingAgreement,
 } from '@lm/shared';
 import { api, qs } from './client';
 
@@ -43,6 +43,18 @@ export function useSaveInvoiceProfile(userId?: number | null) {
   return useMutation({
     mutationFn: (input: InvoiceProfileInput) => api<InvoiceProfile>(userId ? `/invoices/profile/${userId}` : '/invoices/profile', { method: 'PUT', json: input }),
     onSuccess: () => invalidateInvoices(qc),
+  });
+}
+
+/** POST /invoices/profile/:userId/vat/confirm (an administrator, with a fresh code): VAT is charged from then on. */
+export function useConfirmInvoiceVat(userId: number) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (input: InvoiceVatConfirmInput) => api<InvoiceProfile>(`/invoices/profile/${userId}/vat/confirm`, { method: 'POST', json: input }),
+    onSuccess: (p) => {
+      qc.setQueryData(invoiceKeys.profile(userId), p);
+      invalidateInvoices(qc);
+    },
   });
 }
 
