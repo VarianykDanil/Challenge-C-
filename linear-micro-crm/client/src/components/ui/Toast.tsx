@@ -1,6 +1,7 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { CheckCircle2, Info, TriangleAlert, X, XCircle } from 'lucide-react';
 import clsx from 'clsx';
+import { useMediaQuery } from '@/lib/useMediaQuery';
 
 export type ToastTone = 'success' | 'error' | 'info' | 'warning';
 export interface ToastMessage {
@@ -49,10 +50,15 @@ const ACCENT: Record<ToastTone, string> = {
   info: 'before:bg-info',
 };
 
+/** On a phone a notice sits over the top of the page, so it goes sooner (it stays in the bell). */
+const PHONE_NOTICE_MS = 5000;
+
 function ToastItem({ t, onDismiss }: { t: ToastMessage; onDismiss: (id: number) => void }) {
   const [leaving, setLeaving] = useState(false);
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const duration = t.duration ?? (t.tone === 'error' ? 6000 : 4000);
+  const phone = useMediaQuery('(max-width: 639.98px)');
+  const asked = t.duration ?? (t.tone === 'error' ? 6000 : 4000);
+  const duration = t.notice && phone && asked ? Math.min(asked, PHONE_NOTICE_MS) : asked;
 
   const close = useCallback(() => {
     setLeaving(true);
@@ -89,7 +95,8 @@ function ToastItem({ t, onDismiss }: { t: ToastMessage; onDismiss: (id: number) 
       <Icon className={clsx('mt-0.5 h-5 w-5 shrink-0', cls)} aria-hidden />
       <div className="min-w-0 flex-1">
         <div className="text-sm font-semibold leading-snug text-fg">{t.title}</div>
-        {t.description && <div className="mt-0.5 text-xs leading-relaxed text-muted">{t.description}</div>}
+        {/* a notice keeps to two lines of text on a phone; the bell has the rest */}
+        {t.description && <div className={clsx('mt-0.5 text-xs leading-relaxed text-muted', t.notice && 'max-sm:line-clamp-2')}>{t.description}</div>}
         {t.action && (
           <button
             type="button"
