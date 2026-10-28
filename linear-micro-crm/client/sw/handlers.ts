@@ -2,9 +2,13 @@
 // (WorkerDeps), so sw/handlers.test.ts runs it in Node with fake caches; sw/sw.ts wires it to the browser's.
 import { PREVIOUS_CACHE, RUNTIME_CACHE, RUNTIME_LIMIT, SHELL_URL, isShellCache, reusableFromOldCache, servesSavedShell } from './policy.ts';
 
+/** Lookups ignore the Vary header: the app sends `Vary: Origin, Accept-Encoding`, a page's module import carries an
+ * Origin header that install's own requests do not, and a saved file is the same whatever either says. */
+const ANY_VARY = { ignoreVary: true } as const;
+
 /** The parts of a browser Cache this worker uses. */
 export interface CacheLike {
-  match(request: Request | string): Promise<Response | undefined>;
+  match(request: Request | string, options?: { ignoreVary?: boolean }): Promise<Response | undefined>;
   put(request: Request | string, response: Response): Promise<void>;
   keys(): Promise<readonly Request[]>;
   delete(request: Request | string): Promise<boolean>;
@@ -14,7 +18,7 @@ export interface CacheLike {
 export interface CachesLike {
   open(name: string): Promise<CacheLike>;
   /** Looks in every cache of this site, or only in `cacheName`. */
-  match(request: Request | string, options?: { cacheName?: string }): Promise<Response | undefined>;
+  match(request: Request | string, options?: { cacheName?: string; ignoreVary?: boolean }): Promise<Response | undefined>;
   keys(): Promise<string[]>;
   delete(name: string): Promise<boolean>;
 }
@@ -60,10 +64,10 @@ export async function precache(deps: WorkerDeps, urls: readonly string[]): Promi
   await Promise.all(
     urls.map(async (url) => {
       const key = absolute(deps, url);
-      if (await cache.match(key)) return;
+      if (await cache.match(key, ANY_VARY)) return;
       if (reusableFromOldCache(url)) {
         for (const name of older) {
-          const hit = await (await deps.caches.open(name)).match(key);
+          const hit = await (await deps.caches.open(name)).match(key, ANY_VARY);
           if (hit) return cache.put(key, hit);
         }
       }
@@ -91,8 +95,8 @@ export async function retireOldReleases(deps: WorkerDeps): Promise<void> {
   for (const name of old) {
     const cache = await deps.caches.open(name);
     for (const req of await cache.keys()) {
-      if (!reusableFromOldCache(new URL(req.url).pathname) || (await current.match(req))) continue;
-      const res = await cache.match(req);
+      if (!reusableFromOldCache(new URL(req.url).pathname) || (await current.match(req, ANY_VARY))) continue;
+      const res = await cache.match(req, ANY_VARY);
       if (res) await previous.put(req, res);
     }
     await deps.caches.delete(name);
@@ -111,7 +115,7 @@ export async function servePage(deps: WorkerDeps, req: Request): Promise<Respons
   } catch {
     res = null;
   }
-  const shell = await (await deps.caches.open(deps.shell)).match(absolute(deps, SHELL_URL));
+  const shell = await (await deps.caches.open(deps.shell)).match(absolute(deps, SHELL_URL), ANY_VARY);
   if (shell) return shell;
   return res ?? new Response(OFFLINE_PAGE, { status: 503, headers: { 'Content-Type': 'text/html; charset=utf-8' } });
 }
@@ -134,7 +138,7 @@ export async function keepAtRuntime(deps: WorkerDeps, req: Request, res: Respons
  */
 export async function serveSaved(deps: WorkerDeps, req: Request, waitUntil: (p: Promise<unknown>) => void = () => undefined): Promise<Response> {
   const path = new URL(req.url).pathname;
-  const hit = (await (await deps.caches.open(deps.shell)).match(absolute(deps, path))) ?? (await deps.caches.match(req));
+  const hit = (await (await deps.caches.open(deps.shell)).match(absolute(deps, path), ANY_VARY)) ?? (await deps.caches.match(req, ANY_VARY));
   if (hit) return hit;
   const res = await deps.fetch(req);
   // kept in the background, so the page gets the file without waiting for the copy

@@ -7,18 +7,30 @@ import { PREVIOUS_CACHE, RUNTIME_CACHE, RUNTIME_LIMIT, shellCacheName } from './
 const ORIGIN = 'https://hub.example.test';
 const url = (path: string) => `${ORIGIN}${path}`;
 
+/**
+ * Like a browser Cache: one entry per URL, and a lookup honours the stored response's Vary header (the request
+ * headers it names must match the ones it was saved with) unless `ignoreVary` is set. The app sends
+ * `Vary: Origin, Accept-Encoding` on its bundles, and a module import carries an Origin header.
+ */
 class FakeCache implements CacheLike {
-  readonly items = new Map<string, Response>();
+  readonly items = new Map<string, { headers: Headers; res: Response }>();
   private key(r: Request | string): string {
     return typeof r === 'string' ? new URL(r, ORIGIN).href : r.url;
   }
-  async match(r: Request | string) {
-    return this.items.get(this.key(r))?.clone();
+  async match(r: Request | string, options?: { ignoreVary?: boolean }) {
+    const hit = this.items.get(this.key(r));
+    if (!hit) return undefined;
+    if (!options?.ignoreVary) {
+      const asked = typeof r === 'string' ? new Headers() : r.headers;
+      const vary = (hit.res.headers.get('Vary') ?? '').split(',').map((h) => h.trim()).filter(Boolean);
+      if (vary.some((h) => h === '*' || asked.get(h) !== hit.headers.get(h))) return undefined;
+    }
+    return hit.res.clone();
   }
   async put(r: Request | string, res: Response) {
-    // a real cache stores the whole body
+    // a real cache stores the whole body, and the request's headers for Vary
     const body = await res.arrayBuffer();
-    this.items.set(this.key(r), new Response(body, { status: res.status, headers: res.headers }));
+    this.items.set(this.key(r), { headers: typeof r === 'string' ? new Headers() : new Headers(r.headers), res: new Response(body, { status: res.status, headers: res.headers }) });
   }
   async keys() {
     return [...this.items.keys()].map((u) => new Request(u));
@@ -35,10 +47,10 @@ class FakeCaches implements CachesLike {
     if (!c) this.all.set(name, (c = new FakeCache()));
     return c;
   }
-  async match(r: Request | string, options?: { cacheName?: string }) {
-    if (options?.cacheName) return this.all.get(options.cacheName)?.match(r);
+  async match(r: Request | string, options?: { cacheName?: string; ignoreVary?: boolean }) {
+    if (options?.cacheName) return this.all.get(options.cacheName)?.match(r, options);
     for (const c of this.all.values()) {
-      const hit = await c.match(r);
+      const hit = await c.match(r, options);
       if (hit) return hit;
     }
     return undefined;
@@ -52,7 +64,8 @@ class FakeCaches implements CachesLike {
   /** Seed a cache with files: path → body. */
   async seed(name: string, files: Record<string, string>, type = 'application/javascript') {
     const c = await this.open(name);
-    for (const [path, body] of Object.entries(files)) await c.put(url(path), new Response(body, { headers: { 'Content-Type': type } }));
+    // saved as install does: a plain request, and the app's real Vary header
+    for (const [path, body] of Object.entries(files)) await c.put(url(path), new Response(body, { headers: { 'Content-Type': type, Vary: 'Origin, Accept-Encoding' } }));
   }
 }
 
@@ -76,7 +89,8 @@ function deps(caches: FakeCaches, fetch: WorkerDeps['fetch'], shell = SHELL_A, p
   return { caches, fetch, shell, origin: ORIGIN, pageTimeoutMs };
 }
 
-const req = (path: string) => new Request(url(path));
+/** A request as the page makes it for a module script: same-origin, with an Origin header. */
+const req = (path: string) => new Request(url(path), { headers: { Origin: ORIGIN } });
 const text = async (res: Response) => res.text();
 
 test('with no signal, a bundle saved by the release waiting to take over is used (a page already running that release)', async () => {
