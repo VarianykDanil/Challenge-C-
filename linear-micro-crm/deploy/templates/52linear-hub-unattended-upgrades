@@ -1,0 +1,11 @@
+// Linear Hub server (deploy/install.sh). Ubuntu's own security updates are already on (50unattended-upgrades).
+// This adds Caddy's repository, so the HTTPS front door is patched too, and lets the server restart itself at night
+// when an update needs it (a new kernel, say). Linear Hub and Caddy start again by themselves after a restart.
+// Node.js is left to Noryn's monthly maintenance, so a new Node never arrives untested.
+Unattended-Upgrade::Origins-Pattern {
+	"site=dl.cloudsmith.io";
+};
+Unattended-Upgrade::Automatic-Reboot "true";
+Unattended-Upgrade::Automatic-Reboot-Time "04:30";
+Unattended-Upgrade::Remove-Unused-Kernel-Packages "true";
+Unattended-Upgrade::Remove-Unused-Dependencies "true";

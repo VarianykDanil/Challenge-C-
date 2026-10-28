@@ -58,7 +58,7 @@ export const COPY = {
     },
     about: {
       title: 'About Linear Hub',
-      description: 'The story behind the platform, what it tracks and the squad who built it.',
+      description: 'The story behind the platform, what it tracks and how it was built.',
     },
     // Release 1.2 (r2-foundation): the new pages' titles; each page's owner may reword its own entry.
     learning: {

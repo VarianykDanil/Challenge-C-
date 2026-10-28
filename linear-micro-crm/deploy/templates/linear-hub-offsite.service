@@ -1,0 +1,45 @@
+# Linear Hub (written by deploy/install.sh): copy the encrypted backups off this server. Started by the timer.
+[Unit]
+Description=Linear Hub: copy the encrypted backups off this server
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=@SERVICE_USER@
+Group=@SERVICE_USER@
+ExecStart=@LIB_DIR@/offsite-sync.sh
+Environment=HOME=@HOME_DIR@
+Environment=RCLONE_CACHE_DIR=@DATA_DIR@/.cache/rclone
+Nice=10
+IOSchedulingClass=idle
+TimeoutStartSec=6h
+UMask=0077
+
+# Locked down like the app itself: it may write only the data folder and rclone's own settings, and reach the network.
+NoNewPrivileges=yes
+ProtectSystem=strict
+# rclone writes what it learns about the store (and refreshed sign-in tokens) back into its own settings.
+ReadWritePaths=@DATA_DIR@ @HOME_DIR@/.config/rclone
+ProtectHome=yes
+PrivateTmp=yes
+PrivateDevices=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectKernelLogs=yes
+ProtectControlGroups=yes
+ProtectClock=yes
+ProtectHostname=yes
+ProtectProc=invisible
+RestrictNamespaces=yes
+RestrictRealtime=yes
+RestrictSUIDSGID=yes
+LockPersonality=yes
+MemoryDenyWriteExecute=yes
+RemoveIPC=yes
+CapabilityBoundingSet=
+AmbientCapabilities=
+SystemCallArchitectures=native
+SystemCallFilter=@system-service
+SystemCallErrorNumber=EPERM
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6 AF_NETLINK

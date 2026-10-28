@@ -1,17 +1,16 @@
-# Team working agreement
+# Working agreement for parallel work packages
 
-Linear Hub is built by a five-person squad. Each member owns a slice of the codebase; nobody edits
-another member's files without agreeing first (the integrator merges and resolves conflicts).
+Linear Hub is built by one developer at Noryn System Ltd directing AI coding agents (see [`TEAM.md`](TEAM.md)). Each
+release is split into work packages that are built at the same time, each in its own git worktree and branch. This
+page is the agreement they all work to: the conventions, and the contracts between the parts of the code, so that
+packages built side by side fit together when they are merged.
 
-| # | Member | Role | Owns |
-|---|---|---|---|
-| 1 | **Backend Developer** | Software development | `server/**`, `docs/API.md` (implements it exactly; may append notes) |
-| 2 | **Frontend Developer** | Software development | `client/src/pages/**` (except `Login.tsx`, `About.tsx`), `client/src/api/**`, `client/src/auth/**`, `client/src/lib/**`, `client/src/App.tsx`, `client/src/main.tsx` |
-| 3 | **Marketing & Content** | Marketing | `README.md`, `docs/TEAM.md`, `docs/PITCH.md`, `docs/USER_GUIDE.md`, `docs/ROADMAP.md`, `client/src/content/**`, `client/src/pages/About.tsx` |
-| 4 | **Product Designer (Brand & UI)** | Design | `client/src/index.css`, `client/index.html`, `client/public/**`, `client/src/components/ui/**`, `client/src/components/layout/**`, `client/src/components/brand/**`, `client/src/pages/Login.tsx`, `docs/DESIGN.md` |
-| 5 | **Logic Builder (Data & Charts)** | Design / logic | `shared/src/logic/**`, `shared/src/constants.ts`, `client/src/components/charts/**`, `docs/LOGIC.md` |
+**Ownership.** Every package brief lists the files that package may change. A package that truly needs a small change
+outside its list makes the smallest change it can and says so in its notes, so the merge can check it. Comments in the
+code that say a file is "owned by" a role or a package code (P1–P9, L2, U5 and so on) are history from earlier
+releases, not people: [`MAINTAINERS.md`](MAINTAINERS.md) explains them.
 
-Shared and frozen: `shared/src/types.ts` (add optional fields only; report any change).
+**Shared and frozen:** `shared/src/types.ts` (add optional fields only, and say so in the package notes).
 
 ## Conventions
 - TypeScript strict everywhere. ESM. Relative imports inside a package; `@lm/shared` across packages (`import { funnelRatios, type User } from '@lm/shared'`). Inside `shared/`, import with explicit `.ts` extensions.
@@ -23,7 +22,7 @@ Shared and frozen: `shared/src/types.ts` (add optional fields only; report any c
 - Accessibility: every interactive element keyboard reachable, labelled inputs, visible focus rings, colour never the only signal.
 - Commit messages: imperative mood, scoped (`server: add payroll summary`).
 
-## Layout contract (Designer ⇄ Frontend)
+## Layout contract (layout ⇄ pages)
 `client/src/components/layout/AppShell.tsx` exports:
 ```tsx
 export interface AppShellProps { user: UserWithTeam; onLogout: () => void; children: React.ReactNode }
@@ -33,22 +32,23 @@ It renders the sidebar (navigation filtered by `user.role` using `NAV_ITEMS` fro
 topbar (search slot, theme toggle, user menu) and `<main>` with `children`. Pages render inside with
 `<PageHeader title description actions />` from the UI kit at the top.
 
-## UI kit contract (Designer ⇄ everyone)
+## UI kit contract (UI kit ⇄ everyone)
 Components exported from `client/src/components/ui/index.ts` keep the prop names in the skeleton files.
-Frontend may request additions; Designer implements.
+Pages may ask for additions; the UI kit adds them, keeping existing prop names.
 
-## Charts contract (Logic Builder ⇄ Frontend)
+## Charts contract (charts ⇄ pages)
 Components exported from `client/src/components/charts/index.ts` keep the prop names in the skeleton files.
 
 ## Definition of done
-- `npm run typecheck` and `npm run build` pass from the repo root.
-- Server smoke test (`npm run smoke -w server`) passes.
-- Both themes verified visually; no console errors.
+- `npm run typecheck`, `npm test`, `npm run smoke -w server` and `npm run build` pass in `linear-micro-crm/`.
+- A test that failed before the change passes after it (for anything that can be tested).
+- Both themes checked at phone and laptop sizes; no console errors.
+- The package's notes (`docs/fragments/<release>-<package>.md`) say what changed, for users, the owner and developers.
 
-## Auth contract (Frontend ⇄ Designer)
+## Auth contract (sign-in ⇄ pages)
 `client/src/auth/AuthProvider.tsx` exports `AuthProvider` and `useAuth(): { user, loading, login(input), logout(), refresh() }`.
 `client/src/api/hooks.ts` exports `useDemoAccounts()` → `{ accounts: { label, role, email, employeeId }[] }`.
-`client/src/pages/Login.tsx` (Designer) exports `LoginPage()` and uses both. `client/src/pages/About.tsx` (Marketing) exports `AboutPage()`.
+`client/src/pages/Login.tsx` exports `LoginPage()` and uses both. `client/src/pages/About.tsx` exports `AboutPage()`.
 
 ## Chart colour tokens
-`--color-chart-1 … --color-chart-6` are defined in `client/src/index.css` (Designer) and consumed by charts (Logic Builder) via `var(--color-chart-n)`.
+`--color-chart-1 … --color-chart-6` are defined in `client/src/index.css` and used by the charts via `var(--color-chart-n)`.

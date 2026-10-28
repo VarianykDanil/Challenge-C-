@@ -1,38 +1,30 @@
 # Linear Hub 1.3: notes for the owner
 
-What Matt needs to know, set up or decide for each part of 1.3, collected from the engineers' notes. Settings named in **bold** are where you change them.
+What the owner needs to know, set up or decide for each part of 1.3. Settings named in **bold** are where you change
+them. These notes were written for 1.3 (October 2026); where a later release changed something, the note says so.
 
 ## Pay: base or commission, whichever is higher; cancellations
 
 - **Paid weeks never change.** A client's cancellation after payday takes the difference off the person's next unpaid week, as a line they can see with its reason. Because the base is a floor, a cancellation only costs as much as it changes the week: a week paid the base loses nothing.
 - **Bonuses are by hand only**, as decided. Nothing is added automatically: not a sales bonus, and not a leader's override.
 - The owner's own plan is treated as salaried (no day rate and no commission), so it gets no weekly pay from the rule date. Give a plan a day rate if someone on it should be paid weekly.
-- **The rule date** is Monday of the week 1.3 is installed. If Matt wants earlier unpaid weeks paid by the new rule, he can move it back in Settings → Pay; only unpaid weeks move.
+- **The rule date** is Monday of the week 1.3 is installed. To pay earlier unpaid weeks by the new rule, move it back in Settings → Pay; only unpaid weeks move.
 - **The demo rates are illustrative** (BCN £20, CHN £18, VLT £35, FCB £15 a sub to the rep). Set the real rates with **Add a rate** before the first 1.3 payday.
-- **A dispute settlement is not netted against a later statement.** If P2's office settles "I made 18, not 16" with a dispute line and the client's statement later confirms the 18, the statement's correction is worked out without that line (a dispute may be about something else, such as a missed day). Check a statement's preview against open disputes for the same week.
+- **A dispute settlement is not netted against a later statement.** If the office settles "I made 18, not 16" with a dispute line and the client's statement later confirms the 18, the statement's correction is worked out without that line (a dispute may be about something else, such as a missed day). Check a statement's preview against open disputes for the same week.
 - Statements for a 1.2 week paid by the 1.2 code start from the run's own sales; when gauges at several campaigns of that week were changed after payment, the split of those sales per campaign is approximate (the difference is put on the campaigns with the most sales).
 - An unpaid week from before the rule date that the 1.2 code worked out keeps its figures when someone's plan or team changes. Its breakdown shows those figures, and they are what **Mark paid** pays. To pay it on the new plan, change any of that week's gauges (the run is then worked out again), or settle the difference with an adjustment.
 - Applying a statement of 477 rows (every person, campaign and week of 8 weeks of the demo) takes about 100 ms, a dry run about 95 ms; applying it again changes nothing.
-- For the lead and the other packages:
-  - The dated-rate takeover runs inside `rollForwardEventStatuses` (P1's `db/maintenance.ts`), which the foundation's 15-minute sweep in `index.ts` already calls. The lead may prefer its own call in `index.ts`: `applyDatedRates(db)`.
-  - P2: a run can now be refused by **Mark paid** because it is below £0 (409, before the invoice check). Agree how a self-billed invoice shows money owed, and have the bulk **Mark week paid** skip such runs and say so.
-  - P2's disputes call `addPayAdjustment`: a dispute line that would take a finished week below £0 is refused with a 400 in the same words.
-  - P2's payslip and invoice still show plan hints such as "N sales × £0.00", and the foundation's UserDetail plan card still shows "Commission per sale £0.00". Both should switch to the breakdown lines, for example `lines` from `GET /pay/breakdown`.
-  - `attention.ts` wording still uses `plan.basePerDay`.
-  - P2 must reissue an invoice when a run's total changes: a bonus, a statement or a rate.
-  - P3 may set `statement_id` on the seeded `sale_confirmations`.
-  - The seed's payroll uses its own random stream, so the hours of announcement `created_at` values moved.
 
 ## Self-billing invoices: accept or dispute
 
-- **Who is invoiced**: reps and leaders. Recruiters and administrators (you, Marcus) still get a payslip, because they
-  are office roles. If recruiters are self-employed too, say so: it is a one-line change (`INVOICED_ROLES`).
+- **Who is invoiced**: reps and leaders. Recruiters and administrators still get a payslip, because they are office
+  roles. If recruiters are self-employed too, say so: it is a one-line change (`INVOICED_ROLES`).
 - **Have your accountant read the agreement** (Settings → Company → **Agreement text**) before go-live. HMRC expects a
   self-billing agreement with each supplier, reviewed every 12 months for VAT-registered suppliers. Changing the
   wording means a new version (`SELF_BILLING_AGREEMENT_VERSION`) and everyone accepts again.
-- **VAT**: Linear Hub never adds VAT. If someone is VAT registered, their invoices need VAT on top: talk to your
-  accountant before paying a VAT-registered person through Linear Hub. The invoice prints their VAT number and says
-  "No VAT has been added to this invoice."
+- **VAT**: in 1.3 Linear Hub never added VAT. **Since 1.5** a person with a VAT number on their profile is charged VAT
+  at 20% on their invoice, which shows the VAT and their VAT number. Talk to your accountant before paying a
+  VAT-registered person through Linear Hub.
 - **Fill in Settings → Company** first: the postcode and company number are empty in the demo (the invoice prints
   what is there). The owner's name is the default signatory.
 - **On your existing database**, the first start of 1.3 issues invoices for every unpaid field run (pending runs and
@@ -41,36 +33,25 @@ What Matt needs to know, set up or decide for each part of 1.3, collected from t
   Monday, Tuesday or Wednesday morning**: upgrading on Thursday afternoon gives last week's invoices until Friday
   afternoon, so on Friday morning Mark paid needs each person's acceptance or your reason. Everyone is asked to accept
   the agreement on their next visit.
-- **The deadline rule (lead decision, for your accountant)**: "12:00 the day before payday, or 24 hours after the
-  invoice was issued, whichever is later", so nobody's invoice counts as accepted before they could see it. The cost:
+- **The deadline rule (for your accountant)**: "12:00 the day before payday, or 24 hours after the invoice was issued,
+  whichever is later", so nobody's invoice counts as accepted before they could see it. The cost:
   an invoice that changes on Thursday afternoon or on payday is not paid automatically on Friday morning unless the
   person accepts it (they get a notification) or you pay it with a reason. Clause 3 of the agreement says so ("You
-  always get at least 24 hours…"). The agreement's version is unchanged (2026-10): nobody outside the demo has
-  accepted it yet. Bump `SELF_BILLING_AGREEMENT_VERSION` if a real person accepted the earlier wording.
+  always get at least 24 hours…"). The agreement's version is unchanged (2026-10). If a real person accepted the
+  earlier wording, Noryn raises the version so everyone accepts again.
 - **Decision for you (and your accountant): deemed acceptance without an agreement.** "Counts as accepted at the
   deadline" is a term of the self-billing agreement. Today an invoice still counts as accepted at the deadline when
   the person has not accepted the agreement yet (otherwise nobody could be paid in the first week without a reason),
   and the invoice says so: "Deemed accepted … (the self-billing agreement was not accepted yet)". If you would rather
   such invoices wait for acceptance (or a reason), say so: it is a small change.
 - **Paying without acceptance** is possible with a reason (kept with the invoice and in the audit trail) for an
-  invoice still waiting; never for a **disputed** one, which is held until you answer it (the lead's rule, taken
-  literally). Bulk Mark paid never pays a waiting invoice for you.
-- **Back up the signature image**: it lives in `server/data/uploads/`, which the nightly database backup does not
-  copy (the invoices keep working without it; they just show the name).
+  invoice still waiting; never for a **disputed** one, which is held until you answer it. Bulk Mark paid never pays a
+  waiting invoice for you.
+- **The signature image** lives in the uploads folder (`server/data/uploads/` on the Mac). Since 1.5 every backup
+  includes it; before that, copy the folder yourself (the invoices keep working without it; they just show the name).
 - **A reissue keeps the invoice number** and raises the version (the earlier versions are kept and shown). If your
   accountant prefers a credit note and a new number for corrections, that is a change to make before go-live.
-- **For the lead**: (1) the bulk confirm step's count is fixed with a three-line change in `pages/Finance.tsx` (P1's
-  page: `payableRuns` from `features/finance/bulkPay.tsx` for `flaggedSelected` and the confirm label), and its
-  description now comes from `bulkConfirmDescription` (same file, one more line); keep both when merging. (2) The self-service invoice writes have their own 60-a-minute limiter inside `routes/invoices.ts`; if P9
-  adds `/invoices` prefixes to `WRITE_LIMITED_ROUTES`, drop it. (3) Removed runs leave void records in
-  `invoice_voids` (no screen yet). (4) Merged with P1 the "Fix and reissue" correction moves the run's gross, and the
-  lines come from P1's `weekPayBreakdown`; the P2 tests pass with and without P1. (5) Last fix round: the test server
-  in `server/src/test/helpers.ts` turns keep-alive off (`server.keepAliveTimeout = 0`), because r3-contracts'
-  "anonymous → 401" test failed with ECONNRESET ("fetch failed") in every full `npm test` run on the merged tree: the
-  synchronous extension-seed test before it blocks the event loop for ~6 s, longer than Node's 5 s keep-alive timeout,
-  and the next request went out on a pooled socket the server then reset (integration-trial item 5). One line, test
-  only; drop it if the foundation fixes the flake another way. (6) The attention feed's 12-statement budget is met
-  for the admin again (13 → 12) by P2's provider alone; the leader is exactly at 12.
+- Removed runs leave a record of the voided invoice (there is no screen for these yet).
 
 ## Client statements from Gmail
 
@@ -82,13 +63,14 @@ What Matt needs to know, set up or decide for each part of 1.3, collected from t
   administrator does not allow them, or Advanced Protection is on.
 - **What Linear Hub reads.** Only emails FROM the sender addresses you list, and only their PDF attachments. It opens
   the mailbox read-only: it never marks anything read, never moves, labels, flags or deletes mail, and never sends any.
-  The app password is stored encrypted with the app secret (`server/data/app-secret` or `LM_APP_SECRET`), is never
-  shown again or sent by any page, and never appears in the audit trail.
+  The app password is stored encrypted with the app key (the key on the recovery sheet), is never shown again or sent
+  by any page, and never appears in the audit trail.
 - **Removing access.** Press **Remove app password** in Settings → Integrations, or delete the "Linear Hub" app password
   at myaccount.google.com/apppasswords (that stops it at once, wherever Linear Hub runs). Changing your Google password
   also revokes every app password.
-- **Back up `server/data/statements/`** with the database: the nightly backup copies the database only. A statement
-  whose PDF is missing still opens; only its PDF is gone.
+- **The statement PDFs** live in the statements folder (`server/data/statements/` on the Mac). Since 1.5 every backup
+  includes them; before that, copy the folder yourself. A statement whose PDF is missing still opens; only its PDF is
+  gone.
 - **Please send a real (redacted) statement from each client** (BCN, CHN, Volt Energy, FibreCity — names and IDs can be
   blacked out, the layout matters): the reader is built and tested on statements made to look like the usual layouts,
   and a real one lets us check its headings, its period line and the way it marks cancellations. Until then, the first
@@ -104,11 +86,6 @@ What Matt needs to know, set up or decide for each part of 1.3, collected from t
 - **A listed person's days with no row count as cancelled** (they are not "kept as logged" like people the statement
   does not list at all). The statement now says so and waits for you. Tell us if you would rather such days kept the
   logged figure.
-- **For the lead and P1 (merge):** (1) done in the last fix round: P1's `applyConfirmedSales` takes `replacesStatementId`
-  and re-keys its own lines, and P3 no longer writes `pay_adjustments`. (2)
-  When the old correction was already paid out, P1 adds a second line for the difference and its sentence reads "Paid for
-  22, 2 cancelled by BCN, so +£40.00" (relative to what was paid, not to the corrected figure); P1 owns that wording. (3)
-  Done in the last fix round: uploads and Check now have their own per-person limits in P3's router.
 - The demo database has three statements (BCN, CHN and a CHN remittance advice) and none applied, so you can try
   Apply. An upgraded 1.2 database starts with none, no senders and no client IDs.
 
@@ -118,29 +95,29 @@ What Matt needs to know, set up or decide for each part of 1.3, collected from t
   device's clock.
 - The built-in PDF font covers English and Western European letters. Other accents are stripped (Polish "Ł" → "L",
   Romanian "Ș" → "S"), Cyrillic and Greek names are spelled in Latin letters ("Иван Петров" → "Ivan Petrov"), and
-  emoji and other scripts (Chinese, Arabic…) print as "?". **Decide before the self-billing invoices ship (P2 draws
-  them with these blocks):** is a Latin spelling acceptable on an invoice, or should we embed a font that prints every
-  name exactly (each PDF about 100–300 kB larger)?
+  emoji and other scripts (Chinese, Arabic…) print as "?". **Decide:** is a Latin spelling acceptable on an invoice,
+  or should we embed a font that prints every name exactly (each PDF about 100–300 kB larger)?
 - The audit PDF holds every entry that matches the filters on screen, newest first, up to 2,000 (filter by person,
   record or dates for a longer period).
 - Downloads made without signal are recorded when the phone is back online (stamped then; the file name keeps the
   day). If someone clears the browser's data first, or more than 100 wait, the oldest are lost. Invoice, candidate,
-  interview-sheet and venue-report PDFs made without signal are not recorded until those pages use the waiting
-  queue (a one-line change each, listed under API for the lead).
+  interview-sheet and venue-report PDFs made without signal are not recorded yet (a small change for each page).
 - A PDF never prints a line that a spreadsheet would run as a formula: any line (also the second line of a note, or a
   line the page wrapping starts) beginning with = + - or @ and more than a number gets an apostrophe in front, as
   the CSV does.
-- The Xero / Sage **Export for payroll** file is unchanged (an import file for payroll software, so no PDF).
+- The payroll export has no PDF (since 1.5 it is a "Payroll spreadsheet (CSV) for your accountant or payroll
+  software").
 - Decision for the owner (optional): the PDF tables use the same columns as the CSVs. If a printed version should
   leave out a column (e.g. the payroll Reference), tell us which and we'll trim the PDF only.
 
 ## Learning videos
 
-- **Back up the media folder yourself.** The nightly backup (and `npm run backup`) copies the database only, never the
-  video files. Uploaded videos live in `server/data/media/videos/` (next to the database; Settings → Learning videos
-  shows the exact folder and its size). Copy `server/data/media/` when you back up or move Linear Hub. After restoring
-  an older database, videos uploaded since have no row (their files can be deleted); a video whose file is missing
-  says so on its page — copy the folder back or upload it again.
+- **The learning videos** live in the media folder next to the database (Settings → Learning videos shows the exact
+  folder and its size). They are big, so the nightly backup leaves them out unless `LM_BACKUP_VIDEOS=1` is set. On the
+  server set up by `deploy/install.sh` (1.5) they are copied off-site every night, encrypted; on the Mac, copy
+  `server/data/media/` yourself when you back up or move Linear Hub. After restoring an older database, videos uploaded
+  since have no row (their files can be deleted); a video whose file is missing says so on its page — copy the folder
+  back or upload it again.
 - A fresh `npm run seed` starts a new database but leaves files already in `server/data/media/` on disk; delete the
   folder if you do not need them.
 - **The three demo videos are examples**: public TED talks on YouTube, marked Example. Delete them (Edit → Delete video)
@@ -155,14 +132,12 @@ What Matt needs to know, set up or decide for each part of 1.3, collected from t
   videos you want measured. Watching itself is measured by the browser; the server counts it no faster than playing
   at double speed, so a required video cannot be ticked off in one go, but a determined person could still leave a
   video playing unwatched — the numbers say a video was played, not that it was understood.
-- **Disk space on Fly.io or Render.** Uploads sit on the same volume as the database and its backups. Those plans
-  start with a 1 GB volume: Linear Hub refuses an upload that would leave less than a tenth of the disk free (507 with
-  a plain message), but one 800 MB video would still nearly fill it. Before uploading videos there, grow the volume
-  (e.g. 10 GB), or use YouTube (unlisted), Vimeo or Google Drive links instead. On the MacBook the reserve is 500 MB.
-- **Lead merge note (app.ts, foundation-owned): applied in the last fix round.** The blanket bump in `server/src/app.ts`
-  skips progress reports (`isVideoProgressReport`), so people watching no longer keep the cached dashboards and team
-  views cold. The team view's in-progress dots lag by up to the cache's 20 s, and "watched" shows at once (the route
-  clears the cache itself). `videos-trust.test.ts` expects 0 and 1 bumps.
+- **Disk space.** Uploads sit on the same disk as the database and its backups. Linear Hub refuses an upload that
+  would leave less than a tenth of the disk free (with a plain message). The small server in `DEPLOY.md` has 40 GB or
+  more; on a smaller disk, prefer YouTube (unlisted), Vimeo or Google Drive links for long videos. On the MacBook the
+  reserve is 500 MB.
+- People watching a video do not slow the dashboards down. The team view's in-progress dots can lag by up to 20
+  seconds; "watched" shows at once.
 - **A short video:** a viewing starts with 40 s of credit, so a video up to about 44 s long can still be ticked off by
   one report. Watching is measured by the browser; this only stops one request from claiming a longer video.
 - YouTube plays from youtube-nocookie.com (no YouTube cookies until someone presses play) and Vimeo with Do Not Track.
@@ -170,14 +145,15 @@ What Matt needs to know, set up or decide for each part of 1.3, collected from t
 
 ## Client accounts and campaign pages
 
-- **A PIN is now required for every client account** (except the seeded demo client, so the demo button keeps
-  working). Whoever signs in first with the email and access code sets the PIN, so send the invite to the client
-  contact directly; if anyone else might have seen it, **Reset PIN** and send it again.
+- **A PIN is required for every client account** (except the seeded demo client, so the demo button keeps working
+  during the trial). Whoever signs in first sets the PIN, so send the invite to the client contact directly; if anyone
+  else might have seen it, **Reset PIN** and send it again. Since 1.5 the invite also carries a one-time setup code,
+  so the email and access code alone are not enough to start the account.
 - The access code is shown in the client accounts list (like an employee ID in Team); the instructions are shown once,
   right after **Invite**. Codes start at CL-0002 (CL-0001 is the demo's).
 - Turning an account off signs it out at once and keeps its posts. There is no delete: a former contact stays in the
   history of what they posted.
-- **Approve** needs P1's pay rule (the campaign rate history). Approving sets a new rate from the date you confirm.
+- **Approve** uses the pay rule's campaign rate history: approving sets a new rate from the date you confirm.
   If that date is in the past, unpaid weeks from it are recalculated, but **weeks already paid keep the old rate and
   nothing corrects them automatically**: if someone should get the difference, add it yourself with **Add an
   adjustment** (Finance → Company → Bonuses and corrections). The Approve dialog warns you when the date reaches a paid
@@ -194,7 +170,7 @@ What Matt needs to know, set up or decide for each part of 1.3, collected from t
   details.
 - Decide: in narrow cards (phones, and the dashboard's third column) the badge reads "From BCN"; the full "From
   Breast Cancer Now" shows where the card has room, and screen readers and the hover text always get the full name.
-  Showing the full name everywhere needs the announcement title row (the foundation's `Announcements.tsx`) to wrap.
+  Showing the full name everywhere needs the announcement title row to wrap (a small change).
 
 ## Recruitment: date of birth, schedule, question bank, interview sheets
 
@@ -215,24 +191,8 @@ What Matt needs to know, set up or decide for each part of 1.3, collected from t
   trail with who wrote it, and each answer shows who last changed it (on the sheet and in the candidate's Questions
   and answers). Two devices on one sheet never overwrite each other: a clash on the same question asks the second
   person to choose. Opening a sheet is recorded in the audit trail, like opening the candidate's profile.
-- **For the lead / P9:** `lib/auditSpecs.ts` `candidateSnapshot` (P9's) has no `dateOfBirth`; P7 refines the two 1.2
-  candidate specs from `recruitmentSpecs.ts` to add it (the same pattern as P6's campaign specs). If a 1.2 spec is not
-  found it is skipped with a warning (no crash). Better: at merge, P9 adds `c.date_of_birth AS dateOfBirth` to
-  `candidateSnapshot` and the refinement (`withDateOfBirth`) is dropped.
-- **For the lead: a renamed label.** The plan says "Question bank: Settings → Recruitment"; the card is titled
-  **Recruitment: interview questions** so both words are on screen.
-- **For the lead: PUT /answers changed shape during the review fixes** (P7's own route, unreleased): questions left out
-  of a save are no longer taken off (`removed: true` does it), each item may carry `base`, and a clash answers 409. No
-  other package calls it. The re-review fix adds optional `device` + `version` per item and `device` on each answer
-  (additive), and two columns, `interview_answers.device` and `device_version` (in the CREATE TABLE, and
-  `addColumnIfMissing` for a database made by an earlier 1.3 build: its start-up line then reads "Upgraded schema:
-  added recruitment:interview_answers.device, recruitment:interview_answers.device_version" once; a 1.2 database gets
-  them with the new table and reports nothing extra).
-- **For the lead: one test-harness line outside P7** (`server/src/test/helpers.ts`, `server.keepAliveTimeout = 0` on
-  the test server): `r3-contracts` "anonymous → 401" failed with "fetch failed" (ECONNRESET) in 3 of 4 runs on the
-  merged code, because the test before it blocks the shared event loop for about 5 s (a full seed) and the server's
-  5 s keep-alive timer closed an idle socket as fetch reused it. With the line, 5 of 5 runs pass. The main chunk grows by 0.57 kB
-  (472.19 → 472.76 kB) only for the preload map of the new lazy chunks; no P7 code is in it.
+- Saving an interview sheet from two devices at once never loses an answer: a clash on the same question asks the
+  second person to choose.
 
 ## Venues, rosters and event plans
 
@@ -280,7 +240,7 @@ What Matt needs to know, set up or decide for each part of 1.3, collected from t
   venue page as a PDF.
 - Demo data: Golden Square is in Warrington in the seed (`/venues/golden-square--warrington`).
 
-## Audit of every action
+## Audit trail: every change, sign-ins and exports
 
 - **Failed sign-ins are recorded from now on.** They are filed under the account the email belongs to, so a person's
   Activity shows attempts on their account even when it was not them typing (worded "Attempt on … account", never as
@@ -295,40 +255,34 @@ What Matt needs to know, set up or decide for each part of 1.3, collected from t
   accounts tried rows per 15 minutes.
 - **Sign-outs by the idle timeout are recorded** ("Signed out after 12 hours without activity (last active 18:02 Wed
   21 Oct)"), when the person comes back or when the server starts. They do not count as the person being active.
-- **What is still not recorded**: page views, reading a list, a session that reaches its 14-day end (the next request
-  asks to sign in), a refused request other than a sign-in or security check (a rep trying to open the office pages
-  gets 403 and nothing is written), and a request refused by the client guard.
+- **What is not recorded**: page views, reading a list, a session that reaches its end (14 days in 1.3; since 1.4,
+  14 hours after signing in: the next request asks to sign in), a refused request other than a sign-in or security
+  check (a rep trying to open the office pages is refused and nothing is written), and a request refused by the client
+  guard. So the trail records every change, every sign-in and failed attempt, and every export and download, but not
+  every look.
 - **Text that could display misleadingly is cleaned**: a page's report or an email typed at sign-in that carries
   invisible right-to-left or zero-width characters is stored without them (or, for an email, not stored), so the trail
   never shows a name or file reversed. Rows written before this release are shown as they were stored.
-- **For the lead: P3's docs sentence** for a statement download now reads "Exported the BCN statement for 12–18 Oct
-  2026 as PDF" (with "the"), and the row is filed under the statement; P3's code needs no change.
 - **Opened records come from the page.** The phone or laptop reports them, and the server checks the person may open
   that record before writing anything. Someone using the API directly without the app could open a record without the
   "opened" row; every change they make is still recorded by the server.
 - **An existing database** gets the new column on the first start (`audit:audit_log.kind`) and its rows are classified
   once: sign-ins, the payroll exports and changes. Nothing is deleted; the two-year retention is unchanged.
-- The Audit page's line under the title is the page's own ("Everything done in Linear Hub: …"); `COPY.nav.audit`
-  still says "Who changed what and when" (foundation copy) and the lead may want to change it there.
 - The audit PDF's **Who** column uses the page's wording: a failed try on Jordan's account prints as "Attempt on
   Jordan Lee's account".
-- **Sign-outs by the idle timeout** are written from the foundation's `middleware/auth.ts` (two calls to
-  `lib/audit/sessions.ts recordIdleSignOut`: `authenticate` and `purgeExpiredSessions`), the hook P9 asked for.
 
-## Client accounts and the foundation
+## Client accounts on the demo
 
 - The demo client account is part of the demo data only: a **fresh** demo seed (`npm run seed`) creates it and records
-  it as the demo account. It has no PIN so the demo sign-in works; P6 makes a PIN required for every other client
-  account. It never appears in Team, the search palette, payroll, leaderboards or read receipts.
+  it as the demo account. It has no PIN so the demo sign-in works; every other client account needs a PIN. It never appears in Team, the search palette, payroll, leaderboards or read receipts.
 - **Changed in 1.3.1: an existing demo database (yours) gains the demo client once** on its next start — Hannah Price,
   Breast Cancer Now, CL-0001, no PIN, with her demo posts — so the sign-in page shows her under **Charity accounts**.
   It happens only while the database is still the demo: the four demo staff accounts (LM-0001, LM-0002, LM-0003,
   LM-0010) are all there with their roles and none has left, the server is not run with `LM_DEMO_ACCOUNTS=0`, and
   Breast Cancer Now has no client account yet; and only when the server starts (`npm start`), never from
-  `npm run pin:reset`. (In 1.3.0 an upgraded database never gained her.) Before real people use the database, turn
-  every seeded demo person off, Hannah included (**Campaigns → Breast Cancer Now → Open page → Client accounts → Turn
-  off**; the go-live checklist in DEPLOY.md lists them all): `LM_DEMO_ACCOUNTS=0` only hides their buttons, their
-  details still sign in.
+  `npm run pin:reset`. (In 1.3.0 an upgraded database never gained her.) **Since 1.5, going live removes the whole
+  demo company for you**, Hannah included: `npm run golive` (DEPLOY.md, "Go-live day"). Until then the demo accounts
+  cannot touch real bank details or payments.
 - Client accounts sign in with their email and an access code, like staff use their employee ID. The first client you
   invite gets CL-0002: CL-0001 is kept for the demo account, so a real client never shares its code.
 - A client account sees only its own name, email, access code and campaign about itself: the pay plan its account is

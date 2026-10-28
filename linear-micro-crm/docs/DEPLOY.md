@@ -1,433 +1,464 @@
-# Put Linear Hub on the internet (HTTPS)
+# Put Linear Hub online
 
-Linear Hub runs happily on a laptop for phones on the same hotspot. To use it from anywhere — a rep at a different
-site, a leader at home, a phone on 4G — it has to live on a server with a proper address and **HTTPS**. Without HTTPS
-the email, employee ID, PIN and session cookie would cross the internet in plain text.
+Linear Hub runs for real on **one small Linux server of Linear MCR's own**, in the UK or EU, at an address of the
+company's own (for example `https://hub.linear-mcr.co.uk`), with HTTPS. Reps then use it on 4G at any venue, it keeps
+running when the office laptop is shut, and its backups leave the building every night.
 
-There are two good routes:
+This page is the runbook for that: what to buy, the go-live day step by step (the owner with Noryn), the go-live
+checklist, and everyday running. The installer `deploy/install.sh` does the technical part in one run.
 
-| Route | What you run | About per month (October 2026, check before buying) | Best when |
-| --- | --- | --- | --- |
-| **A. A small VPS + Caddy** | One Linux server you control; Caddy gets and renews the certificate | **€4–6** (Hetzner CX22 in Germany or Finland, about €4.50 with an IPv4 address; DigitalOcean, Vultr or Linode in London, about $5–6) | You want the lowest cost, UK/EU hosting and full control |
-| **B. Fly.io or Render** | The repository's `Dockerfile` on a managed platform with a persistent disk | **Fly.io about $4–6** (one shared-CPU machine with 512 MB in London plus a 1 GB volume); **Render about $7.25** (Starter instance plus a 1 GB disk, Frankfurt) | You would rather not look after a server |
-
-Add a domain name for either route (about £10 a year for a `.co.uk`), and off-site backup storage (pennies a month for
-a database this size: Backblaze B2, a Hetzner Storage Box from about €3.20, or any S3-compatible bucket).
-
-Whatever the route, Linear Hub keeps its data in **one SQLite file** (with, since 1.3, the folders of learning videos,
-statement PDFs and the signature image beside it), so it runs as **exactly one copy** with one disk. Never scale it out
-to two machines.
+The office Mac on Wi-Fi is **for the trial only**: see [Trial only: the office Mac](#trial-only-the-office-mac) at the
+end.
 
 ---
 
-## Before you start (both routes)
+## 1. First the agreement, then what to buy in Linear MCR's name
 
-1. **Decide where the data comes from.** On first start Linear Hub creates and seeds the **demo** data. To go live with
-   the people, gauges and pay you already have, bring your existing database: stop Linear Hub on the laptop
-   (`npm run stop`, or `npm run service:uninstall` if it runs as a service), make a fresh backup (`npm run backup`), and
-   copy two files up to the server: `server/data/linear.sqlite` and `server/data/app-secret`. Since 1.3, also copy the
-   folders `server/data/media` (learning videos), `server/data/statements` (client statement PDFs) and
-   `server/data/uploads` (the signature image on invoices) when you have them: they are in neither the database file
-   nor its backups.
-2. **The app secret (the key for two-step secrets, sign-in PINs and, since 1.4, bank details and payment keys).**
-   - New install: generate a key once and keep it in your password manager: `openssl rand -hex 32`. Set it as
-     `LM_APP_SECRET`.
-   - Moving an existing database: keep using its `app-secret` file (set `LM_APP_SECRET_FILE` to where you put it and do
-     **not** set `LM_APP_SECRET`), or everyone with two-step verification would be locked out and no PIN would match.
-   - Sign-in PINs are hashed with this secret mixed in, so a stolen copy of the database file **on its own** is useless
-     for guessing PINs. A backup is only that safe when the key is not next to it. With `LM_APP_SECRET` (the new-install
-     route above) Linear Hub never writes the key to disk, so its backups do not contain it: keep the value in your
-     password manager, apart from the backups. With an `app-secret` file, Linear Hub's own backups folder holds a copy
-     of the key next to the database copies (so a restore keeps two-step and PINs working), and whoever gets that
-     folder can still try every 4-digit PIN in minutes: keep the whole folder private, and send it off the server only
-     to **encrypted** storage (step 7).
-   - **Back the secret up with the database** (for an `app-secret` file the backups folder does this). If the secret is
-     lost, two-step verification has to be set up again and every PIN has to be reset: `npm run pin:reset -- <email>`
-     and `npm run 2fa:reset -- <email>` on the server for the administrators, then **Reset PIN** and **Reset two-step
-     verification** (Team → person → Edit profile) for everyone else. Since 1.4 the same key also encrypts everyone's
-     bank details, the payment connections' keys and tokens and the bank files: without it nobody's bank details can be
-     read (everyone types them in again) and every payment connection has to be connected again.
-   - **Backups now hold encrypted bank details and payment provider secrets** (1.4). They are useless without the app
-     secret, so keep the secret apart from the backups (in your password manager, with `LM_APP_SECRET`), and treat a
-     backups folder that holds the `app-secret` file like the bank details themselves.
-3. **Environment for a real deployment** (both routes):
+**The agreement comes first.** The agreement signed for the trial covers Linear Hub on the office Mac. Going online,
+with HTTPS, is outside it (Schedule 1, Part 2, 2.1(a)): Noryn quotes it as a **fixed-price go-live package**, and both
+companies sign a **variation** under clause 26.2 before go-live day, as clause 9.3 requires. The variation:
 
-   ```ini
-   NODE_ENV=production
-   NODE_NO_WARNINGS=1
-   TZ=Europe/London
-   PORT=4000
-   LM_DEMO_ACCOUNTS=0      # the sign-in page shows no demo accounts and the API never publishes a login
-   TRUST_PROXY=1           # one reverse proxy in front: honour X-Forwarded-Proto/-For (Secure cookies, HSTS, per-client sign-in limits)
-   COOKIE_SECURE=1         # the session cookie is only ever sent over HTTPS
-   LM_APP_SECRET=…         # or LM_APP_SECRET_FILE=… (see step 2)
-   ```
+- names the server and off-site storage providers and where the server is (a server in Germany or Finland holds the
+  data outside the UK, so it is also Linear MCR's written instruction for that, Schedule 3, 3.6);
+- says who looks after the server, its updates and the off-site copies: moved into the monthly service, or kept by
+  Linear MCR, which the agreement makes responsible for them today (clauses 9.2 and 16.5);
+- replaces Schedules 3 and 4 for a server on the internet: where the data is processed, HTTPS, the firewall, Noryn's
+  SSH access, and the owner's duties for the server instead of the Mac (Schedule 4, Part 4).
 
-   Never set `LM_BUSINESS_NOW` on a live server (it is for demos and screenshots), and never `LM_PAYMENTS_FAKE` (1.4:
-   it adds test providers that pay nobody). Leave `LM_PAYMENTS_JOB` unset: the 5-minute check is what marks weeks
-   paid while nobody is signed in.
+Buying the accounts in Linear MCR's name keeps their providers Linear MCR's own (Schedule 3, 3.4). A provider Noryn
+engaged itself would be a new sub-processor, with 30 days' notice first (Schedule 3, 3.2). Nothing goes on the internet
+until the variation is signed.
 
-   `TRUST_PROXY=1` means "exactly one proxy in front of me". Linear Hub then takes each person's address from the
-   proxy's `X-Forwarded-For`, so eight wrong sign-ins from one phone pause that phone, not everyone with that email.
-   Use `1` (not `true`, which would trust any address a client writes in the header), and only when Node is reachable
-   through the proxy alone (`HOST=127.0.0.1` in Route A; the platform's router in Route B).
+Buy each of these **in Linear MCR's name and with its card**, so the company owns its data and its address. Noryn gets
+access to look after them (an SSH key on the server), not ownership.
+
+| What | Suggested | About (October 2026; check before buying) |
+| --- | --- | --- |
+| **A small server (VPS)** | Ubuntu 24.04 LTS, 2 vCPU, 4 GB memory, 40 GB disk or more. For example a Hetzner Cloud CX22 in Germany or Finland, or a London VPS from DigitalOcean, Vultr or Linode | €4–6 a month (Hetzner, with an IPv4 address); about $6–12 a month in London |
+| **The address** | A subdomain of the company's domain, e.g. `hub.linear-mcr.co.uk` | Nothing extra if you own the domain; a new `.co.uk` is about £10 a year |
+| **Off-site storage** | A Hetzner Storage Box (1 TB, in a different location from the server), or any S3-compatible bucket (Hetzner Object Storage, Backblaze B2, AWS S3 London) | About €4 a month; a bucket costs pennies at this size |
+| **Monitoring** (free) | An uptime check (UptimeRobot or Better Stack) and a heartbeat check for the nightly copy (Healthchecks.io) | Free plans are enough |
+
+The server holds everything: one SQLite database file plus the folders beside it. It runs as **exactly one copy**.
+Never run two servers on the same data.
+
+## 2. How it fits together
+
+```
+phone ──https──▶ Caddy (ports 80/443, gets and renews the certificate)
+                   └─▶ Linear Hub on 127.0.0.1:4000 (not reachable from outside)
+                         └─▶ /var/lib/linear-hub/linear.sqlite and the folders beside it
+
+02:00  Linear Hub backs up the database and the uploaded files, checks the copy, and writes an encrypted copy
+       (linear-….lhbk, locked with the off-site passphrase) into /var/lib/linear-hub/offsite
+03:15  the off-site timer copies the new encrypted files to the Storage Box or bucket (it never deletes anything there)
+```
+
+| Where | What |
+| --- | --- |
+| `/opt/linear-hub/app` | The code (a git checkout; the app is in `linear-micro-crm/`) |
+| `/var/lib/linear-hub` | The data: `linear.sqlite`, `backups/`, `offsite/`, `media/` (videos), `statements/`, `uploads/`, `logs/errors.log` |
+| `/etc/linear-hub/linear-hub.env` | The settings (readable by root only) |
+| `/etc/linear-hub/keys/app-secret` | The **app key**: it locks bank details, two-step sign-in and PINs. It goes on the **recovery sheet** |
+| `/etc/linear-hub/keys/backup-passphrase` | The **off-site passphrase**: it locks the off-site copies. It goes on **separate paper** |
+| `/etc/caddy/Caddyfile` | The HTTPS front door |
+| `/usr/local/bin/linear-hub` | The command for everyday jobs (`sudo linear-hub help`) |
+| Logs | `sudo linear-hub logs`, `/var/lib/linear-hub/logs/errors.log`, `/var/log/caddy/linear-hub.log` |
+
+The key and the passphrase live **outside** the data folder on purpose: a copy of the data folder, or of its backups,
+cannot unlock bank details on its own.
 
 ---
 
-## Route A: a small UK/EU VPS with Caddy
+## 3. Go-live day, step by step
 
-The layout: Caddy listens on ports 80 and 443, gets a Let's Encrypt certificate for your domain automatically, and
-passes requests to Linear Hub on `127.0.0.1:4000`. Linear Hub itself is never reachable from outside.
+About half a day, the owner with Noryn. Before you start: the variation for going online is signed (§1), the Mac runs
+Linear Hub 1.5 (`npm run latest` in the Linear Hub folder) and the trial has gone well.
 
-### 1. Create the server
+### Step 1 — Buy the server
 
-- Ubuntu 24.04 LTS, the smallest plan (1–2 vCPU, 1–4 GB RAM is plenty), in London, Germany or Finland.
-- Add your SSH key while creating it. Then log in and create a user for the app:
+1. Create the account in Linear MCR's name (Hetzner: **Cloud → New project "Linear Hub" → Add server**).
+2. Choose **Ubuntu 24.04**, the location (Germany or Finland; or London with another provider) and the size above.
+3. Add Noryn's **SSH key** (Noryn sends it) and, if you like, your own. Do not choose password log-in.
+4. Write down the server's **IPv4 address** (and IPv6, if shown).
 
-  ```bash
-  sudo adduser --system --group --home /opt/linear-hub linear
-  sudo mkdir -p /var/lib/linear-hub && sudo chown linear:linear /var/lib/linear-hub && sudo chmod 700 /var/lib/linear-hub
-  ```
+### Step 2 — Point the address at it
 
-- Point your domain at it: an `A` record (and `AAAA` for IPv6) for, say, `hub.example.co.uk` → the server's address.
+At the company that holds your domain, add a DNS record:
 
-### 2. Firewall
+| Type | Name | Value |
+| --- | --- | --- |
+| `A` | `hub` | the server's IPv4 address |
+| `AAAA` (if the server has IPv6) | `hub` | the server's IPv6 address |
 
-```bash
-sudo ufw allow OpenSSH
-sudo ufw allow 80/tcp
-sudo ufw allow 443/tcp
-sudo ufw enable
-sudo ufw status          # 22, 80 and 443 only
-```
+It usually works within minutes, sometimes an hour. `ping hub.linear-mcr.co.uk` then shows the server's address.
 
-Also switch on your provider's cloud firewall with the same three ports if it has one, and keep password log-in for SSH
-off (`PasswordAuthentication no` in `/etc/ssh/sshd_config`).
+### Step 3 — Order the off-site storage
 
-### 3. Node.js and the code
+- **Hetzner Storage Box** (simplest): order it in a **different location** from the server. In its settings, turn on
+  **SSH support** and **automatic snapshots** (for example one a day). Write down its host (`u123456.your-storagebox.de`)
+  and user (`u123456`). Keep its password to type once in step 4.
+- **Or an S3-compatible bucket:** make a **private** bucket with **versioning** on (and object lock, if the provider
+  offers it), and an access key that can use only that bucket. Keep the endpoint, the bucket's **region** (for AWS,
+  the part after `s3.` in the endpoint, e.g. `eu-west-2`; the installer works it out for AWS, Hetzner and Backblaze
+  addresses and asks otherwise), the bucket name, the access key ID and the secret key for step 4.
 
-```bash
-curl -fsSL https://deb.nodesource.com/setup_22.x | sudo -E bash -
-sudo apt-get install -y nodejs git
-node -v                  # v22.18 or newer (24 and 26 work too)
+**Why snapshots or versioning.** The server's copy job never deletes anything off-site, but the login it uses could:
+someone who took over the server could delete or overwrite the copies with it. Snapshots and versions are kept by the
+storage provider, out of that login's reach.
 
-sudo -u linear git clone https://github.com/<you>/<repo>.git /opt/linear-hub/app
-cd /opt/linear-hub/app/linear-micro-crm
-sudo -u linear npm ci --no-audit --no-fund
-sudo -u linear npm run build
-```
+**How long copies are kept** is Linear MCR's decision, written into the variation: the copies hold personal data, so
+no longer than needed; **90 days** is a sensible start. On a bucket, a lifecycle rule deletes copies (and old versions)
+older than that. On a Storage Box, snapshots expire by themselves; the `backups` folder itself grows by one encrypted
+copy a night, so whoever looks after the server clears copies older than the retention at the monthly backup check
+(`rclone delete --min-age 90d`), always keeping the newest month whatever else happens.
 
-If you are bringing your database, copy it now with its folders (from the laptop; leave out any of `media`,
-`statements` and `uploads` that `server/data` does not have):
+### Step 4 — Run the installer (Noryn, about 20 minutes)
 
-```bash
-scp -r server/data/linear.sqlite server/data/app-secret server/data/media server/data/statements server/data/uploads you@hub.example.co.uk:/tmp/
-# on the server:
-sudo install -o linear -g linear -m 600 /tmp/linear.sqlite /tmp/app-secret /var/lib/linear-hub/ && rm /tmp/linear.sqlite /tmp/app-secret
-# the folders (again, only those you copied); install cannot copy folders, so cp, then hand them to the linear user:
-sudo cp -r /tmp/media /tmp/statements /tmp/uploads /var/lib/linear-hub/ && sudo chown -R linear:linear /var/lib/linear-hub && sudo rm -r /tmp/media /tmp/statements /tmp/uploads
-```
-
-With `DB_PATH=/var/lib/linear-hub/linear.sqlite` (step 4) the server finds all three there: `media` and `statements`
-next to the database, `uploads` next to the app secret.
-
-### 4. The environment file
-
-`/etc/linear-hub.env`, readable by root only (`sudo install -m 600 /dev/null /etc/linear-hub.env`, then edit):
-
-```ini
-NODE_ENV=production
-NODE_NO_WARNINGS=1
-TZ=Europe/London
-HOST=127.0.0.1
-PORT=4000
-DB_PATH=/var/lib/linear-hub/linear.sqlite
-LM_BACKUP_DIR=/var/lib/linear-hub/backups
-LM_DEMO_ACCOUNTS=0
-TRUST_PROXY=1
-COOKIE_SECURE=1
-# New install:
-LM_APP_SECRET=paste-the-openssl-rand-output-here
-# Or, when you brought an existing database, instead of LM_APP_SECRET:
-# LM_APP_SECRET_FILE=/var/lib/linear-hub/app-secret
-```
-
-`HOST=127.0.0.1` keeps Node off the public network: only Caddy can reach it.
-
-### 5. Run it as a service (systemd)
-
-`/etc/systemd/system/linear-hub.service`:
-
-```ini
-[Unit]
-Description=Linear Hub
-After=network-online.target
-Wants=network-online.target
-
-[Service]
-User=linear
-Group=linear
-WorkingDirectory=/opt/linear-hub/app/linear-micro-crm/server
-EnvironmentFile=/etc/linear-hub.env
-ExecStart=/usr/bin/node src/index.ts
-Restart=always
-RestartSec=5
-# Hardening: the app may only write its data folder.
-NoNewPrivileges=true
-ProtectSystem=strict
-ProtectHome=true
-PrivateTmp=true
-ReadWritePaths=/var/lib/linear-hub
-
-[Install]
-WantedBy=multi-user.target
-```
+From a computer with the Linear Hub code on it:
 
 ```bash
-sudo systemctl daemon-reload
-sudo systemctl enable --now linear-hub
-sudo systemctl status linear-hub          # active (running)
-curl -s http://127.0.0.1:4000/api/health  # {"ok":true,…}
-journalctl -u linear-hub -n 50            # its log
+scp -r linear-micro-crm/deploy root@<server address>:/root/
+ssh root@<server address>
+bash /root/deploy/install.sh
 ```
 
-(The repository's own `npm run service:install` also works on Linux: it installs a systemd **user** unit for the
-account that runs it; add `sudo loginctl enable-linger linear` so it keeps running with nobody logged in. The system
-unit above is simpler on a server.)
+It asks:
 
-### 6. Caddy (automatic HTTPS)
+1. the web address (`hub.linear-mcr.co.uk`) and an email for certificate notices;
+2. the code repository and the release to install (Noryn's private repository, a release tag such as `v1.5.0`;
+   for a private repository it shows a key to add on GitHub as a read-only deploy key);
+3. where the off-site copies go: **1** Storage Box, **2** S3-compatible bucket, **3** an rclone remote set up
+   already, **4** nowhere yet (it warns you that copies then stay on the server);
+4. an address to ping after each good off-site copy (a Healthchecks.io check, see step 9; it can be added on a later
+   run, but go-live needs it);
+5. whether to turn off password log-in for SSH (only offered when you log in with a key).
+
+Then it works on its own: system packages, a 2 GB swap file on servers with under 2 GB of memory, automatic security
+updates, the firewall (SSH, 80 and 443 only), Node.js 22 LTS, the `linear` service user and its folders, the code and
+the build, the app key, the off-site passphrase, the settings file, the locked-down service, Caddy and HTTPS, the
+nightly off-site copy and the `linear-hub` command.
+
+**It shows the off-site passphrase once.** Write it on paper there and then, and type its last group of five to show
+it is written down. Keep that paper **apart from** the recovery sheet (step 7): someone who finds one should not find
+the other. The passphrase is not in the install log.
+
+For a Storage Box, it first records the box's SSH host keys and shows their fingerprints: compare them with the ones
+Hetzner publishes for Storage Boxes, and stop if they differ. Then it puts the server's key on the box: type the
+Storage Box password once when asked (it is not stored). Run with `--yes` (no questions), it cannot type that
+password: it shows the server's public key instead. Add that key to the Storage Box as Hetzner's guide to Storage Box
+SSH keys describes, then run the installer again.
+
+At the end it prints the address, the health check address and the next steps. Open `https://hub.linear-mcr.co.uk`:
+the sign-in page with a padlock. (If the address does not answer yet, the DNS is not through: Caddy keeps trying by
+itself. `sudo linear-hub status` shows where it stands.)
+
+The same run without questions, for Noryn's notes:
 
 ```bash
-sudo apt install -y debian-keyring debian-archive-keyring apt-transport-https curl
-curl -1sLf 'https://dl.cloudsmith.io/public/caddy/stable/gpg.key' | sudo gpg --dearmor -o /usr/share/keyrings/caddy-stable-archive-keyring.gpg
-curl -1sLf 'https://dl.cloudsmith.io/public/caddy/stable/debian.deb.txt' | sudo tee /etc/apt/sources.list.d/caddy-stable.list
-sudo apt update && sudo apt install -y caddy
+S3_SECRET_ACCESS_KEY='…' bash /root/deploy/install.sh --yes \
+  --domain hub.linear-mcr.co.uk --email ops@example.co.uk \
+  --repo git@github.com:<noryn>/<linear-hub>.git --ref v1.5.0 \
+  --offsite s3 --s3-endpoint https://… --s3-bucket … --s3-access-key-id …
 ```
 
-`/etc/caddy/Caddyfile`:
+Running it again is safe: it keeps the app key, the passphrase, the database and your extra settings, and changes only
+what is missing or different. Answers are kept in `/etc/linear-hub/install.conf`.
 
-```caddyfile
-{
-	email you@example.co.uk
-}
+### Step 5 — Bring the trial database across
 
-hub.example.co.uk {
-	reverse_proxy 127.0.0.1:4000
-	log {
-		output file /var/log/caddy/linear-hub.log {
-			roll_size 10MiB
-			roll_keep 5
-		}
-	}
-}
-```
+On the **Mac**, in Terminal, in the Linear Hub folder:
 
 ```bash
-sudo systemctl reload caddy
+npm run stop                     # or, if it runs in the background:  npm run service:uninstall
+npm run backup -- --new-passphrase ~/linear-move-passphrase.txt      # a one-off passphrase for the move
+mkdir -p ~/linear-move
+LM_OFFSITE_DIR=~/linear-move LM_BACKUP_PASSPHRASE_FILE=~/linear-move-passphrase.txt LM_BACKUP_VIDEOS=1 npm run backup
+scp ~/linear-move/linear-*.lhbk root@<server address>:/root/
 ```
 
-Caddy fetches the certificate on the first request and renews it by itself; plain `http://` redirects to `https://`.
-Linear Hub already compresses its responses and sends the security headers (and HSTS, once `TRUST_PROXY` tells it the
-request came over HTTPS), so the Caddyfile needs nothing else. If you prefer Caddy to compress, add `encode zstd gzip`
-to the site block and `LM_COMPRESSION=0` to the environment file.
-
-### 7. Backups off the server
-
-Linear Hub already writes a checked copy of the database to `LM_BACKUP_DIR` ten minutes after start and every night
-after 02:00 London time, keeping 30 daily and 8 weekly copies (see the README). A copy on the same server does not
-survive losing the server, so send them somewhere else every night. With [rclone](https://rclone.org) and an
-**encrypted** remote (the folder holds everyone's pay and, with an `app-secret` file, a copy of the key for two-step
-secrets and sign-in PINs):
+That makes **one encrypted file** holding the database, the uploaded files, the learning videos and the trial's app
+key, and copies it to the server. Then, **on the server**:
 
 ```bash
-sudo apt install -y rclone
-sudo -u linear rclone config        # add e.g. "b2" (Backblaze B2), then "offsite" of type crypt wrapping b2:linear-hub-backups
-sudo -u linear crontab -e
-# 03:15 every night: copy the last two days of backups off the server
-15 3 * * * rclone copy /var/lib/linear-hub/backups offsite: --max-age 48h --log-file /var/lib/linear-hub/rclone.log
-# 03:20–03:30: the folders the backups leave out (learning videos, statement PDFs, the signature image)
-20 3 * * * rclone copy /var/lib/linear-hub/media offsite:media --log-file /var/lib/linear-hub/rclone.log
-25 3 * * * rclone copy /var/lib/linear-hub/statements offsite:statements --log-file /var/lib/linear-hub/rclone.log
-30 3 * * * rclone copy /var/lib/linear-hub/uploads offsite:uploads --log-file /var/lib/linear-hub/rclone.log
+sudo linear-hub import /root/linear-2026-11-02-1400.lhbk      # the file name the Mac printed
 ```
 
-`rclone copy` never deletes anything off-site, so an empty folder on a new server cannot wipe the copies (`rclone sync`
-would). A folder that does not exist yet (no video uploaded, say) only logs a line.
+It asks for the **move passphrase** (in `~/linear-move-passphrase.txt` on the Mac) and to confirm. The new server
+started with a fresh demo of its own: if the restore lists payments or paid weeks it would forget, they are that
+demo's, so type **RESTORE**. It puts the trial's database, files and app key in place (the server's own new key is kept
+aside as `app-secret.before-restore-…`, never deleted) and starts Linear Hub again.
 
-**Test a restore** before you rely on it, and again every few months: download one copy to a laptop
-(`rclone copy offsite:linear-2026-10-19-0200.sqlite .`), run `npm run restore -- linear-2026-10-19-0200.sqlite` in a
-checkout there, start it and check the numbers. On a new server, put the folders back before starting:
-`sudo -u linear rclone copy offsite:media /var/lib/linear-hub/media`, and the same for `statements` and `uploads`.
+(Noryn may copy the passphrase file across too and run
+`sudo linear-hub import /root/linear-….lhbk --passphrase-file /root/linear-move-passphrase.txt` instead of typing it;
+delete that file from the server afterwards.)
 
-### 8. Updating
+Then on the Mac: `rm -r ~/linear-move ~/linear-move-passphrase.txt`. Leave Linear Hub **stopped** on the Mac from now
+on, so nobody keeps using the old copy.
+
+### Step 6 — Go live
 
 ```bash
-cd /opt/linear-hub/app/linear-micro-crm
-sudo -u linear git pull
-sudo -u linear npm ci --no-audit --no-fund
-sudo -u linear npm run build
-sudo systemctl restart linear-hub
+sudo linear-hub golive
 ```
 
-Database changes apply themselves at start-up (the log says "Upgraded schema: added …"). Take a backup first when the
-release notes mention the database:
+It shows what goes (the demo company: its people, one-tap accounts and records) and what stays (your settings, your
+own people and everything they made), asks for the first owner's name and email if none of your own administrators
+is left, and asks you to type **GO LIVE**. It backs the database up and checks the backup before changing anything.
+If it made the first owner, it prints their **one-time setup code**.
+
+### Step 7 — The owner signs in and prints the recovery sheet
+
+1. On your phone or laptop, open `https://hub.linear-mcr.co.uk`. Sign in with your email, employee ID and setup code,
+   and set up two-step verification with your authenticator app. Keep the recovery codes somewhere safe, away from the
+   phone.
+2. **Settings › Backups › App key and recovery › Make the recovery sheet.** Type a code from your authenticator app,
+   **Print**, then type the last six characters of the key from the paper and tap **I have printed it**.
+   (On the server instead: `sudo linear-hub recovery-sheet`.)
+3. Lock the sheet away like a bank card, away from the server and **apart from the passphrase paper**. Without the
+   key, bank details, two-step sign-in and PINs cannot be read again.
+4. **Settings › Security › Sign-in rules:** choose when people are signed out (14 hours after signing in by default,
+   4 to 24) and the idle time (12 hours by default); switch on **Require a PIN** if you want one.
+
+### Step 8 — Test the off-site copy and a restore
 
 ```bash
-cd /opt/linear-hub/app/linear-micro-crm
-sudo -u linear env DB_PATH=/var/lib/linear-hub/linear.sqlite LM_BACKUP_DIR=/var/lib/linear-hub/backups npm run backup
+sudo linear-hub backup          # a backup now, with its encrypted copy
+sudo linear-hub offsite-sync    # copy it off the server now ("Result: ok …")
+sudo linear-hub restore-test    # download the newest off-site copy, open it, start it, check it, delete it
 ```
+
+`restore-test` ends with **"Restore test passed"** and the number of people and gauge entries in the copy. Write the
+date in the checklist below. If it fails, stop and tell Noryn: the backups are not proven yet.
+
+### Step 9 — Monitoring (free)
+
+- **Uptime:** in UptimeRobot (or Better Stack), add an HTTP(s) monitor for `https://hub.linear-mcr.co.uk/api/health`,
+  every 5 minutes, with the keyword `"ok":true`. Alerts go to the owner and to Noryn.
+- **Nightly copy:** in Healthchecks.io, add a check with a period of 1 day and a grace of 6 hours. Give its ping
+  address to the installer (`bash /root/deploy/install.sh --heartbeat-url https://hc-ping.com/…`): it is pinged
+  only after a good off-site copy, so a night that fails sends you an email.
+- Inside Linear Hub, administrators also see **System health** in the bell: a failed backup, a late encrypted copy, a
+  disk nearly full, the key not on paper yet, server errors. The bell sees the encrypted copies **on the server**; a
+  nightly copy to the Storage Box or bucket that fails shows only in `sudo linear-hub status` and through this
+  heartbeat. So the heartbeat is **not optional** for go-live: the installer warns at the end of every run until it
+  has one.
+
+### Step 10 — Phones
+
+1. For each person: **Team → their name → Edit profile → Sign-in setup → Give a setup code** (needs your own
+   two-step code). Hand the code over privately (in person or by text, never in a group chat). People added from now
+   on get theirs in **Sign-in details** when they are added.
+2. On the phone: open `https://hub.linear-mcr.co.uk`, sign in with the work email, employee ID and setup code, and set
+   up the authenticator app (about two minutes).
+3. **Add to Home Screen** (iPhone: Share → Add to Home Screen; Android: the menu → Install app). It then opens like an
+   app, and once opened it opens again without signal and keeps saves until the signal is back.
+4. Charity and client contacts: the invite on their campaign page carries their access code and setup code.
+
+### Step 11 — Payments, when you are ready
+
+**Settings → Payments** walks through the first run: a connection in test mode, a sandbox payment (or the 1p test
+file for a bank file), then live (type PAY FOR REAL), then one person, then everyone. See
+[`OWNER_NOTES_1.4.md`](OWNER_NOTES_1.4.md).
+
+### Step 12 — Retire the trial Mac
+
+Once the restore test has passed: on the Mac, `npm run service:uninstall` (if it ran in the background) and delete the
+Linear Hub data folder (`server/data`): it holds personal data that now lives on the server.
 
 ---
 
-## Route B: Fly.io or Render
-
-Both build the repository's `Dockerfile` (it serves the API and the built client on port 4000 and keeps the database
-in `/app/server/data`), so the only things to add are a persistent disk mounted there and the environment.
-
-### Fly.io
-
-```bash
-fly launch --no-deploy --region lhr        # London; accept the Dockerfile, say no to databases
-fly volumes create linear_data --region lhr --size 1
-fly secrets set LM_APP_SECRET="$(openssl rand -hex 32)" LM_DEMO_ACCOUNTS=0 TRUST_PROXY=1 COOKIE_SECURE=1
-fly deploy
-```
-
-`fly.toml` (the parts that matter):
-
-```toml
-app = "linear-hub"
-primary_region = "lhr"
-
-[env]
-  TZ = "Europe/London"
-  PORT = "4000"
-
-[mounts]
-  source = "linear_data"
-  destination = "/app/server/data"
-
-[http_service]
-  internal_port = 4000
-  force_https = true
-  auto_stop_machines = "off"    # keep it running: the nightly backup and event roll-over run inside the app
-  auto_start_machines = true
-  min_machines_running = 1
-
-[[http_service.checks]]
-  method = "GET"
-  path = "/api/health"
-  interval = "30s"
-  timeout = "5s"
-```
-
-- Keep **one machine** (`fly scale count 1`): SQLite lives on that one volume.
-- Your own domain: `fly certs add hub.example.co.uk` and the DNS records it prints; Fly issues the certificate.
-- Bring your database: `fly ssh sftp shell`, then `put linear.sqlite /app/server/data/linear.sqlite` and
-  `put app-secret /app/server/data/app-secret` (set `LM_APP_SECRET_FILE=/app/server/data/app-secret` instead of
-  `LM_APP_SECRET` in that case), then `fly machine restart`.
-- Backups: Fly snapshots the volume daily (kept 5 days by default), and the app's own copies are in
-  `/app/server/data/backups`. Pull one off-site every week: `fly ssh sftp get /app/server/data/backups/<file>`.
-- The folders `media`, `statements` and `uploads` in `/app/server/data` (learning videos, statement PDFs, the signature
-  image) are in the volume snapshots but in no backup file; move them as one file (name only the folders you have).
-  To bring them: `tar czf folders.tgz -C server/data media statements uploads` on the laptop, `put folders.tgz
-  /app/server/data/folders.tgz` in `fly ssh sftp shell`, then
-  `fly ssh console -C "tar xzf /app/server/data/folders.tgz -C /app/server/data"`. To copy them off now and then:
-  `fly ssh console -C "tar czf /app/server/data/folders.tgz -C /app/server/data media statements uploads"`, then
-  `fly ssh sftp get /app/server/data/folders.tgz`.
-
-### Render
-
-1. **New → Web Service**, connect the repository, root directory `linear-micro-crm`, runtime **Docker**, region
-   **Frankfurt (EU)**, instance **Starter** (the free instance has no disk and sleeps).
-2. **Disks → Add disk**: mount path `/app/server/data`, 1 GB.
-3. **Environment**: `TZ=Europe/London`, `LM_DEMO_ACCOUNTS=0`, `TRUST_PROXY=1`, `COOKIE_SECURE=1`, and
-   `LM_APP_SECRET` as a secret (or `LM_APP_SECRET_FILE=/app/server/data/app-secret` when you bring an existing
-   database through the **Shell** tab).
-4. **Health check path**: `/api/health`. **Custom domain**: add it under Settings; Render issues the certificate.
-
-A service with a disk runs one instance and restarts (a few seconds of downtime) on each deploy. Render keeps daily disk
-snapshots for 7 days; still pull a backup off-site every week from the Shell (`ls /app/server/data/backups`), and now
-and then the `media`, `statements` and `uploads` folders next to it, which no backup file holds.
-
----
-
-## If an administrator is locked out (PIN or two-step verification)
-
-Ten wrong PINs in a row lock a PIN for 15 minutes (longer if it keeps happening), and the sign-in screen says when it
-unlocks. Another administrator can reset it at once (Team → person → **Reset PIN**). The only administrator cannot
-reset their own in the app, so run this on the server instead (it works while Linear Hub is running):
-
-```bash
-# Route A
-cd /opt/linear-hub/app/linear-micro-crm
-sudo -u linear env DB_PATH=/var/lib/linear-hub/linear.sqlite npm run pin:reset -- you@example.co.uk
-# Fly.io: fly ssh console -C "sh -c 'cd /app && npm run pin:reset -- you@example.co.uk'"
-# Render: the Shell tab, then: npm run pin:reset -- you@example.co.uk
-```
-
-It clears that person's PIN and lock, signs them out everywhere and notes it in the audit trail; they sign in with
-their email and employee ID and choose a new PIN. The same command is the way back for everyone if the app secret was
-lost (no PIN matches without it).
-
-**Two-step verification (1.4).** Everyone signs in with a code from an authenticator app. If the only administrator
-loses both phone and recovery codes (or the app secret is lost, so no code matches), run the same way:
-
-```bash
-# Route A
-cd /opt/linear-hub/app/linear-micro-crm
-sudo -u linear env DB_PATH=/var/lib/linear-hub/linear.sqlite npm run 2fa:reset -- you@example.co.uk
-# Fly.io: fly ssh console -C "sh -c 'cd /app && npm run 2fa:reset -- you@example.co.uk'"
-# Render: the Shell tab, then: npm run 2fa:reset -- you@example.co.uk
-```
-
-It clears that person's two-step verification, signs them out everywhere and notes it in the audit trail; the PIN is
-left alone. They sign in with their email, employee ID and PIN and set two-step up again.
-
----
-
-## Go-live checklist
+## 4. Go-live checklist
 
 Tick every line before real people use it.
 
-- [ ] **HTTPS**: `https://hub.example.co.uk` shows the padlock and `http://` redirects to it.
-- [ ] **Firewall**: only 22, 80 and 443 are open (`sudo ufw status`); `curl http://<server-ip>:4000` from your laptop
-      fails (Route A).
-- [ ] **Proxy and cookies**: `TRUST_PROXY=1` and `COOKIE_SECURE=1`; `curl -sI https://hub.example.co.uk/api/health`
-      shows `Strict-Transport-Security`.
-- [ ] **`LM_DEMO_ACCOUNTS=0`**: the sign-in page shows no demo accounts.
-- [ ] **Demo people turned off** if this database began as the demo (every Linear Hub database does): `LM_DEMO_ACCOUNTS=0`
-      only hides the buttons, and every seeded person's email and employee ID are public in the repository. In
-      **Team**, set **every** seeded demo person you are not keeping to **Left** — the four demo staff, the other
-      seeded staff (LM-0004 to LM-0034, including LM-0004, an administrator) and team Sapiens' seven unless they are
-      your real people; in **Campaigns → Breast Cancer Now → Open page → Client accounts**, **Turn off** Hannah Price
-      (CL-0001). Once one of the four demo staff has left, no start adds demo accounts again.
-- [ ] **`LM_APP_SECRET` set** (or the `app-secret` file in place) and saved in your password manager: two-step secrets
-      and sign-in PINs depend on it. With `LM_APP_SECRET` the backups never hold the key; with the `app-secret` file
-      the backups folder holds a copy, so nobody else can read that folder and it leaves the server only encrypted.
-- [ ] **PIN required**: you set your own PIN (Settings → Security → Sign-in PIN), then switched on **Require a PIN for
-      everyone** under Sign-in rules. Everyone creates one at their next tap.
-- [ ] **Two-step for everyone** (1.4, no switch to turn on): your own two-step verification is set up (Settings →
-      Security) and your recovery codes are somewhere safe, away from your phone. Everyone is asked to set it up at
-      their next sign-in (charity and client accounts too): tell the team and your charity contacts beforehand that they
-      need an authenticator app (Google Authenticator, Microsoft Authenticator, 1Password or Authy) and about two
-      minutes. Once a demo staff account has left (the line above), the demo accounts are no longer exempt either.
-- [ ] **Sign out after** chosen (Settings → Security → Sign-in rules; 14 hours from sign-in by default, 4 to 24).
-- [ ] **Session idle timeout** chosen (Sign-in rules; 12 hours by default, shorter for shared phones).
-- [ ] **Payments (1.4), if you pay people from Linear Hub**: `LM_PAYMENTS_FAKE` is **not** set (`grep LM_PAYMENTS
-      /etc/linear-hub.env` shows nothing, or only `LM_PAYMENTS_JOB` you set on purpose); each Revolut, Wise or TrueLayer
-      connection was tested and used for one payment **in test mode first**, then switched to live (typing PAY FOR REAL),
-      given its live details and tested again; the first live payment was one person, a small amount, and you checked
-      it arrived. A bank payment file: the first file held one person and the bank took it. See
-      [OWNER_NOTES_1.4.md](OWNER_NOTES_1.4.md).
-- [ ] **Bank details checked**: everyone being paid has added theirs (Settings → Bank details) and you confirmed every
-      changed set with the person (Team → person → **Confirm details**). A database seeded fresh by 1.4 gives the demo
-      people obviously fake details (sort code 00-00-00, shown as "••-••-00"): never put a demo person in a payment.
-- [ ] **App secret safe**: the backups now hold encrypted bank details and payment keys, so the app secret
-      (`LM_APP_SECRET` or the `app-secret` file) is in your password manager and never sits unencrypted next to an
-      off-site copy.
-- [ ] **Backups tested**: the off-site copy runs every night, the `media`, `statements` and `uploads` folders are
-      copied off the server too, and you restored one on a laptop (write the date here: ________).
-- [ ] **No demo data**: the dashboard shows your own people (you brought `linear.sqlite`), not the seeded demo.
-- [ ] **Monitoring** (optional, free): an uptime check on `https://hub.example.co.uk/api/health` that emails you.
-- [ ] **`npm run doctor`** on the server (Route A) reports nothing to fix.
+- [ ] **The variation for going online** is signed by both companies (§1), and the go-live package agreed.
+- [ ] **Bought in Linear MCR's name:** the server, the domain and the off-site storage (snapshots or versioning on).
+- [ ] **HTTPS:** `https://<address>` shows the padlock and `http://<address>` redirects to it.
+- [ ] **Firewall:** `sudo ufw status` shows only SSH, 80 and 443; `curl http://<server-ip>:4000` from another computer
+      fails.
+- [ ] **Settings:** `sudo linear-hub doctor` reports nothing to fix.
+- [ ] **The locked-down service runs:** `systemctl is-active linear-hub caddy` says `active` twice, and
+      `sudo systemd-analyze security linear-hub` rates it "OK" (1.5 in the installer's tests; write the score here:
+      ______). The installer's tests ran the units under systemd in a container; this checks them on the real server.
+- [ ] **Live, not trial:** `sudo linear-hub golive` said "Linear Hub is live" (or "already live"); there is no trial
+      banner.
+- [ ] **Two-step for the owner** set up, recovery codes stored away from the phone.
+- [ ] **Recovery sheet** printed, confirmed in Settings › Backups, and locked away.
+- [ ] **Off-site passphrase** on paper, kept apart from the recovery sheet.
+- [ ] **Restore test passed** (`sudo linear-hub restore-test`) on: ____________
+- [ ] **Monitoring:** the uptime check and the nightly-copy heartbeat (both required) email the owner and Noryn.
+- [ ] **Payments** (if used): no test provider in the list; each connection went through test mode and a sandbox
+      payment (or the 1p file) before live; the first live payment was one person and a small amount.
+- [ ] **Bank details** were added by each person and confirmed by an administrator (nobody confirms their own change;
+      details an administrator types wait for the person to confirm them).
+- [ ] **The trial Mac** is stopped and its data folder deleted.
+
+---
+
+## 5. Everyday running: the `linear-hub` command
+
+Run on the server with `sudo`. `sudo linear-hub help` lists everything.
+
+| Command | What it does |
+| --- | --- |
+| `sudo linear-hub status` | Running? Does HTTPS answer? Newest backup and off-site copy, free disk |
+| `sudo linear-hub logs` (`-f` to follow) | The service log |
+| `sudo linear-hub restart` | Stop and start Linear Hub |
+| `sudo linear-hub update` / `update v1.5.1` | Stop, back up and check the backup, update the code, start again. With a release tag it moves to that release. Either way it prints the way back (the previous release and the backup to restore) |
+| `sudo linear-hub doctor` | A full check of the settings, the key, backups and off-site copies |
+| `sudo linear-hub backup` / `backups` | A backup now / the list of backups |
+| `sudo linear-hub offsite-sync` | Copy the encrypted backups off the server now |
+| `sudo linear-hub restore-test` | Prove the newest off-site copy can be restored (every few months, and after big changes) |
+| `sudo linear-hub restore <file>` | Put a backup back (stops Linear Hub meanwhile; lists any payments it would forget and asks for RESTORE). Use a name from `backups`, or an encrypted `.lhbk` anywhere (a file the `linear` user cannot read, say under `/root`, is copied in first) |
+| `sudo linear-hub import <file.lhbk>` | Bring a database from another computer (asks its passphrase, or `--passphrase-file <file>`) |
+| `sudo linear-hub golive` | End the trial (once) |
+| `sudo linear-hub recovery-sheet` | Print the recovery sheet |
+| `sudo linear-hub key:restore` | Put the app key back from the recovery sheet |
+| `sudo linear-hub setup-code <email>` | A new one-time setup code for someone who has not finished setting up |
+| `sudo linear-hub 2fa:reset <email>` / `pin:reset <email>` | Reset someone's two-step or PIN; prints the setup code they sign in with next |
+
+**Updates.** Noryn applies Linear Hub updates as part of the monthly service, with `sudo linear-hub update`; it backs
+up and checks the database before changing anything, and prints the way back: `sudo linear-hub update <previous>`,
+then `sudo linear-hub restore <the backup it just made>`. Ubuntu's security updates install
+themselves every night (the server restarts itself at about 04:30 when one needs it, and Linear Hub and Caddy start
+again by themselves). Node.js is updated by Noryn, after the tests pass on the new version:
+`sudo apt-get install --only-upgrade nodejs && sudo linear-hub restart`.
+
+---
+
+## 6. When something goes wrong
+
+**The site does not answer.** `sudo linear-hub status`; then `sudo linear-hub logs` (Linear Hub) or
+`sudo journalctl -u caddy -n 50` (HTTPS). The uptime monitor will have emailed.
+
+**Linear Hub will not start and says the app key is missing or does not fit.** Do not delete anything. Run
+`sudo linear-hub key:restore` and type the key from the recovery sheet; it checks the key before saving it. The service
+does not restart itself in a loop while the key is wrong.
+
+**The only administrator is locked out** (lost phone, forgotten PIN): `sudo linear-hub 2fa:reset you@example.co.uk` or
+`sudo linear-hub pin:reset you@example.co.uk`. It prints the setup code to sign in with next.
+
+**A restore from an older backup.** `sudo linear-hub backups` lists them; `sudo linear-hub restore <file>` puts one
+back. It lists payments, bank files, bank details changes and paid weeks it would forget, and asks for **RESTORE**.
+Afterwards, check those payments with the bank.
+
+**The server is lost or broken.** On a new server (step 1), before running the installer, put the off-site
+passphrase from the paper in place, so the new server keeps using it:
+
+```bash
+sudo install -d -m 700 /etc/linear-hub/keys
+sudo sh -c 'cat > /etc/linear-hub/keys/backup-passphrase'     # type the passphrase, Enter, then Ctrl-D
+```
+
+Run the installer (step 4) with the same off-site store. Then fetch the newest copy and bring it in:
+
+```bash
+sudo -u linear rclone --config /opt/linear-hub/.config/rclone/rclone.conf lsf offsite:linear-hub/backups
+sudo -u linear rclone --config /opt/linear-hub/.config/rclone/rclone.conf copy offsite:linear-hub/backups/<newest>.lhbk /var/lib/linear-hub/import/
+sudo linear-hub import /var/lib/linear-hub/import/<newest>.lhbk          # type the off-site passphrase
+sudo -u linear rclone --config /opt/linear-hub/.config/rclone/rclone.conf copy offsite-media: /var/lib/linear-hub/media   # the videos
+```
+
+(For an S3 bucket the path is `offsite:<bucket>/linear-hub/backups`.) Point the DNS at the new server (step 2), check
+the fingerprint in Settings › Backups against the recovery sheet, and run `sudo linear-hub restore-test`.
+
+---
+
+## 7. What the installer sets, and why
+
+- **Linear Hub listens on `127.0.0.1` only** (`HOST=127.0.0.1`); Caddy is the only way in. `TRUST_PROXY=1` (exactly one
+  proxy) lets Linear Hub see each phone's address and that the request came over HTTPS, so cookies are `Secure`, HSTS
+  is sent, and money and secret actions (which refuse insecure requests) work. `COOKIE_SECURE=1` too.
+- **No demo sign-ins on the internet:** `LM_DEMO_ACCOUNTS=0` always. The installer also removes `LM_PAYMENTS_FAKE` and
+  `LM_BUSINESS_NOW` (demo settings) and `LM_TLS_CERT_FILE` / `LM_TLS_KEY_FILE` (Caddy does HTTPS) if they appear.
+- **Keys outside the data folder:** `LM_APP_SECRET_FILE=/etc/linear-hub/keys/app-secret` and
+  `LM_BACKUP_PASSPHRASE_FILE=/etc/linear-hub/keys/backup-passphrase`, readable by the `linear` user only. A new key is
+  made only when there is no database yet; the installer never replaces a key or a passphrase.
+- **Off-site copies:** `LM_OFFSITE_DIR=/var/lib/linear-hub/offsite`. Linear Hub encrypts each copy before it is
+  written there (AES-256-GCM, from the passphrase); rclone only carries the files away, with `copy` (never `sync`), so
+  nothing off-site is ever deleted by an empty folder here. A copy cut off half-way (a dropped connection, the 04:30
+  restart) is shorter than the file on the server, so the next night sends it again. The learning videos are copied
+  with rclone's own encryption under the same passphrase; a video still uploading (`*.upload`) waits for the next
+  night.
+- **The off-site store's settings:** rclone's own settings file for the `linear` user. The installer makes each remote
+  afresh whenever an answer changes (a new Storage Box, user, bucket, region or folder), so a re-run really moves the
+  copies; a Storage Box's host keys are recorded for rclone, which refuses a host it does not know. The nightly copy
+  may write that settings file (rclone notes what it learns about the store there), and nothing else outside the data
+  folder.
+- **Caddy's check runs as Caddy:** the installer checks the Caddyfile as the `caddy` user, and gives the Caddy log
+  back to `caddy` if anything else made it, so Caddy can always open its log and start.
+- **A locked-down service** (`/etc/systemd/system/linear-hub.service`): runs as `linear` with no shell; may write only
+  `/var/lib/linear-hub` and its key folder (only to make a key for a database with nothing locked yet, as on a first
+  start; it never replaces a key); private `/tmp`; no access to home folders, devices, kernel settings or other
+  processes; no extra privileges; restarts by itself after a crash, but not when the key is missing or wrong once
+  something is locked with it (exit code 78). `systemd-analyze security` rates it 1.5 ("OK").
+- **The nightly copy** (`linear-hub-offsite.service`, started by its timer) is locked down the same way: it may write
+  only the data folder and rclone's own settings, and reach the network (rated 1.5).
+- **Firewall:** `ufw` lets in SSH (rate-limited), 80 and 443 only.
+- **Updates:** Ubuntu's and Caddy's security updates install every night; the server restarts itself at about 04:30
+  when one needs it. Node.js is left to Noryn so a new version never arrives untested.
+- **SSH:** password log-in is turned off only when you log in with a key and say yes.
+
+Settings you may add to `/etc/linear-hub/linear-hub.env` (kept by the installer): `LM_BACKUP_VIDEOS=1` (videos inside
+every backup too; large), `LM_BACKUP_HOUR` (the nightly backup's hour, default 2), `LM_SMART=0`, `LM_STATEMENTS_JOB=0`.
+Restart afterwards: `sudo linear-hub restart`.
+
+---
+
+## 8. Other ways to host it (not the supported go-live)
+
+- **Built-in HTTPS without Caddy.** Linear Hub can serve HTTPS itself with `LM_TLS_CERT_FILE` and `LM_TLS_KEY_FILE`
+  (a certificate and its key) on `PORT`. Then you renew the certificate yourself; Caddy does that for you, so the
+  installer uses Caddy.
+- **Fly.io or Render** can run the repository's `Dockerfile` with a persistent disk. The installer, the off-site
+  copies, the restore test and the `linear-hub` command assume a server, so this route is not supported for go-live.
+- **Supabase or another database** is not needed to go online and is not the next step. It would only be worth it for
+  several offices or hundreds of people at once, and would mean rewriting the data layer: see
+  [`ROADMAP.md`](ROADMAP.md).
+
+---
+
+## Trial only: the office Mac
+
+> **For the trial week only.** Do not put real pay, real bank details or real payments through the Mac. Go live on the
+> server first.
+
+During the trial Linear Hub runs on the office Mac, and phones reach it over the **same Wi-Fi or the Mac's hotspot**,
+over plain `http://`:
+
+- `npm start` (or `npm run service:install` to keep it running in the background), then `npm run share` prints the
+  address and a QR code for the phones.
+- **What does not work there:** phones away from that Wi-Fi or hotspot cannot reach it at all; a sleeping or closed
+  Mac answers nobody; there is no home-screen app or opening without signal (they need HTTPS); bank details, payments,
+  setup codes and two-step resets work only on the Mac itself, never from a phone over Wi-Fi (plain http is readable
+  by others on the same network); and the backups sit on the Mac's own disk.
+- **Never** forward the Mac's port to the internet or put it on a public address.
+- The demo company and its one-tap sign-ins are there to try every screen; they can never touch real bank details or
+  payments, and `npm run golive` (on the server, step 6) removes them.
+
+---
+
+## For developers: testing the installer
+
+- `bash deploy/tests/run.sh` — no root, no network: shellcheck on every script, the installer's helpers, and a full
+  `--dry-run` on a pretend fresh server (every file it would write, every command it would run). `npm test` runs it
+  too on Linux, so CI checks the installer on every change.
+- `bash deploy/tests/container-test.sh <repository folder> <branch>` — needs Docker: installs from scratch in a
+  throwaway Ubuntu 24.04 container, runs it twice more to prove it changes nothing the second time, checks the files
+  and modes, `caddy validate`, starts Linear Hub as the service does, makes an encrypted backup, copies it off-site,
+  passes `linear-hub restore-test` (and checks its scratch copy is stopped), brings in a trial database made by a
+  stand-in Mac with `linear-hub import`, goes live, then sets up a Storage Box over SFTP (an OpenSSH server on port 23
+  in the container) with `--yes`, adds the key by hand as the owner would, moves to a second box, user and folder,
+  copies and restore-tests there, updates to a release tag, restores a file kept under `/root`, gives a Caddy log made
+  by root back to `caddy`, and starts again with only the data folder writable. With `LH_TEST_SYSTEMD=1` it then boots
+  the installed machine with systemd (a privileged container with no network) and runs the real units: the
+  locked-down service starts and answers, `systemd-analyze security` rates it, Caddy runs as `caddy`, the nightly copy
+  runs under its own lock-down, `linear-hub restart` works, a missing key is made anew while nothing is locked, and
+  once something is, a missing key stops the service with exit code 78 and no restart loop. The firewall is checked
+  by the dry run only (a container must not change the test machine's firewall). S3 buckets are checked by the dry
+  run (region, provider, no secret shown), not against a real bucket.
+  Options: `LH_TEST_PREINSTALL=1` (Node and Caddy put in first, for networks that block their repositories),
+  `LH_TEST_NODE_DIR=/opt/node22` (copy Node from the test machine instead of downloading it), `LH_TEST_SYSTEMD=1`,
+  `LH_TEST_KEEP_IMAGE=1`, `LH_TEST_CA`, `LH_TEST_PORT`.
+- `bash deploy/install.sh --dry-run --yes --domain … --email … --repo …` shows what a run would do on a real server.

@@ -1,55 +1,47 @@
-# The squad
+# How Linear Hub was built
 
-Linear Hub was built by five people working in parallel on one repository. Each owns a slice of the codebase, agreed up front in [`TEAM_CONTRACT.md`](TEAM_CONTRACT.md); nobody edits another member's files without asking, and an integrator merges the slices and resolves conflicts.
+Linear Hub is written, owned and supported by **Noryn System Ltd**, and licensed to Linear MCR Limited under the
+written agreement between the two companies (see [`LICENSE`](../LICENSE)).
 
-| # | Name | Role | Slice | Owns |
-|---|---|---|---|---|
-| 1 | **Tomasz Nowak** | Backend Developer | API, database and maintenance, seed data, auth, role rules and redaction, pay rules | `server/**` — in particular `server/src/routes/**`, `server/src/middleware/**`, `server/src/lib/**`, `server/src/db/**` (schema, seed, maintenance), `server/src/smoke.ts`; `docs/API.md` |
-| 2 | **Aisha Rahman** | Frontend Developer | Pages, feature components, data hooks, routing, auth flow | `client/src/pages/**` (except `Login.tsx`, `About.tsx`), `client/src/features/**`, `client/src/api/**`, `client/src/auth/**`, `client/src/lib/**`, `client/src/App.tsx`, `client/src/main.tsx` |
-| 3 | **Callum Reid** | Product Designer (Brand & UI) | Design tokens, themes, UI kit, app shell, sign-in | `client/src/index.css`, `client/index.html`, `client/public/**`, `client/src/components/ui/**`, `client/src/components/layout/**`, `client/src/components/brand/**`, `client/src/pages/Login.tsx`, `docs/DESIGN.md` |
-| 4 | **Mei-Ling Chen** | Logic Builder (Data & Charts) | Funnel and payroll logic, benchmarks, coaching insights, charts | `shared/src/logic/**`, `shared/src/constants.ts`, `client/src/components/charts/**`, `docs/LOGIC.md` |
-| 5 | **Sophie Whitfield** | Marketing & Content | Product story, microcopy, user guide, pitch, About page | `README.md`, `docs/TEAM.md`, `docs/PITCH.md`, `docs/USER_GUIDE.md`, `docs/ROADMAP.md`, `client/src/content/**`, `client/src/pages/About.tsx` |
+## Who built it
 
----
+**One developer at Noryn System Ltd**, directing **AI coding agents** (Anthropic's Claude) that wrote most of the
+code. There is no larger team behind it. Earlier versions of this page named a team of five people: those people
+did not exist, and the page was wrong to say so.
 
-## Tomasz Nowak — Backend Developer
+The developer's part: agreeing the scope with Linear MCR, splitting each release into work packages, writing each
+package's brief and its rules, deciding the trade-offs, reading every review and deciding what ships. The agents'
+part: reading the code, writing tests and code, running the checks, and reporting what they did and what they could
+not do.
 
-**Responsibilities.** Implements the API contract in [`API.md`](API.md) exactly and appends implementation notes where the contract leaves behaviour open: Express 5 routes, Zod validation, the httpOnly session cookie with its 14-day sessions, the login rate limit, and role enforcement on every endpoint — reps write only their own gauges at their own team's events, leaders write only for their own team, recruiters run recruitment, administrators do everything. Owns the redaction that blanks employee IDs and other people's check-in times and notes (`server/src/lib/scope.ts`), the pay rules shared by the seed, the live estimates and payroll materialisation (`server/src/lib/pay.ts`), and the maintenance jobs that create pending pay runs for closed weeks and roll event statuses forward (`server/src/db/maintenance.ts`). Owns the SQLite schema behind `node:sqlite`, the deterministic 26-week seed, and the smoke test that boots a temporary database and checks every endpoint.
+## How the work is organised
 
-**Owns.** `server/**` — routes, middleware, `server/src/lib/**`, `server/src/db/**`, `server/src/smoke.ts` — and `docs/API.md` (implements it exactly; may append notes).
+1. **Work packages in parallel.** Each release is split into packages with a clear owner and a written list of the
+   files it may change (for 1.5: sign-in, keys and backups, money, phone, docs, and quality). Each package is built by
+   its own agent in its own copy of the code (a git worktree on its own branch), at the same time as the others.
+   Names that several packages share (settings, commands, functions) are agreed before any code is written.
+2. **Tests first.** A problem that can be tested is first written down as a test that fails, then fixed, then shown to
+   pass. The rules that decide pay, gauges, permissions and dates live in `shared/` and have their own tests.
+3. **The same checks for every change.** Type checking, the shared and server test suites (over 1,300 automated tests
+   at 1.4.0), an end-to-end check of the API, and a production build. GitHub Actions runs them on every change; the
+   app's start-up is also checked on macOS.
+4. **Integration.** One step merges the packages, resolves where they meet, writes the release notes from each
+   package's notes, and runs every check again.
+5. **Independent reviews.** After a release, separate reviewers test it against what was promised, one area each:
+   claims, security, money, reliability, phone use and code quality. A second reviewer checks each first reviewer's
+   findings, confirms or rejects them, and looks for what was missed. The findings become the next round of work:
+   release 1.5 answers the 92 findings of the review of 1.4.0.
+6. **Screens.** The screens are checked by scripted browser runs at phone and laptop sizes, in light and dark, while
+   each package is built. Those runs are not yet part of the automated checks (see [`ROADMAP.md`](ROADMAP.md)).
 
-## Aisha Rahman — Frontend Developer
+## What this means for Linear MCR
 
-**Responsibilities.** Builds every route page except the sign-in and About pages — dashboard, events and event detail, gauges, leaderboard, recruitment and candidate detail, finance, campaigns, team and profile, settings — and the domain components they compose from `client/src/features/**`: the **Log gauges** form with its live funnel validation and event-date rule, the payroll runs table and payslip, the recruitment board, the **Move to…** control and hire dialog, the event, campaign, candidate, expense and user forms, the range picker and the shared status badges. Owns the data layer — the `fetch` wrapper that throws `ApiError`, the TanStack Query hooks per endpoint, and `AuthProvider` / `useAuth()` — plus routing, the auth and role gates in `App.tsx`, and the formatting helpers (`formatGBP`, dates, labels).
+- **It moves fast.** Release 1.0 came out on 15 October 2026 and 1.4.0's final version on 26 October: each release
+  takes days, not months.
+- **The safety net is the tests and the reviews,** not a person reading every line. No one has read all of the
+  roughly 130,000 lines line by line. The parts that matter most (pay, payments, sign-in, backups) have the most tests
+  and the strictest reviews, and each review's findings are written down and answered in the next release.
+- **One developer is a single point of failure.** [`MAINTAINERS.md`](MAINTAINERS.md) is written so another developer
+  can take Linear Hub over: how it fits together, where the rules live, how to change it safely and how releases work.
 
-**Owns.** `client/src/pages/**` (except `Login.tsx` and `About.tsx`), `client/src/features/**`, `client/src/api/**`, `client/src/auth/**`, `client/src/lib/**`, `client/src/App.tsx`, `client/src/main.tsx`.
-
-## Callum Reid — Product Designer (Brand & UI)
-
-**Responsibilities.** Defines the semantic design tokens (`bg-surface`, `text-fg`, `text-muted`, `bg-primary`, chart colours and the rest) so that light and dark themes both work from one set of class names and nobody hard-codes a colour. Builds the UI kit (`Button`, `Card`, `Badge`, `Avatar`, `DataTable`, `Modal`, `Tabs`, `SegmentedControl`, `Stepper`, `Switch`, `KpiTile`, `PageHeader`, `Toast` and friends), the `AppShell` with role-filtered navigation, the quick "Go to page…" search, the Linear MCR logo mark and wordmark, and the sign-in page. Keeps accessibility honest: keyboard reach, labelled inputs, visible focus, colour never the only signal.
-
-**Owns.** `client/src/index.css`, `client/index.html`, `client/public/**`, `client/src/components/ui/**`, `client/src/components/layout/**`, `client/src/components/brand/**`, `client/src/pages/Login.tsx`, `docs/DESIGN.md`.
-
-## Mei-Ling Chen — Logic Builder (Data & Charts)
-
-**Responsibilities.** Writes the pure business logic shared by server and client so the numbers always agree: `funnelRatios`, `validateGaugeFunnel` (each stage ≤ the previous), `compareToBenchmark` and `performanceScore`, `calculatePayroll` (base per day, commission, weekly bonus, leader overrides, deductions), `paydayForWeek` and `payrollStatusFor`, `isCheckInOnTime` with the five-minute grace period, `rankRows` with shared ranks and movement, and `coachingInsights` — the sentences on the dashboard that turn a weak ratio into something to work on. Owns the company benchmark ratios (the law of averages) and the brand constants, the Recharts wrappers (funnel, trend, bars, donut, sparkline) that consume the chart tokens, and the `node:test` suites that keep all of it true.
-
-**Owns.** `shared/src/logic/**`, `shared/src/constants.ts`, `client/src/components/charts/**`, `docs/LOGIC.md`.
-
-## Sophie Whitfield — Marketing & Content
-
-**Responsibilities.** Owns the words. The product story and positioning, every piece of user-facing microcopy (page descriptions, empty states, gauge help, greetings, motivation lines) in `client/src/content/`, the About page, the README, this file, the business case for Linear MCR's owner, the user guide per role and the roadmap. Keeps everything in British English, specific and free of hype — and true to the shipped product: every button, tab and rule in the user guide is checked against the client source.
-
-**Owns.** `README.md`, `docs/TEAM.md`, `docs/PITCH.md`, `docs/USER_GUIDE.md`, `docs/ROADMAP.md`, `client/src/content/**`, `client/src/pages/About.tsx`.
-
----
-
-## Shared and frozen
-
-`shared/src/types.ts` is the contract between all five slices. Existing fields are frozen; anyone may add an **optional** field, and must say so when they do (the `recruiter` position, `Dashboard.previous`, `FinanceWeek.estimated` and `payrollOnTimeWindow` arrived this way).
-
-## How we worked
-
-We agreed the contracts first and the code second. Before anyone wrote a feature, the API (`API.md`), the shared types, the UI kit prop names, the chart component props, the layout shell and the auth hook were all pinned down in writing, so each of us could build against a stable interface rather than against each other's half-finished work. From there the five slices were built in parallel: the backend implemented the contract against a deterministic seed; the frontend built pages and feature components against the typed hooks; the designer shipped tokens and the kit that pages compose; the logic builder kept the maths pure and tested; and content filled every string from one place.
-
-The integrator pulled the slices together, ran `npm run typecheck`, `npm run build` and the server smoke test, checked both themes, and resolved the handful of conflicts that come from five people touching one repo. Three rounds of QA followed, each fixing what the pilot-style walkthrough found — gauge integrity rules, payroll materialisation, employee-ID redaction, the recruiter role — and the documentation was then re-checked line by line against the final UI. The definition of done was the same for everyone: typecheck and build pass from the root, the smoke test passes, both themes look right, no console errors.
+Questions about how Linear Hub is built or supported: hq@norynsystem.com.

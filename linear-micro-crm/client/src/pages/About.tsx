@@ -1,4 +1,4 @@
-// Owned by Marketing & Content. Product story, what Linear Hub tracks, and the squad who built it.
+// Product story, what Linear Hub tracks, and how it was built (content/team.ts, docs/TEAM.md).
 import type { LucideIcon } from 'lucide-react';
 import {
   ArrowRight,
@@ -168,9 +168,9 @@ export function AboutPage() {
         </ul>
       </Card>
 
-      {/* Squad */}
+      {/* How it was built */}
       <Card className="mb-6">
-        <CardHeader title="The squad" description="Five people, five slices of the codebase, one integrator merge." />
+        <CardHeader title="Who built it" description="One developer at Noryn System Ltd, AI coding agents, automated tests and independent reviews." />
         <ul className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
           {TEAM_MEMBERS.map((m) => (
             <li key={m.name} className="flex gap-3 rounded-lg border border-border bg-surface-2 p-4">
@@ -187,7 +187,7 @@ export function AboutPage() {
 
       {/* Stack */}
       <Card className="mb-6">
-        <CardHeader title="Under the bonnet" description="A small, modern stack with no external services to pay for or keep online." />
+        <CardHeader title="Under the bonnet" description="A small, modern stack. Outside services are optional: Gmail for statements, and a bank or payment provider for paying people." />
         <ul className="flex flex-wrap gap-2">
           {ABOUT.stack.map((s) => (
             <li key={s.name}>

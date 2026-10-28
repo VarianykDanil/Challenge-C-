@@ -1,0 +1,4 @@
+// Linear Hub server (deploy/install.sh): look for updates and install security updates every day.
+APT::Periodic::Update-Package-Lists "1";
+APT::Periodic::Unattended-Upgrade "1";
+APT::Periodic::AutocleanInterval "7";

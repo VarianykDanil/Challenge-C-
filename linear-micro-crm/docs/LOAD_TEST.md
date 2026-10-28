@@ -13,8 +13,8 @@ Run with the scripts in `server/loadtest/` (see its README). Numbers below come 
 `TZ=Europe/London`, serving `client/dist`. **Host:** 4 vCPU / 16 GB, Node 22.22, `node:sqlite`.
 **Load client:** `server/loadtest/{mix,writes,abuse,lag}.mjs` + `autocannon` (static only). App code untouched.
 
-> ⚠️ The environment is shared: other engineers restarted servers and rebuilt `client/dist` mid-run (the JS chunk
-> was renamed twice; a 2FA/TOTP schema upgrade landed between runs). Where a run was contaminated it is re-run and
+> ⚠️ The machine was shared with other work running at the same time: other servers were restarted and `client/dist`
+> was rebuilt mid-run (the JS chunk was renamed twice; a 2FA/TOTP schema upgrade landed between runs). Where a run was contaminated it is re-run and
 > labelled. My first `:4600` server was SIGKILLed externally near the 5-min mark of the first soak (clean exit, **no
 > error in its log** — not an app crash); it was restarted and the soak re-run cleanly.
 
@@ -80,7 +80,7 @@ converge (~400–420 ms) because queue wait dominates server work.
 | largest JS chunk (442 KB) | 1,262 | 77 ms | 132 ms | 559 ms | **533 MB/s** | 0 |
 
 `express.static` is an order of magnitude faster than the API and never a bottleneck. (An earlier JS run showed
-2,182 4xx — an artifact of another engineer rebuilding `client/dist` mid-test, renaming the chunk; the clean re-run
+2,182 4xx — an artifact of other work on the same machine rebuilding `client/dist` mid-test, renaming the chunk; the clean re-run
 above is 0 non-2xx.)
 
 ---

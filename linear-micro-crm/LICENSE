@@ -1,0 +1,32 @@
+Linear Hub — proprietary licence notice
+
+Copyright (c) 2026 Noryn System Ltd (registered in England and Wales, company number 17335896).
+All rights reserved.
+
+1. Ownership
+   Linear Hub, including its source code, object code, database design, documentation, designs, tests and the other
+   material in this repository (together, "the Software"), is owned by Noryn System Ltd.
+
+2. Licence to Linear MCR Limited
+   Noryn System Ltd licenses the Software to Linear MCR Limited under the written agreement between them
+   ("the Agreement"). Linear MCR Limited may use, run, copy and keep the Software only as the Agreement allows.
+
+3. No other rights
+   No other person or organisation is granted any right or licence in the Software, whether to use, copy, modify,
+   merge, publish, distribute, sublicense or sell it, by implication, estoppel or otherwise, except as the Agreement
+   or a separate written licence signed by Noryn System Ltd allows. Being able to read the Software, for example in a
+   code repository, does not grant a licence to use it.
+
+4. Linear MCR Limited's own material
+   Linear MCR Limited's data, and the material it supplied for the Software (such as its training material, as the
+   Agreement defines its Customer Materials), remain Linear MCR Limited's property. This notice does not license them
+   to anyone.
+
+5. Open-source components
+   The Software uses open-source components, listed in package.json and package-lock.json. Each remains under its own
+   licence, which this notice does not change.
+
+6. No warranty beyond the Agreement
+   Except as the Agreement provides, the Software is provided "as is", without warranty of any kind.
+
+Questions about this licence: hq@norynsystem.com
