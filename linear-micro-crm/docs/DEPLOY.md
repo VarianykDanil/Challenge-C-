@@ -130,7 +130,8 @@ It asks:
    for a private repository it shows a key to add on GitHub as a read-only deploy key);
 3. where the off-site copies go: **1** Storage Box, **2** S3-compatible bucket, **3** an rclone remote set up
    already, **4** nowhere yet (it warns you that copies then stay on the server);
-4. an address to ping after each good off-site copy (optional: a Healthchecks.io check, see step 9);
+4. an address to ping after each good off-site copy (a Healthchecks.io check, see step 9; it can be added on a later
+   run, but go-live needs it);
 5. whether to turn off password log-in for SSH (only offered when you log in with a key).
 
 Then it works on its own: system packages, a 2 GB swap file on servers with under 2 GB of memory, automatic security
@@ -278,8 +279,8 @@ Tick every line before real people use it.
       fails.
 - [ ] **Settings:** `sudo linear-hub doctor` reports nothing to fix.
 - [ ] **The locked-down service runs:** `systemctl is-active linear-hub caddy` says `active` twice, and
-      `sudo systemd-analyze security linear-hub` rates it "OK" or better (write the score here: ______). The
-      installer's tests run in containers without systemd, so this is the first time the hardening runs for real.
+      `sudo systemd-analyze security linear-hub` rates it "OK" (1.5 in the installer's tests; write the score here:
+      ______). The installer's tests ran the units under systemd in a container; this checks them on the real server.
 - [ ] **Live, not trial:** `sudo linear-hub golive` said "Linear Hub is live" (or "already live"); there is no trial
       banner.
 - [ ] **Two-step for the owner** set up, recovery codes stored away from the phone.
@@ -388,8 +389,12 @@ the fingerprint in Settings › Backups against the recovery sheet, and run `sud
 - **Caddy's check runs as Caddy:** the installer checks the Caddyfile as the `caddy` user, and gives the Caddy log
   back to `caddy` if anything else made it, so Caddy can always open its log and start.
 - **A locked-down service** (`/etc/systemd/system/linear-hub.service`): runs as `linear` with no shell; may write only
-  `/var/lib/linear-hub`; private `/tmp`; no access to home folders, devices, kernel settings or other processes; no
-  extra privileges; restarts by itself after a crash, but not when the key is wrong (exit code 78).
+  `/var/lib/linear-hub` and its key folder (only to make a key for a database with nothing locked yet, as on a first
+  start; it never replaces a key); private `/tmp`; no access to home folders, devices, kernel settings or other
+  processes; no extra privileges; restarts by itself after a crash, but not when the key is missing or wrong once
+  something is locked with it (exit code 78). `systemd-analyze security` rates it 1.5 ("OK").
+- **The nightly copy** (`linear-hub-offsite.service`, started by its timer) is locked down the same way: it may write
+  only the data folder and rclone's own settings, and reach the network (rated 1.5).
 - **Firewall:** `ufw` lets in SSH (rate-limited), 80 and 443 only.
 - **Updates:** Ubuntu's and Caddy's security updates install every night; the server restarts itself at about 04:30
   when one needs it. Node.js is left to Noryn so a new version never arrives untested.
@@ -446,11 +451,14 @@ over plain `http://`:
   stand-in Mac with `linear-hub import`, goes live, then sets up a Storage Box over SFTP (an OpenSSH server on port 23
   in the container) with `--yes`, adds the key by hand as the owner would, moves to a second box, user and folder,
   copies and restore-tests there, updates to a release tag, restores a file kept under `/root`, gives a Caddy log made
-  by root back to `caddy`, and starts again with only the data folder writable. Containers have no systemd, so the
-  service, timer and firewall commands are checked by the dry run instead, and the go-live checklist runs
-  `systemd-analyze security` on the real server. S3 buckets are checked by the dry run (region, provider, no secret
-  shown), not against a real bucket.
+  by root back to `caddy`, and starts again with only the data folder writable. With `LH_TEST_SYSTEMD=1` it then boots
+  the installed machine with systemd (a privileged container with no network) and runs the real units: the
+  locked-down service starts and answers, `systemd-analyze security` rates it, Caddy runs as `caddy`, the nightly copy
+  runs under its own lock-down, `linear-hub restart` works, a missing key is made anew while nothing is locked, and
+  once something is, a missing key stops the service with exit code 78 and no restart loop. The firewall is checked
+  by the dry run only (a container must not change the test machine's firewall). S3 buckets are checked by the dry
+  run (region, provider, no secret shown), not against a real bucket.
   Options: `LH_TEST_PREINSTALL=1` (Node and Caddy put in first, for networks that block their repositories),
-  `LH_TEST_NODE_DIR=/opt/node22` (copy Node from the test machine instead of downloading it), `LH_TEST_CA`,
-  `LH_TEST_PORT`.
+  `LH_TEST_NODE_DIR=/opt/node22` (copy Node from the test machine instead of downloading it), `LH_TEST_SYSTEMD=1`,
+  `LH_TEST_KEEP_IMAGE=1`, `LH_TEST_CA`, `LH_TEST_PORT`.
 - `bash deploy/install.sh --dry-run --yes --domain … --email … --repo …` shows what a run would do on a real server.

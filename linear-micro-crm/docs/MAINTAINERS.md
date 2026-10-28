@@ -58,6 +58,9 @@ npm run build                  # the client production build
 bash deploy/tests/run.sh       # the installer: shellcheck, helpers and a full dry run
 ```
 
+Before a release that changes `deploy/`, also run the installer end to end in a throwaway container (needs Docker;
+[`DEPLOY.md`](DEPLOY.md), "For developers"): `LH_TEST_SYSTEMD=1 bash deploy/tests/container-test.sh <repo> <branch>`.
+
 Handy for demos and tests, **never on a real server**: `LM_BUSINESS_NOW=2026-10-19T15:00:00` pins the business clock;
 `LM_PAYMENTS_FAKE=1` adds test payment providers that pay nobody.
 
