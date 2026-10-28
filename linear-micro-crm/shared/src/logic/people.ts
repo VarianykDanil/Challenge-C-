@@ -4,6 +4,7 @@
  * is given. Pure and deterministic, used by the server (POST /users, sentences that quote a name) and the client.
  */
 import type { Role } from '../types.ts';
+import { setupCodeExpiryText } from './access.ts';
 import { PIN_MAX_LENGTH, PIN_MIN_LENGTH } from '../types/pin.ts';
 import { FIELD_ADD_POSITIONS, PEOPLE_ADDER_ROLES } from '../types/people.ts';
 
@@ -129,6 +130,24 @@ export interface StaffSignInText {
   signInUrl?: string | null;
   /** True while the office requires a PIN for everyone (Settings → Security): their first sign-in creates one. */
   pinRequired: boolean;
+  /**
+   * The one-time setup code for the first sign-in, when it can be sent with the text; null or absent when it was not
+   * shown (they get it from an administrator).
+   */
+  setupCode?: string | null;
+  /** When the setup code stops working (ISO). */
+  setupCodeExpiresAt?: string | null;
+}
+
+/**
+ * The step that comes right after the email and ID: every new account finishes setting up with a one-time setup code,
+ * so knowing someone's email and ID is not enough to sign in as them. `from` names who hands it out when the text does
+ * not carry it ("an administrator", "Linear MCR").
+ */
+export function setupCodeStep(n: number, code: string | null | undefined, expiresAt: string | null | undefined, from: string): string {
+  if (!code) return `${n}. The first time, type the one-time setup code ${from} gives you.`;
+  const until = expiresAt ? setupCodeExpiryText(expiresAt).replace(/^Valid until /, '') : '';
+  return `${n}. The first time, type your one-time setup code: ${code}. It works once${until ? `, until ${until}` : ''}.`;
 }
 
 /**
@@ -167,11 +186,12 @@ export function staffSignInInstructions(t: StaffSignInText): string {
   const steps = [
     `1. ${where}.`,
     `2. Enter your email (${t.email}) and your employee ID: ${t.employeeId}.`,
+    setupCodeStep(3, t.setupCode, t.setupCodeExpiresAt, 'an administrator'),
   ];
   if (t.pinRequired) {
-    steps.push(`3. The first time, create a PIN of ${PIN_MIN_LENGTH} to ${PIN_MAX_LENGTH} digits. You will type it after your email and employee ID each time you sign in.`);
+    steps.push(`4. Then create a PIN of ${PIN_MIN_LENGTH} to ${PIN_MAX_LENGTH} digits. You will type it after your email and employee ID each time you sign in.`);
   }
-  steps.push(twoFactorSetupStep(steps.length + 1, t.pinRequired));
+  steps.push(twoFactorSetupStep(steps.length + 1, true));
   return [
     `Hello ${t.firstName.trim() || 'there'},`,
     '',
@@ -179,6 +199,6 @@ export function staffSignInInstructions(t: StaffSignInText): string {
     '',
     ...steps,
     '',
-    `Keep your employee ID${t.pinRequired ? ', PIN' : ''} and recovery codes to yourself. If you lose your phone, sign in with a recovery code, or ask an administrator to reset two-step verification.`,
+    `Keep your employee ID, setup code${t.pinRequired ? ', PIN' : ''} and recovery codes to yourself. If you lose your phone, sign in with a recovery code, or ask an administrator to reset two-step verification.`,
   ].join('\n');
 }

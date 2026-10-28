@@ -21,13 +21,15 @@
 import { Router } from 'express';
 import { z } from 'zod';
 import { clientInviteInstructions, type CampaignPage, type CampaignPageCampaign, type ClientInviteResult } from '@lm/shared';
-import { all, get, run, type Db } from '../db/connection.ts';
+import { all, get, run, transaction, type Db } from '../db/connection.ts';
 import { ANNOUNCEMENT_SELECT, CAMPAIGN_SELECT, listEvents, mapAnnouncement, mapCampaign, type AnnouncementRow } from '../db/queries.ts';
 import { clientPayPlanId, nextClientAccessCode } from '../lib/client.ts';
 import { campaignBrief, getClientAccount, listClientAccounts, listOfficePosts } from '../lib/clientPortal.ts';
 import { addDays, startOfMonth, todayISO } from '../lib/dates.ts';
 import { conflict, notFound } from '../lib/errors.ts';
 import { listCampaignRates } from '../lib/payRule.ts';
+import { isSecureRequest } from '../lib/secureRequest.ts';
+import { issueSetupCode } from '../lib/setupCodes.ts';
 import { idParam } from '../lib/validate.ts';
 import { currentUser, requireRole } from '../middleware/auth.ts';
 import type { Campaign } from '@lm/shared';
@@ -134,17 +136,28 @@ export function campaignPagesRouter(db: Db): Router {
     const input = inviteBody.parse(req.body ?? {});
     if (get(db, `SELECT 1 FROM users WHERE lower(email) = lower(?)`, [input.email])) throw conflict(`${input.email} already has an account`);
     const accessCode = nextClientAccessCode(db);
-    const id = run(
-      db,
-      `INSERT INTO users (employee_id, email, first_name, last_name, role, position, team_id, pay_plan_id, start_date, status, phone, avatar_color, city, client_campaign_id)
-       VALUES (?, ?, ?, ?, 'client', 'client', NULL, ?, ?, 'active', NULL, ?, NULL, ?)`,
-      [accessCode, input.email, input.firstName, input.lastName, clientPayPlanId(db), todayISO(), campaign.color, campaignId],
-    ).lastInsertRowid;
+    // the first sign-in needs a one-time setup code, shown once here (not over plain http from another device)
+    const me = currentUser(req);
+    const secure = isSecureRequest(req);
+    const { id, issued } = transaction(db, () => {
+      const newId = run(
+        db,
+        `INSERT INTO users (employee_id, email, first_name, last_name, role, position, team_id, pay_plan_id, start_date, status, phone, avatar_color, city, client_campaign_id)
+         VALUES (?, ?, ?, ?, 'client', 'client', NULL, ?, ?, 'active', NULL, ?, NULL, ?)`,
+        [accessCode, input.email, input.firstName, input.lastName, clientPayPlanId(db), todayISO(), campaign.color, campaignId],
+      ).lastInsertRowid;
+      return { id: newId, issued: secure ? issueSetupCode(db, newId, { createdBy: me.id, reason: 'new_account' }) : null };
+    });
     const account = getClientAccount(db, id)!;
     const result: ClientInviteResult = {
       account,
       accessCode,
-      instructions: clientInviteInstructions({ firstName: input.firstName, email: input.email, accessCode, campaignName: campaign.name, signInUrl: input.signInUrl }),
+      instructions: clientInviteInstructions({
+        firstName: input.firstName, email: input.email, accessCode, campaignName: campaign.name, signInUrl: input.signInUrl,
+        setupCode: issued?.code ?? null, setupCodeExpiresAt: issued?.expiresAt ?? null,
+      }),
+      setupCode: issued?.code ?? null,
+      ...(issued ? { setupCodeExpiresAt: issued.expiresAt } : { setupCodeWithheld: true }),
     };
     res.status(201).json(result);
   });

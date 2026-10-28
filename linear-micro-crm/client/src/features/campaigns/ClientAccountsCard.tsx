@@ -6,11 +6,13 @@
 // verification, set up at sign-in after the PIN ("No two-step yet" until then); **Reset two-step** after a lost phone.
 import { useId, useState } from 'react';
 import { Copy, KeyRound, Pencil, Power, ShieldOff, UserPlus, UsersRound } from 'lucide-react';
-import type { ClientAccount, ClientInviteResult } from '@lm/shared';
+import { ACCESS_MESSAGES, setupCodeExpiryText, type ClientAccount, type ClientAccountReset, type ClientInviteResult } from '@lm/shared';
 import { useInviteClient, useResetClientPin, useResetClientTwoFactor, useUpdateClientAccount } from '@/api/clientPortal';
 import { Badge, Button, Card, CardHeader, EmptyState, Field, Input, Modal, useToast } from '@/components/ui';
 import { ConfirmDialog } from '@/features/common/ConfirmDialog';
-import { errorMessage } from '@/features/common/QueryStates';
+import { apiMessage, errorMessage } from '@/features/common/QueryStates';
+import { SetupCodeDialog } from '@/features/access/SetupCodeDialog';
+import { StepUpCodeField, StepUpDialog } from '@/features/access/StepUpDialog';
 import { fullName } from '@/lib/format';
 
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
@@ -74,19 +76,64 @@ function AccountConfirm({ confirm: { account, action }, onClose }: { confirm: Co
   const reset = useResetClientPin();
   const reset2fa = useResetClientTwoFactor();
   const update = useUpdateClientAccount();
+  const [stepUpError, setStepUpError] = useState<string | null>(null);
+  // after a reset: the one-time setup code their next sign-in needs, shown once
+  const [issued, setIssued] = useState<ClientAccountReset | null>(null);
   const name = fullName(account);
   const text = {
-    reset: { title: `Reset ${name}’s PIN?`, body: 'They are signed out everywhere and create a new PIN when they next sign in with their email and access code.', label: 'Reset PIN', done: 'PIN reset' },
+    reset: {
+      title: `Reset ${name}’s PIN?`,
+      body: 'They are signed out everywhere. They sign in next with their email, access code and the one-time setup code you get next, then create a new PIN.',
+      label: 'Reset PIN',
+      done: 'PIN reset',
+      next: 'create a new PIN',
+    },
     reset2fa: {
       title: `Reset ${name}’s two-step verification?`,
-      body: 'For a lost or new phone. They are signed out everywhere and set it up again, with a new authenticator code, when they next sign in.',
+      body: 'For a lost or new phone. They are signed out everywhere. They sign in next with their email, access code and the one-time setup code you get next, then set up two-step verification again.',
       label: 'Reset two-step',
       done: 'Two-step verification reset',
+      next: 'set up two-step verification again',
     },
     off: { title: `Turn off ${name}’s account?`, body: 'They are signed out at once and cannot sign in until you turn it back on. Their posts stay.', label: 'Turn off', done: 'Account turned off' },
     on: { title: `Turn on ${name}’s account?`, body: 'They can sign in again with their email, access code, PIN and the code from their authenticator app.', label: 'Turn on', done: 'Account turned on' },
   }[action];
   const busy = reset.isPending || reset2fa.isPending || update.isPending;
+  if (action === 'reset' || action === 'reset2fa') {
+    const t = text;
+    const run = action === 'reset' ? reset : reset2fa;
+    if (issued) {
+      return (
+        <SetupCodeDialog
+          name={name}
+          firstName={account.firstName}
+          email={account.email}
+          idLabel="Access code"
+          idValue={account.accessCode}
+          setupCode={issued.setupCode}
+          expiresAt={issued.setupCodeExpiresAt}
+          intro={`${t.done}: ${name} is signed out everywhere.`}
+          next={t.next ?? "finish setting up"}
+          onClose={onClose}
+        />
+      );
+    }
+    return (
+      <StepUpDialog
+        open
+        onClose={onClose}
+        title={t.title}
+        description={t.body}
+        confirmLabel={t.label}
+        busy={run.isPending}
+        error={stepUpError}
+        onConfirm={(code) => {
+          setStepUpError(null);
+          run.mutate({ id: account.id, code }, { onSuccess: setIssued, onError: (e) => setStepUpError(apiMessage(e, 'Could not do that.')) });
+        }}
+      />
+    );
+  }
   return (
     <ConfirmDialog
       open
@@ -98,9 +145,7 @@ function AccountConfirm({ confirm: { account, action }, onClose }: { confirm: Co
       loading={busy}
       onConfirm={() => {
         const done = { onSuccess: () => { toast.success(text.done, name); onClose(); }, onError: (e: unknown) => toast.error('Could not do that', errorMessage(e)) };
-        if (action === 'reset') reset.mutate(account.id, done);
-        else if (action === 'reset2fa') reset2fa.mutate(account.id, done);
-        else update.mutate({ id: account.id, status: action === 'off' ? 'left' : 'active' }, done);
+        update.mutate({ id: account.id, status: action === 'off' ? 'left' : 'active' }, done);
       }}
     />
   );
@@ -113,27 +158,32 @@ function EditAccountModal({ account, onClose }: { account: ClientAccount; onClos
   const update = useUpdateClientAccount();
   const [f, setF] = useState({ firstName: account.firstName, lastName: account.lastName, email: account.email });
   const [submitted, setSubmitted] = useState(false);
+  // a new sign-in email needs the admin's fresh two-step code
+  const [stepUp, setStepUp] = useState('');
+  const newEmail = f.email.trim().toLowerCase() !== account.email.toLowerCase();
   const errors = {
     firstName: submitted && !f.firstName.trim() ? 'Enter their first name' : undefined,
     lastName: submitted && !f.lastName.trim() ? 'Enter their last name' : undefined,
     email: submitted && !EMAIL_RE.test(f.email.trim()) ? 'Enter a valid email' : undefined,
+    stepUp: submitted && newEmail && !/^\d{6}$/.test(stepUp) ? 'Type the 6-digit code from your authenticator app' : undefined,
   };
 
   async function submit() {
     setSubmitted(true);
-    if (!f.firstName.trim() || !f.lastName.trim() || !EMAIL_RE.test(f.email.trim())) return;
+    if (!f.firstName.trim() || !f.lastName.trim() || !EMAIL_RE.test(f.email.trim()) || (newEmail && !/^\d{6}$/.test(stepUp))) return;
     const patch = {
       ...(f.firstName.trim() !== account.firstName ? { firstName: f.firstName.trim() } : {}),
       ...(f.lastName.trim() !== account.lastName ? { lastName: f.lastName.trim() } : {}),
-      ...(f.email.trim().toLowerCase() !== account.email.toLowerCase() ? { email: f.email.trim() } : {}),
+      ...(newEmail ? { email: f.email.trim() } : {}),
     };
     if (!Object.keys(patch).length) return onClose();
     try {
-      const saved = await update.mutateAsync({ id: account.id, ...patch });
+      const saved = await update.mutateAsync({ id: account.id, ...patch, ...(newEmail ? { code: stepUp } : {}) });
       toast.success('Saved', patch.email ? `${fullName(saved)} now signs in with ${saved.email}.` : fullName(saved));
       onClose();
     } catch (err) {
-      toast.error('Could not save that', errorMessage(err));
+      setStepUp('');
+      toast.error('Could not save that', apiMessage(err, errorMessage(err)));
     }
   }
 
@@ -162,6 +212,11 @@ function EditAccountModal({ account, onClose }: { account: ClientAccount; onClos
         <Field label="Email" required htmlFor={`${uid}-email`} error={errors.email} className="sm:col-span-2">
           <Input id={`${uid}-email`} type="email" inputMode="email" maxLength={200} value={f.email} onChange={(e) => setF({ ...f, email: e.target.value })} invalid={!!errors.email} />
         </Field>
+        {newEmail && (
+          <div className="sm:col-span-2">
+            <StepUpCodeField id={`${uid}-stepup`} value={stepUp} onChange={setStepUp} why="A new sign-in email needs your code." error={errors.stepUp} />
+          </div>
+        )}
       </form>
     </Modal>
   );
@@ -211,7 +266,7 @@ function InviteModal({ campaignId, campaignName, onClose }: { campaignId: number
         open
         onClose={onClose}
         title={`${fullName(result.account)} can sign in now`}
-        description="Send them these instructions. This is the only time the sign-in instructions are shown here."
+        description="Send them these instructions privately. This is the only time the setup code and the sign-in instructions are shown here."
         size="md"
         footer={
           <>
@@ -220,9 +275,22 @@ function InviteModal({ campaignId, campaignName, onClose }: { campaignId: number
           </>
         }
       >
-        <div className="rounded-lg border border-border bg-surface-2 p-3 text-center">
-          <p className="text-xs text-muted">Access code</p>
-          <p className="mt-1 font-mono text-2xl font-bold tracking-widest text-fg" data-testid="invite-access-code">{result.accessCode}</p>
+        <div className="grid gap-3 rounded-lg border border-border bg-surface-2 p-3 text-center sm:grid-cols-2">
+          <div>
+            <p className="text-xs text-muted">Access code</p>
+            <p className="mt-1 font-mono text-2xl font-bold tracking-widest text-fg" data-testid="invite-access-code">{result.accessCode}</p>
+          </div>
+          <div className="min-w-0">
+            <p className="text-xs text-muted">One-time setup code</p>
+            {result.setupCode ? (
+              <>
+                <p className="mt-1 break-all font-mono text-xl font-bold tracking-wider text-fg" data-testid="invite-setup-code">{result.setupCode}</p>
+                {result.setupCodeExpiresAt && <p className="mt-0.5 text-xs text-muted">{setupCodeExpiryText(result.setupCodeExpiresAt)}</p>}
+              </>
+            ) : (
+              <p className="mt-1 text-xs text-warning">{ACCESS_MESSAGES.setupCodeWithheld}</p>
+            )}
+          </div>
         </div>
         <pre className="mt-4 max-h-64 overflow-auto whitespace-pre-wrap break-words rounded-lg border border-border bg-surface p-3 font-sans text-sm text-fg" data-testid="invite-instructions">{result.instructions}</pre>
       </Modal>

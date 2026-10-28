@@ -19,6 +19,7 @@ import { useAttention } from '@/api/hooks';
 import { useAuth } from '@/auth/AuthProvider';
 import { Skeleton } from '../ui/Skeleton';
 import { useToast } from '../ui/Toast';
+import { DIALOG_OPENED_EVENT } from '../ui/Modal';
 import { AttentionRow, attentionCheckedAt } from '@/features/smart/AttentionRow';
 import {
   ATTENTION_TOASTS_FIRST,
@@ -118,6 +119,16 @@ export function NotificationsBell({ hasNotifications = false, onNotifications }:
   navigateRef.current = navigate;
   const markSeenRef = useRef(markSeen);
   markSeenRef.current = markSeen;
+  // a dialog opening puts the attention toasts away (they stay in the bell), so none hides its buttons on a phone
+  const toastIds = useRef<number[]>([]);
+  useEffect(() => {
+    const putAway = () => {
+      for (const id of toastIds.current) toaster.dismiss(id);
+      toastIds.current = [];
+    };
+    window.addEventListener(DIALOG_OPENED_EVENT, putAway);
+    return () => window.removeEventListener(DIALOG_OPENED_EVENT, putAway);
+  }, [toaster]);
   useEffect(() => {
     if (userId === null || !feed || feed.disabled) return;
     // keep what is still in the feed at the newest end of both sets, so a long-lived item is never evicted and re-shown
@@ -134,7 +145,7 @@ export function NotificationsBell({ hasNotifications = false, onNotifications }:
     if (!fresh.length) return;
     addToAttentionSet('toasted', userId, fresh);
     for (const item of show) {
-      toaster.toast({
+      const id = toaster.toast({
         title: item.title,
         description: item.body,
         tone: item.key.startsWith('pay:paid:') ? 'success' : item.severity === 'danger' ? 'error' : item.severity === 'warning' ? 'warning' : 'info',
@@ -147,6 +158,7 @@ export function NotificationsBell({ hasNotifications = false, onNotifications }:
           },
         },
       });
+      toastIds.current = [...toastIds.current.slice(-9), id];
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps -- once per fetch, keyed on the fetch time
   }, [q.dataUpdatedAt, userId]);

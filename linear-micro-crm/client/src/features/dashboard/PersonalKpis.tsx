@@ -66,10 +66,26 @@ export function PersonalKpis({ dashboard: d, role, deltaLabel, streaks }: Person
           <KpiTile className={TILE} label="Conversion" {...conversionKpi(d.personal.totals.stops, d.personal.ratios.overallConversion)} delta={d.personal.totals.stops > 0 ? d.personal.deltas.conversion : null} deltaLabel={deltaLabel} hint="sales ÷ stops" />
           <KpiTile className={TILE} label="Stops" value={formatNumber(d.personal.totals.stops)} delta={d.personal.deltas.stops} deltaLabel={deltaLabel} hint={`${formatNumber(d.personal.totals.presentations)} presentations`} />
           <KpiTile className={TILE} label="Earnings to date" value={formatGBP(d.personal.earningsToDate)} hint="gross, this period" />
-          <KpiTile className={TILE} label="Next payday" value={d.personal.nextPayday ? formatDateShort(d.personal.nextPayday) : '—'} tone={d.personal.nextPayday && d.personal.nextPayday < todayISO() ? 'danger' : 'default'} hint={d.personal.nextPayday ? `${d.personal.nextPayAmount != null ? formatGBP(d.personal.nextPayAmount, { cents: true }) : 'amount pending'} · ${d.personal.nextPayday < todayISO() ? 'overdue · ' : ''}${formatRelative(d.personal.nextPayday)}` : 'No pending run'} />
+          <PaydayTile nextPayday={d.personal.nextPayday} amount={d.personal.nextPayAmount} />
           <KpiTile className={TILE} label="Punctuality" value={d.personal.punctualityRate == null ? '—' : formatPct(d.personal.punctualityRate)} tone={d.personal.punctualityRate == null ? 'default' : d.personal.punctualityRate >= 0.9 ? 'success' : d.personal.punctualityRate >= 0.75 ? 'warning' : 'danger'} hint="check-ins on time" />
         </>
       )}
     </div>
+  );
+}
+
+/** The pay still to come: "Next payday", or "Overdue pay" (in red) once that payday has passed (UX-9). */
+function PaydayTile({ nextPayday, amount }: { nextPayday: string | null | undefined; amount: number | null | undefined }) {
+  if (!nextPayday) return <KpiTile className={TILE} label="Next payday" value="—" hint="No pending run" />;
+  const overdue = nextPayday < todayISO();
+  const money = amount != null ? formatGBP(amount, { cents: true }) : 'amount pending';
+  return (
+    <KpiTile
+      className={TILE}
+      label={overdue ? 'Overdue pay' : 'Next payday'}
+      value={formatDateShort(nextPayday)}
+      tone={overdue ? 'danger' : 'default'}
+      hint={`${money} · ${overdue ? 'was due ' : ''}${formatRelative(nextPayday)}`}
+    />
   );
 }

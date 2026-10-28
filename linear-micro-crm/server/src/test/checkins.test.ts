@@ -237,7 +237,7 @@ test('on the demo seed: admin MISS under 150 ms, shapes and scoping hold for eve
     }
     assert.ok(ms < 150, `admin /me/insights MISS took ${ms.toFixed(1)} ms at best of 5`);
     const status = new Map(all<{ id: number; status: string; role: string; teamId: number | null }>(seeded.db, 'SELECT id, status, role, team_id AS teamId FROM users').map((u) => [u.id, u]));
-    const adminId = all<{ id: number }>(seeded.db, `SELECT id FROM users WHERE email = 'danil@linear-mcr.co.uk'`)[0]!.id;
+    const adminId = all<{ id: number }>(seeded.db, `SELECT id FROM users WHERE email = 'morgan.blake@linearhub.example'`)[0]!.id;
     const company: Json[] = res.json.company.checkIns;
     assertList(company);
     for (const c of company) {
@@ -248,7 +248,7 @@ test('on the demo seed: admin MISS under 150 ms, shapes and scoping hold for eve
     }
     seeded.resetCache();
     const lead = await l.get('/me/insights');
-    const leaderRow = all<{ id: number; teamId: number }>(seeded.db, `SELECT id, team_id AS teamId FROM users WHERE email = 'amelia.hart@linear-mcr.co.uk'`)[0]!;
+    const leaderRow = all<{ id: number; teamId: number }>(seeded.db, `SELECT id, team_id AS teamId FROM users WHERE email = 'amelia.hart@linearhub.example'`)[0]!;
     assertList(lead.json.team.checkIns);
     for (const c of lead.json.team.checkIns) {
       assert.notEqual(c.userId, leaderRow.id);

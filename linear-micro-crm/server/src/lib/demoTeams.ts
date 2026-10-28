@@ -1,6 +1,6 @@
 /**
- * Release 1.3.1: the demo teams whose accounts start blank — team Sapiens and its seven sign-ins (db/seed-data.ts
- * DEMO_TEAMS, DEMO_TEAM_ACCOUNTS). One function adds them for both paths:
+ * The starter team whose accounts start blank, with one-tap sign-ins during the trial (lib/starterTeam.ts: the office's
+ * local file, else the example of invented people). One function adds them for both paths:
  *  - a fresh demo seed calls addDemoTeams at its very end, after every extension seed (db/seed.ts), and marks the
  *    one-off step done;
  *  - an existing demo database gains them once on start-up (db/extensions/sapiens.ts), guarded by the same flag.
@@ -10,10 +10,12 @@
  */
 import type { Role } from '@lm/shared';
 import { all, get, run, type Db } from '../db/connection.ts';
-import { AVATAR_PALETTE, DEMO_TEAM_ACCOUNTS, DEMO_TEAMS, type DemoTeamAccountSeed, type DemoTeamSeed } from '../db/seed-data.ts';
+import { AVATAR_PALETTE } from '../db/seed-data.ts';
 import { currentDataVersion } from './cache.ts';
 import { demoClientMarkers, matchesDemoClient, type DemoClientMarker } from './client.ts';
 import { formatEmployeeId, maxEmployeeNumber } from './people.ts';
+import { loadStarterTeam, type StarterTeam } from './starterTeam.ts';
+import { isTrialMode } from './trialMode.ts';
 
 /** meta key: JSON `DemoTeamMarker[]`, the demo team accounts the seed or the start-up step inserted. */
 export const DEMO_TEAMS_META_KEY = 'seed_demo_teams';
@@ -62,9 +64,23 @@ export function demoStaffIntact(db: Db): boolean {
 }
 
 /**
+ * Whether the operator's settings allow the one-tap demo sign-ins: LM_DEMO_ACCOUNTS=0 never, =1 always; unset, only
+ * on a server that is not online — built-in HTTPS (LM_TLS_CERT_FILE) or a reverse proxy (TRUST_PROXY) means it can be
+ * reached from the internet, where published one-tap accounts must not work. Read on every call, never cached.
+ */
+export function demoAccountsAllowed(env: NodeJS.ProcessEnv = process.env): boolean {
+  const flag = env.LM_DEMO_ACCOUNTS?.trim();
+  if (flag === '0') return false;
+  if (flag === '1') return true;
+  const proxy = (env.TRUST_PROXY ?? '').trim();
+  const behindProxy = proxy !== '' && proxy !== '0' && !/^false$/i.test(proxy);
+  return !behindProxy && !(env.LM_TLS_CERT_FILE ?? '').trim();
+}
+
+/**
  * Whether a one-off demo start-up step (the Sapiens accounts, the demo charity account) may add its accounts now:
- * - 'later': not now, ask again on the next start — the server runs with LM_DEMO_ACCOUNTS=0 (the operator says real
- *   people use it), the database is not one the demo seed created, or its core rows are not there yet (a fresh install
+ * - 'later': not now, ask again on the next start — the operator's settings turn the demo sign-ins off
+ *   (demoAccountsAllowed: LM_DEMO_ACCOUNTS=0, or a server online over https), the database is not one the demo seed created, or its core rows are not there yet (a fresh install
  *   before its seed);
  * - 'never': the database began as the demo but one of its four demo staff is missing, has left, or has another role
  *   or employee ID (a renamed person or a new email still counts as the demo) — it is in real use now, so the step
@@ -73,17 +89,17 @@ export function demoStaffIntact(db: Db): boolean {
  * Every Linear Hub database starts from the demo seed, so the seed's meta alone never decides this.
  */
 export function demoStepAllowed(db: Db): 'yes' | 'later' | 'never' {
-  if (process.env.LM_DEMO_ACCOUNTS === '0') return 'later';
+  if (!demoAccountsAllowed()) return 'later';
   if (!isDemoDatabase(db)) return 'later';
   if (!get(db, `SELECT 1 FROM users LIMIT 1`) || !get(db, `SELECT 1 FROM pay_plans LIMIT 1`)) return 'later';
   return demoStaffIntact(db) ? 'yes' : 'never';
 }
 
-// ── Release 1.4 (package S): the demo sign-in accounts are exempt from two-step and the 14-hour sign-out ──
+// ── the one-tap demo sign-in accounts (trial mode only) ──
 
 /** Who signs in as the demo, worked out once per data version (every write request moves it). */
 interface DemoSignInState {
-  /** The database part of demoStepAllowed says 'yes' (LM_DEMO_ACCOUNTS is read on every call, never cached). */
+  /** The database part of demoStepAllowed says 'yes' (the environment is read on every call, never cached). */
   stillDemo: boolean;
   teamAccounts: DemoTeamAccountMarker[];
   clients: DemoClientMarker[];
@@ -95,13 +111,21 @@ function demoSignInState(db: Db): DemoSignInState {
   const version = currentDataVersion();
   const hit = signInStateCache.get(db);
   if (hit && hit.version === version) return hit.state;
+  // Only in trial mode (lib/trialMode.ts): `npm run golive` ends it for good, and a database the demo seed did not
+  // build never had it.
   const stillDemo =
-    isDemoDatabase(db) && Boolean(get(db, `SELECT 1 FROM users LIMIT 1`)) && Boolean(get(db, `SELECT 1 FROM pay_plans LIMIT 1`)) && demoStaffIntact(db);
+    isTrialMode(db) && isDemoDatabase(db) && Boolean(get(db, `SELECT 1 FROM users LIMIT 1`)) && Boolean(get(db, `SELECT 1 FROM pay_plans LIMIT 1`)) &&
+    demoStaffIntact(db);
   const state: DemoSignInState = stillDemo
     ? { stillDemo, teamAccounts: demoTeamMarkers(db).flatMap((m) => m.accounts), clients: demoClientMarkers(db) }
     : { stillDemo, teamAccounts: [], clients: [] };
   signInStateCache.set(db, { version, state });
   return state;
+}
+
+/** The one-tap demo sign-ins work right now: trial mode, demoAccountsAllowed, the demo staff are intact. */
+export function demoSignInsOn(db: Db): boolean {
+  return demoAccountsAllowed() && demoSignInState(db).stillDemo;
 }
 
 /** The fields of a users row the rule reads. */
@@ -113,18 +137,18 @@ export interface DemoSignInSubject {
 }
 
 /**
- * Release 1.4 (package S, owner's decision): true for an account the sign-in page's demo buttons list, while Linear Hub
- * is still the demo — the same "still the demo" rule as demoStepAllowed ('yes': LM_DEMO_ACCOUNTS is not 0, the
- * database is one the demo seed built and its four demo staff are intact) AND the account is one GET
- * /auth/demo-accounts lists: one of the four by employee ID and role (DEMO_STAFF), a team Sapiens account by its
- * marker (same id, employee ID and email; staff), or the demo charity account by its marker (lib/client.ts
- * matchesDemoClient). Those accounts need no two-step verification and keep the 14-day session, so one-click demo
- * sign-in keeps working on the owner's Mac. Every other account (anyone Matt adds, every invited client) is not
- * exempt, even on the demo database, and nobody is once the database is in real use.
+ * True for an account the sign-in page's demo buttons list, while the database is in trial mode and still the demo
+ * (demoAccountsAllowed, the database is one the demo seed built and its four demo staff are intact) AND the
+ * account is one GET /auth/demo-accounts lists: one of the four by employee ID and role (DEMO_STAFF), a starter team
+ * account by its marker (same id, employee ID and email; staff), or the demo charity account by its marker
+ * (lib/client.ts matchesDemoClient). Those accounts sign in with one tap and need no two-step verification, so the
+ * demo works on the owner's Mac; they get the normal 14-hour session, and lib/trial.ts keeps them away from real
+ * people's bank details, admin making, sign-in resets, setup codes and payments. Every other account (anyone Matt
+ * adds, every invited client) is not exempt, and nobody is once the database has gone live.
  * Cheap: the database reads are cached per data version.
  */
 export function isDemoSignInAccount(db: Db, user: DemoSignInSubject | null | undefined): boolean {
-  if (!user || process.env.LM_DEMO_ACCOUNTS === '0') return false;
+  if (!user || !demoAccountsAllowed()) return false;
   const state = demoSignInState(db);
   if (!state.stillDemo) return false;
   const employeeId = user.employeeId.toUpperCase();
@@ -170,25 +194,21 @@ export interface AddDemoTeamsResult {
 const employeeNumber = (id: string) => Number(id.slice(3));
 
 /**
- * Adds each demo team (reusing a team of that name, any case, when one exists) and its accounts that are missing,
- * matched by email: active, no surname, start date `today`, Manchester, the default pay plan for the position, no
+ * Adds each starter team (reusing a team of that name, any case, when one exists) and its accounts that are missing,
+ * matched by email: active, the surname the file gives (usually none), start date `today`, Manchester, the default pay plan for the position, no
  * phone, no PIN. An account keeps its fixed employee ID unless someone already has it; then it gets the next number
  * above both the IDs in use and the demo's own. A team without a leader gets its `leadsTeam` account when that person
  * is on it. Writes nothing else (no gauges, events, pay or audit rows). Records what it inserted in the marker. The
  * caller holds the transaction and sets DEMO_TEAMS_DONE_KEY.
  */
-export function addDemoTeams(
-  db: Db,
-  today: string,
-  teams: readonly DemoTeamSeed[] = DEMO_TEAMS,
-  accounts: readonly DemoTeamAccountSeed[] = DEMO_TEAM_ACCOUNTS,
-): AddDemoTeamsResult {
+export function addDemoTeams(db: Db, today: string, starter: Pick<StarterTeam, 'teams' | 'accounts'> = loadStarterTeam()): AddDemoTeamsResult {
+  const { teams, accounts } = starter;
   const markers = demoTeamMarkers(db);
   const result: AddDemoTeamsResult = { teamsCreated: 0, inserted: [] };
   const reservedTop = Math.max(0, ...accounts.map((a) => employeeNumber(a.employeeId)));
   const insertUser = db.prepare(
     `INSERT INTO users (employee_id, email, first_name, last_name, role, position, team_id, pay_plan_id, start_date, status, phone, avatar_color, city)
-     VALUES (?, ?, ?, '', ?, ?, ?, ?, ?, 'active', NULL, ?, 'Manchester')`,
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'active', NULL, ?, 'Manchester')`,
   );
   for (const t of teams) {
     let team = get<{ id: number; leaderId: number | null }>(db, `SELECT id, leader_id AS leaderId FROM teams WHERE lower(name) = lower(?) ORDER BY id LIMIT 1`, [t.name]);
@@ -204,7 +224,7 @@ export function addDemoTeams(
       const taken = get(db, `SELECT 1 FROM users WHERE lower(employee_id) = lower(?)`, [a.employeeId]);
       const employeeId = taken ? formatEmployeeId(Math.max(maxEmployeeNumber(db), reservedTop) + 1) : a.employeeId;
       const color = AVATAR_PALETTE[(employeeNumber(employeeId) - 1) % AVATAR_PALETTE.length]!;
-      const id = Number(insertUser.run(employeeId, a.email, a.firstName, a.role, a.position, team.id, plan.id, today, color).lastInsertRowid);
+      const id = Number(insertUser.run(employeeId, a.email, a.firstName, a.lastName ?? '', a.role, a.position, team.id, plan.id, today, color).lastInsertRowid);
       added.push({ id, employeeId, email: a.email });
     }
     const lead = accounts.find((x) => x.team === t.name && x.leadsTeam);

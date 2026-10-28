@@ -1,25 +1,30 @@
 import { Router, type Request, type Response } from 'express';
 import { z } from 'zod';
 import {
-  PIN_PROBLEM_MESSAGES, POSITION_LABELS, SESSION_IDLE_HOURS_MAX, SESSION_IDLE_HOURS_MIN, SESSION_MAX_HOURS_MAX, SESSION_MAX_HOURS_MIN, personName,
+  ACCESS_MESSAGES, PIN_PROBLEM_MESSAGES, POSITION_LABELS, SESSION_IDLE_HOURS_MAX, SESSION_IDLE_HOURS_MIN, SESSION_MAX_HOURS_MAX, SESSION_MAX_HOURS_MIN, personName,
   pinProblem, type AuthResponse, type DemoTeamAccounts, type LoginPinChallenge, type LoginPinDetails, type LoginPinReason, type LoginPinRequired,
-  type Role, type TwoFactorChallenge, type TwoFactorStatus, type UserWithTeam,
+  type LoginSetupCodeChallenge, type LoginSetupCodeDetails, type Role, type SetupCodeIssued, type TwoFactorChallenge, type TwoFactorStatus,
+  type UserWithTeam,
 } from '@lm/shared';
 import { all, get, transaction, type Db } from '../db/connection.ts';
 import { USER_SELECT } from '../db/queries.ts';
 import { HttpError, badRequest, conflict, notFound, unauthorized } from '../lib/errors.ts';
 import { FailureLimiter } from '../lib/limiter.ts';
 import { clientCampaignIdOf, clientSafeUser, demoClientMarkers, isClientUser, isDemoClientAccount, matchesDemoClient } from '../lib/client.ts';
-import { DEMO_STAFF, demoTeamMarkers, isDemoSignInAccount } from '../lib/demoTeams.ts';
+import { DEMO_STAFF, demoAccountsAllowed, demoTeamMarkers, isDemoSignInAccount } from '../lib/demoTeams.ts';
 import {
-  accountFlags, clearPin, clearPinFailures, clientPinRequired, countPinAttempt, hashPin, isPinLocked, pinAttemptsLeft, pinHashNeedsUpgrade,
-  pinLockedMessage, pinRow, pinStatusFor, readSecuritySettings, resetPinAndSignOut, savePinHash, upgradePinHash, verifyPin,
+  accountFlags, clearPin, clearPinAndSessions, clearPinFailures, clientPinRequired, countPinAttempt, hashPin, isPinLocked, pinAttemptsLeft, pinHashNeedsUpgrade,
+  pinLockedMessage, pinRow, pinStatusFor, readSecuritySettings, savePinHash, upgradePinHash, verifyPin,
   writeSecuritySettings, type PinRow,
 } from '../lib/pin.ts';
 import {
   assertCodeAttemptsLeft, beginSetup, clearCodeFailures, clearTwoFactor, createChallenge, deleteChallenge, enableTwoFactor,
-  isTwoFactorEnabled, issueRecoveryCodes, recordChallengeAttempt, recordCodeFailure, requireChallenge, twoFactorStatus, verifySecondFactor,
+  deleteRecoveryCodes, isTwoFactorEnabled, issueRecoveryCodes, recordChallengeAttempt, recordCodeFailure, requireChallenge, twoFactorStatus,
+  verifySecondFactor,
 } from '../lib/twofactor.ts';
+import { isSecureRequest } from '../lib/secureRequest.ts';
+import { consumeHeldSetupCode, consumeSetupCode, holdSetupCode, issueSetupCode, needsSetupCode, requireSetupCodeAtNextSignIn } from '../lib/setupCodes.ts';
+import { assertStepUp, isTrialMode, trialStatus } from '../lib/trial.ts';
 import { idParam } from '../lib/validate.ts';
 import {
   clearSessionCookie, createSession, currentUser, destroyOtherSessions, destroySession, requireAuth, requireRole, setSessionCookie,
@@ -33,6 +38,8 @@ const loginSchema = z.object({
   employeeId: z.string().trim().min(1, 'Employee ID is required'),
   /** Release 1.2 (U1): required once the person has a PIN; ignored for an account without one. */
   pin: pinField.optional(),
+  /** The one-time setup code, for an account that has not finished setting up (lib/setupCodes.ts). */
+  setupCode: z.string().trim().max(40).optional(),
 });
 
 const setPinBody = z.object({ pin: pinField, currentPin: pinField.optional() });
@@ -188,6 +195,7 @@ export function authRouter(db: Db): Router {
     const session = createSession(db, user);
     setSessionCookie(req, res, session.token, session.maxAgeMs);
     const body: AuthResponse = { user: withFlags(user, twoFactorEnabled), session: session.info };
+    if (user.role === 'admin' && isTrialMode(db)) body.trial = trialStatus(db); // the banner from the first page
     res.json(body);
   };
 
@@ -225,8 +233,13 @@ export function authRouter(db: Db): Router {
     throw status === 401 ? unauthorized(WRONG_CODE) : badRequest(WRONG_CODE);
   }
 
+  const wrongSetupCode = () => {
+    const details: LoginSetupCodeDetails = { requiresSetupCode: true, reason: 'wrong' };
+    return new HttpError(401, ACCESS_MESSAGES.setupCodeWrong, details);
+  };
+
   router.post('/login', async (req, res) => {
-    const { email, employeeId, pin } = loginSchema.parse(req.body);
+    const { email, employeeId, pin, setupCode } = loginSchema.parse(req.body);
     const keys = loginKeys(req, email);
     const now = Date.now();
     assertLoginAllowed(keys, now);
@@ -265,11 +278,30 @@ export function authRouter(db: Db): Router {
       // A 1.2.0 hash (no pepper) is replaced now that the PIN is known to be right.
       if (pinHashNeedsUpgrade(pinState.hash)) upgradePinHash(db, user.id, pinState.hash, await hashPin(pin));
     }
-    if (isTwoFactorEnabled(db, user.id)) {
+    // An account that has not finished setting up (no two-step yet, or an admin reset its PIN) signs in only with its
+    // one-time setup code: the email and employee ID alone never start an account. A one-tap demo account (trial mode)
+    // is exempt. A missing or wrong code counts against the login limiter, like a wrong PIN. With two-step on the code
+    // is used up only once the two-step code is right too (/login/2fa), so an abandoned sign-in leaves it needed.
+    const twoFactorOn = isTwoFactorEnabled(db, user.id);
+    const codeNeeded = needsSetupCode(db, user.id, { twoFactorEnabled: twoFactorOn, demoSignIn: isDemoSignInAccount(db, user) });
+    if (codeNeeded) {
+      recordLoginFailure(keys, now);
+      if (!setupCode) {
+        const challenge: LoginSetupCodeChallenge = { requiresSetupCode: true };
+        return res.json(challenge);
+      }
+    }
+    if (twoFactorOn) {
       // Step one of two: no cookie yet, and the login counters keep running until the code is right.
-      const challenge: TwoFactorChallenge = { requiresTwoFactor: true, challengeToken: createChallenge(db, user.id), method: 'totp' };
+      const token = createChallenge(db, user.id);
+      if (codeNeeded && !holdSetupCode(db, user.id, setupCode, token)) {
+        deleteChallenge(db, token);
+        throw wrongSetupCode();
+      }
+      const challenge: TwoFactorChallenge = { requiresTwoFactor: true, challengeToken: token, method: 'totp' };
       return res.json(challenge);
     }
+    if (codeNeeded && !consumeSetupCode(db, user.id, setupCode)) throw wrongSetupCode();
     clearLoginFailures(keys); // a successful sign-in resets the counters
     signIn(req, res, user, false);
   });
@@ -290,6 +322,13 @@ export function authRouter(db: Db): Router {
       recordLoginFailure(keys, now); // a wrong code counts against the login limiter too
       recordChallengeAttempt(db, challenge.token);
     });
+    // the setup code step one held for this challenge (after an admin PIN reset) is used up now; none held, or it was
+    // replaced or expired meanwhile: start again
+    if (needsSetupCode(db, user.id, { twoFactorEnabled: true, demoSignIn: isDemoSignInAccount(db, user) }) && !consumeHeldSetupCode(db, user.id, challenge.token)) {
+      deleteChallenge(db, challenge.token);
+      recordLoginFailure(keys, now);
+      throw wrongSetupCode();
+    }
     deleteChallenge(db, challenge.token);
     clearLoginFailures(keys);
     signIn(req, res, user, true);
@@ -303,7 +342,10 @@ export function authRouter(db: Db): Router {
 
   router.get('/me', requireAuth, (req, res) => {
     // Release 1.4: and when this session ends (the sign-in page says why once it has)
-    const body: AuthResponse = { user: currentUser(req), ...(req.sessionInfo ? { session: req.sessionInfo } : {}) };
+    const me = currentUser(req);
+    const body: AuthResponse = { user: me, ...(req.sessionInfo ? { session: req.sessionInfo } : {}) };
+    // trial mode: every administrator sees the banner until the owner goes live
+    if (me.role === 'admin' && isTrialMode(db)) body.trial = trialStatus(db);
     res.json(body);
   });
 
@@ -331,6 +373,12 @@ export function authRouter(db: Db): Router {
       throw badRequest(WRONG_CODE);
     }
     clearCodeFailures(me.id, source);
+    // Over plain http from another device the codes would cross the network in clear: none are kept (so none can be
+    // stolen) and the person makes them later in Settings over a secure connection.
+    if (!isSecureRequest(req)) {
+      deleteRecoveryCodes(db, me.id);
+      return res.json({ recoveryCodes: [], recoveryCodesWithheld: true, message: ACCESS_MESSAGES.recoveryCodesWithheld });
+    }
     res.json({ recoveryCodes });
   });
 
@@ -414,8 +462,17 @@ export function authRouter(db: Db): Router {
           `wait for the time it shows, or run "npm run pin:reset -- ${me.email}" on the server.`,
       );
     }
-    resetPinAndSignOut(db, id);
-    res.status(204).end();
+    // a reset hands someone a fresh start: refused for a demo account, and it needs this admin's fresh two-step code
+    assertStepUp(db, me, req, 'reset anyone’s PIN');
+    // the next sign-in needs the setup code shown here once, as well as their two-step code: a stolen phone alone
+    // cannot choose the new PIN
+    const issued = transaction(db, () => {
+      clearPinAndSessions(db, id);
+      requireSetupCodeAtNextSignIn(db, id);
+      return issueSetupCode(db, id, { createdBy: me.id, reason: 'reset_pin' });
+    });
+    const body: SetupCodeIssued = { userId: id, setupCode: issued.code, expiresAt: issued.expiresAt };
+    res.json(body);
   });
 
   // ── Release 1.2 (U1): sign-in settings (admin) ──
@@ -444,10 +501,13 @@ export function authRouter(db: Db): Router {
   /**
    * Public: the login page needs these before any session exists. The response is the login credential of four
    * people, so it is only ever the four *seeded* demo accounts: when any of them is missing, deactivated or has a
-   * different role (a real deployment), or when `LM_DEMO_ACCOUNTS=0`, the list is empty. There is no fallback.
+   * different role (a real deployment), or when the settings turn them off (lib/demoTeams.ts demoAccountsAllowed:
+   * `LM_DEMO_ACCOUNTS=0`, or a server online over https without `LM_DEMO_ACCOUNTS=1`), the list is empty. There is no
+   * fallback.
    */
   router.get('/demo-accounts', (_req, res) => {
-    if (process.env.LM_DEMO_ACCOUNTS === '0') return res.json({ accounts: [] });
+    // only in trial mode (npm run golive ends it for good), and only where the settings allow them
+    if (!demoAccountsAllowed() || !isTrialMode(db)) return res.json({ accounts: [] });
     const rows = all<UserWithTeam>(db, `${USER_SELECT} WHERE upper(u.employee_id) IN ('LM-0001', 'LM-0002', 'LM-0003', 'LM-0010')`);
     const accounts: { label: string; role: Role; email: string; employeeId: string }[] = [];
     for (const d of DEMO) {

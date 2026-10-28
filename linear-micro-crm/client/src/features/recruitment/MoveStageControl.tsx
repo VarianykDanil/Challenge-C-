@@ -3,7 +3,7 @@
 // 1.1 (p8): each open target shows the deadline the move sets (today + the stage target), and the toast confirms it.
 import { useEffect, useId, useState } from 'react';
 import { format } from 'date-fns';
-import type { CandidateStage, CandidateWithMeta, Position } from '@lm/shared';
+import type { CandidateStage, CandidateWithMeta, HiredSignIn, Position } from '@lm/shared';
 import { POSITION_LABELS, STAGE_LABELS, defaultNextActionAt, stageSlaDays } from '@lm/shared';
 import { Field, Select, Textarea, useToast } from '@/components/ui';
 import { useMoveCandidateStage, useTeams, useUsers } from '@/api/hooks';
@@ -12,6 +12,7 @@ import { ConfirmDialog, StageBadge, errorMessage } from '@/features/common';
 import { todayISO } from '@/lib/dates';
 import { fullName, parseDate } from '@/lib/format';
 import { ENTRY_POSITIONS, optionsFrom } from '@/lib/labels';
+import { SignInDetails } from '@/features/team/AddPersonModal';
 import { allowedStageTargets } from './stageRules';
 
 /** "Tue 21 Oct" for a date-only deadline, "Tue 21 Oct, 17:00" for a timestamp. */
@@ -51,6 +52,7 @@ export function MoveStageControl({ candidate, compact, onMoved }: { candidate: C
   const targets = allowedStageTargets(candidate.stage, me.role);
   const move = useMoveCandidateStage();
   const [pending, setPending] = useState<CandidateStage | null>(null);
+  const [hired, setHired] = useState<HiredSignIn | null>(null);
   const [note, setNote] = useState('');
   const hiring = pending === 'hired';
   const teams = useTeams();
@@ -67,7 +69,14 @@ export function MoveStageControl({ candidate, compact, onMoved }: { candidate: C
     if (pick != null) setHireTeamId(String(pick));
   }, [hiring, hireTeamId, people.data, teams.data, candidate.ownerId]);
 
-  if (targets.length === 0) return <StageBadge stage={candidate.stage} />;
+  if (targets.length === 0) {
+    return (
+      <>
+        <StageBadge stage={candidate.stage} />
+        {hired && <SignInDetails person={hired} onClose={() => setHired(null)} />}
+      </>
+    );
+  }
   const today = todayISO();
 
   const doMove = (stage: CandidateStage, n?: string) => {
@@ -79,6 +88,8 @@ export function MoveStageControl({ candidate, compact, onMoved }: { candidate: C
           toast.success(stage === 'hired' ? `${fullName(candidate)} hired` : `Moved to ${STAGE_LABELS[stage]}`, stage === 'hired' ? `Rep account created · ${POSITION_LABELS[hirePosition]}${hireTeamId ? ` · ${teams.data?.find((t) => String(t.id) === hireTeamId)?.name ?? ''}` : ''}` : due ? `${fullName(candidate)} · ${due}` : fullName(candidate));
           setPending(null);
           setNote('');
+          // the new rep's Sign-in details (employee ID and one-time setup code), once
+          if (stage === 'hired' && updated?.hiredSignIn) setHired(updated.hiredSignIn);
           onMoved?.(stage);
         },
         onError: (e) => toast.error('Could not move candidate', errorMessage(e)),
@@ -128,6 +139,7 @@ export function MoveStageControl({ candidate, compact, onMoved }: { candidate: C
           <Textarea id={`${id}-note`} rows={2} value={note} onChange={(e) => setNote(e.target.value)} placeholder={hiring ? 'Start date agreed, who inducts them…' : 'Reason…'} />
         </Field>
       </ConfirmDialog>
+      {hired && <SignInDetails person={hired} onClose={() => setHired(null)} />}
     </>
   );
 }

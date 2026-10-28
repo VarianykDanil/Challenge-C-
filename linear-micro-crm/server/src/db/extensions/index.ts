@@ -8,6 +8,7 @@
  * Release 1.4 appends payments (F: bank details, payment connections, batches and items).
  */
 import type { Db } from '../connection.ts';
+import { extension as access } from './access.ts';
 import { extension as audit } from './audit.ts';
 import { extension as checkins } from './checkins.ts';
 import { extension as client } from './client.ts';
@@ -35,6 +36,8 @@ export const EXTENSIONS: readonly DbExtension[] = [
   sapiens,
   // Release 1.4 (F: bank details, payment connections, batches and items)
   payments,
+  // sign-in safety: setup codes, hashed sessions, trial mode (last: its trial step reads what the others left)
+  access,
 ];
 
 /**

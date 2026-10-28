@@ -4,6 +4,7 @@
  */
 import QRCode from 'qrcode';
 import { isLinearHub, networkUrls } from './lib/boot.ts';
+import { serverScheme } from './lib/tls.ts';
 
 const port = Number(process.env.PORT ?? 4000);
 
@@ -11,9 +12,10 @@ if (!(await isLinearHub('127.0.0.1', port))) {
   console.error(`Linear Hub is not running on port ${port}. Start it first:  npm start   (then run npm run share in another terminal).`);
   process.exit(1);
 }
-const urls = networkUrls(port);
+const scheme = serverScheme();
+const urls = networkUrls(port, undefined, scheme);
 if (!urls.length) {
-  console.log(`Linear Hub is running on http://localhost:${port}, but this machine has no network address other devices could use (not connected to Wi-Fi or a hotspot?).`);
+  console.log(`Linear Hub is running on ${scheme}://localhost:${port}, but this machine has no network address other devices could use (not connected to Wi-Fi or a hotspot?).`);
   process.exit(0);
 }
 console.log(`Linear Hub is running. Open it from a phone or laptop on the same Wi-Fi or hotspot at:\n`);

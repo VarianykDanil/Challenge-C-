@@ -13,6 +13,7 @@
  */
 import { afterEach, test } from 'node:test';
 import assert from 'node:assert/strict';
+import { sessionKey } from '../lib/sessionKey.ts';
 import { PAYMENT_LIVE_CONFIRMATION, paydayForWeek, sessionMaxAgeMessage } from '@lm/shared';
 import { all, get, run, type Db } from '../db/connection.ts';
 import { encrypt } from '../lib/crypto.ts';
@@ -38,7 +39,8 @@ afterEach(async () => {
 
 const db = (): Db => srv!.db;
 const idOf = (employeeId: string) => get<{ id: number }>(db(), `SELECT id FROM users WHERE lower(employee_id) = lower(?)`, [employeeId])!.id;
-const tokenOf = (c: TestClient) => c.cookie.replace(/^lm_session=/, '');
+// the sessions table keeps the token's hash (lib/sessionKey.ts)
+const tokenOf = (c: TestClient) => sessionKey(c.cookie.replace(/^lm_session=/, ''));
 
 /** Moves this client's session back: signed in `ms` ago, its last request just now (real clock). */
 function signedInAgo(c: TestClient, ms: number): void {
@@ -116,7 +118,9 @@ const WRITE_BODY = { provider: 'fake', name: 'x', holderName: 'Someone Test', so
 
 // ───────────────────────────── the demo admin ─────────────────────────────
 
-test('the demo admin is exempt from two-step, yet must set it up before approving a payment — and can, voluntarily', async () => {
+// Trial mode: the demo admin is a one-tap account anyone on the network can open, so it never approves a payment or
+// switches a connection to live, with or without two-step (it used to be able to, once it had set two-step up).
+test('the demo admin is exempt from two-step, but never touches a payment connection or approves a payment, two-step or not', async () => {
   srv = await startTestServer({ seed: true });
   const adminId = idOf(DEMO_ACCOUNTS.admin.employeeId);
   const jordanId = idOf(DEMO_ACCOUNTS.rep.employeeId);
@@ -131,7 +135,20 @@ test('the demo admin is exempt from two-step, yet must set it up before approvin
   assert.equal((await admin.get('/auth/2fa')).json.required, false);
   assert.equal((await admin.get('/me/bank-details')).json.codeRequired, false, 'no code to ask for yet');
 
-  const { id: conn, fake } = await connect(admin, 'api', { submitStatus: 'paid' });
+  const fake = createFakeProvider({ kind: 'api', submitStatus: 'paid' });
+  registerPaymentProvider(fake);
+  // 1.5: payment connections are office-wide settings, so the demo admin neither adds nor tests nor changes one; the
+  // office's own administrator set this one up
+  const made = await admin.post('/payments/connections', { provider: 'fake', name: 'Fake' });
+  assert.equal(made.status, 403);
+  assert.equal(made.json.details.code, 'demo_account');
+  const conn = run(db(), `INSERT INTO payment_connections (provider, name, mode, settings_json, status, created_at) VALUES ('fake', 'Fake', 'test', '{}', 'connected', ?)`, [
+    new Date().toISOString(),
+  ]).lastInsertRowid;
+  assert.equal((await admin.post(`/payments/connections/${conn}/test`)).json.details.code, 'demo_account');
+  const live = await admin.patch(`/payments/connections/${conn}`, { mode: 'live', confirm: PAYMENT_LIVE_CONFIRMATION });
+  assert.equal(live.status, 403);
+  assert.equal(live.json.details.code, 'demo_account');
   const weekStart = addDays(mondayOf(todayISO()), -7 * 150); // years back: no seeded run that week
   assert.equal(get(db(), `SELECT 1 FROM payroll_runs WHERE user_id = ? AND week_start = ?`, [jordanId, weekStart]), undefined);
   const runId = addRun(jordanId, weekStart, 63.5);
@@ -139,15 +156,13 @@ test('the demo admin is exempt from two-step, yet must set it up before approvin
   assert.equal(draft.status, 201, JSON.stringify(draft.json));
   assert.equal(draft.json.count, 1, 'Jordan’s seeded bank details are confirmed');
 
-  // no two-step yet: no payout, whatever code is typed
   const held = await admin.post(`/payments/batches/${draft.json.id}/approve`, { code: '123456' });
   assert.equal(held.status, 403);
-  assert.equal(held.json.details.twoFactorRequired, true);
-  assert.match(held.json.error, /Set up two-step verification in Settings → Security first: every payment needs a code from your authenticator app/);
+  assert.equal(held.json.details.code, 'demo_account');
   assert.equal(fake.calls.submit, 0, 'nothing sent');
   assert.equal(runStatus(runId).status, 'pending');
 
-  // set up voluntarily, through the same routes as everyone
+  // set up voluntarily, through the same routes as everyone: still a demo account
   const setup = await admin.post('/auth/2fa/setup');
   assert.equal(setup.status, 201, JSON.stringify(setup.json));
   const on = await admin.post('/auth/2fa/enable', { code: totp(setup.json.secret) });
@@ -155,32 +170,21 @@ test('the demo admin is exempt from two-step, yet must set it up before approvin
   assert.equal(on.json.recoveryCodes.length, 10);
   const after = (await admin.get('/auth/me')).json;
   assert.equal(after.user.twoFactorEnabled, true);
-  assert.equal(after.session.maxHours, null, 'still the demo: the 14-day session, not the 14 hours');
+  assert.equal(after.session.maxHours, 14, 'the demo accounts get the normal 14-hour session');
   assert.equal((await admin.get('/auth/2fa')).json.required, false, 'still not required of the demo admin');
   assert.equal((await admin.get('/me/bank-details')).json.codeRequired, true, 'with two-step on, a bank details change asks for the code');
-
-  // now a fresh code approves it; a wrong one never pays
-  const wrongCode = currentCode(db(), adminId) === '000000' ? '111111' : '000000';
-  const wrong = await admin.post(`/payments/batches/${draft.json.id}/approve`, { code: wrongCode });
-  assert.equal(wrong.status, 400);
+  const stillHeld = await admin.post(`/payments/batches/${draft.json.id}/approve`, { code: currentCode(db(), adminId) });
+  assert.equal(stillHeld.status, 403, 'a right code changes nothing for a demo account');
+  assert.equal(stillHeld.json.details.code, 'demo_account');
   assert.equal(fake.calls.submit, 0);
-  const ok = await admin.post(`/payments/batches/${draft.json.id}/approve`, { code: currentCode(db(), adminId) });
-  assert.equal(ok.status, 200, JSON.stringify(ok.json));
-  assert.equal(ok.json.status, 'completed');
-  assert.ok(PAID.includes(runStatus(runId).status));
-  assert.equal(fake.paymentsMade(), 1);
+  assert.equal(fake.paymentsMade(), 0);
+  assert.equal(runStatus(runId).status, 'pending');
 
   // the next sign-in asks for the code (no remember-this-device), exempt or not
   const again = await srv.anon().post('/auth/login', DEMO_ACCOUNTS.admin);
   assert.equal(again.json.requiresTwoFactor, true);
-
-  // the demo admin may switch it off again (exempt) — and then payments are held again
+  // the demo admin may switch it off again (exempt)
   assert.equal((await admin.post('/auth/2fa/disable', { code: currentCode(db(), adminId) })).status, 204);
-  const second = addRun(jordanId, addDays(weekStart, 7), 63.5);
-  const draft2 = await admin.post('/payments/batches', { connectionId: conn, runIds: [second] });
-  assert.equal(draft2.status, 201, JSON.stringify(draft2.json));
-  assert.equal((await admin.post(`/payments/batches/${draft2.json.id}/approve`, { code: '123456' })).json.details.twoFactorRequired, true);
-  assert.equal(fake.paymentsMade(), 1);
 });
 
 test('LM_DEMO_ACCOUNTS=0: the demo admin is held at the setup gate before any payments page', async () => {

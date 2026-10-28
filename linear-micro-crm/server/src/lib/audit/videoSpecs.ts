@@ -11,7 +11,7 @@
  *  POST   /videos/:id/progress  a viewing, not a change: one row only when it makes the video watched for that person
  *                            ("Watched “…”", or "Marked “…” as watched" for a Google Drive link), and one when an
  *                            editor's player gave the video its length ("Set the length of video “…” to 1:04 (from
- *                            Danil Varianyk’s player); counted 2 people as watched"); every other report (every 15 s
+ *                            Morgan Blake’s player); counted 2 people as watched"); every other report (every 15 s
  *                            while a video plays) writes nothing. PATCH and the still say whom a new length counted.
  * Snapshots use readable values (topic, audience, length "9:58", size "312 MB") and never a file path.
  */

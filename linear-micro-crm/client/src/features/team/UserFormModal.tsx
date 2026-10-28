@@ -1,13 +1,21 @@
 // Admin-only create / edit user form. Release 1.3.1: recruiters and leaders add people with AddPersonModal instead.
+// Making, demoting or setting as left an administrator, and changing someone's sign-in email or employee ID, need the
+// admin's fresh two-step code;
+// a new person's Sign-in details (with their one-time setup code) show once after saving.
 import { useId, useState } from 'react';
 import { ShieldCheck, ShieldOff } from 'lucide-react';
-import type { Position, Role, UserStatus, UserWithTeam } from '@lm/shared';
+import type { AddPersonResult, Position, Role, SetupCodeIssued, UserStatus, UserWithTeam } from '@lm/shared';
 // Release 1.3: the staff roles only — client portal accounts are invited from the campaign page (P6), never here.
-import { POSITIONS, POSITION_LABELS, ROLE_LABELS, STAFF_ROLES } from '@lm/shared';
+import { POSITIONS, POSITION_LABELS, ROLE_LABELS, STAFF_ROLES, staffEditStepUp } from '@lm/shared';
 import { Badge, Button, Field, Input, Modal, Select, useToast } from '@/components/ui';
 import { useCreateUser, usePayPlans, useResetUserTwoFactor, useTeams, useUpdateUser } from '@/api/hooks';
 import { useCurrentUser } from '@/auth/AuthProvider';
-import { ConfirmDialog, ErrorBoundary, errorMessage } from '@/features/common';
+import { ErrorBoundary, errorMessage } from '@/features/common';
+import { apiMessage } from '@/features/common/QueryStates';
+import { SetupCodeDialog } from '@/features/access/SetupCodeDialog';
+import { SetupCodeSection } from '@/features/access/SetupCodeSection';
+import { StepUpCodeField, StepUpDialog } from '@/features/access/StepUpDialog';
+import { SignInDetails } from '@/features/team/AddPersonModal';
 import { PinResetSection } from '@/features/settings/PinResetSection';
 import { COPY } from '@/content/copy';
 import { todayISO } from '@/lib/dates';
@@ -15,14 +23,17 @@ import { fullName } from '@/lib/format';
 import { USER_STATUS_LABELS, optionsFrom } from '@/lib/labels';
 
 export function UserFormModal({ open, onClose, user, onSaved }: { open: boolean; onClose: () => void; user?: UserWithTeam | null; onSaved?: (u: UserWithTeam) => void }) {
+  // a new person: their Sign-in details (employee ID and one-time setup code), once, instead of the form
+  const [created, setCreated] = useState<AddPersonResult | null>(null);
+  if (created) return <SignInDetails person={created} onClose={() => { setCreated(null); onClose(); onSaved?.(created); }} />;
   return (
     <Modal open={open} onClose={onClose} title={user ? `Edit ${fullName(user)}` : 'Add person'} size="lg">
-      <UserForm onClose={onClose} user={user} onSaved={onSaved} />
+      <UserForm onClose={onClose} user={user} onSaved={onSaved} onCreated={setCreated} />
     </Modal>
   );
 }
 
-function UserForm({ onClose, user, onSaved }: { onClose: () => void; user?: UserWithTeam | null; onSaved?: (u: UserWithTeam) => void }) {
+function UserForm({ onClose, user, onSaved, onCreated }: { onClose: () => void; user?: UserWithTeam | null; onSaved?: (u: UserWithTeam) => void; onCreated: (r: AddPersonResult) => void }) {
   const toast = useToast();
   const uid = useId();
   const me = useCurrentUser();
@@ -46,7 +57,13 @@ function UserForm({ onClose, user, onSaved }: { onClose: () => void; user?: User
     avatarColor: user?.avatarColor ?? '#4F46E5',
   });
   const [errors, setErrors] = useState<Record<string, string>>({});
+  const [stepUp, setStepUp] = useState('');
   const set = (k: keyof typeof f) => (v: string) => setF((s) => ({ ...s, [k]: v }));
+  // the admin's fresh two-step code (shared staffEditStepUp, the server's rule): making, demoting or setting as left an
+  // administrator, or a new sign-in email or employee ID
+  const stepUpReason = staffEditStepUp(user ?? null, { role: f.role, status: f.status, email: f.email, ...(user ? { employeeId: f.employeeId } : {}) });
+  const needsStepUp = stepUpReason !== null;
+  const stepUpWhy = stepUpReason?.why ?? '';
 
   const submit = async () => {
     const e: Record<string, string> = {};
@@ -57,6 +74,7 @@ function UserForm({ onClose, user, onSaved }: { onClose: () => void; user?: User
     if (!/^\S+@\S+\.\S+$/.test(f.email)) e.email = 'Enter a valid email';
     if ((user || f.employeeId.trim()) && !/^LM-\d{4}$/i.test(f.employeeId.trim())) e.employeeId = 'Format LM-0000';
     if (!f.payPlanId) e.payPlanId = 'Choose a pay plan';
+    if (needsStepUp && !/^\d{6}$/.test(stepUp)) e.stepUp = 'Type the 6-digit code from your authenticator app';
     setErrors(e);
     if (Object.keys(e).length) return;
     const body = {
@@ -73,13 +91,20 @@ function UserForm({ onClose, user, onSaved }: { onClose: () => void; user?: User
       phone: f.phone.trim() || null,
       city: f.city.trim() || null,
       avatarColor: f.avatarColor,
+      ...(needsStepUp ? { code: stepUp } : {}),
     };
     try {
-      const saved = user ? await update.mutateAsync({ id: user.id, ...body, employeeId: f.employeeId.trim().toUpperCase() }) : await create.mutateAsync(body);
-      toast.success(user ? 'Profile updated' : 'Person added', fullName(saved));
-      onSaved?.(saved);
-      onClose();
+      if (user) {
+        const saved = await update.mutateAsync({ id: user.id, ...body, employeeId: f.employeeId.trim().toUpperCase() });
+        toast.success('Profile updated', fullName(saved));
+        onSaved?.(saved);
+        onClose();
+      } else {
+        const created = await create.mutateAsync({ ...body, signInUrl: `${window.location.origin}/login` });
+        onCreated(created);
+      }
     } catch (err) {
+      setStepUp('');
       toast.error('Could not save', errorMessage(err));
     }
   };
@@ -107,7 +132,14 @@ function UserForm({ onClose, user, onSaved }: { onClose: () => void; user?: User
         </Field>
       </div>
 
+      {needsStepUp && (
+        <div className="rounded-xl border border-warning/30 bg-warning-soft/40 p-4">
+          <StepUpCodeField id={`${uid}-stepup`} value={stepUp} onChange={setStepUp} why={stepUpWhy} error={errors.stepUp} />
+        </div>
+      )}
+
       {/* Lost-device recovery for someone else; your own second factor is managed from Settings → Security. */}
+      {user && user.id !== me.id && <SetupCodeSection user={user} />}
       {user && user.id !== me.id && <TwoFactorResetSection user={user} />}
       {/* Release 1.2 slot (U1): reset someone's sign-in PIN (admin); nothing until the package lands. */}
       {user && user.id !== me.id && (
@@ -124,23 +156,31 @@ function UserForm({ onClose, user, onSaved }: { onClose: () => void; user?: User
   );
 }
 
-/** Edit mode only: "Reset two-step verification" with a confirmation. The state badge shows only when the API sends `twoFactorEnabled`. */
+/**
+ * Edit mode only: "Reset two-step verification", with the admin's fresh two-step code; the one-time setup code their next
+ * sign-in needs is shown once afterwards. The state badge shows only when the API sends `twoFactorEnabled`.
+ */
 function TwoFactorResetSection({ user }: { user: UserWithTeam }) {
-  const toast = useToast();
   const uid = useId();
   const reset = useResetUserTwoFactor(user.id);
   const [confirm, setConfirm] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [issued, setIssued] = useState<SetupCodeIssued | null>(null);
   const t = COPY.security.admin;
   const known = user.twoFactorEnabled !== undefined;
 
-  async function onConfirm() {
-    try {
-      await reset.mutateAsync();
-      toast.success(t.toast, fullName(user));
-      setConfirm(false);
-    } catch (err) {
-      toast.error('Could not reset', errorMessage(err));
-    }
+  function onConfirm(code: string) {
+    setError(null);
+    reset.mutate(
+      { code },
+      {
+        onSuccess: (r) => {
+          setConfirm(false);
+          setIssued(r);
+        },
+        onError: (err) => setError(apiMessage(err, 'Could not reset two-step verification.')),
+      },
+    );
   }
 
   return (
@@ -158,20 +198,35 @@ function TwoFactorResetSection({ user }: { user: UserWithTeam }) {
           </div>
           <p className="mt-1 text-xs leading-relaxed text-muted">{t.body}</p>
         </div>
-        <Button type="button" variant="outline" size="sm" className="shrink-0" onClick={() => setConfirm(true)} disabled={user.twoFactorEnabled === false} leftIcon={<ShieldOff aria-hidden />}>
+        <Button type="button" variant="outline" size="sm" className="shrink-0" onClick={() => { setError(null); setConfirm(true); }} disabled={user.twoFactorEnabled === false} leftIcon={<ShieldOff aria-hidden />}>
           {t.reset}
         </Button>
       </div>
-      <ConfirmDialog
+      <StepUpDialog
         open={confirm}
         onClose={() => setConfirm(false)}
-        onConfirm={() => void onConfirm()}
-        tone="danger"
+        onConfirm={onConfirm}
         title={t.confirmTitle}
         description={`${fullName(user)} ${t.confirmBody}`}
         confirmLabel={t.reset}
-        loading={reset.isPending}
+        busy={reset.isPending}
+        error={error}
       />
+      {issued && (
+        <SetupCodeDialog
+          name={fullName(user)}
+          firstName={user.firstName}
+          email={user.email}
+          idLabel="Employee ID"
+          idValue={user.employeeId}
+          setupCode={issued.setupCode}
+          expiresAt={issued.expiresAt}
+          withheld={issued.withheld}
+          intro={`${t.toast}: ${fullName(user)} is signed out everywhere.`}
+          next="set up two-step verification again"
+          onClose={() => setIssued(null)}
+        />
+      )}
     </section>
   );
 }

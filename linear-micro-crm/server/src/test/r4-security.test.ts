@@ -10,6 +10,8 @@
  */
 import { afterEach, test } from 'node:test';
 import assert from 'node:assert/strict';
+import { sessionKey } from '../lib/sessionKey.ts';
+import { issueSetupCode } from '../lib/setupCodes.ts';
 import { spawnSync } from 'node:child_process';
 import { randomBytes } from 'node:crypto';
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
@@ -41,7 +43,8 @@ async function start(seed = false): Promise<TestServer> {
 
 const db = () => srv!.db;
 const fx = () => srv!.fixture!;
-const tokenOf = (c: TestClient) => c.cookie.replace(/^lm_session=/, '');
+// the sessions table keeps the token's hash (lib/sessionKey.ts)
+const tokenOf = (c: TestClient) => sessionKey(c.cookie.replace(/^lm_session=/, ''));
 
 interface UserRow { id: number; role: string; email: string; employeeId: string; status: string }
 const userBy = (creds: Credentials): UserRow =>
@@ -74,6 +77,11 @@ const probeFor = (role: string) => (role === 'client' ? '/client/portal' : '/me/
 async function signInSteps(creds: Credentials, pin?: string): Promise<{ client: TestClient; last: TestResponse }> {
   const client = srv!.anon();
   let last = await client.post('/auth/login', pin ? { ...creds, pin } : creds);
+  // an account still setting up signs in with the one-time setup code an admin gave
+  if (last.status === 200 && last.json?.requiresSetupCode) {
+    const setupCode = issueSetupCode(db(), userBy(creds).id, { createdBy: null, reason: 'reissue' }).code;
+    last = await client.post('/auth/login', { ...(pin ? { ...creds, pin } : creds), setupCode });
+  }
   if (last.status === 200 && last.json?.requiresTwoFactor) {
     last = await client.post('/auth/login/2fa', { challengeToken: last.json.challengeToken, code: currentCode(db(), userBy(creds).id) });
   }
@@ -267,7 +275,7 @@ test('the old "Require two-step for administrators" setting stays readable but n
 
 // ───────────────────────────── 14 hours from sign-in ─────────────────────────────
 
-test('a session lasts 14 hours from sign-in and the cookie matches; the demo accounts keep 14 days', async () => {
+test('a session lasts 14 hours from sign-in and the cookie matches; the one-tap demo accounts too', async () => {
   await start();
   const { client, last } = await signInSteps(FIXTURE_ACCOUNTS.rep);
   assert.equal(maxAgeOf(last), 14 * 3600, 'cookie Max-Age 14 hours');
@@ -278,11 +286,13 @@ test('a session lasts 14 hours from sign-in and the cookie matches; the demo acc
   await srv!.close();
   srv = null;
 
+  // The demo accounts used to keep 14 days (anyone on the network could open one and keep it for two weeks): now the
+  // same 14 hours as everyone (finding SEC-1).
   await start(true);
   const demo = await signInSteps(DEMO_ACCOUNTS.rep);
-  assert.equal(maxAgeOf(demo.last), 14 * 86_400, 'demo cookie Max-Age 14 days');
-  assert.ok(Math.abs(lifetimeHours(session(demo.client)!) - 14 * 24) < 0.001);
-  assert.equal((await demo.client.get('/auth/me')).json.session.maxHours, null);
+  assert.equal(maxAgeOf(demo.last), 14 * 3600, 'demo cookie Max-Age 14 hours');
+  assert.ok(Math.abs(lifetimeHours(session(demo.client)!) - 14) < 0.001);
+  assert.equal((await demo.client.get('/auth/me')).json.session.maxHours, 14);
 });
 
 test('the 14-hour boundary for every role: alive at 13:59, signed out at 14:01 with the reason', async () => {
@@ -338,12 +348,16 @@ test('the idle timeout still applies on its own, without the 14-hour sentence', 
   assert.equal(all(db(), `SELECT 1 FROM audit_log WHERE action = 'SESSION idle'`).length, 1);
 });
 
-test('exempt demo sessions keep the old 14-day expiry', async () => {
+test('demo sessions end 14 hours after sign-in like everyone’s (they used to last 14 days)', async () => {
   await start(true);
   for (const role of ROLES) {
     const c = await srv!.login(role);
+    age(c, 13 * HOUR, 0);
+    assert.equal((await c.get(probeFor(role))).status, 200, `${role}: 13 hours after sign-in`);
     age(c, 20 * HOUR, 0);
-    assert.equal((await c.get(probeFor(role))).status, 200, `${role}: 20 hours after sign-in`);
+    const ended = await c.get(probeFor(role));
+    assert.equal(ended.status, 401, `${role}: 20 hours after sign-in`);
+    assert.equal(ended.json.error, sessionMaxAgeMessage(14));
   }
 });
 
@@ -427,14 +441,14 @@ test('a longer limit applies from the next sign-in: a session signed in under 14
   assert.deepEqual((await recruiter.get('/me/dashboard')).json.details, { sessionEnded: 'max_age', maxHours: 10 });
 });
 
-test('an expired session of a demo account or from before 1.4 still goes quietly at its 14 days', async () => {
+test('a 14-day demo session from before this release ends at its next request with the 14-hour reason', async () => {
   await start(true);
   const demo = await srv!.login('rep');
-  age(demo, 15 * 86_400_000, 0, -HOUR);
+  age(demo, 15 * 86_400_000, 0, -HOUR); // signed in 15 days ago under the old 14 days, expired an hour ago
   const r = await demo.get('/me/dashboard');
   assert.equal(r.status, 401);
-  assert.equal(r.json.details, undefined);
-  assert.equal(maxAgeRows(userBy(DEMO_ACCOUNTS.rep).id).length, 0);
+  assert.deepEqual(r.json.details, { sessionEnded: 'max_age', maxHours: 14 });
+  assert.equal(maxAgeRows(userBy(DEMO_ACCOUNTS.rep).id).length, 1, 'recorded like anyone’s');
 });
 
 test('audit: a 14-hour sign-out is one automatic row filed under the person; the sweep writes one per person', async () => {
@@ -484,8 +498,11 @@ test('POST /client-accounts/:id/reset-2fa: admin only; clears two-step, signs th
   assert.equal((await admin.post('/client-accounts/987654/reset-2fa')).status, 404);
   assert.equal((await admin.post(`/client-accounts/${fx().users.rep}/reset-2fa`)).status, 404, 'a staff member is not a client account');
 
-  const r = await admin.post(`/client-accounts/${clientId}/reset-2fa`);
+  // the admin's fresh two-step code is needed; the answer carries the client's setup code for their next sign-in
+  assert.equal((await admin.post(`/client-accounts/${clientId}/reset-2fa`)).status, 400, 'no code');
+  const r = await admin.post(`/client-accounts/${clientId}/reset-2fa`, { code: currentCode(db(), fx().users.admin) });
   assert.equal(r.status, 200, JSON.stringify(r.json));
+  assert.match(r.json.setupCode, /^[A-Z2-9]{4}-[A-Z2-9]{4}-[A-Z2-9]{4}$/);
   assert.equal(r.json.id, clientId);
   assert.equal(r.json.twoFactorEnabled, false);
   assert.equal((await cl.get('/client/portal')).status, 401, 'signed out everywhere');
@@ -508,7 +525,10 @@ test('the staff reset (Team › Edit) still works and the person sets it up agai
   await start();
   const rep = await srv!.login('rep');
   const admin = await srv!.login('admin');
-  assert.equal((await admin.post(`/users/${fx().users.rep}/2fa/reset`)).status, 204);
+  assert.equal((await admin.post(`/users/${fx().users.rep}/2fa/reset`)).status, 400, 'the admin’s fresh two-step code is needed');
+  const reset = await admin.post(`/users/${fx().users.rep}/2fa/reset`, { code: currentCode(db(), fx().users.admin) });
+  assert.equal(reset.status, 200);
+  assert.match(reset.json.setupCode, /^[A-Z2-9]{4}-[A-Z2-9]{4}-[A-Z2-9]{4}$/, 'the setup code their next sign-in needs');
   assert.equal((await rep.get('/me/dashboard')).status, 401);
   const back = await srv!.login('rep', undefined, { twoFactor: false });
   assert.equal((await back.get('/me/dashboard')).status, 403);

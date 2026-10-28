@@ -19,6 +19,8 @@
     "restore": "cd linear-micro-crm && npm run restore --",
     "pin:reset": "cd linear-micro-crm && npm run pin:reset --",
     "2fa:reset": "cd linear-micro-crm && npm run 2fa:reset --",
+    "setup-code": "cd linear-micro-crm && npm run setup-code --",
+    "golive": "cd linear-micro-crm && npm run golive --",
     "service:install": "cd linear-micro-crm && npm run service:install --",
     "service:uninstall": "cd linear-micro-crm && npm run service:uninstall --",
     "service:status": "cd linear-micro-crm && npm run service:status --",

@@ -5,7 +5,7 @@
  * No I/O; every function is deterministic and en-GB.
  */
 import { PIN_MAX_LENGTH, PIN_MIN_LENGTH } from '../types/pin.ts';
-import { shareableSignInUrl, twoFactorSetupStep } from './people.ts';
+import { setupCodeStep, shareableSignInUrl, twoFactorSetupStep } from './people.ts';
 import { CLIENT_ACCESS_CODE_PREFIX, type ClientPost, type ClientPostInput, type ClientPostKind, type ClientPostStatus } from '../types/client.ts';
 
 export const CLIENT_POST_KIND_LABELS: Record<ClientPostKind, string> = {
@@ -199,6 +199,9 @@ export interface ClientInviteText {
   campaignName: string;
   /** The sign-in page, when known ("https://hub.example/login"); a localhost address is left out (shareableSignInUrl). */
   signInUrl?: string | null;
+  /** The one-time setup code for the first sign-in, when it can be sent with the text. */
+  setupCode?: string | null;
+  setupCodeExpiresAt?: string | null;
 }
 
 /**
@@ -215,10 +218,11 @@ export function clientInviteInstructions(t: ClientInviteText): string {
     '',
     `1. ${where}.`,
     `2. Enter your email (${t.email}) and your access code: ${t.accessCode}.`,
-    `3. The first time, create a PIN of ${PIN_MIN_LENGTH} to ${PIN_MAX_LENGTH} digits. You will type it after your email and access code each time you sign in.`,
-    twoFactorSetupStep(4, true),
+    setupCodeStep(3, t.setupCode, t.setupCodeExpiresAt, 'Linear MCR'),
+    `4. Then create a PIN of ${PIN_MIN_LENGTH} to ${PIN_MAX_LENGTH} digits. You will type it after your email and access code each time you sign in.`,
+    twoFactorSetupStep(5, true),
     '',
-    'Keep your access code, PIN and recovery codes to yourself. If you forget your PIN, ask Linear MCR to reset it. ' +
+    'Keep your access code, setup code, PIN and recovery codes to yourself. If you forget your PIN, ask Linear MCR to reset it. ' +
       'If you lose your phone, sign in with a recovery code, or ask Linear MCR to reset two-step verification.',
   ].join('\n');
 }

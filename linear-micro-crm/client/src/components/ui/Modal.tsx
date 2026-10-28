@@ -51,6 +51,9 @@ const stop = (e: SyntheticEvent) => e.stopPropagation();
 
 let openCount = 0;
 
+/** Fired on window whenever a Modal opens. */
+export const DIALOG_OPENED_EVENT = 'lm:dialog-opened';
+
 /**
  * On a phone, a page that overflows horizontally inflates the layout viewport, so `inset-0` no
  * longer matches what the user can see. While that is the case, pin the overlay to the visual
@@ -90,6 +93,8 @@ export function Modal({ open, onClose, title, description, children, footer, siz
     if (!open) return;
     restoreRef.current = document.activeElement as HTMLElement | null;
     openCount += 1;
+    // the Needs-attention toasts step aside (NotificationsBell), so none covers this dialog's buttons on a phone
+    window.dispatchEvent(new Event(DIALOG_OPENED_EVENT));
     const prevOverflow = document.body.style.overflow;
     const prevPad = document.body.style.paddingRight;
     const scrollbar = window.innerWidth - document.documentElement.clientWidth;

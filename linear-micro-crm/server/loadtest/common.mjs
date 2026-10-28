@@ -2,10 +2,10 @@
 // Nothing here touches the app code; these are external black-box load clients.
 
 export const DEMO = {
-  admin: { email: 'danil@linear-mcr.co.uk', employeeId: 'LM-0001' },
-  leader: { email: 'amelia.hart@linear-mcr.co.uk', employeeId: 'LM-0002' },
-  recruiter: { email: 'priya.shah@linear-mcr.co.uk', employeeId: 'LM-0003' },
-  rep: { email: 'jordan.lee@linear-mcr.co.uk', employeeId: 'LM-0010' },
+  admin: { email: 'morgan.blake@linearhub.example', employeeId: 'LM-0001' },
+  leader: { email: 'amelia.hart@linearhub.example', employeeId: 'LM-0002' },
+  recruiter: { email: 'priya.shah@linearhub.example', employeeId: 'LM-0003' },
+  rep: { email: 'jordan.lee@linearhub.example', employeeId: 'LM-0010' },
 };
 
 /** Parse `--key value` / `--flag` CLI args into an object with defaults. */

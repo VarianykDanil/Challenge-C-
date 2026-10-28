@@ -19,6 +19,15 @@ export type FieldAddPosition = (typeof FIELD_ADD_POSITIONS)[number];
  */
 export interface AddPersonResult extends UserWithTeam {
   signInInstructions?: string;
+  /**
+   * The new account's one-time setup code ("ABCD-EFGH-JKMN"), shown this once: they need it, with their email and
+   * employee ID, to sign in the first time. Null when it was not shown (an insecure connection from another device;
+   * `setupCodeWithheld`): an administrator gives them one later from Team.
+   */
+  setupCode?: string | null;
+  /** When the setup code stops working (ISO). */
+  setupCodeExpiresAt?: string;
+  setupCodeWithheld?: boolean;
 }
 
 /** One one-click demo sign-in on the sign-in page. */
@@ -44,4 +53,22 @@ export interface DemoTeamAccounts {
   name: string;
   color: string;
   accounts: DemoAccountItem[];
+}
+
+/**
+ * POST /recruitment/candidates/:id/stage to `hired` answers the candidate plus this, once: the new account's sign-in
+ * details for whoever hired them to pass on (the employee ID and the one-time setup code are never shown again).
+ */
+export interface HiredSignIn {
+  userId: number;
+  firstName: string;
+  lastName: string;
+  email: string;
+  employeeId: string;
+  teamName: string | null;
+  /** Null when it was not shown (an insecure connection from another device): an administrator gives one later. */
+  setupCode: string | null;
+  setupCodeExpiresAt?: string;
+  setupCodeWithheld?: boolean;
+  signInInstructions: string;
 }

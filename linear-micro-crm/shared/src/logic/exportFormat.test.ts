@@ -193,7 +193,7 @@ test('PDF headings from the CSV file name (every CSV button in the app today)', 
 test('generated line from the device clock', () => {
   // 22 Oct 2026 is a Thursday
   assert.equal(pdfGeneratedLine(new Date(2026, 9, 22, 15, 4)), 'Generated Thu 22 Oct 2026, 15:04');
-  assert.equal(pdfGeneratedLine(new Date(2026, 9, 22, 9, 0), 'Danil Varianyk'), 'Generated Thu 22 Oct 2026, 09:00 by Danil Varianyk');
+  assert.equal(pdfGeneratedLine(new Date(2026, 9, 22, 9, 0), 'Morgan Blake'), 'Generated Thu 22 Oct 2026, 09:00 by Morgan Blake');
 });
 
 // ───────────────────────────── Review fixes (r3 P4) ─────────────────────────────

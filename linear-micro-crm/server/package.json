@@ -20,6 +20,8 @@
     "recovery-sheet": "NODE_NO_WARNINGS=1 node src/recoverySheet.ts",
     "pin:reset": "NODE_NO_WARNINGS=1 node src/pinReset.ts",
     "2fa:reset": "NODE_NO_WARNINGS=1 node src/twoFactorReset.ts",
+    "setup-code": "NODE_NO_WARNINGS=1 node src/setupCode.ts",
+    "golive": "TZ=Europe/London NODE_NO_WARNINGS=1 node src/golive.ts",
     "service:install": "NODE_NO_WARNINGS=1 node src/service.ts install",
     "service:uninstall": "NODE_NO_WARNINGS=1 node src/service.ts uninstall",
     "service:status": "NODE_NO_WARNINGS=1 node src/service.ts status",

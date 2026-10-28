@@ -23,7 +23,7 @@ export interface TablePdfOptions<T extends object> {
   filename: string;
   /** 'auto' (default): portrait up to six columns, landscape above (shared pdfOrientationFor). */
   orientation?: PdfOrientation | 'auto';
-  /** Release 1.3 (P4): printed after the generated time, "… by Danil Varianyk". */
+  /** Release 1.3 (P4): printed after the generated time, "… by Morgan Blake". */
   generatedBy?: string | null;
   /** Release 1.3 (P4): the clock for "Generated …" (default: the device's now). */
   now?: Date;
@@ -99,7 +99,7 @@ export interface PdfDocumentOptions {
   orientation?: PdfOrientation;
   /** The PDF's document title (metadata), also printed in the running header of pages 2 onwards. */
   title?: string;
-  /** Release 1.3 (P4): who made it, for "Generated … by Danil Varianyk" (default: no name). */
+  /** Release 1.3 (P4): who made it, for "Generated … by Morgan Blake" (default: no name). */
   generatedBy?: string | null;
   /** Release 1.3 (P4): the clock for "Generated …" (default: the device's now). */
   now?: Date;

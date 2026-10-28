@@ -45,6 +45,7 @@ import { configureAppSecret, decrypt, encrypt } from '../lib/crypto.ts';
 import { addDays, mondayOf, setBusinessClock, todayISO } from '../lib/dates.ts';
 import { isDemoSignInAccount } from '../lib/demoTeams.ts';
 import { hashPin, savePinHash } from '../lib/pin.ts';
+import { issueSetupCode } from '../lib/setupCodes.ts';
 import { generateSecret, totp } from '../lib/totp.ts';
 import { resetCodeFailures } from '../lib/twofactor.ts';
 import { resetLoginFailures } from '../routes/auth.ts';
@@ -122,10 +123,10 @@ export function pinBusinessClock(at: string = FIXED_BUSINESS_NOW): void {
 
 /** The four demo accounts of the full seed (`seed: true`). */
 export const DEMO_ACCOUNTS = {
-  admin: { email: 'danil@linear-mcr.co.uk', employeeId: 'LM-0001' },
-  leader: { email: 'amelia.hart@linear-mcr.co.uk', employeeId: 'LM-0002' },
-  recruiter: { email: 'priya.shah@linear-mcr.co.uk', employeeId: 'LM-0003' },
-  rep: { email: 'jordan.lee@linear-mcr.co.uk', employeeId: 'LM-0010' },
+  admin: { email: 'morgan.blake@linearhub.example', employeeId: 'LM-0001' },
+  leader: { email: 'amelia.hart@linearhub.example', employeeId: 'LM-0002' },
+  recruiter: { email: 'priya.shah@linearhub.example', employeeId: 'LM-0003' },
+  rep: { email: 'jordan.lee@linearhub.example', employeeId: 'LM-0010' },
   /** Release 1.3: the demo client portal account (Breast Cancer Now). */
   client: { email: 'hannah.price@breastcancernow.example', employeeId: 'CL-0001' },
 } as const satisfies Record<string, Credentials>;
@@ -381,7 +382,11 @@ export async function signInWith(db: Db, client: TestClient, creds: Credentials,
     [creds.email, creds.employeeId],
   );
   if (user && opts.twoFactor !== false && user.status !== 'left' && !user.totpOn && !isDemoSignInAccount(db, user)) enrolTwoFactor(db, user.id);
-  const r = await client.post('/auth/login', creds);
+  let r = await client.post('/auth/login', creds);
+  // An account still setting up signs in with its one-time setup code (an admin hands one out): give it one here.
+  if (r.status === 200 && r.json?.requiresSetupCode === true && user) {
+    r = await client.post('/auth/login', { ...creds, setupCode: issueSetupCode(db, user.id, { createdBy: null, reason: 'reissue' }).code });
+  }
   if (r.status === 200 && r.json?.requiresTwoFactor === true && user) {
     return client.post('/auth/login/2fa', { challengeToken: r.json.challengeToken, code: currentCode(db, user.id) });
   }

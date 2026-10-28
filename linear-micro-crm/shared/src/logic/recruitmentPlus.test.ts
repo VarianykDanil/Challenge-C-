@@ -105,8 +105,8 @@ test('stage moves in words: added, forward, back, closed, reopened, hired', () =
   assert.equal(t('observation', 'interview'), 'Moved back from Observation day to Interview by Priya Shah');
   assert.equal(t('interview', 'rejected'), 'Rejected at Interview by Priya Shah');
   assert.equal(t('offer', 'withdrawn'), 'Withdrew at Offer (recorded by Priya Shah)');
-  assert.equal(t('offer', 'hired', 'Danil Varianyk'), 'Hired by Danil Varianyk');
-  assert.equal(t('rejected', 'offer', 'Danil Varianyk'), 'Reopened at Offer by Danil Varianyk');
+  assert.equal(t('offer', 'hired', 'Morgan Blake'), 'Hired by Morgan Blake');
+  assert.equal(t('rejected', 'offer', 'Morgan Blake'), 'Reopened at Offer by Morgan Blake');
 });
 
 test('buildCandidateTimeline: every stage, interview and change, newest first, ties in the story order', () => {

@@ -7,6 +7,7 @@
  * only) for the 1.2 tests.
  */
 import { AUDIT_ROUTES, type AuditRouteSpec } from '../auditSpecs.ts';
+import { AUDIT_SPECS as access } from './accessSpecs.ts';
 import { AUDIT_SPECS as auditEvents } from './auditEventSpecs.ts';
 import { AUDIT_SPECS as client } from './clientSpecs.ts';
 import { AUDIT_SPECS as invoices } from './invoiceSpecs.ts';
@@ -24,6 +25,8 @@ export const PACKAGE_AUDIT_SPECS: Readonly<Record<string, readonly AuditRouteSpe
   pay, invoices, statements, videos, client, recruitment, venues, auditEvents,
   // Release 1.4 (S): two-step for everyone, 14-hour sessions; (F, P, A): payments and bank details
   security, payments,
+  // sign-in safety: setup codes
+  access,
 };
 
 /** Every spec, in match order: the 1.3 packages' first, then the 1.2 registry. */

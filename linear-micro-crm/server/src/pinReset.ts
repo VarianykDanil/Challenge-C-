@@ -5,7 +5,8 @@
  * cannot reset their own PIN in the app), or the app secret was lost, so no PIN matches any more (PINs are peppered
  * with it). It clears the PIN, the wrong-PIN count and the lock, signs the person out on every device and writes an
  * audit row ("Linear Hub", action `npm run pin:reset`). They then sign in with their email and employee ID and choose
- * a new PIN. Two-step verification is left as it is.
+ * a new PIN. Two-step verification is left as it is. As after a reset in the app, their next sign-in needs the one-time
+ * setup code this prints (7 days, single use).
  *
  * Works while Linear Hub is running (SQLite allows the one small write; it waits up to five seconds for the server).
  * DB_PATH is honoured, like npm start (default server/data/linear.sqlite). Exit codes: 0 done, or nothing to reset;
@@ -18,7 +19,9 @@ import { createSchema } from './db/schema.ts';
 import { DEFAULT_DB_PATH } from './db/seed.ts';
 import { recordAudit } from './lib/audit.ts';
 import { userSnapshot } from './lib/auditSpecs.ts';
+import { setupCodeExpiryText } from '@lm/shared';
 import { pinRow, readSecuritySettings, resetPinAndSignOut } from './lib/pin.ts';
+import { issueSetupCode, requireSetupCodeAtNextSignIn } from './lib/setupCodes.ts';
 
 const dbPath = process.env.DB_PATH ? path.resolve(process.env.DB_PATH) : DEFAULT_DB_PATH;
 const email = process.argv.slice(2).find((a) => !a.startsWith('-'))?.trim();
@@ -27,7 +30,7 @@ if (!email) {
   console.log('Usage: npm run pin:reset -- <email>\n');
   console.log('Clears that person’s sign-in PIN and its lock and signs them out on every device. They then sign in');
   console.log('with their email and employee ID and choose a new PIN. For example:');
-  console.log('  npm run pin:reset -- danil@linear-mcr.co.uk');
+  console.log('  npm run pin:reset -- jo.bloggs@example.com');
   process.exit(1);
 }
 if (!existsSync(dbPath)) {
@@ -78,6 +81,9 @@ if (!row?.hash && !row?.failures && !row?.lockedUntil) {
 
 const before = userSnapshot(db, person.id);
 const signedOut = resetPinAndSignOut(db, person.id);
+// as after a reset in the app: their next sign-in needs a one-time setup code, printed below
+requireSetupCodeAtNextSignIn(db, person.id);
+const issued = issueSetupCode(db, person.id, { createdBy: null, reason: 'reset_pin' });
 recordAudit(db, {
   userId: null,
   action: 'npm run pin:reset',
@@ -92,6 +98,7 @@ db.close();
 
 const devices = `${signedOut} device${signedOut === 1 ? '' : 's'}`;
 console.log(`Reset the sign-in PIN of ${person.name} (${person.email}) and signed them out on ${devices}.`);
+console.log(`Their one-time setup code: ${issued.code} (it works once; ${setupCodeExpiryText(issued.expiresAt).replace(/^Valid/, 'valid')}).`);
 console.log(
-  `They sign in with their email and employee ID, then ${required ? 'create a new PIN straight away (a PIN is required for everyone)' : 'can set a new PIN in Settings → Security'}.`,
+  `They sign in with their email, employee ID and this code, then ${required ? 'create a new PIN straight away (a PIN is required for everyone)' : 'can set a new PIN in Settings → Security'}.`,
 );

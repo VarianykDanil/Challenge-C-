@@ -205,10 +205,13 @@ export function clearPin(db: Db, userId: number): void {
  * device, in one transaction. Returns how many sessions ended.
  */
 export function resetPinAndSignOut(db: Db, userId: number): number {
-  return transaction(db, () => {
-    clearPin(db, userId);
-    return run(db, `DELETE FROM sessions WHERE user_id = ?`, [userId]).changes;
-  });
+  return transaction(db, () => clearPinAndSessions(db, userId));
+}
+
+/** resetPinAndSignOut without its own transaction, for a caller that holds one. */
+export function clearPinAndSessions(db: Db, userId: number): number {
+  clearPin(db, userId);
+  return run(db, `DELETE FROM sessions WHERE user_id = ?`, [userId]).changes;
 }
 
 // ── security settings ───────────────────────────────────────────────────────

@@ -115,6 +115,7 @@ export function signInFailed(_db: Db, done: AuditDone, state: SignInState | unde
     return [filed(account, `PIN locked after ${PIN_LOCK_AFTER_FAILURES} wrong PINs in a row, until ${until}`, { reason: 'pin_locked_now', lockedUntil: details.lockedUntil ?? null })];
   }
   if (done.status !== 401) return []; // 400: a missing field; nobody tried a credential
+  if (details.requiresSetupCode === true) return [filed(account, 'Failed sign-in: wrong, used or expired setup code', { reason: 'wrong_setup_code' })];
   if (body.requiresPin === true && details.reason === 'wrong') {
     const left = typeof details.attemptsLeft === 'number' ? details.attemptsLeft : null;
     const tail = left === null ? '' : ` (${left === 1 ? '1 try' : `${left} tries`} left before a lock)`;
@@ -147,6 +148,9 @@ export function twoFactorSignInFailed(_db: Db, done: AuditDone, state: TwoFactor
   const account = state?.account ?? null;
   if (!account) return [];
   if (done.status === 429) return [filed(account, `Sign-in refused: too many attempts${retryText(done)}`, { reason: 'too_many_attempts' })];
+  if (done.status === 401 && detailsOf(done).requiresSetupCode === true) {
+    return [filed(account, 'Failed sign-in: wrong, used or expired setup code', { reason: 'wrong_setup_code' })];
+  }
   if (done.status === 401) return [filed(account, 'Failed sign-in: wrong two-step code', { reason: 'wrong_code' })];
   if (done.status === 410) {
     return errorOf(done) === SIGN_IN_MESSAGES.tooManyCodes

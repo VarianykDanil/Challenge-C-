@@ -7,8 +7,8 @@
  * secret was lost (the authenticator secrets are encrypted with it, so no code matches any more; recovery codes still
  * work). It clears the secret, any setup half done, the recovery codes and open sign-in challenges, signs the person out
  * on every device and writes an audit row ("Linear Hub", action `npm run 2fa:reset`; the snapshot says only
- * `twoFactor: false`, never a secret). They then sign in with their email and employee ID (and PIN) and set two-step
- * up again with a new code before they can carry on. The PIN is left as it is.
+ * `twoFactor: false`, never a secret). They then sign in with their email, employee ID and the one-time setup code this
+ * prints (and PIN) and set two-step up again before they can carry on. The PIN is left as it is.
  *
  * Works while Linear Hub is running (SQLite allows the one small write; it waits up to five seconds for the server).
  * DB_PATH is honoured, like npm start (default server/data/linear.sqlite). Exit codes: 0 done, or nothing to reset;
@@ -21,6 +21,8 @@ import { createSchema } from './db/schema.ts';
 import { DEFAULT_DB_PATH } from './db/seed.ts';
 import { recordAudit } from './lib/audit.ts';
 import { userSnapshot } from './lib/auditSpecs.ts';
+import { setupCodeExpiryText } from '@lm/shared';
+import { issueSetupCode } from './lib/setupCodes.ts';
 import { clearTwoFactor } from './lib/twofactor.ts';
 
 const dbPath = process.env.DB_PATH ? path.resolve(process.env.DB_PATH) : DEFAULT_DB_PATH;
@@ -81,6 +83,8 @@ if (!person.on && !person.pending) {
 const before = userSnapshot(db, person.id);
 clearTwoFactor(db, person.id);
 const signedOut = run(db, `DELETE FROM sessions WHERE user_id = ?`, [person.id]).changes;
+// their email and employee ID alone no longer start an account: the one-time setup code printed below does
+const issued = issueSetupCode(db, person.id, { createdBy: null, reason: 'reset_2fa' });
 recordAudit(db, {
   userId: null,
   action: 'npm run 2fa:reset',
@@ -94,4 +98,5 @@ db.close();
 
 const devices = `${signedOut} device${signedOut === 1 ? '' : 's'}`;
 console.log(`Reset the two-step verification of ${person.name} (${person.email}) and signed them out on ${devices}.`);
-console.log('They sign in with their email and employee ID (and PIN), then set it up again with a new authenticator code.');
+console.log(`Their one-time setup code: ${issued.code} (it works once; ${setupCodeExpiryText(issued.expiresAt).replace(/^Valid/, 'valid')}).`);
+console.log('They sign in with their email, employee ID and this code (and PIN), then set it up again with a new authenticator code.');

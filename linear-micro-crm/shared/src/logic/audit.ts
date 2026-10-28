@@ -281,6 +281,7 @@ export const AUDIT_SIGN_IN_REASON_LABELS: Record<AuditSignInReason, string> = {
   too_many_codes: 'Too many wrong two-step codes',
   challenge_expired: 'The two-step code was not entered within 5 minutes',
   wrong_current_pin: 'Wrong current PIN',
+  wrong_setup_code: 'Wrong, used or expired setup code',
 };
 
 /** Labels for snapshot fields (diff tables and summaries); anything else is humanised from camelCase. */

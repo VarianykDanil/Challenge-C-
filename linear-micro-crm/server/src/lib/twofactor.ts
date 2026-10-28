@@ -11,6 +11,7 @@ import { all, get, run, transaction, type Db } from '../db/connection.ts';
 import { decrypt, decryptLegacy, encrypt } from './crypto.ts';
 import { conflict, gone } from './errors.ts';
 import { FailureLimiter } from './limiter.ts';
+import { sessionKey } from './sessionKey.ts';
 import { generateSecret, matchTotpCounter, otpauthUrl } from './totp.ts';
 
 export const TOTP_ISSUER = 'Linear Hub';
@@ -96,7 +97,7 @@ export function enableTwoFactor(db: Db, userId: number, code: string, keepSessio
       new Date().toISOString(), counter, userId,
     ]);
     const codes = writeRecoveryCodes(db, userId);
-    if (keepSessionToken) run(db, `DELETE FROM sessions WHERE user_id = ? AND token <> ?`, [userId, keepSessionToken]);
+    if (keepSessionToken) run(db, `DELETE FROM sessions WHERE user_id = ? AND token <> ?`, [userId, sessionKey(keepSessionToken)]);
     else run(db, `DELETE FROM sessions WHERE user_id = ?`, [userId]);
     return codes;
   });
@@ -104,11 +105,14 @@ export function enableTwoFactor(db: Db, userId: number, code: string, keepSessio
 
 /** Removes the active and pending secrets, the replay marker and every recovery code (disable and the admin reset). */
 export function clearTwoFactor(db: Db, userId: number): void {
-  transaction(db, () => {
-    run(db, `UPDATE users SET totp_secret_enc = NULL, totp_pending_enc = NULL, totp_enabled_at = NULL, totp_last_counter = NULL WHERE id = ?`, [userId]);
-    run(db, `DELETE FROM recovery_codes WHERE user_id = ?`, [userId]);
-    run(db, `DELETE FROM two_factor_challenges WHERE user_id = ?`, [userId]);
-  });
+  transaction(db, () => clearTwoFactorRows(db, userId));
+}
+
+/** clearTwoFactor without its own transaction, for a caller that holds one. */
+export function clearTwoFactorRows(db: Db, userId: number): void {
+  run(db, `UPDATE users SET totp_secret_enc = NULL, totp_pending_enc = NULL, totp_enabled_at = NULL, totp_last_counter = NULL WHERE id = ?`, [userId]);
+  run(db, `DELETE FROM recovery_codes WHERE user_id = ?`, [userId]);
+  run(db, `DELETE FROM two_factor_challenges WHERE user_id = ?`, [userId]);
 }
 
 /**
@@ -214,6 +218,11 @@ function writeRecoveryCodes(db: Db, userId: number): string[] {
   run(db, `DELETE FROM recovery_codes WHERE user_id = ?`, [userId]);
   for (const code of codes) run(db, `INSERT INTO recovery_codes (user_id, code_hash, used_at) VALUES (?, ?, NULL)`, [userId, hashRecoveryCode(code)]);
   return codes;
+}
+
+/** Removes every recovery code of the user (two-step turned on over an insecure connection keeps none). */
+export function deleteRecoveryCodes(db: Db, userId: number): void {
+  run(db, `DELETE FROM recovery_codes WHERE user_id = ?`, [userId]);
 }
 
 /** Replaces the user's recovery codes with a fresh set and returns the plaintext codes (shown once). */

@@ -5,9 +5,9 @@
 // Contract: exports LoginPage(); uses useAuth() and pickDemoAccounts().
 import { useEffect, useId, useRef, useState, type FormEvent } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
-import { ArrowLeft, ArrowRight, Check, ChevronDown, CircleAlert, IdCard, Info, KeyRound, Mail, MapPin, ShieldCheck, Smartphone } from 'lucide-react';
+import { ArrowLeft, ArrowRight, Check, ChevronDown, CircleAlert, IdCard, Info, KeyRound, Mail, MapPin, ShieldCheck, Smartphone, Ticket } from 'lucide-react';
 import clsx from 'clsx';
-import { BRAND, PIN_MIN_LENGTH, POSITION_LABELS, ROLE_LABELS, isPinFormatValid, type DemoTeamAccounts, type LoginPinDetails } from '@lm/shared';
+import { ACCESS_MESSAGES, BRAND, PIN_MIN_LENGTH, POSITION_LABELS, ROLE_LABELS, isPinFormatValid, isSetupCodeComplete, type DemoTeamAccounts, type LoginPinDetails, type LoginSetupCodeDetails } from '@lm/shared';
 import { COPY } from '@/content/copy';
 import { useAuth } from '@/auth/AuthProvider';
 import { pickDemoAccounts } from '@/api/hooks';
@@ -47,6 +47,25 @@ function pinStop(e: unknown): (LoginPinDetails & { message: string }) | null {
     ? { ...(d as LoginPinDetails), message: apiMessage(e, PIN_COPY.login.locked) }
     : null;
 }
+
+/** The sign-in failed at the setup code (401 with `details.requiresSetupCode`): the server's sentence, else null. */
+function setupCodeStop(e: unknown): string | null {
+  if (!(e instanceof ApiError) || e.status !== 401) return null;
+  const d = e.details as Partial<LoginSetupCodeDetails> | null | undefined;
+  return d && typeof d === 'object' && d.requiresSetupCode === true ? apiMessage(e, ACCESS_MESSAGES.setupCodeWrong) : null;
+}
+
+/** The setup-code step's words (an account that has not finished setting up). */
+const SETUP_COPY = {
+  heading: 'Type your setup code',
+  body: 'Your account is not set up yet. Type the one-time setup code your administrator gave you. It looks like ABCD-EFGH-JKMN.',
+  bodyClient: 'Your account is not set up yet. Type the one-time setup code from your invite. It looks like ABCD-EFGH-JKMN.',
+  label: 'Setup code',
+  hint: 'Spaces and dashes do not matter.',
+  submit: 'Continue',
+  noCode: 'No code, or has it run out? Ask an administrator for a new one (Team → your name → Edit profile → Give a setup code).',
+  noCodeClient: 'No code, or has it run out? Ask the office that invited you for a new one.',
+} as const;
 
 /** The error line for a wrong PIN, with the tries left once few remain. */
 function wrongPinMessage(attemptsLeft: number | undefined): string {
@@ -90,7 +109,15 @@ export function LoginPage() {
   const [pinBusy, setPinBusy] = useState(false);
   const [pinHint, setPinHint] = useState<string | null>(null);
   const pinRef = useRef<HTMLInputElement>(null);
-  const stage: 'credentials' | 'pin' | 'code' = challenge ? 'code' : pinStep ? 'pin' : 'credentials';
+
+  // Step 1c: the one-time setup code, for an account that has not finished setting up (after the PIN, if any).
+  const [setupStep, setSetupStep] = useState(false);
+  const [setupCode, setSetupCode] = useState('');
+  const [setupError, setSetupError] = useState<string | null>(null);
+  const [setupLocked, setSetupLocked] = useState(false);
+  const [setupBusy, setSetupBusy] = useState(false);
+  const setupRef = useRef<HTMLInputElement>(null);
+  const stage: 'credentials' | 'pin' | 'setup' | 'code' = challenge ? 'code' : setupStep ? 'setup' : pinStep ? 'pin' : 'credentials';
 
   useEffect(() => { if (stage === 'credentials') emailRef.current?.focus(); }, [stage]);
 
@@ -121,6 +148,16 @@ export function LoginPage() {
     setChallenge(challengeToken);
   }
 
+  /** Swap the form for the setup-code step (the PIN, if any, is kept to send again with the code). */
+  function openSetupStep() {
+    setSetupCode('');
+    setSetupError(null);
+    setSetupLocked(false);
+    setSetupBusy(false);
+    setPinStep(false);
+    setSetupStep(true);
+  }
+
   /** Swap the form for the PIN step, as the server's answer says (missing, wrong or locked). */
   function openPinStep(stop: PinStepReason) {
     setPin('');
@@ -142,6 +179,13 @@ export function LoginPage() {
         setEmail(normalised.email);
         setEmployeeId(normalised.employeeId);
         openPinStep({ reason: 'missing', attemptsLeft: result.attemptsLeft });
+        setSubmitting(null);
+        return;
+      }
+      if (result.requiresSetupCode) {
+        setEmail(normalised.email);
+        setEmployeeId(normalised.employeeId);
+        openSetupStep();
         setSubmitting(null);
         return;
       }
@@ -199,6 +243,11 @@ export function LoginPage() {
     setPinHint(null);
     setPinLocked(false);
     setPinBusy(false);
+    setSetupStep(false);
+    setSetupCode('');
+    setSetupError(null);
+    setSetupLocked(false);
+    setSetupBusy(false);
     setError(null);
     setNotice(message);
   }
@@ -212,6 +261,10 @@ export function LoginPage() {
       const result = await login({ email, employeeId, pin });
       if (result.requiresPin) {
         openPinStep({ reason: 'missing', attemptsLeft: result.attemptsLeft }); // the PIN did not arrive: ask again
+        return;
+      }
+      if (result.requiresSetupCode) {
+        openSetupStep();
         return;
       }
       if (result.requiresTwoFactor) {
@@ -242,6 +295,52 @@ export function LoginPage() {
         setPinError(err instanceof ApiError ? err.message : NETWORK_ERROR);
       }
       setPinBusy(false);
+    }
+  }
+
+  async function submitSetupCode(e?: FormEvent) {
+    e?.preventDefault();
+    if (setupBusy || setupLocked || !isSetupCodeComplete(setupCode)) return;
+    setSetupError(null);
+    setSetupBusy(true);
+    try {
+      const result = await login({ email, employeeId, ...(pin ? { pin } : {}), setupCode });
+      if (result.requiresPin) {
+        setSetupStep(false);
+        openPinStep({ reason: 'missing', attemptsLeft: result.attemptsLeft });
+        return;
+      }
+      if (result.requiresSetupCode) {
+        setSetupError(ACCESS_MESSAGES.setupCodeNeeded);
+        setSetupBusy(false);
+        return;
+      }
+      if (result.requiresTwoFactor) {
+        setSetupStep(false);
+        openCodeStep(result.challengeToken);
+        return;
+      }
+      navigate('/', { replace: true });
+    } catch (err) {
+      const wrongCode = setupCodeStop(err);
+      const pinProblem = pinStop(err);
+      if (wrongCode) {
+        setSetupError(wrongCode);
+        setSetupCode('');
+        requestAnimationFrame(() => setupRef.current?.focus());
+      } else if (pinProblem) {
+        setSetupStep(false);
+        openPinStep(pinProblem);
+      } else if (err instanceof ApiError && err.status === 429) {
+        setSetupLocked(true);
+        setSetupError(apiMessage(err, PIN_COPY.login.tooMany));
+      } else if (err instanceof ApiError && err.status === 401) {
+        backToCredentials();
+        setError(noMatch(employeeId));
+      } else {
+        setSetupError(err instanceof ApiError ? err.message : NETWORK_ERROR);
+      }
+      setSetupBusy(false);
     }
   }
 
@@ -395,6 +494,19 @@ export function LoginPage() {
                 onToggleRecovery={toggleRecovery}
                 onBack={() => backToCredentials()}
               />
+            ) : stage === 'setup' ? (
+              <SetupCodeStep
+                email={email}
+                client={client}
+                value={setupCode}
+                error={setupError}
+                locked={setupLocked}
+                busy={setupBusy}
+                inputRef={setupRef}
+                onChange={(v) => { setSetupCode(v); if (setupError && !setupLocked) setSetupError(null); }}
+                onSubmit={(e) => void submitSetupCode(e)}
+                onBack={() => backToCredentials()}
+              />
             ) : stage === 'pin' ? (
               <PinStep
                 email={email}
@@ -445,7 +557,7 @@ export function LoginPage() {
                       inputMode="email"
                       required
                       aria-required
-                      placeholder="you@linear-mcr.co.uk"
+                      placeholder="you@yourcompany.co.uk"
                       value={email}
                       onChange={(e) => setEmail(e.target.value)}
                       // Validate on blur only once something was typed: an empty field left by clicking elsewhere
@@ -682,6 +794,75 @@ function PinStep({ email, client, pin, error, hint, locked, busy, inputRef, onPi
         <div className="flex justify-end">
           <Button type="button" variant="link" size="sm" onClick={onBack} disabled={busy} leftIcon={<ArrowLeft />}>
             {client ? t.backClient : t.back}
+          </Button>
+        </div>
+      </form>
+    </div>
+  );
+}
+
+interface SetupCodeStepProps {
+  email: string;
+  client: boolean;
+  value: string;
+  error: string | null;
+  locked: boolean;
+  busy: boolean;
+  inputRef: React.RefObject<HTMLInputElement | null>;
+  onChange: (value: string) => void;
+  onSubmit: (e: FormEvent) => void;
+  onBack: () => void;
+}
+
+/** The one-time setup code: the first sign-in of a new account, or the next one after an administrator's reset. */
+function SetupCodeStep({ email, client, value, error, locked, busy, inputRef, onChange, onSubmit, onBack }: SetupCodeStepProps) {
+  const t = SETUP_COPY;
+  return (
+    <div data-testid="login-setup-code" className="animate-slide-up">
+      <span className="mb-5 inline-flex h-12 w-12 items-center justify-center rounded-xl bg-primary-soft text-primary" aria-hidden>
+        <Ticket className="h-6 w-6" />
+      </span>
+      <h2 className="text-2xl font-bold tracking-tight">{t.heading}</h2>
+      <p className="mt-1.5 text-sm text-muted">{client ? t.bodyClient : t.body}</p>
+      <p className="mt-2 text-xs text-muted">
+        {PIN_COPY.login.signingInAs} <span className="font-medium text-fg">{email}</span>
+      </p>
+
+      {error && (
+        <div role="alert" data-testid="login-setup-code-error" className="mt-5 flex items-start gap-3 rounded-xl border border-danger/30 bg-danger-soft px-4 py-3 text-sm text-danger animate-scale-in">
+          <CircleAlert className="mt-0.5 h-4 w-4 shrink-0" aria-hidden />
+          <span className="text-fg">{error}</span>
+        </div>
+      )}
+
+      <form onSubmit={onSubmit} noValidate className="mt-6 space-y-5">
+        <Field label={t.label} htmlFor="login-setup-code-input" hint={t.hint}>
+          <Input
+            ref={inputRef}
+            id="login-setup-code-input"
+            name="setupCode"
+            autoFocus
+            autoComplete="one-time-code"
+            autoCapitalize="characters"
+            spellCheck={false}
+            maxLength={20}
+            placeholder="ABCD-EFGH-JKMN"
+            value={value}
+            onChange={(e) => onChange(e.target.value.toUpperCase())}
+            disabled={locked || busy}
+            invalid={!!error && !locked}
+            leftIcon={<Ticket />}
+            size="lg"
+            className="font-mono tracking-wider"
+          />
+        </Field>
+        <Button type="submit" size="lg" fullWidth loading={busy} disabled={locked || !isSetupCodeComplete(value)} rightIcon={<ArrowRight />}>
+          {t.submit}
+        </Button>
+        <p className="text-xs leading-relaxed text-muted">{client ? t.noCodeClient : t.noCode}</p>
+        <div className="flex justify-end">
+          <Button type="button" variant="link" size="sm" onClick={onBack} disabled={busy} leftIcon={<ArrowLeft />}>
+            {client ? PIN_COPY.login.backClient : PIN_COPY.login.back}
           </Button>
         </div>
       </form>

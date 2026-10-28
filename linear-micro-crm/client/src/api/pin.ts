@@ -1,7 +1,7 @@
 // Release 1.2 — U1 sign-in-pin hooks — OWNED BY U1 (laid down by r2-foundation). Endpoints: server/src/routes/auth.ts.
 // Keys start with 'auth', so the existing ['auth'] invalidations refresh them too.
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import type { PinRemoveInput, PinSetInput, PinStatus, SecuritySettings } from '@lm/shared';
+import type { PinRemoveInput, PinSetInput, PinStatus, SecuritySettings, SetupCodeIssued } from '@lm/shared';
 import { api } from './client';
 
 export const pinKeys = {
@@ -39,11 +39,14 @@ export function useUserPinStatus(userId: number, { enabled = true }: { enabled?:
   return useQuery({ queryKey: pinKeys.user(userId), queryFn: () => api<PinStatus>(`/auth/pin/${userId}`), enabled });
 }
 
-/** POST /auth/pin/reset/:userId (admin) — clears another person's PIN and lock, and signs them out. */
+/**
+ * POST /auth/pin/reset/:userId (admin) — clears another person's PIN and lock, and signs them out. Needs the admin's
+ * fresh two-step code; answers the one-time setup code their next sign-in needs.
+ */
 export function useResetUserPin(userId: number) {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: () => api<void>(`/auth/pin/reset/${userId}`, { method: 'POST' }),
+    mutationFn: (input: { code: string }) => api<SetupCodeIssued>(`/auth/pin/reset/${userId}`, { method: 'POST', json: input }),
     onSuccess: () => {
       void qc.invalidateQueries({ queryKey: ['users'] });
       void qc.invalidateQueries({ queryKey: pinKeys.user(userId) });

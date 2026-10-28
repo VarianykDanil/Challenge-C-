@@ -22,6 +22,7 @@ import { TwoFactorSection } from '@/features/settings/TwoFactorSection';
 // Release 1.4 (F): Bank details (every staff role, their own) and Settings → Payments (admin, loaded lazily).
 import { BankDetailsCard } from '@/features/payments/BankDetailsCard';
 import { LazyPaymentsSettingsSection } from '@/features/payments';
+import { TrialSettingsSection } from '@/features/access/TrialBanner';
 import { formatDate, formatDateTime, formatRelative, fullName, pluralise } from '@/lib/format';
 import { useTheme, type Theme } from '@/components/layout';
 import { usePageTitle } from '@/lib/usePageTitle';
@@ -56,6 +57,7 @@ export function SettingsPage() {
       <PageHeader title={COPY.nav.settings.title} description={COPY.nav.settings.description} />
       <div className="grid gap-6 lg:grid-cols-3">
         <div className="min-w-0 space-y-6 lg:col-span-2">
+          {user.role === 'admin' && <ErrorBoundary name="settings-trial" fallback={null}><TrialSettingsSection /></ErrorBoundary>}
           <Card>
             <CardHeader title="Profile" description="Details are managed by the office — ask an administrator to change them." />
             <div className="mb-5 flex items-center gap-4">

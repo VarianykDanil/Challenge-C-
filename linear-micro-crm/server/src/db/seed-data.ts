@@ -220,6 +220,9 @@ export const EVENT_TIMES: Record<EventType, [string, string][]> = {
   residential: [['12:00', '20:00'], ['13:00', '20:30'], ['11:00', '19:00']],
 };
 
+/** The demo company's email domain: invented (the .example top-level domain is reserved, so it never reaches anyone). */
+export const DEMO_EMAIL_DOMAIN = 'linearhub.example';
+
 export interface UserSeed {
   no: number; // employee number → LM-XXXX, also the row id
   firstName: string;
@@ -244,7 +247,7 @@ export interface UserSeed {
 }
 
 export const USERS: UserSeed[] = [
-  { no: 1, firstName: 'Danil', lastName: 'Varianyk', email: 'danil@linear-mcr.co.uk', role: 'admin', position: 'owner', team: null, start: '2024-02-27', status: 'active', city: 'Manchester', skill: 1.3, attendance: 0.04 },
+  { no: 1, firstName: 'Morgan', lastName: 'Blake', role: 'admin', position: 'owner', team: null, start: '2024-02-27', status: 'active', city: 'Manchester', skill: 1.3, attendance: 0.04 },
   { no: 2, firstName: 'Amelia', lastName: 'Hart', role: 'leader', position: 'crew_leader', team: 'Northern Lights', start: '2024-03-04', status: 'active', city: 'Salford', skill: 1.2, leadsTeam: true },
   { no: 3, firstName: 'Priya', lastName: 'Shah', role: 'recruiter', position: 'recruiter', team: null, start: '2024-06-10', status: 'active', city: 'Manchester', skill: 1, attendance: 0 },
   { no: 4, firstName: 'Marcus', lastName: 'Doyle', role: 'admin', position: 'assistant_owner', team: null, start: '2024-04-15', status: 'active', city: 'Manchester', skill: 1.2, attendance: 0.08 },
@@ -362,11 +365,11 @@ export const CLIENT_ACCOUNTS: ClientAccountSeed[] = [
 ];
 
 /**
- * Release 1.3.1: the demo teams whose accounts start BLANK (no gauges, pay, learning or anything else): team Sapiens
- * and its seven sign-ins for the owner's demo. First names only — the repository is public, so never a real surname,
- * email or phone number here; Matt adds surnames in Team → Edit. Inserted by the core seed at its very end, after every
- * extension seed (so no extension sees them), and once into an existing demo database by db/extensions/sapiens.ts.
- * Both go through lib/demoTeams.ts addDemoTeams.
+ * The starter team whose accounts start BLANK (no gauges, pay, learning or anything else), with one-tap sign-ins during
+ * the trial. The people are never in code (the repository is public): lib/starterTeam.ts loads them from the office's
+ * local file next to the database, or from server/starter-team.example.json (invented people). Inserted by the core seed
+ * at its very end, after every extension seed (so no extension sees them), and once into an existing demo database by
+ * db/extensions/sapiens.ts. Both go through lib/demoTeams.ts addDemoTeams.
  */
 export interface DemoTeamSeed {
   name: string;
@@ -374,12 +377,12 @@ export interface DemoTeamSeed {
   color: string;
 }
 
-export const DEMO_TEAMS: DemoTeamSeed[] = [{ name: 'Sapiens', color: '#7C3AED' }];
-
 export interface DemoTeamAccountSeed {
   /** Fixed, above the demo seed's LM-0001 to LM-0034 (an existing database that already uses one gets the next free ID). */
   employeeId: string;
   firstName: string;
+  /** Optional: the office adds surnames later in Team → Edit. */
+  lastName?: string;
   email: string;
   role: Role;
   position: Position;
@@ -387,23 +390,3 @@ export interface DemoTeamAccountSeed {
   /** The team's leader (teams.leader_id). */
   leadsTeam?: boolean;
 }
-
-const demoTeamAccount = (no: number, firstName: string, role: Role, position: Position, leadsTeam = false): DemoTeamAccountSeed => ({
-  employeeId: `LM-${String(no).padStart(4, '0')}`,
-  firstName,
-  email: `${firstName.toLowerCase()}@linear-mcr.co.uk`,
-  role,
-  position,
-  team: 'Sapiens',
-  ...(leadsTeam ? { leadsTeam } : {}),
-});
-
-export const DEMO_TEAM_ACCOUNTS: DemoTeamAccountSeed[] = [
-  demoTeamAccount(101, 'Theo', 'leader', 'team_leader', true),
-  demoTeamAccount(102, 'Daniel', 'leader', 'team_leader'),
-  demoTeamAccount(103, 'Ridwan', 'leader', 'team_leader'),
-  demoTeamAccount(104, 'Jamie', 'leader', 'team_leader'),
-  demoTeamAccount(105, 'Olivia', 'rep', 'trainee'),
-  demoTeamAccount(106, 'Owens', 'rep', 'trainee'),
-  demoTeamAccount(107, 'Yasmin', 'rep', 'trainee'),
-];
