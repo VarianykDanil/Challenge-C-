@@ -106,6 +106,31 @@ describe('going online', () => {
     assert.match(later, /Not needed for going online/);
   });
 
+  // The signed agreement covers Linear Hub on the office Mac. Going online is outside it (Schedule 1, Part 2, 2.1(a)),
+  // and clause 9.3 says Schedules 3 and 4 are varied under clause 26.2 when it happens. The pitch and the runbook must
+  // not present the server, or looking after it, as already part of the deal.
+  it('PITCH and DEPLOY: going online is quoted separately and needs a signed variation of the agreement first', () => {
+    const pitch = read('docs/PITCH.md');
+    const deploy = read('docs/DEPLOY.md');
+    for (const [name, text] of [['PITCH.md', pitch], ['DEPLOY.md', deploy]] as const) {
+      assert.match(text, /variation/i, `${name} does not say the agreement is varied`);
+      assert.match(text, /clause 26\.2/, `${name} does not name clause 26.2 (variation)`);
+      assert.match(text, /clause 9\.3/, `${name} does not name clause 9.3 (going online)`);
+      assert.match(text, /Schedules? 3 and 4/, `${name} does not say Schedules 3 and 4 change`);
+      assert.match(text, /fixed[- ]price/i, `${name} does not say the go-live is quoted at a fixed price`);
+    }
+    // Any promise to look after the server (or its off-site copies) is tied to the variation.
+    for (const sentence of pitch.split(/(?<=\.)\s+/)) {
+      if (/looking after the server|looks after the server/i.test(sentence)) {
+        assert.match(sentence, /once the agreement is varied|variation/i, `PITCH.md promises server care outside the agreement: "${sentence.trim()}"`);
+      }
+    }
+    const buy = section(deploy, /^## 1\. /);
+    assert.match(buy, /variation/i, 'DEPLOY.md §1 (what to buy) must start from the agreement variation');
+    assert.match(section(deploy, /^## 4\. Go-live checklist/), /variation/i, 'the go-live checklist must tick off the signed variation');
+    assert.match(section(pitch, /^## Rollout plan/), /variation/i, 'the rollout plan must put the variation before go-live day');
+  });
+
   it('DEPLOY: the runbook is built on the installer, uses the shared setting names, and marks the Mac as trial only', () => {
     const deploy = read('docs/DEPLOY.md');
     for (const must of ['deploy/install.sh', 'HOST=127.0.0.1', 'TRUST_PROXY=1', 'COOKIE_SECURE=1', 'LM_APP_SECRET_FILE',

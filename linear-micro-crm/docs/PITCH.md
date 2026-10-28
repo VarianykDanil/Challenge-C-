@@ -83,12 +83,24 @@ gauges honest and quick to see, and pay quick to check.
 
 - **A licensed system with a monthly service.** Noryn System Ltd built Linear Hub, owns it and supports it; Linear MCR
   uses it under the written agreement between the two companies: a one-off price for the build and a monthly service
-  fee, both set out in the agreement. The monthly service covers fixing faults, updates, keeping the bank, payment and
-  Gmail connections working as those services change, and looking after the server and its backups with you.
+  fee, both set out in the agreement. The monthly service covers fixing faults, updates, a monthly check that the
+  backups ran with a test restore, and keeping the bank, payment and Gmail connections working as those services
+  change. Looking after the server and its off-site copies joins it only once the agreement is varied for going
+  online (next point).
+- **Going online is a separate step, agreed in writing first.** The agreement signed for the trial covers Linear Hub
+  on the office Mac. Moving it online, with HTTPS, is outside the build price (Schedule 1, Part 2): Noryn quotes it as
+  a **fixed-price go-live package**. Before go-live day both companies sign a short **variation** of the agreement
+  (clause 26.2), as clause 9.3 already foresees. The variation records which server and storage providers are used and
+  where the server is; who looks after the server, its updates and the off-site copies (moved into the monthly
+  service, or kept by Linear MCR as the agreement says today); and the new Schedules 3 and 4: who handles the data and
+  where, and the security of a server on the internet (HTTPS, the firewall, the owner's duties for the server instead
+  of the Mac). A server in Germany or Finland holds the data outside the UK, so the variation is also Linear MCR's
+  written instruction for that (Schedule 3, 3.6); a London server avoids the question.
 - **Your own small server, in Linear MCR's name.** Linear Hub runs on one small Linear MCR-owned server in the UK or
-  EU, at an address of your own (for example `hub.linear-mcr.co.uk`), with HTTPS. Running costs go straight to the
-  providers *(October 2026 prices, check before buying)*: the server about €5–10 a month, the domain about £10 a year,
-  off-site backup storage about €4 a month. There are no per-user fees.
+  EU, at an address of your own (for example `hub.linear-mcr.co.uk`), with HTTPS. The server and storage accounts are
+  Linear MCR's own, so their providers are Linear MCR's, not Noryn's sub-processors (Schedule 3, 3.4). Running costs
+  go straight to the providers *(October 2026 prices, check before buying)*: the server about €5–10 a month, the domain
+  about £10 a year, off-site backup storage about €4 a month. There are no per-user fees.
 - **One sign-in on every phone, anywhere.** Reps at a venue in Bolton or Liverpool use it on 4G exactly as in the
   office. Added to the home screen it opens like an app, and once a phone has opened it, it opens again without
   signal and keeps saves until the signal is back.
@@ -145,6 +157,9 @@ advertising trackers.
 **Trial week — on the office Mac.** The demo company shows every screen; the starter team tries their own accounts.
 Nothing real is paid.
 
+**Before go-live — the agreement.** Agree the fixed-price go-live package and sign the variation for going online
+(see *What you get*). Nothing goes on the internet before both are done.
+
 **Go-live day — on the server (about half a day with Noryn).** Buy the server and the domain in Linear MCR's name, run
 the installer, move the trial database across, go live, print the recovery sheet, test a restore. The steps are in
 [`DEPLOY.md`](DEPLOY.md).
@@ -169,7 +184,8 @@ same fortnight.
 2. **The pay** — the day rate and commission per sale for each campaign and position, and the date each applies from.
 3. **Campaign payouts** — for each live campaign, what the client pays per confirmed sale.
 4. **Two administrators** — so every payment has a second approver; both set up two-step sign-in.
-5. **A server, a domain and off-site storage in Linear MCR's name** — we help choose and set them up.
+5. **A server, a domain and off-site storage in Linear MCR's name** — we help choose and set them up — and the
+   **signed variation** of the agreement for going online.
 6. **One real statement from each client** (names can be blacked out) — to check the statement reader.
 7. **A sandbox login for each payment provider you want to use** — for the first test payment.
 8. **Thirty minutes per leader** during their rollout week.
@@ -204,8 +220,9 @@ licenses it to Linear MCR (see [`LICENSE`](../LICENSE) and the agreement).
 React, Node.js, SQLite), and [`MAINTAINERS.md`](MAINTAINERS.md) explains to another developer how it fits together,
 where the rules live and how to change it safely.
 
-**Will it need Supabase or a bigger database?** Not for Linear MCR's size: one small server handles hundreds of
-requests a second. A bigger database is a later option only if Linear opens several offices or hundreds of people use
+**Will it need Supabase or a bigger database?** Not for Linear MCR's size: in the load tests of releases 1.0 and 1.1,
+on a test machine, one server answered hundreds of requests a second, and a company of tens of people needs a few. A
+bigger database is a later option only if Linear opens several offices or hundreds of people use
 it at once ([`ROADMAP.md`](ROADMAP.md) says why and what it would take).
 
 **How long does it take to learn?** A rep: under five minutes. A leader: half an hour. The recruiter: half an hour.
