@@ -22,6 +22,9 @@ import { purgeExpiredSessions } from './middleware/auth.ts';
 import { readTlsFiles, tlsFilesFromEnv } from './lib/tls.ts';
 import { loadStarterTeam, starterTeamFileFor } from './lib/starterTeam.ts';
 import { missingDatabaseRefusal } from './lib/seedGuard.ts';
+import { demoAccountsAllowed } from './lib/demoTeams.ts';
+import { isTrialMode } from './lib/trialMode.ts';
+import { isLoopbackAddress } from './lib/secureRequest.ts';
 
 const dbPath = process.env.DB_PATH ? path.resolve(process.env.DB_PATH) : DEFAULT_DB_PATH;
 // Built-in HTTPS when LM_TLS_CERT_FILE and LM_TLS_KEY_FILE are both set (lib/tls.ts): checked before anything opens, so
@@ -184,4 +187,17 @@ server.listen(port, host, () => {
     console.log(`Bound to ${host} only: other devices cannot reach it (unset HOST to allow them).`);
   }
   if (tls) console.log('HTTPS is on (LM_TLS_CERT_FILE): sign-in cookies are Secure and browsers are told to keep using https.');
+  // behind a proxy the forwarded headers decide what counts as https, so only the proxy may reach this port
+  if (parseTrustProxy(process.env.TRUST_PROXY) !== false && !(host === 'localhost' || isLoopbackAddress(host))) {
+    console.warn(
+      'Warning: TRUST_PROXY is set but HOST is not 127.0.0.1, so anyone who reaches this port directly can pretend to be ' +
+        'on https. Set HOST=127.0.0.1 so that only the reverse proxy reaches it (docs/DEPLOY.md).',
+    );
+  }
+  if (isTrialMode(db) && !demoAccountsAllowed() && process.env.LM_DEMO_ACCOUNTS?.trim() !== '0') {
+    console.log(
+      'Trial mode: the one-tap demo sign-ins are off because this server is reachable over https. Go live (npm run golive), ' +
+        'or set LM_DEMO_ACCOUNTS=1 to show them anyway.',
+    );
+  }
 });

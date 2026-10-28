@@ -11,7 +11,7 @@ import { USER_SELECT } from '../db/queries.ts';
 import { HttpError, badRequest, conflict, notFound, unauthorized } from '../lib/errors.ts';
 import { FailureLimiter } from '../lib/limiter.ts';
 import { clientCampaignIdOf, clientSafeUser, demoClientMarkers, isClientUser, isDemoClientAccount, matchesDemoClient } from '../lib/client.ts';
-import { DEMO_STAFF, demoTeamMarkers, isDemoSignInAccount } from '../lib/demoTeams.ts';
+import { DEMO_STAFF, demoAccountsAllowed, demoTeamMarkers, isDemoSignInAccount } from '../lib/demoTeams.ts';
 import {
   accountFlags, clearPin, clearPinAndSessions, clearPinFailures, clientPinRequired, countPinAttempt, hashPin, isPinLocked, pinAttemptsLeft, pinHashNeedsUpgrade,
   pinLockedMessage, pinRow, pinStatusFor, readSecuritySettings, savePinHash, upgradePinHash, verifyPin,
@@ -501,11 +501,13 @@ export function authRouter(db: Db): Router {
   /**
    * Public: the login page needs these before any session exists. The response is the login credential of four
    * people, so it is only ever the four *seeded* demo accounts: when any of them is missing, deactivated or has a
-   * different role (a real deployment), or when `LM_DEMO_ACCOUNTS=0`, the list is empty. There is no fallback.
+   * different role (a real deployment), or when the settings turn them off (lib/demoTeams.ts demoAccountsAllowed:
+   * `LM_DEMO_ACCOUNTS=0`, or a server online over https without `LM_DEMO_ACCOUNTS=1`), the list is empty. There is no
+   * fallback.
    */
   router.get('/demo-accounts', (_req, res) => {
-    // only in trial mode (npm run golive ends it for good), and never with LM_DEMO_ACCOUNTS=0
-    if (process.env.LM_DEMO_ACCOUNTS === '0' || !isTrialMode(db)) return res.json({ accounts: [] });
+    // only in trial mode (npm run golive ends it for good), and only where the settings allow them
+    if (!demoAccountsAllowed() || !isTrialMode(db)) return res.json({ accounts: [] });
     const rows = all<UserWithTeam>(db, `${USER_SELECT} WHERE upper(u.employee_id) IN ('LM-0001', 'LM-0002', 'LM-0003', 'LM-0010')`);
     const accounts: { label: string; role: Role; email: string; employeeId: string }[] = [];
     for (const d of DEMO) {

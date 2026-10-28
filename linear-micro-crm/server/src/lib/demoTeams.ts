@@ -64,9 +64,23 @@ export function demoStaffIntact(db: Db): boolean {
 }
 
 /**
+ * Whether the operator's settings allow the one-tap demo sign-ins: LM_DEMO_ACCOUNTS=0 never, =1 always; unset, only
+ * on a server that is not online — built-in HTTPS (LM_TLS_CERT_FILE) or a reverse proxy (TRUST_PROXY) means it can be
+ * reached from the internet, where published one-tap accounts must not work. Read on every call, never cached.
+ */
+export function demoAccountsAllowed(env: NodeJS.ProcessEnv = process.env): boolean {
+  const flag = env.LM_DEMO_ACCOUNTS?.trim();
+  if (flag === '0') return false;
+  if (flag === '1') return true;
+  const proxy = (env.TRUST_PROXY ?? '').trim();
+  const behindProxy = proxy !== '' && proxy !== '0' && !/^false$/i.test(proxy);
+  return !behindProxy && !(env.LM_TLS_CERT_FILE ?? '').trim();
+}
+
+/**
  * Whether a one-off demo start-up step (the Sapiens accounts, the demo charity account) may add its accounts now:
- * - 'later': not now, ask again on the next start — the server runs with LM_DEMO_ACCOUNTS=0 (the operator says real
- *   people use it), the database is not one the demo seed created, or its core rows are not there yet (a fresh install
+ * - 'later': not now, ask again on the next start — the operator's settings turn the demo sign-ins off
+ *   (demoAccountsAllowed: LM_DEMO_ACCOUNTS=0, or a server online over https), the database is not one the demo seed created, or its core rows are not there yet (a fresh install
  *   before its seed);
  * - 'never': the database began as the demo but one of its four demo staff is missing, has left, or has another role
  *   or employee ID (a renamed person or a new email still counts as the demo) — it is in real use now, so the step
@@ -75,7 +89,7 @@ export function demoStaffIntact(db: Db): boolean {
  * Every Linear Hub database starts from the demo seed, so the seed's meta alone never decides this.
  */
 export function demoStepAllowed(db: Db): 'yes' | 'later' | 'never' {
-  if (process.env.LM_DEMO_ACCOUNTS === '0') return 'later';
+  if (!demoAccountsAllowed()) return 'later';
   if (!isDemoDatabase(db)) return 'later';
   if (!get(db, `SELECT 1 FROM users LIMIT 1`) || !get(db, `SELECT 1 FROM pay_plans LIMIT 1`)) return 'later';
   return demoStaffIntact(db) ? 'yes' : 'never';
@@ -85,7 +99,7 @@ export function demoStepAllowed(db: Db): 'yes' | 'later' | 'never' {
 
 /** Who signs in as the demo, worked out once per data version (every write request moves it). */
 interface DemoSignInState {
-  /** The database part of demoStepAllowed says 'yes' (LM_DEMO_ACCOUNTS is read on every call, never cached). */
+  /** The database part of demoStepAllowed says 'yes' (the environment is read on every call, never cached). */
   stillDemo: boolean;
   teamAccounts: DemoTeamAccountMarker[];
   clients: DemoClientMarker[];
@@ -109,9 +123,9 @@ function demoSignInState(db: Db): DemoSignInState {
   return state;
 }
 
-/** The one-tap demo sign-ins work right now: trial mode, LM_DEMO_ACCOUNTS is not 0, the demo staff are intact. */
+/** The one-tap demo sign-ins work right now: trial mode, demoAccountsAllowed, the demo staff are intact. */
 export function demoSignInsOn(db: Db): boolean {
-  return process.env.LM_DEMO_ACCOUNTS !== '0' && demoSignInState(db).stillDemo;
+  return demoAccountsAllowed() && demoSignInState(db).stillDemo;
 }
 
 /** The fields of a users row the rule reads. */
@@ -124,7 +138,7 @@ export interface DemoSignInSubject {
 
 /**
  * True for an account the sign-in page's demo buttons list, while the database is in trial mode and still the demo
- * (LM_DEMO_ACCOUNTS is not 0, the database is one the demo seed built and its four demo staff are intact) AND the
+ * (demoAccountsAllowed, the database is one the demo seed built and its four demo staff are intact) AND the
  * account is one GET /auth/demo-accounts lists: one of the four by employee ID and role (DEMO_STAFF), a starter team
  * account by its marker (same id, employee ID and email; staff), or the demo charity account by its marker
  * (lib/client.ts matchesDemoClient). Those accounts sign in with one tap and need no two-step verification, so the
@@ -134,7 +148,7 @@ export interface DemoSignInSubject {
  * Cheap: the database reads are cached per data version.
  */
 export function isDemoSignInAccount(db: Db, user: DemoSignInSubject | null | undefined): boolean {
-  if (!user || process.env.LM_DEMO_ACCOUNTS === '0') return false;
+  if (!user || !demoAccountsAllowed()) return false;
   const state = demoSignInState(db);
   if (!state.stillDemo) return false;
   const employeeId = user.employeeId.toUpperCase();

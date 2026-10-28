@@ -79,6 +79,40 @@ test('admins see trial mode: GET /auth/me carries it and the Needs-attention fee
   }
 });
 
+/** Runs `fn` with these environment variables (undefined: unset), then puts them back. */
+async function withEnv(vars: Record<string, string | undefined>, fn: () => Promise<void>): Promise<void> {
+  const prev = Object.fromEntries(Object.keys(vars).map((k) => [k, process.env[k]]));
+  const put = (k: string, v: string | undefined) => (v === undefined ? delete process.env[k] : (process.env[k] = v));
+  for (const [k, v] of Object.entries(vars)) put(k, v);
+  try {
+    await fn();
+  } finally {
+    for (const [k, v] of Object.entries(prev)) put(k, v);
+  }
+}
+
+test('one-tap demo sign-ins are off by default on a server reachable over https (built-in HTTPS or a reverse proxy); LM_DEMO_ACCOUNTS=1 turns them on', async () => {
+  srv = await startTestServer({ seed: true });
+  const off = async (why: string) => {
+    srv!.resetCache();
+    assert.deepEqual((await srv!.anon().get('/auth/demo-accounts')).json, { accounts: [] }, why);
+    assert.equal(trialStatus(db()).demoSignIns, false, why);
+    const r = await srv!.anon().post('/auth/login', DEMO_ACCOUNTS.admin);
+    assert.deepEqual(r.json, { requiresSetupCode: true }, `${why}: the demo owner is an ordinary account`);
+  };
+  const on = async (why: string) => {
+    srv!.resetCache();
+    assert.ok((await srv!.anon().get('/auth/demo-accounts')).json.accounts.length > 0, why);
+    assert.equal((await srv!.anon().post('/auth/login', DEMO_ACCOUNTS.admin)).status, 200, why);
+  };
+  await withEnv({ LM_DEMO_ACCOUNTS: undefined, TRUST_PROXY: undefined, LM_TLS_CERT_FILE: undefined }, () => on('plain http on the office network'));
+  await withEnv({ LM_DEMO_ACCOUNTS: undefined, TRUST_PROXY: '1', LM_TLS_CERT_FILE: undefined }, () => off('behind a reverse proxy'));
+  await withEnv({ LM_DEMO_ACCOUNTS: undefined, TRUST_PROXY: undefined, LM_TLS_CERT_FILE: '/srv/cert.pem' }, () => off('built-in HTTPS'));
+  await withEnv({ LM_DEMO_ACCOUNTS: undefined, TRUST_PROXY: 'false', LM_TLS_CERT_FILE: '' }, () => on('TRUST_PROXY=false is off'));
+  await withEnv({ LM_DEMO_ACCOUNTS: '1', TRUST_PROXY: '1', LM_TLS_CERT_FILE: undefined }, () => on('LM_DEMO_ACCOUNTS=1 asks for them'));
+  await withEnv({ LM_DEMO_ACCOUNTS: '0', TRUST_PROXY: undefined, LM_TLS_CERT_FILE: undefined }, () => off('LM_DEMO_ACCOUNTS=0'));
+});
+
 test('demo sign-ins get the normal 14-hour session, not 14 days (SEC-1)', async () => {
   srv = await startTestServer({ seed: true });
   const r = await srv.anon().post('/auth/login', DEMO_ACCOUNTS.admin);

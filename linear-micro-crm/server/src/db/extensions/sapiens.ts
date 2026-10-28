@@ -6,7 +6,7 @@
  * The one-off step (`ext:sapiens:accounts`): only from the server's own start (createSchema `{ demoSteps: true }` in
  * index.ts, never a maintenance command such as npm run pin:reset), and only while the database is still the demo
  * (lib/demoTeams.ts demoStepAllowed): one the demo seed created (meta `seeded_at` and `seed_today`, so never the
- * route-test fixture) whose four demo staff accounts are intact, on a server not run with LM_DEMO_ACCOUNTS=0. Every
+ * route-test fixture) whose four demo staff accounts are intact, on a server whose settings allow the demo sign-ins (lib/demoTeams.ts demoAccountsAllowed). Every
  * Linear Hub database starts from the demo seed, so a database in real use (a demo staff account left, removed, or given
  * another role) is done without gaining anyone. On a fresh install (the upgrade runs before the seed, on empty tables)
  * and with LM_DEMO_ACCOUNTS=0 it skips WITHOUT the flag. A "Sapiens" team someone made by hand is reused (only the
@@ -26,7 +26,7 @@ export const extension: DbExtension = {
   upgrade(db, opts) {
     // only from the server's own start, never a maintenance command (types.ts UpgradeOptions)
     if (!opts?.demoSteps || metaFlag(db, DEMO_TEAMS_DONE_KEY)) return [];
-    // only while it is still the demo (lib/demoTeams.ts demoStepAllowed): LM_DEMO_ACCOUNTS=0, not a demo database, or
+    // only while it is still the demo (lib/demoTeams.ts demoStepAllowed): the demo sign-ins turned off, not a demo database, or
     // core rows missing → ask again next start; a demo staff account left, removed or given another role → done, nothing added
     const allowed = demoStepAllowed(db);
     if (allowed === 'later') return [];

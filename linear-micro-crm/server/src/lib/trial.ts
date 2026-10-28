@@ -11,7 +11,7 @@ import { ACCESS_MESSAGES, type TrialStatus, type UserWithTeam } from '@lm/shared
 import { get, type Db } from '../db/connection.ts';
 import { currentDataVersion } from './cache.ts';
 import { HttpError } from './errors.ts';
-import { DEMO_STAFF, isDemoSignInAccount } from './demoTeams.ts';
+import { DEMO_STAFF, demoAccountsAllowed, isDemoSignInAccount } from './demoTeams.ts';
 import { assertFreshCode, codeSource } from './payments/code.ts';
 import { isTwoFactorEnabled } from './twofactor.ts';
 import { TRIAL_MODE_KEY, isDemoPerson, isTrialMode } from './trialMode.ts';
@@ -23,7 +23,7 @@ const statusCache = new WeakMap<Db, { version: number; status: TrialStatus }>();
 /**
  * The banner's facts (trialMode false: no banner). One statement, cached per data version: the Needs-attention feed
  * asks on every dashboard load and has a budget. The same rule as lib/demoTeams.ts demoSignInsOn: trial mode, a
- * database the demo seed built, its four demo staff intact (role kept, not left), and LM_DEMO_ACCOUNTS not 0.
+ * database the demo seed built, its four demo staff intact (role kept, not left), and demoAccountsAllowed.
  */
 export function trialStatus(db: Db): TrialStatus {
   const version = currentDataVersion();
@@ -43,8 +43,8 @@ export function trialStatus(db: Db): TrialStatus {
   return withEnv(status);
 }
 
-/** LM_DEMO_ACCOUNTS is read on every call, never cached. */
-const withEnv = (s: TrialStatus): TrialStatus => (process.env.LM_DEMO_ACCOUNTS === '0' ? { ...s, demoSignIns: false } : s);
+/** The environment (lib/demoTeams.ts demoAccountsAllowed) is read on every call, never cached. */
+const withEnv = (s: TrialStatus): TrialStatus => (demoAccountsAllowed() ? s : { ...s, demoSignIns: false });
 
 /** A one-tap demo account or a demo person, while in trial mode. Never anyone once the database has gone live. */
 export function isRestrictedDemo(db: Db, user: Pick<UserWithTeam, 'id' | 'role' | 'email' | 'employeeId'>): boolean {

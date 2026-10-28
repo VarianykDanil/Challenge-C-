@@ -33,7 +33,7 @@
  * accounts". Only from the server's own start (createSchema `{ demoSteps: true }` in index.ts — never a maintenance
  * command such as npm run pin:reset), and only while the database is still the demo (lib/demoTeams.ts
  * demoStepAllowed): one the demo seed created (meta `seeded_at` and `seed_today`) whose four demo staff accounts are
- * intact, on a server not run with LM_DEMO_ACCOUNTS=0. Every Linear Hub database starts from the demo seed, so a
+ * intact, on a server whose settings allow the demo sign-ins (lib/demoTeams.ts demoAccountsAllowed). Every Linear Hub database starts from the demo seed, so a
  * database in real use (a demo staff account left, removed, or given another role) is marked done without gaining her.
  * Skipped without the flag with LM_DEMO_ACCOUNTS=0 and while the core tables are empty (the fresh-install upgrade runs
  * before the seed); never when the demo seed already made her (its marker), when someone already holds her access code
@@ -302,7 +302,7 @@ export const DEMO_CLIENT_STEP_KEY = 'ext:client:demo-account';
  */
 export function addDemoClientAccount(db: Db): boolean {
   if (metaFlag(db, DEMO_CLIENT_STEP_KEY) || demoClientMarkers(db).length > 0) return false;
-  // only while it is still the demo (lib/demoTeams.ts demoStepAllowed): LM_DEMO_ACCOUNTS=0, not a demo database, or core
+  // only while it is still the demo (lib/demoTeams.ts demoStepAllowed): the demo sign-ins turned off, not a demo database, or core
   // rows missing → ask again next start; a demo staff account left, removed or given another role → done, nothing added
   const allowed = demoStepAllowed(db);
   if (allowed === 'later' || !get(db, `SELECT 1 FROM campaigns LIMIT 1`)) return false;
