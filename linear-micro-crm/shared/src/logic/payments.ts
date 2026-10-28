@@ -182,7 +182,7 @@ export interface ApprovalOutcome {
  * processing or paid; failed: refused, never counted as sent; waiting: still queued — the provider has not confirmed
  * it yet, either because it was not reached or because its answer was lost (a payment sent without an answer may still
  * exist there), so the words stay neutral. The provider's next step (`createsOnly`: Wise, fund the transfers there) or
- * `success` (who and how much) only when every item was really sent. A test bank file is never to be uploaded.
+ * `success` (who and how much) only when every item was really sent. A test bank file is for looking at only (it carries no real bank details).
  */
 export function approvalOutcome(
   b: { kind: PaymentProviderKind; mode: PaymentMode; items: readonly { status: PaymentItemStatus }[] },

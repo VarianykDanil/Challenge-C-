@@ -83,7 +83,8 @@ CREATE TABLE IF NOT EXISTS payment_connections (
   disconnected_at TEXT,
   test_file_at TEXT,
   test_file_by INTEGER,
-  test_file_result TEXT
+  test_file_result TEXT,
+  details_changed_at TEXT
 );
 
 CREATE TABLE IF NOT EXISTS payment_batches (

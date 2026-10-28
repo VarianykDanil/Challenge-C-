@@ -7,7 +7,7 @@
  *    payment (or Runs to pay when several payments are involved);
  *  - a bank file approved but not yet marked paid (info, one per payment, newest two), with the people and the money
  *    still waiting for the bank (review fix UI-1: a line the bank format refused is not in the file, so not counted).
- *    Live only (review fix money:3): a test bank file (LM_PAYMENTS_FAKE=1) is never to be uploaded to a bank;
+ *    Live only (review fix money:3): a test bank file pays nobody (it carries no real bank details);
  *  - a connection whose last test or payment failed (warning);
  *  - review fix: a run whose figures changed after its payment was approved (the run is frozen while the money is on
  *    its way, and paid as approved): "Jordan Lee's pay changed while payment #3 was on its way" (warning; one line
