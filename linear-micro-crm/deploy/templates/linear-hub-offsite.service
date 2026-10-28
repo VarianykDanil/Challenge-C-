@@ -16,7 +16,8 @@ IOSchedulingClass=idle
 TimeoutStartSec=6h
 NoNewPrivileges=yes
 ProtectSystem=strict
-ReadWritePaths=@DATA_DIR@
+# rclone writes what it learns about the store (and refreshed sign-in tokens) back into its own settings.
+ReadWritePaths=@DATA_DIR@ @HOME_DIR@/.config/rclone
 ProtectHome=yes
 PrivateTmp=yes
 PrivateDevices=yes

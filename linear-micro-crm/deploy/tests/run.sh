@@ -130,6 +130,22 @@ check "remote_matches: secrets are not compared" \
 check "remote_matches: a changed host does not match" bash -c "! (source '$INSTALL'; remote_matches \"\$1\" type=sftp host=b.example.co.uk)" _ "$shown"
 check "remote_matches: a changed type does not match" bash -c "! (source '$INSTALL'; remote_matches \"\$1\" type=s3 host=a.example.co.uk)" _ "$shown"
 check "remote_matches: no remote does not match" bash -c "! (source '$INSTALL'; remote_matches '' type=sftp)"
+# rclone's sftp backend writes these into the remote itself after its first connection (rclone 1.60:
+# backend/sftp/sftp.go, f.m.Set). They are not an earlier answer, so they must not make every run make the remote anew.
+learned=$'[offsite]\ntype = sftp\nhost = a.example.co.uk\nuser = u1\nport = 23\nshell_type = unix\nmd5sum_command = md5sum\nsha1sum_command = sha1sum'
+check "remote_matches: settings rclone learns by itself (shell type, hash commands) are not 'left over'" \
+  remote_matches "$learned" type=sftp host=a.example.co.uk user=u1 port=23
+
+# The Caddy log: Caddy 2.8 and newer create the log file named in the Caddyfile when the file is checked, for the
+# checking user only (caddy 2.10.2 modules/logging/filewriter.go: OpenFile(…, O_CREATE, 0600)). A log file that is not
+# Caddy's stops Caddy starting, so the installer gives it back on every run.
+check "the Caddyfile writes the log the installer looks after" has_text "$DEPLOY/templates/Caddyfile" "output file $CADDY_LOG "
+: >"$WORK/caddy.log"
+check "a Caddy log that is not caddy's is given back to caddy" bash -c "source '$INSTALL'; set +e; DRY_RUN=0; CADDY_LOG='$WORK/caddy.log'
+  run() { printf '%s\n' \"\$*\" >>'$WORK/caddy.cmds'; }; note() { :; }
+  caddy_owns_log && grep -qx 'chown caddy:caddy $WORK/caddy.log' '$WORK/caddy.cmds'"
+check "…and nothing is done when there is no log file yet" bash -c "source '$INSTALL'; set +e; DRY_RUN=0; CADDY_LOG='$WORK/none.log'
+  run() { echo called >>'$WORK/caddy.none'; }; ! caddy_owns_log && [[ ! -e '$WORK/caddy.none' ]]"
 
 set -e
 
@@ -220,6 +236,10 @@ SYNC="$PREVIEW/usr/local/lib/linear-hub/offsite-sync.sh"
 check "off-site copy: no --immutable (a copy cut off half-way must be sent again, not refused for ever)" lacks_text "$SYNC" "--immutable"
 check "off-site copy: compares by size, so a short copy is sent again" has_text "$SYNC" "--size-only"
 check "off-site copy: half-uploaded videos are skipped" has_text "$SYNC" "--exclude '*.upload'"
+# rclone writes what it learns about the store (and refreshed sign-in tokens) back into its settings file; the locked-down
+# service must let it, or every night logs an error and a refreshed token is lost.
+check "off-site service: rclone may write its own settings" \
+  has_line "$PREVIEW/etc/systemd/system/linear-hub-offsite.service" "ReadWritePaths=/var/lib/linear-hub /opt/linear-hub/.config/rclone"
 
 check "updates: security updates every day" has_text "$PREVIEW/etc/apt/apt.conf.d/20auto-upgrades" 'APT::Periodic::Unattended-Upgrade "1";'
 check "updates: restart at night when an update needs it" has_text "$PREVIEW/etc/apt/apt.conf.d/52linear-hub-unattended-upgrades" 'Automatic-Reboot "true"'

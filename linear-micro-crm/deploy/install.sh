@@ -30,6 +30,7 @@ OFFSITE_CONF=$CONF_DIR/offsite.conf
 LIB_DIR=/usr/local/lib/linear-hub
 CLI_PATH=/usr/local/bin/linear-hub
 RCLONE_CONF=$HOME_DIR/.config/rclone/rclone.conf
+CADDY_LOG=/var/log/caddy/linear-hub.log # named in templates/Caddyfile
 SSH_DIR=$HOME_DIR/.ssh
 APP_PORT=''
 NODE_MAJOR=22
@@ -145,12 +146,16 @@ s3_provider_for() {
 }
 
 # remote_matches SHOWN key=value…: true when the rclone remote SHOWN (what `rclone config show NAME` prints) has exactly
-# these settings: none missing, none different and none left over from an earlier answer. Secrets are not compared.
+# these settings: none missing, none different and none left over from an earlier answer. Secrets are not compared, nor
+# what rclone's sftp backend writes into the remote by itself after its first connection (the shell type and the hash
+# commands): those are not answers, and a remote made anew learns them again.
 remote_matches() {
   local shown=$1 have want kv
   shift
   [[ -n $shown ]] || return 1
-  have=$(grep -E '^[a-z0-9_]+ = ' <<<"$shown" | grep -Ev '^(secret_access_key|password|password2|pass|key_file_pass) = ' | sort) || true
+  have=$(grep -E '^[a-z0-9_]+ = ' <<<"$shown" |
+    grep -Ev '^(secret_access_key|password|password2|pass|key_file_pass|shell_type|md5sum_command|sha1sum_command) = ' |
+    sort) || true
   want=$(for kv in "$@"; do printf '%s = %s\n' "${kv%%=*}" "${kv#*=}"; done | sort)
   [[ $have == "$want" ]]
 }
@@ -835,13 +840,15 @@ step_caddy() {
       if [[ -n $backup ]]; then cp -p "$backup" "$caddyfile"; fi
       die "Caddy did not accept the new Caddyfile, so the previous one was put back."
     fi
-    caddy_owns_log
+    caddy_owns_log || true
     if [[ $HAVE_SYSTEMD == 1 ]]; then
       run systemctl enable caddy.service
       run systemctl reload-or-restart caddy.service
     fi
   else
     ok "Caddyfile unchanged"
+    # Checked on every run: a log file Caddy cannot open stops it starting, even with an unchanged Caddyfile.
+    if caddy_owns_log && [[ $HAVE_SYSTEMD == 1 ]]; then run systemctl reload-or-restart caddy.service; fi
   fi
   [[ -n $backup ]] && rm -f "$backup"
   [[ $DRY_RUN == 1 || $HAVE_SYSTEMD == 0 ]] && return 0
@@ -863,11 +870,13 @@ caddy_validate() {
   run runuser -u caddy -- env -i HOME="${home:-/var/lib/caddy}" PATH=/usr/bin:/bin caddy validate --config "$1" --adapter caddyfile
 }
 
-# caddy_owns_log: a log file left by root (an earlier check run as root) is given back to Caddy.
+# caddy_owns_log: a log file left by root (say, a check someone ran as root by hand) is given back to Caddy.
+# True when it had to change it.
 caddy_owns_log() {
-  local log=/var/log/caddy/linear-hub.log
-  [[ $DRY_RUN == 0 && -e $log ]] || return 0
-  [[ $(stat -c '%U' "$log") == caddy ]] || run chown caddy:caddy "$log"
+  [[ $DRY_RUN == 0 && -e $CADDY_LOG ]] || return 1
+  [[ $(stat -c '%U' "$CADDY_LOG") != caddy ]] || return 1
+  run chown caddy:caddy "$CADDY_LOG"
+  note "the Caddy log $CADDY_LOG was not Caddy's; it is now"
 }
 
 check_dns() {
