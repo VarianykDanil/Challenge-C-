@@ -139,3 +139,45 @@ test('payments, a bank file, a bank details change and a run marked paid after t
     db.close();
   }
 });
+
+// Review of REL-4: the comparison used to fail open (any SQL error gave "nothing lost", so a plain yes was enough).
+test('when the money records cannot be compared, restore says so and still needs RESTORE typed', async () => {
+  const s = setup();
+  const r = await backupNow(s.db, { dir: s.backups, now: new Date('2026-10-19T01:00:00Z') });
+  // the live database's payments table is not what this version expects (a damaged or half-upgraded database)
+  s.db.exec('ALTER TABLE payment_items RENAME COLUMN live TO live_gone');
+  s.db.close();
+
+  const losses = paymentLosses(s.dbPath, r.path);
+  assert.ok(losses.unknown, 'the failure is reported, not hidden');
+  assert.equal(losses.total, 0);
+  const text = describeLosses(losses).join('\n');
+  assert.match(text, /could not compare the money records/);
+  assert.match(text, /check each payment against the bank statement/i);
+
+  const asked: Array<{ typed?: string }> = [];
+  const cancelled = await restoreDatabase({ dbPath: s.dbPath, candidate: r.path, port: 1, confirm: async (_q, o) => (asked.push(o ?? {}), false), log: () => {} });
+  assert.equal(cancelled.status, 'cancelled');
+  assert.deepEqual(asked, [{ typed: RESTORE_TYPED_WORD }], 'a plain yes is not enough');
+
+  const done = await restoreDatabase({ dbPath: s.dbPath, candidate: r.path, port: 1, confirm: async (_q, o) => o?.typed === RESTORE_TYPED_WORD, log: () => {} });
+  assert.equal(done.status, 'restored');
+  const db = new DatabaseSync(s.dbPath, { readOnly: true });
+  try {
+    const warning = JSON.parse((db.prepare(`SELECT value FROM meta WHERE key = ?`).get(RESTORE_WARNING_META) as { value: string }).value);
+    assert.equal(warning.unknown, true, 'the office is warned in the app too');
+  } finally {
+    db.close();
+  }
+});
+
+test('an unreadable live database also needs RESTORE typed (nothing tells what it held)', async () => {
+  const s = setup();
+  const r = await backupNow(s.db, { dir: s.backups, now: new Date('2026-10-19T01:00:00Z') });
+  s.db.close();
+  writeFileSync(s.dbPath, 'this is not a database any more');
+  for (const suffix of ['-wal', '-shm']) rmSync(s.dbPath + suffix, { force: true });
+  const losses = paymentLosses(s.dbPath, r.path);
+  assert.ok(losses.unknown);
+  assert.match(describeLosses(losses).join('\n'), /could not compare the money records/);
+});

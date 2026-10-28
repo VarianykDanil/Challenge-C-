@@ -95,25 +95,76 @@ export function readPassphrase(env: NodeJS.ProcessEnv = process.env): string | n
   }
 }
 
-/** Why off-site copies cannot be written right now (plain words), or null when they can. */
-export function offsiteProblem(config: OffsiteConfig): string | null {
-  if (!config.passphraseFile) return 'LM_OFFSITE_DIR is set but LM_BACKUP_PASSPHRASE_FILE is not: off-site copies need a passphrase file.';
+export interface OffsiteIssue {
+  code: 'no-passphrase' | 'passphrase-unreadable' | 'passphrase-short' | 'not-a-folder' | 'missing-folder';
+  /** For the person running the server (doctor, start-up, the backup command): names the settings and commands. */
+  message: string;
+  /** For the office (the bell, Settings): plain words, no setting names or commands. */
+  plain: string;
+}
+
+/** Why off-site copies cannot be written right now, or null when they can. Reads the passphrase file and the folder. */
+export function offsiteIssue(config: OffsiteConfig): OffsiteIssue | null {
+  if (!config.passphraseFile) {
+    return {
+      code: 'no-passphrase',
+      message: 'LM_OFFSITE_DIR is set but LM_BACKUP_PASSPHRASE_FILE is not: off-site copies need a passphrase file.',
+      plain: 'Off-site copies are switched on, but the passphrase that locks them is not set up, so none are made. Ask Noryn to finish setting them up.',
+    };
+  }
   let passphrase: string | null = null;
   try {
     passphrase = readFileSync(config.passphraseFile, 'utf8').trim();
   } catch {
-    return `The passphrase file ${config.passphraseFile} cannot be read.`;
+    return {
+      code: 'passphrase-unreadable',
+      message: `The passphrase file ${config.passphraseFile} cannot be read.`,
+      plain: 'The passphrase that locks the off-site copies cannot be read on the server, so none are made. Ask Noryn to check it.',
+    };
   }
   if (passphrase.length < OFFSITE_RULES.minPassphraseLength) {
-    return `The passphrase in ${config.passphraseFile} is too short: use at least ${OFFSITE_RULES.minPassphraseLength} characters (npm run backup -- --new-passphrase makes one).`;
+    return {
+      code: 'passphrase-short',
+      message: `The passphrase in ${config.passphraseFile} is too short: use at least ${OFFSITE_RULES.minPassphraseLength} characters (npm run backup -- --new-passphrase makes one).`,
+      plain: 'The passphrase that locks the off-site copies is too short, so none are made. Ask Noryn to set a longer one.',
+    };
   }
   try {
-    if (!statSync(config.dir).isDirectory()) return `The off-site folder ${config.dir} is not a folder.`;
+    if (!statSync(config.dir).isDirectory()) {
+      const message = `The off-site folder ${config.dir} is not a folder.`;
+      return { code: 'not-a-folder', message, plain: `${message} Ask Noryn to check where the off-site copies go.` };
+    }
   } catch {
     // never created here: a missing folder usually means the cloud drive is not mounted, and a copy on this disk is not off-site
-    return `The off-site folder ${config.dir} is not there. Is the cloud drive connected? Linear Hub does not create it, so a copy never lands on this disk by mistake.`;
+    const message = `The off-site folder ${config.dir} is not there. Is the cloud drive connected? Linear Hub does not create it, so a copy never lands on this disk by mistake.`;
+    return { code: 'missing-folder', message, plain: message };
   }
   return null;
+}
+
+/** The operator's message from offsiteIssue (start-up, doctor, the backup command). */
+export function offsiteProblem(config: OffsiteConfig): string | null {
+  return offsiteIssue(config)?.message ?? null;
+}
+
+const CHECK_TTL_MS = 60_000;
+let checkCache: { key: string; at: number; issue: OffsiteIssue | null } | null = null;
+
+/**
+ * offsiteIssue at most once a minute, for the bell and Settings: those run on every page load, and a hung network or
+ * cloud drive would otherwise stall each of them. Writing a copy always checks afresh (and resets this).
+ */
+export function offsiteIssueCached(config: OffsiteConfig, now: number = Date.now()): OffsiteIssue | null {
+  const key = `${config.dir}\0${config.passphraseFile ?? ''}`;
+  if (checkCache && checkCache.key === key && now - checkCache.at >= 0 && now - checkCache.at < CHECK_TTL_MS) return checkCache.issue;
+  const issue = offsiteIssue(config);
+  checkCache = { key, at: now, issue };
+  return issue;
+}
+
+/** Drops the cached check (after an off-site write, and in tests). */
+export function forgetOffsiteCheck(): void {
+  checkCache = null;
 }
 
 /** A new passphrase: 6 groups of 5 letters and digits (no look-alikes), about 150 bits. */
@@ -444,6 +495,7 @@ export const archiveNameFor = (backupName: string) => backupName.replace(/\.sqli
  */
 export async function writeOffsiteCopy(db: DatabaseSync, config: OffsiteConfig, input: OffsiteInput): Promise<OffsiteResult> {
   const now = input.now ?? new Date();
+  forgetOffsiteCheck(); // the bell and Settings see this attempt's state at once
   try {
     const problem = offsiteProblem(config);
     if (problem) throw new Error(problem);
@@ -571,7 +623,7 @@ export interface OffsiteStatus {
   /** The last failure, when it is newer than the last success. */
   error: string | null;
   errorAt: string | null;
-  /** Why it cannot run right now (no passphrase, folder missing), or null. */
+  /** Why it cannot run right now (no passphrase, folder missing), in plain words, or null. */
   problem: string | null;
 }
 
@@ -594,7 +646,7 @@ export function offsiteStatus(db: DatabaseSync, config: OffsiteConfig | null): O
     file: m[OFFSITE_META.file] ?? null,
     error: failedLast ? (m[OFFSITE_META.error] ?? 'failed') : null,
     errorAt: failedLast ? errorAt : null,
-    problem: config ? offsiteProblem(config) : null,
+    problem: config ? (offsiteIssueCached(config)?.plain ?? null) : null,
   };
 }
 

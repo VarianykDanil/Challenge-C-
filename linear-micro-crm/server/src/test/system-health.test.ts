@@ -9,8 +9,9 @@ import os from 'node:os';
 import path from 'node:path';
 import type { UserWithTeam } from '@lm/shared';
 import { run } from '../db/connection.ts';
-import { configureSystemHealth, provider } from '../lib/attention/system.ts';
+import { configureSystemHealth, provider, shortText } from '../lib/attention/system.ts';
 import { configureBackupDir, recordBackup, recordBackupFailure } from '../lib/backup.ts';
+import { forgetOffsiteCheck, offsiteIssueCached } from '../lib/offsite.ts';
 import { configureErrorLog, ERROR_LOG, logServerError, serverErrorsSince } from '../lib/errorLog.ts';
 import { getUser } from '../db/queries.ts';
 import { recordSheetConfirmed } from '../lib/recoverySheet.ts';
@@ -82,7 +83,10 @@ describe('the system-health items', () => {
     const failing = items(admin).find((i) => i.key.startsWith('system:offsite-failed'));
     assert.equal(failing?.severity, 'danger');
     assert.match(failing!.body, /not there/);
+    // the whole message, never cut mid-word (it used to end "Linear Hub does not create i")
+    assert.match(failing!.body, /Linear Hub does not create it, so a copy never lands on this disk by mistake\. The backups on the server itself are still made\.$/);
     mkdirSync(path.join(tmp, 'not-mounted'));
+    forgetOffsiteCheck(); // the folder check is cached for a minute (see below)
     assert.ok(items(admin).some((i) => i.key === 'system:offsite-first'), 'switched on, none made yet');
     setMeta('last_offsite_at', new Date(Date.now() - 3 * 24 * 3_600_000).toISOString());
     assert.match(items(admin).find((i) => i.key.startsWith('system:offsite-old'))!.title, /^No off-site copy for 3 days$/);
@@ -90,6 +94,82 @@ describe('the system-health items', () => {
     setMeta('last_offsite_error', 'The upload folder went away');
     assert.match(items(admin).find((i) => i.key.startsWith('system:offsite-failed'))!.body, /upload folder went away/);
     configureSystemHealth({ offsite: null });
+  });
+
+  test('a long error from the system is cut on a word boundary, with …', () => {
+    const admin = srv.fixture!.users.admin;
+    const pass = path.join(tmp, 'pass-long.txt');
+    writeFileSync(pass, 'a-long-enough-passphrase\n');
+    mkdirSync(path.join(tmp, 'mounted-long'), { recursive: true });
+    configureSystemHealth({ offsite: { dir: path.join(tmp, 'mounted-long'), passphraseFile: pass, includeVideos: false } });
+    forgetOffsiteCheck();
+    setMeta('last_offsite_at', new Date(Date.now() - 3_600_000).toISOString());
+    setMeta('last_offsite_error_at', new Date().toISOString());
+    setMeta('last_offsite_error', `EIO: input/output error while writing ${'segment '.repeat(40)}end`);
+    const body = items(admin).find((i) => i.key.startsWith('system:offsite-failed'))!.body;
+    assert.match(body, /segment… The backups on the server itself are still made\.$/);
+    assert.equal(shortText('short enough', 40), 'short enough');
+    assert.equal(shortText('one two three four', 12), 'one two…');
+    assert.equal(shortText('abcdefghijklmnop', 8), 'abcdefgh…', 'no space to cut at: cut at the limit');
+    run(srv.db, `DELETE FROM meta WHERE key IN ('last_offsite_at', 'last_offsite_error_at', 'last_offsite_error')`);
+    configureSystemHealth({ offsite: null });
+  });
+
+  test('the folder and passphrase check is made at most once a minute (a hung cloud drive cannot stall every page)', () => {
+    const dir = path.join(tmp, 'cache-check');
+    const pass = path.join(tmp, 'pass-cache.txt');
+    writeFileSync(pass, 'a-long-enough-passphrase\n');
+    const config = { dir, passphraseFile: pass, includeVideos: false };
+    forgetOffsiteCheck();
+    const t0 = 1_000_000_000_000;
+    assert.equal(offsiteIssueCached(config, t0)?.code, 'missing-folder');
+    mkdirSync(dir);
+    assert.equal(offsiteIssueCached(config, t0 + 30_000)?.code, 'missing-folder', 'still the answer from 30 s ago');
+    assert.equal(offsiteIssueCached(config, t0 + 61_000), null, 'checked again after a minute');
+    forgetOffsiteCheck();
+  });
+
+  test('the bell speaks plainly: no commands, no setting names', () => {
+    const admin = srv.fixture!.users.admin;
+    appKeyFingerprint(); // the server makes its key at start-up
+    const jargon = /\bnpm\b|LM_[A-Z_]+|=0\b|EnvironmentFile|systemctl|launchctl/;
+    const seen: string[] = [];
+    const collect = () => {
+      for (const i of items(admin)) seen.push(`${i.key}: ${i.title} ${i.body}`);
+    };
+    run(srv.db, `DELETE FROM meta WHERE key IN ('last_backup_error_at', 'last_backup_error', 'last_offsite_at', 'last_offsite_error_at', 'last_offsite_error')`);
+    configureSystemHealth({ offsite: null });
+    setMeta('last_backup_at', new Date(Date.now() - 50 * 3_600_000).toISOString());
+    collect(); // no backup for 50 hours, off-site off, recovery sheet
+    configureBackupDir(path.join(tmp, 'backups'), { scheduled: false });
+    collect(); // backups off
+    configureBackupDir(path.join(tmp, 'backups'), { scheduled: true });
+    recordBackupFailure(srv.db, new Error('disk full'), new Date());
+    collect(); // backup failed
+    configureSystemHealth({ offsite: { dir: path.join(tmp, 'nowhere'), passphraseFile: null, includeVideos: false } });
+    forgetOffsiteCheck();
+    collect(); // no passphrase
+    const pass = path.join(tmp, 'pass-short.txt');
+    writeFileSync(pass, 'short\n');
+    configureSystemHealth({ offsite: { dir: path.join(tmp, 'nowhere'), passphraseFile: pass, includeVideos: false } });
+    forgetOffsiteCheck();
+    collect(); // passphrase too short
+    mkdirSync(path.join(tmp, 'there'), { recursive: true });
+    writeFileSync(pass, 'a-long-enough-passphrase\n');
+    configureSystemHealth({ offsite: { dir: path.join(tmp, 'there'), passphraseFile: pass, includeVideos: false } });
+    forgetOffsiteCheck();
+    collect(); // switched on, none yet
+    setMeta('last_offsite_at', new Date(Date.now() - 3 * 86_400_000).toISOString());
+    collect(); // none for 3 days
+    const keys = new Set(seen.map((l) => l.split(':').slice(0, 2).join(':')));
+    for (const k of ['system:backup-old', 'system:backups-off', 'system:backup-failed', 'system:offsite-none', 'system:offsite-failed', 'system:offsite-first', 'system:offsite-old', 'system:recovery-sheet']) {
+      assert.ok(keys.has(k), `${k} was looked at`);
+    }
+    for (const line of seen) assert.doesNotMatch(line, jargon, line);
+    run(srv.db, `DELETE FROM meta WHERE key IN ('last_backup_error_at', 'last_backup_error', 'last_offsite_at')`);
+    recordBackup(srv.db, new Date().toISOString(), 'linear-2026-10-27-1200.sqlite');
+    configureSystemHealth({ offsite: null });
+    forgetOffsiteCheck();
   });
 
   test('low disk space: a warning, and a danger item when nearly full', () => {
@@ -136,6 +216,9 @@ describe('the system-health items', () => {
     logServerError('Backup failed (nightly)', new Error('disk full'));
     const item = items(admin).find((i) => i.key.startsWith('system:errors'));
     assert.match(item!.title, /^2 server errors in the last 24 hours$/);
+    // one key, with the count: the bell treats a growing count as new and a seen one as seen (a dismissal sticks)
+    assert.equal(item!.key, 'system:errors');
+    assert.equal(item!.count, 2);
     assert.match(item!.body, /logs\/errors\.log/);
     const text = readFileSync(path.join(data, 'logs', 'errors.log'), 'utf8');
     assert.match(text, /^\d{4}-\d{2}-\d{2}T[\d:.]+Z Server error \[GET \/api\/venues user 7\]: Error: boom/m);

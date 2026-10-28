@@ -9,10 +9,10 @@
  * route returns the app key or takes it.
  */
 import path from 'node:path';
-import { statfsSync } from 'node:fs';
 import { Router, type Request } from 'express';
 import type { UserWithTeam } from '@lm/shared';
 import type { Db } from '../db/connection.ts';
+import { disk } from '../lib/attention/system.ts';
 import { currentBackupDir, currentOffsite, lastBackupFailure } from '../lib/backup.ts';
 import { backupVideos } from '../lib/backupFiles.ts';
 import { appSecretFile, currentAppSecret, secretFingerprint, shortFingerprint } from '../lib/crypto.ts';
@@ -42,13 +42,7 @@ export function systemRouter(db: Db): Router {
     const fingerprint = current ? secretFingerprint(current.secret) : null;
     const sheet = sheetStatus(db, fingerprint);
     const dbFile = databasePath(db);
-    let disk: { freeBytes: number; totalBytes: number } | null = null;
-    try {
-      const s = statfsSync(dbFile.startsWith('(') ? currentBackupDir() : path.dirname(dbFile));
-      disk = { freeBytes: Number(s.bavail) * Number(s.bsize), totalBytes: Number(s.blocks) * Number(s.bsize) };
-    } catch {
-      disk = null;
-    }
+    const space = disk(dbFile.startsWith('(') ? currentBackupDir() : path.dirname(dbFile));
     const offsite = offsiteStatus(db, currentOffsite());
     res.json({
       key: {
@@ -63,7 +57,7 @@ export function systemRouter(db: Db): Router {
       offsite: { configured: offsite.configured, dir: offsite.dir, lastAt: offsite.lastAt, file: offsite.file, error: offsite.error, errorAt: offsite.errorAt, problem: offsite.problem },
       backupFailure: lastBackupFailure(db),
       files: { includeVideos: backupVideos() },
-      disk,
+      disk: space ? { freeBytes: space.free, totalBytes: space.total } : null,
       serverErrors24h: serverErrorsSince(),
       errorLog: errorLogFile() ? path.join(path.basename(path.dirname(errorLogFile()!)), path.basename(errorLogFile()!)) : null,
     });

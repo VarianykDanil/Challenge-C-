@@ -66,6 +66,8 @@ describe('backupNow', () => {
     assert.equal(r.file, 'linear-2026-10-19-0230.sqlite');
     assert.equal(r.path, path.join(backups, r.file));
     assert.ok(r.bytes > 0 && statSync(r.path).size === r.bytes);
+    // the copy holds everyone's data: private to this user, like the database itself should be
+    if (process.platform !== 'win32') assert.equal(statSync(r.path).mode & 0o777, 0o600);
 
     const copy = new DatabaseSync(r.path, { readOnly: true });
     try {
@@ -563,6 +565,10 @@ describe('restoreDatabase', () => {
     assert.deepEqual(restoreKeyNotes('none', both), [], 'LM_APP_SECRET set, or no copy to compare with');
     assert.deepEqual(restoreKeyNotes('missing', nobody), []);
     assert.match(restoreKeyNotes('installed', both)[0]!, /two-step codes and sign-in PINs keep working/);
+    assert.match(restoreKeyNotes('installed', both, null, 'backups')[0]!, /from the backups folder/);
+    const replaced = restoreKeyNotes('replaced', both, '/data/app-secret.before-restore-x', 'backups')[0]!;
+    assert.match(replaced, /npm run recovery-sheet/, 'a new sheet is made on the server');
+    assert.doesNotMatch(replaced, /Settings › Backups/);
     assert.match(restoreKeyNotes('differs', nobody)[0]!, /^Note: .* nothing depends on it yet/);
     const missingBoth = restoreKeyNotes('missing', both)[0]!;
     assert.match(missingBoth, /3 people with a sign-in PIN .* and 1 person with two-step sign-in cannot finish signing in with a code/);

@@ -470,6 +470,7 @@ async function runBackup(db: DatabaseSync, opts: BackupOptions): Promise<BackupR
     } finally {
       copy.close();
     }
+    if (process.platform !== 'win32') chmodSync(partial, 0o600); // everyone's data: private to this user
     renameSync(partial, target);
   } catch (err) {
     removeDbFiles(partial);
@@ -846,6 +847,8 @@ export type RestoreOutcome =
       secret: 'installed' | 'replaced' | 'same' | 'differs' | 'missing' | 'none';
       /** The key file kept aside (secret 'replaced'). */
       keptKey: string | null;
+      /** Where the key put in place came from: an off-site backup, or the backups folder (null: none was put in place). */
+      keySource: 'archive' | 'backups' | null;
       candidate: DbSummary;
       /** The uploaded files put back from the backup's snapshot (null: the backup had none). */
       files: FilesRestoreResult | null;
@@ -1025,8 +1028,8 @@ export async function restoreDatabase(opts: RestoreOptions): Promise<RestoreOutc
     const busyNow = await running();
     if (busyNow) return { status: 'refused', reason: busyNow };
 
-    if (losses.total) {
-      // the restored database remembers what it lost, so the office is warned in the app as well
+    if (losses.total || losses.unknown) {
+      // the restored database remembers what it lost (or that nobody could tell), so the office is warned in the app as well
       const w = new DatabaseSync(staging);
       try {
         w.prepare(`INSERT INTO meta (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value`).run(
@@ -1062,7 +1065,8 @@ export async function restoreDatabase(opts: RestoreOptions): Promise<RestoreOutc
     }
     const folders = opts.folders ?? foldersOutsideBackup(dbPath);
     const files = filesSnapshot ? restoreFiles(filesSnapshot, folders, stamp) : null;
-    return { status: 'restored', dbPath, previous: moved.includes(previous) ? previous : null, moved, secret, keptKey, candidate: check.summary, files, losses };
+    const keySource = secret === 'installed' || secret === 'replaced' ? (archive ? 'archive' : 'backups') : null;
+    return { status: 'restored', dbPath, previous: moved.includes(previous) ? previous : null, moved, secret, keptKey, keySource, candidate: check.summary, files, losses };
   } finally {
     // after the swap the staging name no longer exists; on a refusal or cancel this deletes the private copy
     removeDbFiles(staging);
@@ -1082,19 +1086,21 @@ export function restoreKeyNotes(
   secret: Extract<RestoreOutcome, { status: 'restored' }>['secret'],
   candidate: Pick<DbSummary, 'twoStepUsers' | 'pinUsers'>,
   keptKey: string | null = null,
+  keySource: 'archive' | 'backups' | null = 'backups',
 ): string[] {
+  const from = keySource === 'archive' ? 'the off-site backup' : 'the backups folder';
   const { pinUsers, twoStepUsers } = candidate;
   const pinReset =
     `If no copy of the key is left, reset those PINs: npm run pin:reset -- <email> on this computer for an administrator, ` +
     'then Team › person › Edit profile › Reset PIN for everyone else.';
   const twoStepReset = 'People with two-step sign-in can use a recovery code, and an administrator resets it (Team › Edit › Reset two-step verification).';
   if (secret === 'installed') {
-    return ['Put the app secret from the backups folder in place (there was none), so two-step codes and sign-in PINs keep working.'];
+    return [`Put the app key from ${from} in place (there was none), so two-step codes and sign-in PINs keep working.`];
   }
   if (secret === 'replaced') {
     return [
-      `The app key next to the database did not open this backup, so the backup's own key was put in place${keptKey ? ` and the old one kept as ${keptKey}` : ''}. ` +
-        'Make a new recovery sheet once Linear Hub is running (Settings › Backups): the sheet you have is for the other key.',
+      `The app key next to the database did not open this backup, so the backup's own key (from ${from}) was put in place${keptKey ? ` and the old one kept as ${keptKey}` : ''}. ` +
+        'Make a new recovery sheet with  npm run recovery-sheet  once Linear Hub is running: the sheet you have is for the other key.',
     ];
   }
   if (secret === 'differs') {

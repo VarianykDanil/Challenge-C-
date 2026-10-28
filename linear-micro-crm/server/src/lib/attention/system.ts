@@ -8,8 +8,9 @@
  *  - the app key is not on a recovery sheet yet (made with the owner on the server computer; others ask the owner);
  *  - server errors in the last 24 hours (lib/errorLog.ts), with where the details are;
  *  - the database was restored over payments it does not know about (for 14 days after the restore).
- * One statement (the meta values) per call; the rest is the file system, so the feed's budget holds. Backups and the
- * server's errors are about the real clock, not the business day.
+ * One statement (the meta values) per call; the rest is the file system (the disk and the off-site folder checked at
+ * most once a minute), so the feed's budget holds. Backups and the server's errors are about the real clock, not the
+ * business day. The words are for the office: no commands or setting names (those are in the docs and npm run doctor).
  */
 import { statfsSync } from 'node:fs';
 import path from 'node:path';
@@ -18,7 +19,7 @@ import { all } from '../../db/connection.ts';
 import { BACKUP_FAILURE_META, BACKUP_RULES, backupScheduleOn, currentBackupDir, formatBytes, listBackups } from '../backup.ts';
 import { currentAppSecret, secretFingerprint } from '../crypto.ts';
 import { errorLogFile, serverErrorsSince } from '../errorLog.ts';
-import { OFFSITE_META, OFFSITE_RULES, offsiteProblem, type OffsiteConfig } from '../offsite.ts';
+import { OFFSITE_META, OFFSITE_RULES, offsiteIssueCached, type OffsiteConfig } from '../offsite.ts';
 import { SHEET_META } from '../recoverySheet.ts';
 import { RESTORE_WARNING_META } from '../restoreCheck.ts';
 import type { AttentionProvider } from './types.ts';
@@ -44,8 +45,8 @@ export function configureSystemHealth(c: Partial<SystemHealthConfig>): void {
 }
 
 let diskCache: { at: number; dir: string; free: number; total: number } | null = null;
-/** Free and total bytes on the disk that holds `dir`, at most once a minute. */
-function disk(dir: string, now: number): { free: number; total: number } | null {
+/** Free and total bytes on the disk that holds `dir`, at most once a minute (the bell and Settings share it). */
+export function disk(dir: string, now: number = Date.now()): { free: number; total: number } | null {
   if (diskCache && diskCache.dir === dir && now - diskCache.at < 60_000) return diskCache;
   try {
     const s = statfsSync(dir);
@@ -57,6 +58,17 @@ function disk(dir: string, now: number): { free: number; total: number } | null 
 }
 
 const hoursText = (h: number) => (h >= 48 ? `${Math.floor(h / 24)} days` : `${Math.max(1, Math.round(h))} hours`);
+
+/** A raw error message cut to `max` characters on a word boundary, with … (Linear Hub's own messages are never cut). */
+export function shortText(text: string, max: number): string {
+  const t = text.trim().replace(/\s+/g, ' ');
+  if (t.length <= max) return t;
+  const cut = t.lastIndexOf(' ', max);
+  return `${(cut > max / 2 ? t.slice(0, cut) : t.slice(0, max)).replace(/[\s,;:.]+$/, '')}…`;
+}
+
+/** A sentence from raw error text: ends with a full stop (or the … of a cut). */
+const sentence = (t: string) => (!t ? '' : /[.!?…]$/.test(t) ? t : `${t}.`);
 const SETTINGS = '/settings#backups';
 
 export const provider: AttentionProvider = {
@@ -91,7 +103,7 @@ export const provider: AttentionProvider = {
         kind: 'system',
         severity: 'danger',
         title: 'The last backup failed',
-        body: `${(m[BACKUP_FAILURE_META.message] ?? '').slice(0, 160)} Linear Hub tries again at the next check. If it keeps failing, run npm run doctor on the server.`.trim(),
+        body: `${sentence(shortText(m[BACKUP_FAILURE_META.message] ?? '', 160))} Linear Hub tries again at the next check. If it keeps failing, ask Noryn to look at the server.`.trim(),
         href: SETTINGS,
         at: m[BACKUP_FAILURE_META.at],
       });
@@ -101,7 +113,7 @@ export const provider: AttentionProvider = {
         kind: 'system',
         severity: 'warning',
         title: 'Automatic backups are off',
-        body: 'This server was started with LM_BACKUP=0, so it makes no nightly backups. Run npm run backup on the server, or start it without LM_BACKUP=0.',
+        body: 'This server was started with automatic backups switched off, so it makes no nightly backups. Ask Noryn to switch them back on.',
         href: SETTINGS,
       });
     } else {
@@ -113,7 +125,7 @@ export const provider: AttentionProvider = {
           kind: 'system',
           severity: 'warning',
           title: lastOk ? `No backup for ${hoursText(age)}` : 'No backup yet',
-          body: 'Backups only run while Linear Hub is running. Leave the server on overnight, or run npm run backup on it now.',
+          body: 'Backups only run while Linear Hub is running. Leave the server computer on overnight, or ask Noryn to make a backup now.',
           href: SETTINGS,
           ...(lastOk ? { at: new Date(lastOk).toISOString() } : {}),
         });
@@ -124,14 +136,16 @@ export const provider: AttentionProvider = {
     if (config.offsite) {
       const okAt = t(m[OFFSITE_META.at]);
       const errAt = t(m[OFFSITE_META.errorAt]);
-      const problem = offsiteProblem(config.offsite);
-      if (problem || (Number.isFinite(errAt) && (!Number.isFinite(okAt) || errAt > okAt))) {
+      const issue = offsiteIssueCached(config.offsite, now);
+      if (issue || (Number.isFinite(errAt) && (!Number.isFinite(okAt) || errAt > okAt))) {
+        // Linear Hub's own words whole; a raw error from the system cut on a word boundary
+        const why = issue ? issue.plain : sentence(shortText(m[OFFSITE_META.error] ?? '', 200));
         items.push({
-          key: `system:offsite-failed:${problem ? 'setup' : m[OFFSITE_META.errorAt]}`,
+          key: `system:offsite-failed:${issue ? issue.code : m[OFFSITE_META.errorAt]}`,
           kind: 'system',
           severity: 'danger',
           title: 'The off-site backup copy is failing',
-          body: `${(problem ?? m[OFFSITE_META.error] ?? '').slice(0, 200)} The backups on the server itself are still made.`.trim(),
+          body: `${why} The backups on the server itself are still made.`.trim(),
           href: SETTINGS,
           ...(Number.isFinite(errAt) ? { at: m[OFFSITE_META.errorAt] } : {}),
         });
@@ -141,7 +155,7 @@ export const provider: AttentionProvider = {
           kind: 'system',
           severity: 'info',
           title: 'No off-site copy yet',
-          body: 'Off-site copies are switched on. The first one is made with the next backup, or run npm run backup on the server now.',
+          body: 'Off-site copies are switched on. The first one is made with the next nightly backup.',
           href: SETTINGS,
         });
       } else if ((now - okAt) / HOUR > OFFSITE_RULES.staleHours) {
@@ -150,7 +164,7 @@ export const provider: AttentionProvider = {
           kind: 'system',
           severity: 'warning',
           title: `No off-site copy for ${hoursText((now - okAt) / HOUR)}`,
-          body: 'The newest backups have not reached the off-site folder. Check that the cloud drive is connected, then run npm run backup on the server.',
+          body: 'The newest backups have not reached the off-site folder. Check that the cloud drive is connected: the next backup tries again.',
           href: SETTINGS,
           at: m[OFFSITE_META.at],
         });
@@ -161,7 +175,7 @@ export const provider: AttentionProvider = {
         kind: 'system',
         severity: 'info',
         title: 'Backups are on this computer only',
-        body: 'If the computer is lost or broken, the backups go with it. Noryn can switch on encrypted off-site copies (LM_OFFSITE_DIR).',
+        body: 'If the computer is lost or broken, the backups go with it. Noryn can switch on locked copies in a second place, such as a cloud drive.',
         href: SETTINGS,
       });
     }
@@ -203,7 +217,8 @@ export const provider: AttentionProvider = {
     if (errors > 0) {
       const file = errorLogFile();
       items.push({
-        key: `system:errors:${errors}`,
+        // one key with the count: a seen item stays seen until more errors come (attentionSeen compares the count)
+        key: 'system:errors',
         kind: 'system',
         severity: 'warning',
         title: `${errors} server error${errors === 1 ? '' : 's'} in the last 24 hours`,
@@ -217,15 +232,18 @@ export const provider: AttentionProvider = {
     const restored = m[RESTORE_WARNING_META];
     if (restored) {
       try {
-        const w = JSON.parse(restored) as { at: string; backup: string; sent: number; approved: number; bankFiles: number; bankDetails: number; paidRuns: number };
+        const w = JSON.parse(restored) as { at: string; backup: string; sent: number; approved: number; bankFiles: number; bankDetails: number; paidRuns: number; unknown?: boolean };
         if (now - Date.parse(w.at) < RESTORE_WARNING_DAYS * 24 * HOUR) {
+          const found = w.sent + w.approved + w.bankFiles + w.bankDetails + w.paidRuns > 0;
           items.push({
             key: `system:restored:${w.at}`,
             kind: 'system',
             severity: 'danger',
             title: 'Restored from an older backup: check payments with the bank',
             body:
-              `The database was restored from ${w.backup}, which did not have some payments, bank files or bank details changes. ` +
+              (found
+                ? `The database was restored from ${w.backup}, which did not have some payments, bank files or bank details changes. `
+                : `The database was restored from ${w.backup}. Linear Hub could not check whether it had every payment, bank file and bank details change. `) +
               'Before paying anyone, check each payment against the bank statement, so nobody is paid twice or to old bank details.',
             href: '/finance/pay',
             at: w.at,

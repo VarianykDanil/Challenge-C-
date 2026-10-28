@@ -5,7 +5,9 @@
  * paid to someone's old bank details. Restore lists them and asks for a typed confirmation; the restored database
  * then carries a warning (meta `restore_payment_warning`) that the Needs-attention bell shows the office.
  *
- * Compared by content, not by clock: a row counts when the backup lacks it or holds an earlier state of it.
+ * Compared by content, not by clock: a row counts when the backup lacks it or holds an earlier state of it. When the
+ * comparison cannot be made (an unreadable or unexpected database), it fails closed: `unknown` says why, and restore
+ * asks for the typed confirmation and stores the warning all the same.
  */
 import { DatabaseSync } from 'node:sqlite';
 import { formatPence } from '@lm/shared';
@@ -21,14 +23,18 @@ export interface PaymentLosses {
   bankDetails: string[];
   /** Pay runs marked paid that the backup still has as unpaid. */
   paidRuns: { count: number; gross: number; names: string[] };
-  /** Everything above added up (0: nothing to lose). */
+  /** Everything above added up (0: nothing found to lose). */
   total: number;
+  /** Why the comparison could not be made (null when it was): then nothing tells what would be forgotten. */
+  unknown: string | null;
 }
 
 export const RESTORE_WARNING_META = 'restore_payment_warning';
 
 /** Nothing lost (no live database to compare with). */
-export const noLosses = (): PaymentLosses => ({ approved: [], sent: { count: 0, pence: 0, names: [] }, bankFiles: [], bankDetails: [], paidRuns: { count: 0, gross: 0, names: [] }, total: 0 });
+export const noLosses = (): PaymentLosses => ({ approved: [], sent: { count: 0, pence: 0, names: [] }, bankFiles: [], bankDetails: [], paidRuns: { count: 0, gross: 0, names: [] }, total: 0, unknown: null });
+
+const reason = (err: unknown) => (err instanceof Error ? err.message : String(err)).split('\n')[0]!.slice(0, 200);
 
 function tables(db: DatabaseSync, schema: 'main' | 'bk'): Set<string> {
   return new Set((db.prepare(`SELECT name FROM ${schema}.sqlite_master WHERE type = 'table'`).all() as Array<{ name: string }>).map((r) => r.name));
@@ -40,8 +46,8 @@ export function paymentLosses(liveFile: string, backupFile: string): PaymentLoss
   let db: DatabaseSync;
   try {
     db = new DatabaseSync(liveFile, { readOnly: true });
-  } catch {
-    return out; // no readable live database: nothing to lose
+  } catch (err) {
+    return { ...out, unknown: `the current database could not be opened: ${reason(err)}` };
   }
   try {
     db.prepare(`ATTACH DATABASE ? AS bk`).run(backupFile);
@@ -106,8 +112,10 @@ export function paymentLosses(liveFile: string, backupFile: string): PaymentLoss
     }
     out.total = out.approved.length + out.sent.count + out.bankFiles.length + out.bankDetails.length + out.paidRuns.count;
     return out;
-  } catch {
-    return out;
+  } catch (err) {
+    // fail closed: an error must never read as "nothing to lose"
+    out.total = out.approved.length + out.sent.count + out.bankFiles.length + out.bankDetails.length + out.paidRuns.count;
+    return { ...out, unknown: reason(err) };
   } finally {
     db.close();
   }
@@ -119,7 +127,14 @@ const pounds = (n: number) => `£${n.toLocaleString('en-GB', { minimumFractionDi
 
 /** The lines restore prints before asking (empty when nothing would be lost). */
 export function describeLosses(l: PaymentLosses): string[] {
-  if (!l.total) return [];
+  if (!l.total && !l.unknown) return [];
+  if (!l.total) {
+    return [
+      `Linear Hub could not compare the money records in the current database with this backup (${l.unknown}).`,
+      'So it cannot tell whether restoring makes it forget payments approved or sent, bank files, bank details changes or pay runs marked paid after the backup.',
+      'If you restore, check each payment against the bank statement before paying anyone, so nobody is paid twice or to old bank details.',
+    ];
+  }
   const lines = ['This backup is older than these money records. Restoring it makes Linear Hub forget them:'];
   if (l.approved.length) {
     const pence = l.approved.reduce((n, a) => n + a.pence, 0);
@@ -129,6 +144,7 @@ export function describeLosses(l: PaymentLosses): string[] {
   if (l.bankFiles.length) lines.push(`  - ${plural(l.bankFiles.length, 'bank file')} made: ${some(l.bankFiles.map((f) => f.fileName))}`);
   if (l.bankDetails.length) lines.push(`  - ${plural(l.bankDetails.length, 'bank details change', 'bank details changes')}: ${some(l.bankDetails)}. The backup has their OLD bank details.`);
   if (l.paidRuns.count) lines.push(`  - ${plural(l.paidRuns.count, 'pay run')} marked paid (${pounds(l.paidRuns.gross)}): ${some(l.paidRuns.names)}`);
+  if (l.unknown) lines.push(`  - and maybe more: Linear Hub could not compare everything (${l.unknown})`);
   lines.push(
     'After the restore, Linear Hub would show these people as not paid yet, so they could be paid twice, or paid to old bank details.',
     'Check each one against the bank statement before paying anyone.',
@@ -146,5 +162,6 @@ export function restoreWarningRecord(l: PaymentLosses, backupName: string, at: D
     bankFiles: l.bankFiles.length,
     bankDetails: l.bankDetails.length,
     paidRuns: l.paidRuns.count,
+    unknown: Boolean(l.unknown),
   });
 }

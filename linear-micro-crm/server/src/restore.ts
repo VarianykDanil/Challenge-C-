@@ -128,9 +128,9 @@ if (outcome.status === 'cancelled') {
 }
 console.log(`Restored. ${outcome.dbPath} now holds the backup (${outcome.candidate.users} users, ${outcome.candidate.gauges} gauge entries).`);
 if (outcome.previous) console.log(`The database it replaced is kept as ${outcome.previous}${outcome.moved.length > 1 ? ' (with its -wal/-shm files)' : ''}.`);
-for (const line of restoreKeyNotes(outcome.secret, outcome.candidate, outcome.keptKey)) console.log(line);
+for (const line of restoreKeyNotes(outcome.secret, outcome.candidate, outcome.keptKey, outcome.keySource)) console.log(line);
 for (const line of restoreFolderNotes(foldersOutsideBackup(dbPath), outcome.files)) console.log(line);
-if (outcome.losses.total) {
+if (outcome.losses.total || outcome.losses.unknown) {
   console.log('Before paying anyone: check the payments listed above against the bank. Administrators also see this warning in Linear Hub.');
 }
 console.log(service ? 'Start it again: npm run service:install' : 'Start it again: npm start');
