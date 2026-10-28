@@ -32,6 +32,7 @@ import { all, placeholders } from '../../db/connection.ts';
 import { DAY_CHECK_LOOKBACK_DAYS, PAY_DAY_CHECKS_KEY } from '../payDays.ts';
 import { listPaymentProviders } from '../payments/registry.ts';
 import { TWO_APPROVALS_KEY, TWO_APPROVALS_OFF_REQUEST_KEY } from '../payments/settings.ts';
+import { DEMO_PEOPLE_KEY, TRIAL_MODE_KEY } from '../trialMode.ts';
 import type { AttentionProvider } from './types.ts';
 
 /**
@@ -199,12 +200,16 @@ export const provider: AttentionProvider = {
        UNION ALL
        SELECT 'twostuck', 0, NULL, NULL, NULL, NULL, NULL, NULL
        FROM meta t WHERE t.key = ? AND t.value IN ('on', 'auto-on')
-         AND (SELECT COUNT(*) FROM users a WHERE a.role = 'admin' AND a.status = 'active' AND a.totp_enabled_at IS NOT NULL) < 2
+         AND (SELECT COUNT(*) FROM users a WHERE a.role = 'admin' AND a.status = 'active' AND a.totp_enabled_at IS NOT NULL
+                AND a.id NOT IN (SELECT d.value FROM meta p, json_each(p.value) d
+                                 WHERE p.key = ? AND json_valid(p.value) AND EXISTS (SELECT 1 FROM meta tm WHERE tm.key = ? AND tm.value = '1'))) < 2
          AND EXISTS (SELECT 1 FROM payment_connections c WHERE c.mode = 'live' AND c.disconnected_at IS NULL)
        ORDER BY at DESC`,
       [
         me.id, me.id, me.id, since, since, ...(fileProviders.length ? fileProviders : ['-']), daysSince(now.today), now.today, PAY_DAY_CHECKS_KEY,
         TWO_APPROVALS_OFF_REQUEST_KEY, me.id, TWO_APPROVALS_KEY, TWO_APPROVALS_KEY,
+        // during the trial the demo company's administrators never approve a payment (lib/payments/settings.ts adminsWithTwoStep)
+        DEMO_PEOPLE_KEY, TRIAL_MODE_KEY,
       ],
     );
     const items: AttentionItem[] = [...noticeItem(rows), ...daysItem(rows, true)];

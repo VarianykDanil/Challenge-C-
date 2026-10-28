@@ -16,16 +16,26 @@
  * administrator's fresh code (checked last, so a refused change keeps the code); the route's audit spec records it.
  */
 import type { PaymentsSettings, UserWithTeam } from '@lm/shared';
-import { get, run, type Db } from '../../db/connection.ts';
+import { all, get, run, type Db } from '../../db/connection.ts';
 import { nowISO } from '../dates.ts';
 import { badRequest, conflict } from '../errors.ts';
+import { isRestrictedDemo } from '../trial.ts';
 
 export const TWO_APPROVALS_KEY = 'ext:payments:two_approvals';
 export const TWO_APPROVALS_OFF_REQUEST_KEY = 'ext:payments:two_approvals_off_request';
 
-/** Active administrators with two-step verification on (the people who can approve a payment). */
+/**
+ * Active administrators with two-step verification on (the people who can approve a payment). During the trial a
+ * one-tap demo administrator may turn two-step on, but it may never approve a payment or change this setting
+ * (lib/demoWrites.ts), so it does not count: otherwise it would switch two approvals on for good and leave live
+ * payments waiting for a second approval nobody can give.
+ */
 export function adminsWithTwoStep(db: Db): number {
-  return Number(get<{ n: number }>(db, `SELECT COUNT(*) AS n FROM users WHERE role = 'admin' AND status = 'active' AND totp_enabled_at IS NOT NULL`)!.n);
+  const admins = all<Pick<UserWithTeam, 'id' | 'role' | 'email' | 'employeeId'>>(
+    db,
+    `SELECT id, role, email, employee_id AS employeeId FROM users WHERE role = 'admin' AND status = 'active' AND totp_enabled_at IS NOT NULL`,
+  );
+  return admins.filter((a) => !isRestrictedDemo(db, a)).length;
 }
 
 const readMeta = (db: Db, key: string): string | null => get<{ value: string }>(db, `SELECT value FROM meta WHERE key = ?`, [key])?.value ?? null;

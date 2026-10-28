@@ -2,9 +2,10 @@
  * Two guards app.ts mounts on the API by route, so the routers behind them (bank details, payments) need not know:
  *
  *  - secureOnly: money and secret actions are refused over plain http from another device (lib/secureRequest.ts):
- *    entering or changing bank details, approving or downloading a payment, adding or changing a payment connection
- *    (its keys, or switching it to live), and anything that shows a setup code or recovery codes. The office computer
- *    itself (loopback) and https (built in, or at the trusted proxy) are allowed.
+ *    entering, changing, confirming or reporting bank details, approving or downloading a payment, adding or changing a
+ *    payment connection (its keys, its 1p test file, or switching it to live), the two-approvals setting, confirming a
+ *    VAT number, freeing the weeks of a downloaded bank file, and anything that shows a setup code or recovery codes.
+ *    The office computer itself (loopback) and https (built in, or at the trusted proxy) are allowed.
  *  - demoGuard: during the trial a one-tap demo account or one of the demo company's people (lib/trial.ts
  *    isRestrictedDemo) writes only what lib/demoWrites.ts lists: its own account, the demo company and new records,
  *    never a person of the office's own, anyone's pay but the demo company's, payments or office-wide money and
@@ -21,7 +22,11 @@ import { isSecureRequest } from '../lib/secureRequest.ts';
 import { demoRefusalFor } from '../lib/demoWrites.ts';
 import { demoRefusal, isRestrictedDemo } from '../lib/trial.ts';
 
-type Rule = readonly [method: string, path: RegExp];
+/** [method, path] and, for a route that is only sometimes a money action, which requests (by their JSON body). */
+type Rule = readonly [method: string, path: RegExp, when?: (body: Record<string, unknown>) => boolean];
+
+/** The request carries a typed confirmation or a two-step code (cancel or mark-paid after a bank file's download). */
+const confirming = (body: Record<string, unknown>) => body.confirm !== undefined || body.code !== undefined;
 
 const ID = '\\d+';
 /** Paths are relative to /api, as Express gives them to the API router, compared lower case without a trailing slash. */
@@ -39,12 +44,26 @@ export const SECURE_ONLY_ROUTES: readonly Rule[] = [
   ['POST', new RegExp(`^/client-accounts/${ID}/reset-2fa$`)],
   ['POST', new RegExp(`^/client-accounts/${ID}/reset-pin$`)],
   ['POST', /^\/auth\/2fa\/recovery-codes$/],
+  // 1.5 (money): the person's own answer about details someone else typed in (MON-3), an administrator confirming a
+  // VAT number (MON-7), "two people approve each payment" (MONEY-MISSED-2), the 1p test file (it holds a full account
+  // number) and its result (MON-6), and saying a downloaded bank file was not uploaded or not paid, which frees those
+  // weeks to be paid again (MON-2: the typed confirmation with a fresh code)
+  ['POST', /^\/me\/bank-details\/confirm$/],
+  ['POST', /^\/me\/bank-details\/report$/],
+  ['POST', new RegExp(`^/invoices/profile/${ID}/vat/confirm$`)],
+  ['PUT', /^\/payments\/settings$/],
+  ['POST', new RegExp(`^/payments/connections/${ID}/test-file$`)],
+  ['POST', new RegExp(`^/payments/connections/${ID}/test-file-result$`)],
+  ['POST', new RegExp(`^/payments/batches/${ID}/cancel$`), confirming],
+  ['POST', new RegExp(`^/payments/batches/${ID}/mark-paid$`), confirming],
 ];
 
 const normalPath = (req: Request) => req.path.toLowerCase().replace(/\/+$/, '') || '/';
+const bodyOf = (req: Request): Record<string, unknown> =>
+  req.body && typeof req.body === 'object' && !Array.isArray(req.body) ? (req.body as Record<string, unknown>) : {};
 const matches = (rules: readonly Rule[], req: Request) => {
   const p = normalPath(req);
-  return rules.some(([m, re]) => m === req.method && re.test(p));
+  return rules.some(([m, re, when]) => m === req.method && re.test(p) && (!when || when(bodyOf(req))));
 };
 
 export function secureOnly(): RequestHandler {

@@ -125,6 +125,9 @@ const campaignPayUnchanged: DemoCheck = (c) => {
   return changed('payoutPerSale', row.payout) || changed('repCommissionPerSale', row.rep) ? 'change a campaign’s pay per sale' : null;
 };
 
+/** One's own bank details: only a demo company person's (a real person signing in one-tap never sees or changes theirs). */
+const ownBankDetails: DemoCheck = (c) => (isDemoPerson(c.db, c.me.id) ? null : 'see or change a real person’s bank details');
+
 /** Write routes ("METHOD /pattern", as the route table lists them) → what a demo account may do there. */
 export const DEMO_WRITE_RULES: Readonly<Record<string, DemoCheck>> = {
   // ── its own account ──
@@ -175,7 +178,10 @@ export const DEMO_WRITE_RULES: Readonly<Record<string, DemoCheck>> = {
   'POST /client-accounts/:id/reset-pin': deny('reset anyone’s sign-in'),
 
   // ── money ──
-  'PUT /me/bank-details': (c) => (isDemoPerson(c.db, c.me.id) ? null : 'see or change a real person’s bank details'),
+  'PUT /me/bank-details': ownBankDetails,
+  // 1.5 (money, MON-3): "yes, these are mine" and "these are not my details" about details someone else typed in
+  'POST /me/bank-details/confirm': ownBankDetails,
+  'POST /me/bank-details/report': ownBankDetails,
   'PUT /users/:id/bank-details': (c) => (ownPeople(c.db, param('id')(c)).length ? 'see or change a real person’s bank details' : null),
   'POST /users/:id/bank-details/confirm': (c) => (ownPeople(c.db, param('id')(c)).length ? 'see or change a real person’s bank details' : null),
   'POST /pay/adjustments': money(field('userId')),
@@ -184,6 +190,13 @@ export const DEMO_WRITE_RULES: Readonly<Record<string, DemoCheck>> = {
   'POST /finance/payroll/:id/pay': money(lookup(`SELECT user_id AS u FROM payroll_runs WHERE id = ?`)),
   'POST /invoices/:id/resolve': money(lookup(`SELECT user_id AS u FROM invoices WHERE id = ?`)),
   'PUT /invoices/profile/:userId': money(param('userId')),
+  // 1.5 (money): a VAT number adds 20% to what is paid (MON-7); a checked day counts towards pay (MON-1); an office
+  // person's leaving date and days off change their pay (MON-8)
+  'POST /invoices/profile/:userId/vat/confirm': money(param('userId')),
+  'POST /pay/day-checks': money(field('userId')),
+  'PUT /pay/staff/:userId/leaving-date': money(param('userId')),
+  'POST /pay/staff/:userId/absences': money(param('userId')),
+  'DELETE /pay/staff/:userId/absences/:id': money(param('userId')),
   'POST /payments/batches': money(runPeople),
   'POST /payments/batches/:id/cancel': money(lookup(`SELECT user_id AS u FROM payment_items WHERE batch_id = ?`)),
   'POST /payments/batches/:id/mark-paid': money(lookup(`SELECT user_id AS u FROM payment_items WHERE batch_id = ?`)),
@@ -193,6 +206,11 @@ export const DEMO_WRITE_RULES: Readonly<Record<string, DemoCheck>> = {
   'PATCH /payments/connections/:id': deny('add or change a payment connection'),
   'DELETE /payments/connections/:id': deny('add or change a payment connection'),
   'POST /payments/connections/:id/test': deny('add or change a payment connection'),
+  // 1.5 (money): the 1p test file pays real money and holds a full account number (MON-6); its result moves the
+  // connection towards live; "two people approve each payment" (MONEY-MISSED-2)
+  'POST /payments/connections/:id/test-file': deny('add or change a payment connection'),
+  'POST /payments/connections/:id/test-file-result': deny('add or change a payment connection'),
+  'PUT /payments/settings': deny('change the payment settings'),
 
   // ── office-wide settings (money, security, sign-in, statements, the interview questions, videos) ──
   'PUT /auth/security-settings': deny('change the sign-in security settings'),
