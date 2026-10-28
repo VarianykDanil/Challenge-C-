@@ -5,7 +5,7 @@
  *  - off-site copies: the last one failed, it cannot run (no passphrase, the folder is missing), or the newest is older
  *    than two days; when off-site copies are not switched on, one quiet line says the backups are on this computer only;
  *  - the disk that holds the data is nearly full;
- *  - the app key is not on a recovery sheet yet (the owner makes it; other administrators are told to ask the owner);
+ *  - the app key is not on a recovery sheet yet (made with the owner on the server computer; others ask the owner);
  *  - server errors in the last 24 hours (lib/errorLog.ts), with where the details are;
  *  - the database was restored over payments it does not know about (for 14 days after the restore).
  * One statement (the meta values) per call; the rest is the file system, so the feed's budget holds. Backups and the
@@ -192,10 +192,9 @@ export const provider: AttentionProvider = {
         severity: 'warning',
         title: 'The app key is not on a recovery sheet yet',
         body: owner
-          ? 'Bank details and two-step sign-in are locked with it. Make the recovery sheet, print it and lock it away: without it, losing the server loses them.'
-          : 'Bank details and two-step sign-in are locked with it. Ask the owner to make the recovery sheet in Settings › Backups.',
+          ? 'Bank details and two-step sign-in are locked with it. Ask Noryn to make the recovery sheet with you on the server computer, then lock it away: without it, losing the server loses them.'
+          : 'Bank details and two-step sign-in are locked with it. Ask the owner to make the recovery sheet with Noryn, on the server computer.',
         href: SETTINGS,
-        ...(owner ? { actionLabel: 'Make it' } : {}),
       });
     }
 

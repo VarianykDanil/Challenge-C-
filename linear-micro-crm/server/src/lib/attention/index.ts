@@ -17,7 +17,7 @@ import type { AttentionProvider } from './types.ts';
 export type { AttentionProvider } from './types.ts';
 
 // Release 1.4 (F): payments (bank details to check, failed payments, bank files waiting, connections to look at)
-// System health (keys): backups, off-site copies, disk space, the app key on paper, server errors, a restore over payments
+// system: backups, off-site copies, disk space, the app key on paper, server errors, a restore over payments
 export const ATTENTION_PROVIDERS: readonly AttentionProvider[] = [invoices, statements, clientPosts, payments, system];
 
 /** Every provider's items for `me` (a failing provider contributes nothing). */

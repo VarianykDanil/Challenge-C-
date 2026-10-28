@@ -1,13 +1,13 @@
 /**
  * The recovery sheet: one printed page with the app key and the steps to get Linear Hub back after losing the key or
- * the whole computer. Made by the owner (Settings › Backups, with a fresh two-step code) or on the server with
- * `npm run recovery-sheet`.
+ * the whole computer. Made and confirmed only on the server computer with `npm run recovery-sheet`, so the key never
+ * travels over the network and no API route returns it. Settings › Backups only shows whether it is done.
  *
  * What the database remembers (meta), never the key itself:
  *  - when a sheet was last made, and for which key (its fingerprint);
- *  - when the owner confirmed they have it (by typing the last six characters of the key from the sheet), and for
- *    which key. From then on, backups no longer carry a copy of that key (`keyLeftOutOfBackups`): a stolen backups
- *    folder then holds no key. Until then the key stays in the backups, so nothing can become unrecoverable.
+ *  - when the owner confirmed they have it (by typing the whole key back from the paper), and for which key. From
+ *    then on, backups no longer carry a copy of that key (`keyLeftOutOfBackups`): a stolen backups folder then holds
+ *    no key. Until then the key stays in the backups, so nothing can become unrecoverable.
  */
 import type { DatabaseSync } from 'node:sqlite';
 import { readSecretFile, secretFingerprint, shortFingerprint } from './crypto.ts';
@@ -82,15 +82,13 @@ export function keyFromPaper(typed: string): string {
   return /^[0-9a-f]{64}$/i.test(compact) ? compact.toLowerCase() : trimmed;
 }
 
-/** The last six characters of the key, which the owner types to confirm they have the sheet. */
-export function lastSix(secret: string): string {
-  return keyFromPaper(secret).slice(-6);
-}
-
-/** True when `typed` is the last six characters of the key (case and spaces ignored). */
+/**
+ * True when `typed` is the whole key, read back from the paper (for a hex key, case, spaces and dashes are ignored).
+ * Only then do backups stop keeping their copy: one wrong character anywhere means the paper cannot open the data.
+ */
 export function confirmsKey(secret: string, typed: unknown): boolean {
-  if (typeof typed !== 'string') return false;
-  return typed.replace(/\s+/g, '').toLowerCase() === lastSix(secret).toLowerCase();
+  if (typeof typed !== 'string' || !typed.trim()) return false;
+  return keyFromPaper(typed) === keyFromPaper(secret);
 }
 
 export interface RecoverySheet {

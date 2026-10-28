@@ -1,24 +1,21 @@
 /**
- * The recovery sheet (SEC-7, SECURITY-MISSED-3, REL-1): the owner makes a printable sheet with the app key (fresh
- * two-step code, secure request only); the audit trail records it without the key; once the owner confirms the sheet,
- * local backups stop carrying the key (and before that they keep it, so nothing becomes unreadable).
+ * The recovery sheet (SEC-7, SECURITY-MISSED-3, REL-1): the app key on paper, made and confirmed only on the server
+ * computer (npm run recovery-sheet), so the key is never sent over the network or returned by the API. The audit
+ * trail records it without the key. Confirming needs the whole key typed back from the paper: only then do local
+ * backups stop carrying their copy of the key (before that they keep it, so nothing can become unreadable).
  */
 import { after, before, describe, test } from 'node:test';
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
-import http from 'node:http';
-import type { AddressInfo } from 'node:net';
 import path from 'node:path';
-import { createApp } from '../app.ts';
-import { all, openDb, run } from '../db/connection.ts';
+import { all, openDb } from '../db/connection.ts';
 import { createSchema } from '../db/schema.ts';
 import { backupNow } from '../lib/backup.ts';
 import { appSecretFile, currentAppSecret } from '../lib/crypto.ts';
-import { keyForPaper, lastSix } from '../lib/recoverySheet.ts';
-import { OWNER_ONLY_MESSAGE, SECURE_ONLY_MESSAGE } from '../routes/system.ts';
-import { buildFixture, currentCode, enrolTwoFactor, signInWith, startTestServer, TestClient, type TestServer } from './helpers.ts';
+import { confirmsKey, keyForPaper, keyLeftOutOfBackups } from '../lib/recoverySheet.ts';
+import { buildFixture, currentCode, startTestServer, type TestServer } from './helpers.ts';
 
 let srv: TestServer;
 let tmp: string;
@@ -33,7 +30,6 @@ after(async () => {
 });
 
 const adminId = () => srv.fixture!.users.admin;
-const auditRows = () => all<{ summary: string; after_json: string | null; before_json: string | null; action: string }>(srv.db, `SELECT * FROM audit_log ORDER BY id`);
 
 describe('routes', () => {
   test('GET /system/status: administrators only; it shows the key fingerprint, never the key', async () => {
@@ -43,94 +39,39 @@ describe('routes', () => {
     assert.match(r.json.key.fingerprint, /^[0-9A-F]{4}-[0-9A-F]{4}-[0-9A-F]{4}$/);
     assert.equal(r.json.key.confirmedForThisKey, false);
     assert.equal(r.json.key.inLocalBackups, true, 'until a sheet is confirmed, backups keep the key');
-    assert.equal(r.json.canMakeSheet, true, 'the fixture admin is the owner');
-    assert.equal(r.json.secure, true, 'the test client is on this computer');
     assert.equal(JSON.stringify(r.json).includes(currentAppSecret()!.secret), false);
     for (const who of ['leader', 'recruiter', 'rep'] as const) {
       const c = await srv.login(who);
       assert.equal((await c.get('/system/status')).status, 403, who);
-      assert.equal((await c.post('/system/recovery-sheet', {})).status, 403, who);
     }
     assert.equal((await (await srv.login('client')).get('/system/status')).status, 403);
     assert.equal((await srv.anon().get('/system/status')).status, 401);
   });
 
-  test('POST /system/recovery-sheet: the owner with a fresh code gets the sheet (no-store); the trail says so without the key', async () => {
+  test('no route hands out the key or takes it: the sheet is made and confirmed on the server computer only', async () => {
     const admin = await srv.login('admin');
-    const noCode = await admin.post('/system/recovery-sheet', {});
-    assert.equal(noCode.status, 400);
-    const wrong = await admin.post('/system/recovery-sheet', { code: '000000' });
-    assert.equal(wrong.status, 400);
-    const r = await admin.post('/system/recovery-sheet', { code: currentCode(srv.db, adminId()) });
-    assert.equal(r.status, 200, JSON.stringify(r.json));
-    assert.equal(r.headers.get('cache-control'), 'no-store');
     const secret = currentAppSecret()!.secret;
-    assert.equal(r.json.sheet.key, keyForPaper(secret));
-    assert.equal(r.json.sheet.keyFile, appSecretFile());
-    assert.ok(r.json.sheet.steps.some((s: string) => /npm run key:restore/.test(s)));
-    const rows = auditRows();
-    assert.ok(rows.some((row) => /^Made the recovery sheet for the app key \(key [0-9A-F-]+\)/.test(row.summary)));
-    assert.ok(rows.some((row) => /^Tried to make the recovery sheet/.test(row.summary)), 'refused attempts are recorded');
-    const bare = secret.toLowerCase();
-    for (const row of rows) assert.equal(JSON.stringify(row).toLowerCase().includes(bare), false, 'the key is never in the audit trail');
-    const status = await admin.get('/system/status');
-    assert.ok(status.json.key.sheetMadeAt);
+    const make = await admin.post('/system/recovery-sheet', { code: currentCode(srv.db, adminId()) });
+    assert.equal(make.status, 404);
+    assert.equal(JSON.stringify(make.json ?? {}).includes(secret), false);
+    const confirm = await admin.post('/system/recovery-sheet/confirm', { key: secret, lastSix: secret.slice(-6) });
+    assert.equal(confirm.status, 404);
+    assert.equal((await admin.get('/system/status')).json.key.confirmedForThisKey, false, 'nothing was confirmed');
   });
+});
 
-  test('another administrator who is not the owner is refused', async () => {
-    const id = run(
-      srv.db,
-      `INSERT INTO users (employee_id, email, first_name, last_name, role, position, team_id, pay_plan_id, start_date, status, avatar_color)
-       VALUES ('LM-0901', 'office.admin@fixture.test', 'Olly', 'Office', 'admin', 'assistant_owner', NULL, ?, '2026-01-01', 'active', '#000000')`,
-      [srv.fixture!.plans.owner],
-    ).lastInsertRowid;
-    enrolTwoFactor(srv.db, id);
-    const office = await srv.login({ email: 'office.admin@fixture.test', employeeId: 'LM-0901' });
-    const status = await office.get('/system/status');
-    assert.equal(status.status, 200);
-    assert.equal(status.json.canMakeSheet, false);
-    const r = await office.post('/system/recovery-sheet', { code: currentCode(srv.db, id) });
-    assert.equal(r.status, 403);
-    assert.equal(r.json.error, OWNER_ONLY_MESSAGE);
-  });
-
-  test('confirming takes the last six characters of the key from the paper', async () => {
-    const admin = await srv.login('admin');
-    const wrong = await admin.post('/system/recovery-sheet/confirm', { lastSix: 'zzzzzz' });
-    assert.equal(wrong.status, 400);
-    const r = await admin.post('/system/recovery-sheet/confirm', { lastSix: lastSix(currentAppSecret()!.secret).toUpperCase() });
-    assert.equal(r.status, 200, JSON.stringify(r.json));
-    const status = await admin.get('/system/status');
-    assert.equal(status.json.key.confirmedForThisKey, true);
-    assert.equal(status.json.key.inLocalBackups, false);
-    assert.ok(auditRows().some((row) => /^Confirmed the recovery sheet/.test(row.summary)));
-  });
-
-  test('from another device on plain HTTP (not a secure request) the sheet is refused', async (t) => {
-    const lan = Object.values(os.networkInterfaces())
-      .flat()
-      .find((i) => i && i.family === 'IPv4' && !i.internal)?.address;
-    if (!lan) {
-      t.skip('no network address on this machine');
-      return;
-    }
-    const server = http.createServer(createApp(srv.db));
-    await new Promise<void>((resolve) => server.listen(0, '0.0.0.0', () => resolve()));
-    try {
-      const client = new TestClient(`http://${lan}:${(server.address() as AddressInfo).port}/api`);
-      const signedIn = await signInWith(srv.db, client, srv.fixture!.accounts.admin);
-      assert.equal(signedIn.status, 200);
-      const status = await client.get('/system/status');
-      assert.equal(status.json.secure, false);
-      const r = await client.post('/system/recovery-sheet', { code: currentCode(srv.db, adminId()) });
-      assert.equal(r.status, 403);
-      assert.equal(r.json.error, SECURE_ONLY_MESSAGE);
-      const confirm = await client.post('/system/recovery-sheet/confirm', { lastSix: lastSix(currentAppSecret()!.secret) });
-      assert.equal(confirm.status, 403);
-    } finally {
-      server.closeAllConnections();
-      await new Promise<void>((resolve) => server.close(() => resolve()));
-    }
+describe('confirming the sheet', () => {
+  test('needs the whole key from the paper: one wrong character in the middle is refused', () => {
+    const key = 'a1b2c3d4e5f60718293a4b5c6d7e8f90a1b2c3d4e5f60718293a4b5c6d7e8f90';
+    assert.equal(confirmsKey(key, keyForPaper(key)), true, 'typed in the groups of four from the sheet');
+    assert.equal(confirmsKey(key, keyForPaper(key).toUpperCase().replace(/ /g, '-')), true, 'case, spaces and dashes do not matter');
+    const oneOff = `${key.slice(0, 30)}${key[30] === '0' ? '1' : '0'}${key.slice(31)}`;
+    assert.equal(confirmsKey(key, oneOff), false);
+    assert.equal(confirmsKey(key, key.slice(-6)), false, 'the last six characters are not enough');
+    assert.equal(confirmsKey(key, ''), false);
+    assert.equal(confirmsKey(key, undefined), false);
+    assert.equal(confirmsKey('a custom LM_APP_SECRET value', ' a custom LM_APP_SECRET value '), true);
+    assert.equal(confirmsKey('a custom LM_APP_SECRET value', 'a custom LM_APP_SECRET valuf'), false);
   });
 });
 
@@ -162,36 +103,100 @@ describe('the key in the local backups', () => {
 });
 
 describe('npm run recovery-sheet', () => {
-  test('prints the key and its fingerprint, records it in the trail, and --confirm with the last six characters', () => {
-    const dir = path.join(tmp, 'cli');
+  const serverDir = path.resolve(import.meta.dirname, '../..');
+  const key = '9'.repeat(30) + '0123456789abcdef' + '8'.repeat(14) + 'abcd';
+  function scratch(name: string) {
+    const dir = path.join(tmp, name);
     mkdirSync(dir, { recursive: true });
     const dbPath = path.join(dir, 'linear.sqlite');
     const keyFile = path.join(dir, 'app-secret');
-    const key = '9'.repeat(60) + 'abcd';
     writeFileSync(keyFile, `${key}\n`, { mode: 0o600 });
     const db = openDb(dbPath);
     createSchema(db);
     buildFixture(db);
     db.close();
-    const env = { ...process.env, NODE_NO_WARNINGS: '1', DB_PATH: dbPath, LM_APP_SECRET_FILE: keyFile, LM_APP_SECRET: '', LM_OFFSITE_DIR: '' };
-    const serverDir = path.resolve(import.meta.dirname, '../..');
-    const r = spawnSync(process.execPath, [path.join(serverDir, 'src', 'recoverySheet.ts')], { cwd: serverDir, encoding: 'utf8', env });
+    const env: NodeJS.ProcessEnv = { ...process.env, NODE_NO_WARNINGS: '1', DB_PATH: dbPath, LM_APP_SECRET_FILE: keyFile, LM_APP_SECRET: '', LM_OFFSITE_DIR: '' };
+    const sheet = (args: string[], input?: string, extraEnv: NodeJS.ProcessEnv = {}) =>
+      spawnSync(process.execPath, [path.join(serverDir, 'src', 'recoverySheet.ts'), ...args], { cwd: serverDir, encoding: 'utf8', env: { ...env, ...extraEnv }, input });
+    const confirmed = () => {
+      const check = openDb(dbPath);
+      try {
+        return keyLeftOutOfBackups(check, keyFile);
+      } finally {
+        check.close();
+      }
+    };
+    const audit = () => {
+      const check = openDb(dbPath);
+      try {
+        return all<{ summary: string; after_json: string | null }>(check, `SELECT summary, after_json FROM audit_log WHERE action = 'npm run recovery-sheet' ORDER BY id`);
+      } finally {
+        check.close();
+      }
+    };
+    return { dir, dbPath, keyFile, sheet, confirmed, audit };
+  }
+
+  test('prints the key and its fingerprint and records it in the trail without the key', () => {
+    const s = scratch('cli-print');
+    const r = s.sheet([]);
     assert.equal(r.status, 0, r.stderr);
     assert.ok(r.stdout.includes(keyForPaper(key)));
     assert.match(r.stdout, /Key fingerprint: [0-9A-F]{4}-[0-9A-F]{4}-[0-9A-F]{4}/);
     assert.match(r.stdout, /npm run key:restore/);
-    const wrong = spawnSync(process.execPath, [path.join(serverDir, 'src', 'recoverySheet.ts'), '--confirm=000000'], { cwd: serverDir, encoding: 'utf8', env });
-    assert.equal(wrong.status, 1);
-    const ok = spawnSync(process.execPath, [path.join(serverDir, 'src', 'recoverySheet.ts'), '--confirm=99abcd'], { cwd: serverDir, encoding: 'utf8', env });
+    const rows = s.audit();
+    assert.ok(rows.some((row) => /^Made the recovery sheet from the server command/.test(row.summary)));
+    for (const row of rows) assert.equal(JSON.stringify(row).includes(key), false);
+  });
+
+  test('--confirm takes the whole key typed from the paper; one wrong character changes nothing and keeps the backup copy', async () => {
+    const s = scratch('cli-confirm');
+    const oneOff = keyForPaper(`${key.slice(0, 33)}f${key.slice(34)}`);
+    assert.notEqual(oneOff, keyForPaper(key));
+    const wrong = s.sheet(['--confirm'], `${oneOff}\n`);
+    assert.equal(wrong.status, 1, wrong.stdout);
+    assert.match(wrong.stderr, /not the key.*Nothing was confirmed/s);
+    assert.equal(s.confirmed(), false);
+    const db = openDb(s.dbPath);
+    const backups = path.join(s.dir, 'backups');
+    assert.equal((await backupNow(db, { dir: backups, secretFile: s.keyFile, now: new Date('2026-10-27T02:00:00Z') })).secret, 'copied', 'the copy stays');
+    db.close();
+
+    const six = s.sheet(['--confirm'], `${key.slice(-6)}\n`);
+    assert.equal(six.status, 1, 'the last six characters are not enough');
+
+    const ok = s.sheet(['--confirm'], `${keyForPaper(key).toUpperCase()}\n`);
     assert.equal(ok.status, 0, ok.stderr);
-    const check = openDb(dbPath);
-    try {
-      const rows = all<{ summary: string; after_json: string | null }>(check, `SELECT summary, after_json FROM audit_log WHERE action = 'npm run recovery-sheet' ORDER BY id`);
-      assert.ok(rows.some((row) => /^Made the recovery sheet from the server command/.test(row.summary)));
-      assert.ok(rows.some((row) => /^Confirmed the recovery sheet/.test(row.summary)));
-      for (const row of rows) assert.equal(JSON.stringify(row).includes(key), false);
-    } finally {
-      check.close();
-    }
+    assert.equal(ok.stdout.includes(keyForPaper(key)) || ok.stdout.includes(key), false, '--confirm never shows the key, so it is typed from the paper');
+    assert.equal(s.confirmed(), true);
+    const db2 = openDb(s.dbPath);
+    assert.equal((await backupNow(db2, { dir: backups, secretFile: s.keyFile, now: new Date('2026-10-28T02:00:00Z') })).secret, 'removed');
+    db2.close();
+    assert.equal(existsSync(path.join(backups, 'app-secret')), false);
+    assert.ok(s.audit().some((row) => /^Confirmed the recovery sheet/.test(row.summary)));
+  });
+
+  test('the key is never taken on the command line (it would stay in the shell history)', () => {
+    const s = scratch('cli-arg');
+    const r = s.sheet([`--confirm=${key}`]);
+    assert.equal(r.status, 1);
+    assert.match(r.stderr, /not taken on the command line/);
+    assert.equal(s.confirmed(), false);
+  });
+
+  test('--print sends the sheet to the printer and does not show the key on screen', () => {
+    if (process.platform === 'win32') return;
+    const s = scratch('cli-lp');
+    const bin = path.join(tmp, 'lp-bin');
+    const printed = path.join(tmp, 'printed.txt');
+    mkdirSync(bin, { recursive: true });
+    writeFileSync(path.join(bin, 'lp'), `#!/bin/sh\ncat > "${printed}"\necho "request id is Office-1 (1 file(s))"\n`);
+    chmodSync(path.join(bin, 'lp'), 0o755);
+    const r = s.sheet(['--print'], undefined, { PATH: `${bin}${path.delimiter}${process.env.PATH ?? ''}` });
+    assert.equal(r.status, 0, r.stderr);
+    assert.ok(readFileSync(printed, 'utf8').includes(keyForPaper(key)), 'the printer got the sheet');
+    assert.equal(r.stdout.includes(keyForPaper(key)), false, 'the screen did not');
+    assert.match(r.stdout, /Sent the recovery sheet to the printer/);
+    assert.match(r.stdout, /npm run recovery-sheet -- --confirm/);
   });
 });

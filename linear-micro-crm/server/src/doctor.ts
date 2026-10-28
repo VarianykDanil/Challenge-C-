@@ -168,7 +168,7 @@ console.log(`Linear Hub doctor — ${new Date().toISOString()}\n`);
             'warn',
             'No recovery sheet confirmed for this key yet',
             'Without a copy of the key kept away from this computer, losing the computer loses the locked data (bank details, two-step sign-in). ' +
-              'Make one: Settings › Backups › Recovery sheet (the owner), or  npm run recovery-sheet  here, and keep it locked away.',
+              'Make one here with the owner:  npm run recovery-sheet -- --print  (or without --print to show it on screen), lock it away, then  npm run recovery-sheet -- --confirm  and type the key back from the paper.',
           );
         }
       }

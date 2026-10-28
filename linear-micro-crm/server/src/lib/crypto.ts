@@ -150,7 +150,7 @@ export function announceAppSecret(): void {
   console.log(
     `${hasAppSecret() ? 'The app key comes from LM_APP_SECRET' : `The app key is in ${secretFile} (mode 0600)`}${fingerprint}. It locks two-step ` +
       'sign-in, PINs, bank details and payment connections: without it they cannot be read. Make a recovery sheet ' +
-      '(Settings › Backups, or npm run recovery-sheet) and keep it locked away.',
+      'on this computer (npm run recovery-sheet) and keep it locked away.',
   );
 }
 

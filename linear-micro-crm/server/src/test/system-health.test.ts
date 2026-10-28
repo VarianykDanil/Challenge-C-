@@ -103,12 +103,13 @@ describe('the system-health items', () => {
     configureSystemHealth({ dataDir: null });
   });
 
-  test('the key not on a recovery sheet: the owner is told to make it, until confirmed for this key', () => {
+  test('the key not on a recovery sheet: the owner is told how it is made, until confirmed for this key', () => {
     const admin = srv.fixture!.users.admin;
     appKeyFingerprint(); // the server makes its key at start-up
     const item = items(admin).find((i) => i.key === 'system:recovery-sheet');
     assert.ok(item);
-    assert.match(item!.body, /Make the recovery sheet/);
+    assert.match(item!.body, /make the recovery sheet with you on the server computer/);
+    assert.equal(item!.actionLabel, undefined, 'nothing to do in the app: the key never reaches a browser');
     recordSheetConfirmed(srv.db, secretFingerprint(currentAppSecret()!.secret));
     assert.equal(items(admin).some((i) => i.key === 'system:recovery-sheet'), false);
     recordSheetConfirmed(srv.db, 'a-fingerprint-of-another-key');
