@@ -2,7 +2,8 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 import type { AuthResponse, LoginInput, LoginPinChallenge, TwoFactorChallenge, UserWithTeam } from '@lm/shared';
-import { api, ApiError, isNetworkError } from '@/api/client';
+import { api, ApiError, NETWORK_EVENT, isNetworkError, type NetworkEventDetail } from '@/api/client';
+import { AUTH_PROBE_TIMEOUT_MS } from '@/api/requestRules';
 import { forgetSession, rememberSession } from '@/api/sessionEnd';
 import { forgetKit, offlineUser, rememberKitUser } from '@/offline/fieldKit';
 
@@ -44,27 +45,42 @@ const AuthContext = createContext<AuthContextValue | null>(null);
 
 /** A tab coming back to the front re-reads /auth/me at most this often. */
 const VISIBLE_REFRESH_MS = 60_000;
+/** While Linear Hub cannot be reached, the session is checked again this often (and as soon as anything answers). */
+const UNREACHABLE_RETRY_MS = 15_000;
 
 export function AuthProvider({ children }: { children: ReactNode }) {
   const qc = useQueryClient();
   const [user, setUser] = useState<UserWithTeam | null>(null);
   const [loading, setLoading] = useState(true);
+  // the last session check could not reach Linear Hub (no signal, no answer in time, the proxy says it is down)
+  const [unreachable, setUnreachable] = useState(false);
+  const firstCheck = useRef(true);
 
   const refresh = useCallback(async () => {
+    // The check when the app opens waits only a few seconds: on a weak signal the app then opens as the person last
+    // signed in here instead of showing "Loading…" for as long as the connection hangs.
+    const timeoutMs = firstCheck.current ? AUTH_PROBE_TIMEOUT_MS : undefined;
+    firstCheck.current = false;
     try {
-      const res = await api<AuthResponse>('/auth/me');
+      const res = await api<AuthResponse>('/auth/me', { timeoutMs });
       // Release 1.4: when this session ends, so the sign-in page can say why once it has (api/sessionEnd.ts)
       rememberSession(res.session);
       setUser(res.user);
-      rememberKitUser(res.user);
+      rememberKitUser(res.user, res.session);
+      setUnreachable(false);
     } catch (e) {
       if (e instanceof ApiError && e.status === 401) {
         setUser(null);
         forgetKit();
+        setUnreachable(false);
       }
       // No signal when the app opens: carry on as the person last signed in on this phone (src/offline/fieldKit.ts),
-      // so they can log gauges and check in; it all waits on the phone and sends once they are signed in online.
-      else if (isNetworkError(e)) setUser((current) => current ?? offlineUser());
+      // so they can log gauges and check in; it all waits on the phone and sends once they are signed in online. The
+      // kit only lasts as long as their session would have. Linear Hub is asked again in the background (below).
+      else if (isNetworkError(e)) {
+        setUser((current) => current ?? offlineUser());
+        setUnreachable(true);
+      }
       // Other server errors keep the current user and let pages surface the error.
     } finally {
       setLoading(false);
@@ -74,6 +90,33 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     void refresh();
   }, [refresh]);
+
+  // Could not reach Linear Hub: ask again every 15 s, and as soon as the phone's signal returns or any request gets an
+  // answer. Then the real session takes over: the person carries on, or meets the sign-in page if it has ended.
+  useEffect(() => {
+    if (!unreachable) return;
+    let busy = false;
+    const again = () => {
+      if (busy) return;
+      busy = true;
+      void refresh().finally(() => {
+        busy = false;
+      });
+    };
+    const id = window.setInterval(() => {
+      if (document.visibilityState === 'visible') again();
+    }, UNREACHABLE_RETRY_MS);
+    const onNetwork = (e: Event) => {
+      if ((e as CustomEvent<NetworkEventDetail>).detail?.online) again();
+    };
+    window.addEventListener('online', again);
+    window.addEventListener(NETWORK_EVENT, onNetwork);
+    return () => {
+      window.clearInterval(id);
+      window.removeEventListener('online', again);
+      window.removeEventListener(NETWORK_EVENT, onNetwork);
+    };
+  }, [unreachable, refresh]);
 
   // Release 1.2 (U1): re-read /auth/me when a signed-in tab comes back to the front (at most once a minute), so a
   // session that ended while the phone was in a pocket — the idle timeout, a PIN reset, a new sign-in rule — shows the
@@ -99,7 +142,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       qc.clear();
       rememberSession(res.session);
       setUser(res.user);
-      rememberKitUser(res.user);
+      rememberKitUser(res.user, res.session);
+      setUnreachable(false);
     },
     [qc],
   );

@@ -1,7 +1,7 @@
 // The field kit in this browser's localStorage (one key, one person; see fieldKitLogic.ts for what it holds and why).
 // Every storage call is wrapped: without storage the app simply needs signal to open, as before.
-import type { SalesEventWithMeta, UserWithTeam } from '@lm/shared';
-import { kitUser, parseKit, withEvents, withUser, type FieldKit } from './fieldKitLogic';
+import type { SalesEventWithMeta, SessionInfo, UserWithTeam } from '@lm/shared';
+import { kitUser, parseKit, touchKit, withEvents, withUser, type FieldKit } from './fieldKitLogic';
 
 const KEY = 'lm-field-kit';
 
@@ -29,10 +29,20 @@ function write(kit: FieldKit): void {
   }
 }
 
-/** After every successful sign-in or session check. */
-export function rememberKitUser(user: UserWithTeam): void {
-  if (user.role === 'client') return; // the client portal has nothing to do offline
-  write(withUser(read(), user, Date.now()));
+/**
+ * After every successful sign-in or session check, with the session details the server sent (when it ends, the
+ * inactivity sign-out). Roles that never log offline keep no kit, and any kit left by someone else goes.
+ */
+export function rememberKitUser(user: UserWithTeam, session: SessionInfo | undefined): void {
+  const next = withUser(read(), user, Date.now(), session);
+  if (next) write(next);
+  else forgetKit();
+}
+
+/** The server answered for the signed-in person: the inactivity time starts again. */
+export function touchKitNow(): void {
+  const kit = read();
+  if (kit) write(touchKit(kit, Date.now()));
 }
 
 /** After the list of events this person can log against loads. */

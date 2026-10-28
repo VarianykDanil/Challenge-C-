@@ -42,12 +42,14 @@ export interface NewSession {
 export function createSession(db: Db, user: DemoSignInSubject): NewSession {
   const token = randomBytes(32).toString('hex');
   const now = new Date();
-  const maxHours = isDemoSignInAccount(db, user) ? null : readSecuritySettings(db).sessionMaxHours;
+  const settings = readSecuritySettings(db);
+  const maxHours = isDemoSignInAccount(db, user) ? null : settings.sessionMaxHours;
   const maxAgeMs = maxHours === null ? DEMO_SESSION_MS : maxHours * 3_600_000;
   const signedInAt = now.toISOString();
   const endsAt = new Date(now.getTime() + maxAgeMs).toISOString();
   run(db, `INSERT INTO sessions (token, user_id, created_at, expires_at, last_seen_at) VALUES (?, ?, ?, ?, ?)`, [token, user.id, signedInAt, endsAt, signedInAt]);
-  return { token, maxAgeMs, info: { signedInAt, endsAt, maxHours } };
+  // idleHours: a phone opened with no signal stops acting as this person when the inactivity sign-out would apply
+  return { token, maxAgeMs, info: { signedInAt, endsAt, maxHours, idleHours: settings.sessionIdleHours } };
 }
 
 export function destroySession(db: Db, token: string): void {
@@ -202,6 +204,7 @@ export function authenticate(db: Db): RequestHandler {
       signedInAt: createdAt,
       endsAt: demoSignIn || ownEnd ? expiresAt : limitEnd,
       maxHours: demoSignIn ? null : ownEnd ? ownHours : settings.sessionMaxHours,
+      idleHours: settings.sessionIdleHours,
     };
     next();
   };
