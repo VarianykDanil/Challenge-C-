@@ -182,12 +182,9 @@ describe('links and paths in the docs', () => {
     // A path in backticks with a folder and an extension; placeholders (<area>) and globs are skipped. Paths are read
     // from the app folder, or from server/src, shared/src or client/src for the short forms (lib/…, routes/…).
     const bases = ['', 'server/src', 'server/src/lib', 'shared/src', 'client/src', 'docs'];
-    // Added in the same release by the sign-in work, which is merged with this one; drop it from here once merged.
-    const comingInThisRelease = new Set(['server/src/lib/secureRequest.ts']);
     const missing: string[] = [];
     for (const m of read('docs/MAINTAINERS.md').matchAll(/`([A-Za-z0-9_./-]+\/[A-Za-z0-9_.-]+\.(?:ts|tsx|md|json|sh|css|mjs))`/g)) {
       const p = m[1]!;
-      if (comingInThisRelease.has(p)) continue;
       if (!bases.some((b) => existsSync(path.join(root, b, p)))) missing.push(p);
     }
     assert.deepEqual(missing, [], `MAINTAINERS.md names files that do not exist: ${missing.join(', ')}`);

@@ -17,6 +17,8 @@
     "backup": "cd linear-micro-crm && npm run backup --",
     "backups": "cd linear-micro-crm && npm run backups --",
     "restore": "cd linear-micro-crm && npm run restore --",
+    "key:restore": "cd linear-micro-crm && npm run key:restore --",
+    "recovery-sheet": "cd linear-micro-crm && npm run recovery-sheet --",
     "pin:reset": "cd linear-micro-crm && npm run pin:reset --",
     "2fa:reset": "cd linear-micro-crm && npm run 2fa:reset --",
     "setup-code": "cd linear-micro-crm && npm run setup-code --",
