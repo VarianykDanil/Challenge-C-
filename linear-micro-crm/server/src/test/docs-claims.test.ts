@@ -12,8 +12,9 @@ const read = (rel: string) => readFileSync(path.join(root, rel), 'utf8');
 
 /** People who never existed: earlier versions of the docs and the About page named them as the team. */
 const INVENTED_TEAM = ['Tomasz Nowak', 'Aisha Rahman', 'Callum Reid', 'Mei-Ling Chen', 'Sophie Whitfield'];
-/** Files that say who built Linear Hub. (README.md joins this list once its "Built by" section is replaced.) */
+/** Files that say who built Linear Hub. */
 const SAYS_WHO_BUILT_IT = [
+  'README.md',
   'docs/TEAM.md',
   'docs/TEAM_CONTRACT.md',
   'docs/PITCH.md',
@@ -166,7 +167,7 @@ describe('the maintainers’ guide', () => {
 });
 
 describe('links and paths in the docs', () => {
-  const DOCS = ['docs/TEAM.md', 'docs/PITCH.md', 'docs/ROADMAP.md', 'docs/DEPLOY.md', 'docs/MAINTAINERS.md', 'docs/TEAM_CONTRACT.md', 'docs/OWNER_NOTES_1.3.md'];
+  const DOCS = ['README.md', 'docs/TEAM.md', 'docs/PITCH.md', 'docs/ROADMAP.md', 'docs/DEPLOY.md', 'docs/MAINTAINERS.md', 'docs/TEAM_CONTRACT.md', 'docs/OWNER_NOTES_1.3.md', 'docs/OWNER_NOTES_1.5.md'];
 
   it('every relative link points at a file that exists', () => {
     for (const doc of DOCS) {

@@ -1,6 +1,6 @@
 # Linear Hub — Design System
 
-Owned by the Product Designer. This is the reference for anyone writing UI in `client/`: tokens, type,
+This is the reference for anyone writing UI in `client/`: tokens, type,
 spacing, the component kit and the rules that keep every page looking like one product.
 
 Source of truth:
@@ -68,7 +68,7 @@ The placeholder identity is routed through one config, `client/src/content/brand
    them with `var()` / `color-mix()`. Edit those eight values and the matching `BRAND_PALETTE` mirror in
    `brand.ts`; nothing else needs touching. Re-check `--primary-fg` / `--accent-fg` and the contrast table
    below if the new hues are much lighter or darker.
-3. Names, legal name, address and website stay in `shared/src/constants.ts` → `BRAND` (Logic Builder's file).
+3. Names, legal name, address and website stay in `shared/src/constants.ts` → `BRAND`.
 
 ---
 
@@ -117,7 +117,7 @@ pairs always ship with an icon or label — see `StatDelta`, `Badge`, `Toast`).
 
 ### Charts
 
-`--chart-1…6` are mapped to `--color-chart-n` for the Logic Builder's charts.
+`--chart-1…6` are mapped to `--color-chart-n` for the charts.
 
 | n | Light | Dark (vs `--surface`) | Hue |
 |---|---|---|---|
@@ -151,12 +151,14 @@ Shadows are tokens too and are darker/tighter in dark mode. Don't use Tailwind's
 
 ## 4. Typography
 
-Loaded in `client/index.html` from Google Fonts with system fallbacks.
+Since 1.5 Inter is served by Linear Hub itself: the variable font from the `@fontsource-variable/inter` package,
+imported in `client/src/main.tsx`, with system fallbacks. Nothing is fetched from Google (the Content-Security-Policy
+allows fonts from this server only), and the Latin file is preloaded and saved for offline use.
 
 | Role | Face | Utility |
 |---|---|---|
-| UI / body | Inter 400–700 | `font-sans` (default on `body`) |
-| Display (headings, KPI numbers) | Inter Tight 600–800 | `font-display` (applied to `h1–h4` globally), `kpi-number` |
+| UI / body | Inter (variable) 400–700 | `font-sans` (default on `body`) |
+| Display (headings, KPI numbers) | Inter (variable) 600–800 with tight tracking | `font-display` (applied to `h1–h4` globally), `kpi-number` |
 | Codes (employee IDs, references) | system monospace | `font-mono` |
 
 Base size is **15px**; line-height 1.5. `h1–h4` get `tracking-tight` and `text-wrap: balance`.

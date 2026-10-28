@@ -9,8 +9,157 @@ response field is renamed or removed, and new fields are optional.
 
 What comes next is in [docs/ROADMAP.md](docs/ROADMAP.md).
 
+## [1.5.0] - 2026-10-28
+
+The release that makes Linear Hub safe to go live with. It answers the independent review of 1.4.0 in six packages: a
+safe trial and a real go-live (setup codes, the administrator's own code for sensitive actions, secure connections,
+built-in HTTPS), keys and backups that cannot be lost quietly (the recovery sheet, uploaded files in every backup,
+encrypted off-site copies, System health), money with a second pair of eyes (days to confirm, bank details someone
+else typed in, two approvals, bank files in test mode, VAT), Linear Hub on a phone with no signal, a tested way to
+put it online (`deploy/install.sh`), and tests that no longer depend on the date. Details:
+[docs/USER_GUIDE.md](docs/USER_GUIDE.md) ("What's new in 1.5"), [docs/LOGIC.md](docs/LOGIC.md) §18,
+[docs/API.md](docs/API.md) ("1.5 endpoints"), and what the owner must do before going live in
+[docs/OWNER_NOTES_1.5.md](docs/OWNER_NOTES_1.5.md).
+
+### Added
+
+- **Trial mode.** A database built by the demo seed is in trial mode until the owner goes live. Administrators see
+  "Trial mode: demo sign-ins are on" (or "… the demo company is still here") under the top bar on every page, with
+  **How to go live** → Settings → Trial mode, and the same item first in Needs attention.
+- **`npm run golive`** ends the trial: it refuses while Linear Hub has the database open, shows what goes and what
+  stays and why (by name), backs up and checks the database (with the uploaded files) first, asks for **GO LIVE**,
+  removes the demo company and the records the demo seed made, keeps the settings, your own people and everything made
+  during the trial (and any demo record those use, read from the database's own links), never deletes statement PDFs,
+  and makes the first owner with a one-time setup code when none of your own administrators is left. Running it again
+  changes nothing. A trial week spent on 1.4 is kept too.
+- **One-time setup codes** for every new account (Team → Add person, a hire, a client invite, the owner golive makes)
+  and every reset of someone's two-step verification or PIN: 12 letters and digits, shown once, valid 7 days, single
+  use. An account that has not finished setting up signs in only with its code. **Give a setup code** (Team → the
+  person → Edit profile → Sign-in setup) and `npm run setup-code -- <email>` make a new one; `npm run 2fa:reset` and
+  `npm run pin:reset` print the code the person needs next.
+- **Built-in HTTPS**: `LM_TLS_CERT_FILE` and `LM_TLS_KEY_FILE` make the server answer HTTPS on `PORT`, with `Secure`
+  cookies and HSTS.
+- **The recovery sheet** for the app key, made and confirmed only on the computer that runs Linear Hub
+  (`npm run recovery-sheet`, `-- --print`, `-- --out <file>`, `-- --confirm`). Confirming needs the whole key typed
+  back from the paper; from then on backups leave the key out. Settings › Backups shows whether it is done.
+- **`npm run key:restore`** puts the app key back from the sheet, a key file or an off-site copy, checked against the
+  database first.
+- **Encrypted off-site copies** of every backup (`LM_OFFSITE_DIR`, `LM_BACKUP_PASSPHRASE_FILE`): the database, the
+  uploaded files and the key, AES-256-GCM under a passphrase, read back and checked before they count, 30 daily and 8
+  weekly kept. `npm run backup -- --new-passphrase <file>` makes a passphrase; `npm run restore -- <file>.lhbk`
+  restores one.
+- **Uploaded files in every backup**: statement PDFs and the signature image (learning videos with
+  `LM_BACKUP_VIDEOS=1`), put back by restore.
+- **System health** in the Needs-attention bell for administrators: a failed or late backup, a failing or late
+  off-site copy, a nearly full disk, the key not on a confirmed recovery sheet, server errors, and a restore over newer
+  payments. Server errors are written to `logs/errors.log` (rotated at 1 MB, five kept).
+- **Days to confirm** (Pay → Days to confirm, leaders and administrators): a day logged with no booking and no check-in
+  (or with nothing logged) pays a base day only once a leader, or the office, says the person worked it. The person
+  sees "1 of your days waits for your leader" in the bell.
+- **Days off and leaving date** for office staff (Team → the person): days off are not paid, nor any day after the
+  leaving date; a leaver's last week is still paid.
+- **Bank details you confirm or report.** Details an administrator typed in for someone wait until that person says
+  **Yes, these are mine** (or a different administrator confirms them); **These are not mine** holds them.
+- **Two people approve each payment** (Settings → Payments): on by default once two administrators use two-step, and
+  kept on. Turning it off while two administrators use two-step needs the other to agree.
+- **Check before paying** on each payment and in Runs to pay: days waiting for a leader, pay resting on subs no client
+  statement has confirmed, and bonuses or adjustments added in the last 7 days with who added them.
+- **Make a 1p test file** for a bank file connection, to check the bank takes the file before the first real run.
+- **VAT on self-billed invoices**: once an administrator (not the person, not whoever typed it in) has checked a VAT
+  number on HMRC's service and confirmed it with a fresh code, invoices show the total before VAT, VAT at 20% and the
+  total due, and payments pay the total with VAT. Numbers must pass HMRC's check digits.
+- **Linear Hub works with no signal**: once opened with signal on a secure (https) address, every page opens offline,
+  even after the phone closed the tab, after a new version came out, and while the server is stopped or restarting
+  behind the proxy; saves send when the connection is back. Phones are told when a new version is ready (**Reload**).
+- **A home-screen app**: web app manifest and icons (180 px Apple, 192, 512, maskable).
+- **Today** card at the top of the rep's and leader's dashboard (Check in, Log gauges, Quick gauges), and a **Check in
+  at …** item in Needs attention at today's team event until they check in.
+- Settings on a phone: **On this page** jumps to each section. `/finance?run=<id>` opens that payslip; the invoice item
+  in Needs attention opens the invoice.
+- **A tested installer for a small Ubuntu 24.04 server** (`deploy/install.sh`): Node 22, the code, a locked-down
+  service, Caddy with automatic HTTPS, a firewall that lets in SSH, 80 and 443 only, automatic security updates,
+  nightly encrypted off-site copies (a Hetzner Storage Box, an S3-compatible bucket or any rclone remote), a health
+  check for an uptime monitor, and the `linear-hub` command for everyday jobs (status, update, import, go live,
+  restore test). Its end-to-end test covers a Storage Box over SFTP, moving to a new box, `linear-hub update` and
+  `restore`, and (optionally) the real units under systemd.
+- `docs/DEPLOY.md` is the go-live runbook; `docs/MAINTAINERS.md` the guide for another developer taking Linear Hub
+  over; `docs/OWNER_NOTES_1.5.md` what the owner does before going live; `LICENSE` says Linear Hub is © Noryn System
+  Ltd, licensed to Linear MCR Limited under the written agreement. `docs/screenshots/take-screenshots.mjs` retakes the
+  README screenshots from a running demo.
+- **`npm run test:dates`** runs the whole test suite as if it were another day (by default five awkward moments,
+  including the Sunday the clocks go forward); `-- --list` prints them.
+- CI runs every check on Linux and on a Mac, fails on a moderate or worse advisory in the app's packages, runs the
+  tests on five other dates and every Monday; Dependabot sends weekly grouped updates.
+- `session.idleHours` in the sign-in answers and `GET /auth/me`; `GET /api/system/status` for administrators.
+
 ### Changed
 
+- **The demo is a trial, not a back door.** During the trial a one-tap demo account (and every person of the demo
+  company) may only change its own account, the demo company and new records it makes. It can never change your own
+  people, touch anyone's pay but the demo company's, see or change a real person's bank details, download a payment
+  file, change office-wide settings, approve a payment, make or promote an administrator, reset anyone's sign-in or
+  give a setup code ("Demo accounts cannot …"). Every write route is on one allowlist; a new one is refused for demo
+  accounts until someone decides. Demo sessions follow the normal 14-hour limit.
+- The one-tap demo sign-ins are off by default on a server reachable over the internet (built-in HTTPS or
+  `TRUST_PROXY`); `LM_DEMO_ACCOUNTS=1` shows them, `0` turns them off everywhere.
+- Sensitive administrator actions need the administrator's own fresh two-step code: creating or promoting an
+  administrator, **stopping someone being one, setting an administrator as left**, changing someone's sign-in email or
+  **employee ID**, resetting two-step or a PIN, and giving a setup code. The Edit profile form asks as soon as such a
+  change is made.
+- `npm run seed` refuses a live database, a trial database with people of your own, or one in use; it asks for
+  **START AGAIN** and backs up first.
+- The demo uses invented people only (the owner is Morgan Blake, every email at `linearhub.example`); the starter team
+  comes from your own `server/data/starter-team.json` (never committed), or else the invented example team.
+- The server **refuses to start** when the app key is missing or does not match a database with locked data (exit code
+  78, with the way back); it used to make a new key silently. The database records the key's fingerprint.
+- `npm run latest` stops the background service, backs up and checks the database first, and starts the service again
+  with its own settings; it prints the way back.
+- Restore lists the payments, bank files, bank details changes and paid runs it would forget and asks for **RESTORE**;
+  when it cannot compare, it says so and still asks.
+- `npm run service:install` hands `LM_APP_SECRET` to the service in a private file instead of refusing it, and when run
+  again keeps the installed service's settings and key file (`-- --fresh` to start clean). `doctor`, `backup`,
+  `restore`, `key:restore`, `recovery-sheet`, `golive`, `setup-code`, `pin:reset` and `2fa:reset` run from a plain
+  terminal use the installed service's database and key.
+- The bell and Settings speak plainly about backups and system health: no commands or setting names for office
+  administrators.
+- Database: 5 s busy timeout, `synchronous=FULL`, nestable transactions, schema upgrades in one transaction.
+- Node is pinned to the tested long-term-support lines: 22 (22.18+), 24 and 26; doctor shows the Node version and the
+  `node:sqlite` status.
+- **Bank file connections start in test mode**, like every other connection. A test file pays nobody: every line has
+  sort code 00-00-00 and account 00000000, its name and references say TEST, and it marks no week paid. Switching to
+  live needs PAY FOR REAL. A bank file connection that was live before the upgrade stays live.
+- **An API connection (Revolut, Wise, TrueLayer) goes live only after a test-mode payment through it got an answer from
+  the provider's sandbox**, made with its current details; changing the details starts the first run again.
+  Settings → Payments shows the first run step by step.
+- **A downloaded bank file counts as sent.** Cancelling it afterwards needs NOT UPLOADED typed and a fresh code (the
+  file becomes void); marking some as not paid needs NOT PAID and a code. A new file for the same weeks has new
+  references ("LINEAR 05OCT JL 2") and names the earlier file.
+- Wise wording: Linear Hub creates the transfers; you fund them in Wise; transfers nobody funds go back to Runs to pay.
+- The payroll export is a "Payroll spreadsheet (CSV) for your accountant or payroll software", not a Xero or Sage import
+  file. New columns: Worker, Adjustments, VAT, Total to pay, Invoice number; every row adds up; it can export the
+  self-billed field people and the office staff apart.
+- Changing someone else's bank details, and an administrator confirming any, needs a fresh two-step code.
+- Tables show as cards on phones (no sideways scrolling); long lists show 10 cards and **Show all**.
+- Opening the app with no signal lasts only until the person would be signed out anyway, and only for reps and
+  leaders; the phone no longer keeps the employee ID.
+- A weak signal or a proxy's 502/503/504 counts as "Can't reach Linear Hub": the strip shows, gauges and check-ins wait
+  on the phone, and reads give up after 15 s (5 s while out of reach) instead of loading for ever.
+- Finance opens on Company for the owner and office. Dashboards and the Events list read in plain words; charts, the
+  week in review and Company fold away on phones. Quick gauges' check-in button says **Check in** on a phone too.
+  Needs-attention pop-ups sit at the top on phones for 5 s, two lines at most, and give way to any form or dialog.
+  Numbers in Log gauges are checked as they are typed.
+- Inter is served by Linear Hub itself (no Google Fonts). The rep's dashboard needs 749 kB of JavaScript instead of
+  1,173 kB; charts load when near the screen; libraries are in their own files, so updates download less.
+- Refused forms explain themselves in plain words ("Required", "Use at most 6 characters", "Choose one of: …") and list
+  at most 20 problems, then how many more.
+- zod 3 → 4, mailparser 3.9.36 → 3.12.4, body-parser 2.3.0 → 2.4.0.
+- The documents say what is true: Linear Hub is built by one developer at Noryn System Ltd directing AI coding agents,
+  with automated tests and independent reviews. The pitch describes the real offer (a licensed system with a monthly
+  service, the outside services it connects to, HTTPS hosting, 14-hour sessions); going online is a fixed-price
+  package agreed by a signed variation first. The roadmap: going live is a small server with HTTPS and SQLite stays.
+  The user guide starts with the guide itself and keeps the release notes at the end; it has a chapter for charity
+  and client accounts.
+- The copyright notice reads "© Noryn System Ltd. Licensed to Linear MCR Limited."
 - The public page (`/welcome`, and `/` when signed out) no longer shows anything about pay or the internal playbook.
   Gone: the six gauges, the law of averages and its benchmarks, weekly pay and paydays, the sample payday figure and
   sales funnel, and the "One sign-in per person" section with its sign-in instructions. In their place: "How we work"
@@ -21,9 +170,70 @@ What comes next is in [docs/ROADMAP.md](docs/ROADMAP.md).
 
 ### Fixed
 
+- The demo left weeks of pay long overdue ("Your pay for w/c 3 Aug is 74 days overdue"); every past week is now paid,
+  and the dashboard's pay tile reads **Overdue pay** once a payday has passed instead of "Next payday" with a past date.
+- After a PIN reset, a sign-in abandoned at the two-step step no longer uses up the setup code.
+- The trial item now comes first in Needs attention; on a phone a Needs-attention pop-up no longer covers a dialog's
+  buttons.
+- The server no longer makes a new demo company where the backups show a database was (a wrong `DB_PATH`).
+- A backup could overwrite the only saved copy of an older app key.
+- A save could fail with 500 while a backup or command held the database for a moment; a power cut could roll back the
+  last acknowledged saves.
+- `npm run seed` with `DB_PATH` set locked the data with a different key from the one the server then used.
+- A week's payroll export row now adds up (corrections from earlier weeks were in the gross but in no column).
+- Office staff were paid Monday to Friday whatever happened; days off and leavers are now handled.
+- The pay estimate no longer promises a bonus under the base-or-commission rule; it says how many more subs beat the
+  base.
+- Pages answered 404 when Linear Hub was installed under a folder with a dot-folder in its path; a missing bundle
+  answered with the page instead of a 404; `npm start` and `npm run latest` did not rebuild a release that only changed
+  the service worker.
+- Number tiles wrapped mid-number at 1280 px; the closed phone menu cast a shadow along the left edge of every page;
+  **Copy** on Client accounts said "Could not copy" on plain http; phone cards were not announced as something to open
+  by screen readers.
+- The tests no longer depend on the real date: they passed only before 12 Nov 2026, outside the first minute after
+  midnight, on days other than the Sunday the clocks go forward, and while the business clock matched the computer's.
+- The one-line message for a refused form counts every problem ("+197 more", not "+18 more"), and a choice that may be
+  left empty says so; a form sent with a huge list is refused at once with one short message instead of an answer
+  listing every item.
+- `npm run smoke` on a Mac stops at once with the command that adds the two loopback addresses it needs, instead of
+  failing three checks.
+- `npm run backup -- --new-passphrase <file>` passes the option on from the top folder; `linear-hub restore-test` no
+  longer leaves its scratch server running.
+- The team pages, the About page and README named five people who never existed; the 1.3 owner notes held notes between
+  the people building it. Both are gone.
 - `npm run build`, `npm start`, `npm run latest` and the other commands now also work from the top folder of the
   repository, the folder above `linear-micro-crm`. Run there, they failed with "Could not read package.json"; now each
   one changes into `linear-micro-crm` and runs the same command, and `npm install` there installs Linear Hub.
+
+### Security
+
+- **Demo accounts could change real people, pay and settings** during the trial, from anyone on the office Wi-Fi. They
+  now write from an allowlist and only to the demo company.
+- **Knowing someone's email and employee ID was enough to start their account** and choose its PIN and authenticator.
+  An account that has not finished setting up now needs its one-time setup code (only a SHA-256 hash is stored).
+- Sessions are stored as a SHA-256 hash of the token; existing sessions are converted in place (nobody is signed out).
+- Money and secret actions are refused over plain http from another device: entering, changing, confirming or
+  reporting bank details, approving a payment or downloading its file, adding or changing a payment connection (its 1p
+  test file too), the two-approvals setting, confirming a VAT number, freeing the weeks of a downloaded bank file,
+  giving a setup code, resetting two-step or a PIN, and new recovery codes. Setup codes and recovery codes are not shown
+  over such a connection. The office computer itself and https are fine. The server warns when `TRUST_PROXY` is set
+  but `HOST` is not 127.0.0.1.
+- **A test-mode bank file carried each person's real sort code and account number**, so uploading it by mistake would
+  have paid people (and a live run paid them again). Test files now carry 00-00-00 and 00000000 on every line.
+- **Anyone could add 20% VAT to their own pay** by typing a made-up VAT number. A number now needs HMRC's check digits
+  and an administrator's confirmation before any VAT is charged.
+- **One administrator could switch two approvals off alone** and then pay alone, and the default went off by itself
+  when the other administrator left. It is kept on, and turning it off needs a second administrator.
+- Bank details an administrator typed in for someone, and "confirmed" themselves, are held again until the person or
+  another administrator confirms them (1.4.0 details included, once, at the upgrade).
+- The app key never travels over the network: no route makes, returns or confirms the recovery sheet. Local backup
+  files are mode 600 (they were readable by other users of the computer).
+- Fonts, the service worker and the manifest come from Linear Hub only (`font-src 'self'`, `worker-src 'self'`,
+  `manifest-src 'self'`): no requests to Google.
+- Known problems in body-parser (high), zod (high) and nodemailer (moderate, inside mailparser) are fixed;
+  `npm audit` finds none. CI now fails on any moderate or worse advisory.
+- No real person is in the public repository any more: the seed, tests, smoke and load scripts and the documents use
+  invented people only.
 
 ## [1.4.0] - 2026-10-25
 
@@ -151,10 +361,11 @@ The Sapiens team's demo sign-ins, and leaders and recruiters can add people. Det
 
 ### Added
 
-- **Team Sapiens on the demo, with seven blank accounts.** Theo (leads the team), Daniel, Ridwan and Jamie as Team
-  Leaders; Olivia, Owens and Yasmin as trainees (LM-0101 to LM-0107, `<first name>@linear-mcr.co.uk`). Every page works
-  for them, with nothing logged: no gauges, events, pay, invoices, learning, check-ins or audit rows. First names only
-  until Matt adds surnames. A fresh demo seed adds them at its very end; an existing demo database gains them once on
+- **Team Sapiens on the demo, with seven blank accounts**: four Team Leaders (one leads the team) and three trainees
+  (LM-0101 to LM-0107, `<first name>@<the company's domain>`). Every page works for them, with nothing logged: no
+  gauges, events, pay, invoices, learning, check-ins or audit rows. First names only until the office adds surnames.
+  (Since 1.5 the starter team comes from the office's own `server/data/starter-team.json`, or else an invented example
+  team: Ava, Ben, Cleo and Dev as Team Leaders, Esme, Femi and Gina as trainees, `<first name>@linearhub.example`.) A fresh demo seed adds them at its very end; an existing demo database gains them once on
   its next start (a "Sapiens" team made by hand is reused, and only the missing accounts are added); a database the
   demo seed did not create never does.
 - **Sapiens team (7) on the sign-in page**, under the four demo buttons: one tap signs in as any of the seven. Listed
@@ -184,9 +395,9 @@ The Sapiens team's demo sign-ins, and leaders and recruiters can add people. Det
   ("Hannah Price (Breast Cancer Now)", was "Hannah Price (Client)") and adds `name`, `organisation` and `sector`.
 - `client/tsconfig.json` no longer sets the deprecated `baseUrl` (the `@/*` path is relative to the file), so editors stop
   warning about it.
-- Names without a surname read well everywhere: "Theo", never "Theo " in a sentence, a label, a CSV or the audit trail;
+- Names without a surname read well everywhere: "Ava", never "Ava " in a sentence, a label, a CSV or the audit trail;
   initials from the first name alone; the Team list, Finance's payroll runs, the pay export, invoices, a campaign's
-  client accounts and "Read by" sort Theo among the T surnames.
+  client accounts and "Read by" sort Ava among the A surnames.
 - The administrator's form is called **Add person** (was **Add member**), and its employee ID may be left blank.
 - `npm run build` installs new dependencies first (`npm ci` when `package-lock.json` changed), so `git pull` followed
   by `npm run build` no longer fails with "Cannot find module 'jspdf'".

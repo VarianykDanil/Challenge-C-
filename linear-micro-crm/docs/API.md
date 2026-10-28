@@ -3,6 +3,9 @@
 All endpoints are prefixed with `/api`, speak JSON, and use the types in `shared/src/types.ts`.
 Authentication is a session cookie (`lm_session`, httpOnly) created by `POST /api/auth/login`.
 Every endpoint except `/auth/login`, `/auth/login/2fa`, `/auth/demo-accounts` and `/health` requires a session and returns `401 {error}` without one.
+Since 1.5 the server stores only a SHA-256 of each session token, an account that has not finished setting up signs in
+with a one-time setup code, demo accounts are limited to the demo company during the trial, and money and secret
+actions need a secure connection (see [1.5 endpoints](#15-endpoints)).
 A session whose user has since been set to status `left` is also rejected with `401` (and deleted). Since 1.4 a session
 ends 14 hours after sign-in (the admin's `sessionMaxHours`); the request that finds it over the limit gets a `401` that
 says so, and until an account has set up two-step verification the setup gate answers `403 { twoFactorSetupRequired:
@@ -20,10 +23,16 @@ finite; the one ratio that has no value without sales, `FunnelRatios.stopsPerSal
 
 **Security headers** on every response: `X-Content-Type-Options: nosniff`, `X-Frame-Options: DENY`,
 `Referrer-Policy: strict-origin-when-cross-origin`, `Permissions-Policy: camera=(), microphone=(), geolocation=()`,
-`Content-Security-Policy` (`default-src 'self'`; scripts same-origin plus the SHA-256 of the inline theme script in
-the built `index.html`; styles inline or Google Fonts; fonts gstatic; `frame-ancestors 'none'`) and
-`Strict-Transport-Security` whenever the request arrived over HTTPS. `GET /assets/*` (hashed Vite bundles) is served
-with `Cache-Control: public, max-age=31536000, immutable`; `index.html` with `no-cache`.
+`Content-Security-Policy` (`default-src 'self'`; scripts same-origin plus the SHA-256 of each inline script in the
+built `index.html`, worked out when the server starts; styles same-origin and inline; since 1.5 fonts, the service
+worker and the web app manifest from this server only — `font-src 'self'`, `worker-src 'self'`, `manifest-src 'self'`,
+no Google Fonts; images same-origin, `data:` and the video providers' thumbnails; frames same-origin and the video
+providers; `connect-src 'self'`; `frame-ancestors 'none'`; `base-uri 'self'`; `form-action 'self'`) and
+`Strict-Transport-Security: max-age=15552000; includeSubDomains` whenever the request arrived over HTTPS (built in, or
+`X-Forwarded-Proto: https` from a trusted proxy). `GET /assets/*` (hashed Vite bundles) is served with
+`Cache-Control: public, max-age=31536000, immutable`, and a missing one is a plain `404`; `index.html`, `/sw.js` and
+`/manifest.webmanifest` with `no-cache` (`/sw.js` also with `Service-Worker-Allowed: /`); other static files
+`public, max-age=3600`.
 
 **Compression** (1.1): JSON, HTML, JavaScript, CSS and SVG responses of 1 KB or more are sent `gzip`-encoded when
 `Accept-Encoding` allows it (`br` only when the client ranks it above gzip), with an exact `Content-Length` and
@@ -57,11 +66,11 @@ unless the requester is an `admin` or the row is the requester themselves. `GET 
 reps see nobody else's; client accounts have none.
 
 ## Auth
-- `POST /auth/login` body `LoginInput { email, employeeId }` → `AuthResponse`. Case-insensitive match on both. Sets cookie. **`401 { error: 'Invalid email or employee ID' }`** for an unknown email, a wrong ID *and* a deactivated (`left`) account alike — the response never confirms whether a credential exists. **Rate limit:** failed attempts are counted per **source address + email** (8 in 15 minutes → `429 { error: 'Too many attempts, try again in N minutes' }` for that address) and per **email from any address** (20 in 15 minutes). The source is the TCP peer address — never `X-Forwarded-For`, which a client can forge — so rotating headers does not bypass the limit. A successful sign-in resets both counters.
+- `POST /auth/login` body `LoginInput { email, employeeId }` → `AuthResponse`. Case-insensitive match on both. Sets cookie. **`401 { error: 'Invalid email or employee ID' }`** for an unknown email, a wrong ID *and* a deactivated (`left`) account alike — the response never confirms whether a credential exists. **Rate limit:** failed attempts are counted per **source address + email** (8 in 15 minutes → `429 { error: 'Too many attempts, try again in N minutes' }` for that address) and per **email from any address** (20 in 15 minutes). The source is the TCP peer address, or behind a configured trusted proxy (`TRUST_PROXY`) the client address Express resolves from `X-Forwarded-For` through the trusted hops only — without `TRUST_PROXY` the header is ignored, so rotating headers does not bypass the limit. A successful sign-in resets both counters. Since 1.5 the body may carry `pin` and `setupCode` (see [1.5 endpoints](#15-endpoints)).
 - `POST /auth/logout` → `204`.
 - `GET /auth/me` → `AuthResponse` (`user.twoFactorEnabled` says whether two-step verification is on). Since 1.4 it also carries `session: SessionInfo { signedInAt, endsAt, maxHours }`, and `user.twoFactorSetupRequired` is true for every account without two-step but the demo sign-in accounts (see [1.4 endpoints](#14-endpoints)).
 - When the account has two-step verification on, `POST /auth/login` answers with a `TwoFactorChallenge` instead and no cookie; see *Two-step verification* at the end of this document for `POST /auth/login/2fa` and the `/auth/2fa*` settings endpoints. Since 1.4 two-step verification is required for every account that signs in (client accounts included), except the demo sign-in accounts while Linear Hub is still the demo; an account without it signs in and meets the setup gate. The signed-in answer is `{ user, session }`, and the cookie lasts as long as the session (14 hours by default; 14 days for a demo sign-in account).
-- `GET /auth/demo-accounts` → `{ accounts: { label: string; role: Role; email: string; employeeId: string }[] }` for the demo "quick sign-in" buttons. Returns the four **seeded** demo accounts (LM-0001/0002/0003/0010, in role order admin, leader, recruiter, rep) only when all four exist with those roles and none has left; otherwise, or when the server runs with `LM_DEMO_ACCOUNTS=0`, `{ accounts: [] }`. There is no "one user per role" fallback: a non-demo database never publishes a login. Clients hide the buttons when the list is empty. Release 1.3 adds `clientAccounts?` (the seeded demo client) and 1.3.1 `demoTeams?: DemoTeamAccounts[]` (team Sapiens' seven blank accounts; see [1.3.1](#131-endpoints)). Since 1.3.1 a `clientAccounts` item is labelled with its organisation (`"Hannah Price (Breast Cancer Now)"`, was `"Hannah Price (Client)"`) and adds `name`, `organisation` and `sector` (additive).
+- `GET /auth/demo-accounts` → `{ accounts: { label: string; role: Role; email: string; employeeId: string }[] }` for the demo "quick sign-in" buttons. Returns the four **seeded** demo accounts (LM-0001/0002/0003/0010, in role order admin, leader, recruiter, rep) only when all four exist with those roles and none has left; otherwise, or when the server runs with `LM_DEMO_ACCOUNTS=0`, `{ accounts: [] }`. Since 1.5 only while the database is in trial mode, and by default not on a server with built-in HTTPS or `TRUST_PROXY` (`LM_DEMO_ACCOUNTS=1` shows them anyway). There is no "one user per role" fallback: a non-demo database never publishes a login. Clients hide the buttons when the list is empty. Release 1.3 adds `clientAccounts?` (the seeded demo client) and 1.3.1 `demoTeams?: DemoTeamAccounts[]` (team Sapiens' seven blank accounts; see [1.3.1](#131-endpoints)). Since 1.3.1 a `clientAccounts` item is labelled with its organisation (`"Hannah Price (Breast Cancer Now)"`, was `"Hannah Price (Client)"`) and adds `name`, `organisation` and `sector` (additive).
 
 ## Dashboard
 - `GET /me/dashboard?range=week|month|quarter` → `Dashboard` (default `week`). `team` is null if the user has no team. `company` is non-null only for `admin` and `leader`. `upcomingEvents` = next 5 events for the user's team (admin: whole company) from today. `announcements` = latest 5, pinned first; `olderAnnouncements` (release 1.2, optional) = how many there are beyond those five (`GET /announcements?offset=5` lists them). `previous` is the comparison window behind `personal.deltas` and leaderboard `movement`: the **same to-date span of the previous period** (week Mon 12 – Thu 15 Oct → Mon 5 – Thu 8 Oct; month 1–15 Oct → 1–15 Sep; quarter 1–15 Oct → 1–15 Jul). `company.payrollOnTimeWindow` says which window `company.payrollOnTimeRate` describes: `'range'` (settled runs due in the range) or `'last12Weeks'` (nothing was due in the range yet, so the runs due in the last 12 weeks up to today were used). `personal.rank`/`rankOutOf` are **team-scoped for reps** (the same population as their `GET /leaderboard`) and company-wide for leaders and admins.
@@ -1423,7 +1432,7 @@ required no → yes" (nothing when nothing changed; a description is named, neve
 still to video “…” (length 0:42)" / "Replaced the still of video “…”"; "Changed learning video settings: leaders can
 add videos no → yes". Progress writes a row only when it makes the video watched for that person ("Watched “…”" or
 "Marked “…” as watched"). The report every 15 s writes nothing. Last fix round: a report from an editor's player that
-gives the video its length writes "Set the length of video “Team talk” to 1:04 (from Danil Varianyk’s player);
+gives the video its length writes "Set the length of video “Team talk” to 1:04 (from Morgan Blake’s player);
 counted 1 person as watched". Edit video and the still step add "; counted N people as watched" when a new length
 counts people. Snapshots never hold a file path.
 
@@ -1844,17 +1853,18 @@ or 0.0.0.0 address is left out, since it would not open on the new person's phon
 - `PATCH /users/:id` and `POST /users/:id/2fa/reset` stay admin only. Release 1.3.1: `lastName: ''` is accepted only
   while the person's last name is already empty (the Sapiens accounts); clearing a surname → `400 "Enter their last
   name"`.
-- Lists of people sort by surname, then first name, with the first name standing in for a missing surname (Theo sorts
-  among the T surnames), case-insensitively (`lib/people.ts personOrderSql`): `GET /users`, `GET /finance/payroll`
+- Lists of people sort by surname, then first name, with the first name standing in for a missing surname (Ava sorts
+  among the A surnames), case-insensitively (`lib/people.ts personOrderSql`): `GET /users`, `GET /finance/payroll`
   (within each week), the pay export (`GET /finance/payroll/export`), `GET /invoices` (within each week), a campaign's
   client accounts and the readers on `GET /announcements/reads` (within the same read time).
 
 ### Demo teams on the sign-in page: `GET /auth/demo-accounts`
 
 `{ accounts, clientAccounts?, demoTeams? }`. `demoTeams: { name, color, accounts: DemoAccountItem[] }[]` — each item
-`{ label: "Theo (Team Leader)", name: "Theo", role, position, email, employeeId }`, in employee-ID order. Listed only:
+`{ label: "Ava (Team Leader)", name: "Ava", role, position, email, employeeId }`, in employee-ID order. Listed only:
 
-- when the four demo accounts are listed (same conditions; `LM_DEMO_ACCOUNTS=0` → `{ accounts: [] }`);
+- when the four demo accounts are listed (same conditions; `LM_DEMO_ACCOUNTS=0` → `{ accounts: [] }`; since 1.5 only
+  in trial mode);
 - for the accounts the demo seed or its start-up step **recorded** (meta `seed_demo_teams`: team id and each account's
   id, employee ID and email) whose id, employee ID and email still match, that are staff and not `left`. Never matched by
   email or ID pattern alone: an account Matt gives a real email, or anyone made by hand, is never offered here.
@@ -1866,7 +1876,7 @@ Now", sector: "charity", role: "client", email, employeeId }` — the same condi
 ### Names without a surname
 
 Every sentence or label the server builds from a person's name uses `personName` (or `TRIM(first_name || ' ' ||
-last_name)` in SQL): "Theo", never "Theo " or a double space. `leaderName` on `GET /teams` is "Theo".
+last_name)` in SQL): "Ava", never "Ava " or a double space. `leaderName` on `GET /teams` is "Ava".
 
 ### Fixes from the 1.3 final security and pay check (additive)
 
@@ -1953,8 +1963,8 @@ log line ever carries a secret, a full sort code or a full account number.
 | --- | --- | --- | --- |
 | GET | `/payments/providers` | — | `PaymentProviderView[]`: the four (`bank_file`, `revolut`, `wise`, `truelayer`, in that order) with `abilities`, `configFields` (the connection form), `available: true`, and where they apply `connectSteps`, `liveNote`, `approveNote`, `waitingNote`. `PaymentConfigField` options carry `iconKey` and `hint`; `requiredUnless` names a stored secret that makes a field optional (Revolut's code once Linear Hub holds its refresh token). `abilities.anyUkBank` is set for the bank file. `testOnly: true` marks the test providers `LM_PAYMENTS_FAKE=1` adds (no live mode) |
 | GET | `/payments/connections` | — | `PaymentConnection[]`, active first. `secretsSet` lists the NAMES of the secrets stored, never their values; `balancePence` is the last test's balance when the provider shows one |
-| POST | `/payments/connections` | `{ provider, name?, settings?, secrets? }` | `201 PaymentConnection`. `400` with `details: [{ path, message }]` per wrong field (checked without a network call). An API connection starts `mode: 'test'`, `status: 'not_connected'`; a bank file `mode: 'live'`, `status: 'connected'` (it has no test mode, and any secrets sent are dropped); the test bank file (`fake_file`, `testOnly`) `mode: 'test'`, `status: 'connected'`. Bank file `settings.format`: `generic`, `starling` or `revolut` |
-| PATCH | `/payments/connections/:id` | `{ name?, settings?, secrets?, mode?, confirm? }` | `PaymentConnection`. An empty secret keeps the stored one. Changing an API connection's settings or secrets puts it back to `not_connected` and clears `balancePence` and `lastCheckedAt`. `mode: 'live'` needs `confirm: "PAY FOR REAL"` typed exactly (`400`) and a connected test (`409`), and leaves it `not_connected` until a live test works. `409` for a change of mode (either way) while an approved payment through it has items waiting. A bank file cannot change mode (`400`), nor can a test provider (`testOnly`: `400` "The test providers never pay anyone: they have no live mode."). `409` once disconnected |
+| POST | `/payments/connections` | `{ provider, name?, settings?, secrets? }` | `201 PaymentConnection`. `400` with `details: [{ path, message }]` per wrong field (checked without a network call). An API connection starts `mode: 'test'`, `status: 'not_connected'`; a bank file `mode: 'live'`, `status: 'connected'` in 1.4 (since 1.5 `mode: 'test'`: see [1.5 endpoints](#15-endpoints); any secrets sent are dropped); the test bank file (`fake_file`, `testOnly`) `mode: 'test'`, `status: 'connected'`. Bank file `settings.format`: `generic`, `starling` or `revolut` |
+| PATCH | `/payments/connections/:id` | `{ name?, settings?, secrets?, mode?, confirm? }` | `PaymentConnection`. An empty secret keeps the stored one. Changing an API connection's settings or secrets puts it back to `not_connected` and clears `balancePence` and `lastCheckedAt`. `mode: 'live'` needs `confirm: "PAY FOR REAL"` typed exactly (`400`) and a connected test (`409`), and leaves it `not_connected` until a live test works. `409` for a change of mode (either way) while an approved payment through it has items waiting. A bank file cannot change mode (`400`; since 1.5 it can, with PAY FOR REAL), nor can a test provider (`testOnly`: `400` "The test providers never pay anyone: they have no live mode."). `409` once disconnected |
 | DELETE | `/payments/connections/:id` | — | `PaymentConnection` with `disconnectedAt`: secrets wiped, drafts through it cancelled, history kept. `409` while a payment through it is on its way |
 | POST | `/payments/connections/:id/test` | — | `PaymentConnectionTestResult { ok, message, balancePence?, checkedAt, connection }`; stores `connected` or `error`. It reaches the provider (its sandbox in test mode) and answers `ok: false` with a plain message, not an error status, when the provider refuses the details. A bank file answers `ok: true` and says which files it makes |
 
@@ -2019,38 +2029,224 @@ the numbers (masked digits only) and counts towards the write limit.
 - `AttentionKind` gains `'payments'` (the bell's "Payments" group); `AuditEntity` gains `payment_connection`,
   `payment_batch`, `bank_account` (labels "Payment connection", "Payment", "Bank details").
 
+## 1.5 endpoints
+
+Trial mode and going live, one-time setup codes, the administrator's own code for sensitive actions, secure
+connections and built-in HTTPS (access); the app key, backups and System health (keys); money checks (money); the
+offline app (phone); plain validation messages (quality). Every change to an existing answer is additive except where
+a route now answers `200` with a body instead of `204` (the resets, below). Types: `shared/src/types/access.ts`,
+`shared/src/types/payments.ts`, `shared/src/types/pin.ts`, `shared/src/types/search.ts`. Rules:
+[LOGIC §18](LOGIC.md#18-release-15).
+
+### Signing in: setup codes and trial mode
+
+- **`POST /auth/login`** `LoginInput { email, employeeId, pin?, setupCode? }`. Order: credentials → PIN (when the
+  account has one) → setup code → two-step challenge. An account that has not finished setting up (no two-step yet, or
+  an administrator reset its PIN) answers `200 { requiresSetupCode: true }` with no cookie until the same body comes with
+  `setupCode`; a wrong, used or expired code → `401 { error: "That setup code is not right, or it has been used or has
+  expired. Ask an administrator for a new one.", details: { requiresSetupCode: true, reason: 'wrong' } }`. Missing and
+  wrong codes count against the login limiter. Exempt: the one-tap demo accounts during the trial. Audit: the sign-in
+  reason `wrong_setup_code` ("Failed sign-in: wrong, used or expired setup code"); a sign-in with a code reads "… with a
+  setup code".
+- **`POST /auth/login/2fa`**: after a PIN reset (two-step stays on) `/auth/login` holds the setup code against the new
+  challenge, and a right two-step code here uses it up. If that code was replaced or expired meanwhile → `401 { details:
+  { requiresSetupCode: true, reason: 'wrong' } }` (start again). An abandoned two-step step leaves the code still needed.
+- **`GET /auth/me`** and the signed-in answers: an administrator's answer carries `trial: { trialMode, demoSignIns }`
+  while the database is in trial mode (`AuthResponse.trial?`). `session` gains `idleHours` (the "Sign out after idle"
+  setting; `SessionInfo.idleHours?`), which the offline field kit uses.
+- **`GET /auth/demo-accounts`**: empty unless the database is in trial mode and the one-tap sign-ins are allowed:
+  `LM_DEMO_ACCOUNTS=0` never, `=1` always, unset only when neither `LM_TLS_CERT_FILE` nor `TRUST_PROXY` is set. A
+  database that has gone live never lists any.
+- **`POST /auth/2fa/enable`** over an insecure connection from another device: `TwoFactorEnabled { recoveryCodes: [],
+  recoveryCodesWithheld: true, message }` (two-step is on; make the codes later over a secure connection).
+
+### Adding people, resets and setup codes
+
+| Method | Path | Who | Body → answer |
+| --- | --- | --- | --- |
+| POST | `/users` | admin, leader, recruiter (1.3.1 rules) | `role: 'admin'` also needs `code` (the caller's fresh two-step code). `201 AddPersonResult` adds `setupCode` (`null` over an insecure connection from another device, with `setupCodeWithheld: true`) and `setupCodeExpiresAt`; `signInInstructions` include the code |
+| PATCH | `/users/:id` | admin | `code` is needed for making someone `admin`, changing an admin's `role`, setting an admin's `status` to `left`, a different `email`, or a different `employeeId` (case does not count): shared `staffEditStepUp`. `400` "Type the 6-digit code…" without it. "You cannot deactivate your own account" is checked first |
+| POST | `/users/:id/setup-code` | admin, not for yourself | `{ code }` → `200 SetupCodeIssued { userId, setupCode, expiresAt }`. `409` for someone who has left. Secure connection only. Audited ("Gave … a new setup code") |
+| POST | `/users/:id/2fa/reset` | admin | `{ code }` → `200 SetupCodeIssued` (was `204`) |
+| POST | `/auth/pin/reset/:userId` | admin | `{ code }` → `200 SetupCodeIssued` (was `204`); the next sign-in needs the code even with two-step on |
+| POST | `/client-accounts/:id/reset-pin`, `/client-accounts/:id/reset-2fa` | admin | `{ code }` → `200 ClientAccountReset` (the account plus `setupCode`, `setupCodeExpiresAt`) |
+| PATCH | `/client-accounts/:id` | admin | a new `email` needs `code` |
+| POST | `/campaigns/:id/client-accounts` | admin | `ClientInviteResult` adds `setupCode`, `setupCodeExpiresAt` (`setupCodeWithheld`); the instructions include the code |
+| POST | `/recruitment/candidates/:id/stage` | to `hired` | the answer adds `hiredSignIn: HiredSignIn` (name, email, employee ID, team, `setupCode`, `signInInstructions`) |
+
+Codes are 12 letters and digits in three groups (`ABCD-EFGH-JKMN`; no I, L, O, 0 or 1), valid 7 days, single use; a
+new one replaces any unused one. Only a hash is stored. The server commands `npm run setup-code -- <email>`,
+`npm run 2fa:reset` and `npm run pin:reset` print one.
+
+### Refusals added in 1.5
+
+| Refusal | Answer |
+| --- | --- |
+| A demo account during the trial, on a write its rule refuses | `403 { error: "Demo accounts cannot … Sign in with your own administrator account, or go live first (npm run golive).", details: { code: 'demo_account', trialMode: true } }` |
+| A money or secret action over plain http from another device | `403 { error: "For safety this only works over a secure connection. Open Linear Hub on the office computer itself, or use its https:// address.", details: { code: 'insecure_connection' } }` |
+| A step-up action by an administrator without two-step | `403 { details: { code: 'two_factor_required', twoFactorRequired: true } }` |
+| A step-up action without the code / with a wrong one / too many wrong ones | `400` "Type the 6-digit code from your authenticator app" / `400` / `429` |
+
+**Demo accounts.** During the trial a restricted demo account (a one-tap account, or a person of the demo company) has
+every write checked against `server/src/lib/demoWrites.ts` `DEMO_WRITE_RULES`, one rule per write route (`"METHOD
+/pattern"`); a route with no rule is refused, and a test fails when a route has none. Reads are allowed except
+`GET /payments/batches/:id/file` and real people's bank details. The guard (`demoGuard`) runs after `authenticate` and
+before the write limit and the audit, so a refusal is neither counted nor recorded as a change.
+
+**Secure connection** = TLS (built in, or `X-Forwarded-Proto: https` from a trusted proxy) or a loopback peer.
+Secure-only routes (`middleware/accessGuards.ts SECURE_ONLY_ROUTES`): `PUT /me/bank-details`,
+`POST /me/bank-details/confirm`, `POST /me/bank-details/report`, `PUT /users/:id/bank-details`,
+`POST /users/:id/bank-details/confirm`, `POST /payments/batches/:id/approve`, `GET /payments/batches/:id/file`,
+`POST /payments/batches/:id/cancel` and `/mark-paid` when they carry `confirm` or `code`, `POST /payments/connections`,
+`PATCH /payments/connections/:id`, `POST /payments/connections/:id/test-file` and `/test-file-result`,
+`PUT /payments/settings`, `POST /invoices/profile/:userId/vat/confirm`, `POST /users/:id/setup-code`,
+`POST /users/:id/2fa/reset`, `POST /auth/pin/reset/:userId`, `POST /client-accounts/:id/reset-2fa` and `/reset-pin`, and
+`POST /auth/2fa/recovery-codes`. With `TRUST_PROXY` set keep `HOST=127.0.0.1`: the server warns at start-up otherwise.
+
+**Built-in HTTPS.** With `LM_TLS_CERT_FILE` and `LM_TLS_KEY_FILE` the server answers HTTPS on `PORT` (no plain-http
+port, no redirect); cookies are then `Secure` and every answer carries `Strict-Transport-Security: max-age=15552000;
+includeSubDomains`.
+
+**Sessions** are stored as a SHA-256 of the cookie value; the cookie itself is unchanged.
+
+### System health and the app key (administrators)
+
+- **`GET /system/status`** (admin; others `403`, client `403`, anonymous `401`) → `{ key: { fingerprint, source:
+  'file' | 'env' | null, sheetMadeAt, sheetConfirmedAt, confirmedForThisKey, inLocalBackups }, offsite: { configured,
+  dir, lastAt, file, error, errorAt, problem }, backupFailure: { at, message } | null, files: { includeVideos }, disk: {
+  freeBytes, totalBytes } | null, serverErrors24h, errorLog }`. `offsite.problem` is in plain words. It never carries the
+  key. The off-site and disk checks are cached for a minute.
+- **No route makes, returns or confirms the recovery sheet** (`POST /system/recovery-sheet` and `…/confirm` answer
+  `404`): the key never travels over the network. The sheet is made with `npm run recovery-sheet` on the server.
+- `GET /me/attention` may carry items of kind `system` ("System health") for administrators, all linking to
+  `/settings#backups` (the restore warning to Runs to pay): `system:errors` keeps one key with its count.
+- `500` answers are unchanged for the caller (`{ error: 'Internal server error' }`); the details go to
+  `<data dir>/logs/errors.log` (never the query string or the request body).
+
+### Money
+
+New routes (all audited; write routes are under the per-person write limit; the demo and secure-connection rules above
+apply):
+
+| Method | Path | Who | Body → answer |
+| --- | --- | --- | --- |
+| GET | `/pay/day-checks` | admin, leader | `PayDayToCheck[]` (a leader: their own team; their own days are `officeOnly`) |
+| POST | `/pay/day-checks` | admin, leader | `{ userId, date, decision: 'confirmed' \| 'not_worked', note? }` → `PayDayCheck`; `403` for a leader's own day or another team; `409` for a paid week |
+| GET | `/pay/staff/:userId` | admin, or the person | `StaffDays { userId, leavingDate, absences[] }` |
+| PUT | `/pay/staff/:userId/leaving-date` | admin | `{ leavingDate: 'YYYY-MM-DD' \| null }` → `StaffDays`; `409` when it would change a paid week |
+| POST | `/pay/staff/:userId/absences` | admin | `{ date, to?, kind: 'holiday' \| 'sick' \| 'unpaid' \| 'other', note? }` → `201 StaffDays` (weekdays only, at most 31 days) |
+| DELETE | `/pay/staff/:userId/absences/:id` | admin | → `StaffDays` |
+| POST | `/me/bank-details/confirm` | the person | `{ changedAt?, code? }` → `BankDetailsView` (details someone else typed in) |
+| POST | `/me/bank-details/report` | the person | `{ note? }` → `BankDetailsView` ("not my details": held) |
+| GET | `/payments/settings` | admin | `PaymentsSettings { twoApprovals, explicit, adminsWithTwoStep, offRequest: { byId, byName, at } \| null, stuck }` |
+| PUT | `/payments/settings` | admin | `{ twoApprovals: boolean, code }` (fresh code, checked last) → `PaymentsSettings`. Off while two or more administrators use two-step: **`202`** (asked; `offRequest` set); the same administrator again → `409`; a different one → `200` (off). `true` cancels a request |
+| POST | `/invoices/profile/:userId/vat/confirm` | admin (not the person, not who typed it) | `{ vatNumber, code }` → `InvoiceProfile`; `403` for your own or a number you typed; `409` no number, already confirmed, or a different number now |
+| POST | `/payments/connections/:id/test-file` | admin | `{ holderName, sortCode, accountNumber, code }` → `{ fileName, contentType, body }` (`no-store`; bank files only, `409` otherwise) |
+| POST | `/payments/connections/:id/test-file-result` | admin | `{ result: 'accepted' \| 'refused' }` → `PaymentConnection` |
+
+Changed routes:
+
+- `PUT /users/:id/bank-details` (someone else's): a fresh code is required; the details wait for that person or a
+  different administrator. `POST /users/:id/bank-details/confirm`: a fresh code is required; `403` for the administrator
+  who typed them in; `409` for details the person reported. Bank details views gain `waitingFor`, `reportedAt`,
+  `canConfirm`, `canReport`, `changedBySomeoneElse`, `noOtherAdmin`.
+- `POST /payments/connections`: **a bank file connection now starts `mode: 'test'`**, like the API ones.
+  `PATCH /payments/connections/:id` `{ mode: 'live', confirm: 'PAY FOR REAL' }` is allowed for bank files; for an API
+  connection `409` "Make a test payment through the … sandbox first" until a test-mode payment through it was answered
+  by the sandbox since its details last changed. `{ mode: 'test' }` works for bank files too.
+- `POST /payments/batches/:id/approve`: with two approvals on (live payments), the first approval answers the draft
+  with `firstApprovedAt/By`; the same administrator again → `409` "a different administrator". With two approvals on
+  and fewer than two administrators using two-step, a first approval is refused (`409`, `approveWaitsFor` says why).
+- `POST /payments/batches/:id/cancel` and `/mark-paid` take `{ confirm, code }` once a live bank file was downloaded
+  (`NOT UPLOADED` / `NOT PAID`); `400` without them. Cancelling then makes the file void (`voidedAt`, `voidedByName`,
+  `voidReason`).
+- `POST /payments/batches`: a new skip code `recent_file` (the person-week is in a live file downloaded in the last 7
+  days that was freed without the confirmation).
+- `GET /payments/batches/:id` gains `downloadedAt/ByName`, `voidedAt/ByName`, `voidReason`, `approvalsNeeded`,
+  `firstApprovedAt/By/ByName`, `recentChanges[]`, `unconfirmedPence`, `unconfirmedSubs`, `daysWaiting`, each item's
+  `checks` and (a live bank file) `earlierFile { batchId, downloadedAt, downloadedByName, voidedAt, copies }`, and the
+  actions `cancelNeedsConfirmation`, `markNotPaidNeedsConfirmation`, `voidable`, `approveWaitsFor`. Test bank files are
+  named `TEST-…`, every reference starts `TEST` and every line has sort code 00-00-00 and account 00000000.
+- `GET /payments/connections` gains `testFileAt`, `testFileResult`, `firstRun { sandboxPaymentAt, livePaymentAt }`.
+- `GET /finance/payroll`: unpaid runs gain `checks { daysWaiting, unconfirmed }` for administrators.
+- `GET /finance/payroll/export?weekStart=&runs=unpaid|all&people=all|self_billed|office[&format=csv]`: one plain CSV
+  (Name, Employee ID, Worker, Period start, Period end, Base pay, Commission, Bonus, Overrides, Deductions, Adjustments,
+  Gross pay, VAT, Total to pay, Invoice number, Payment reference). `format=xero` / `sage` from older links give the same
+  file. File name `linear-hub-payroll-<week>[-self-billed|-office].csv`. It is a spreadsheet to map, not an import file.
+- Invoices: `Invoice.vat { net, ratePercent, vat, gross, statement } | null`; `InvoiceSummary.vatAmount` when VAT is
+  charged; payments pay `total + vatAmount`. `InvoiceProfile.vat { status: 'none' | 'waiting' | 'confirmed', changedAt,
+  changedByName, confirmedAt, confirmedByName }`; `InvoiceParty.vatCharged`. `PUT /invoices/profile[/:userId]`: a VAT
+  number must pass HMRC's check digits (`400` otherwise; `GB 999 9999 73` is HMRC's own example of a valid one); a new
+  number waits for the office.
+- Needs attention: the payments provider adds "N days to confirm" (`payments:days:…`, `/pay/days`), the off request
+  and stuck items for administrators, and a rep's or leader's own waiting days; the invoices provider adds "Check …'s VAT
+  number". The administrator's feed budget is 13 SQL statements (other roles 12).
+
+### The offline app (phone)
+
+- `GET /me/attention`: a new item `events:checkin:<eventId>` (kind `events`) for a rep or leader whose team has an event
+  today, from 60 minutes before its start until its end, while they have no check-in and no gauge row for it. Severity
+  `info` before the start ("Starts 09:30 · 5 min grace. Tap Check in when you get there."), `warning` after ("Started
+  09:30. …"). Title "Check in at BCN — Golden Square", `href` `/quick?eventId=<id>`, `actionLabel` "Check in".
+- The items `invoices:open:*` and `invoices:resolved:*` link to `/finance?tab=me&run=<payroll run id>` (action "Open the
+  invoice" / "Open the payslip").
+- **Static files**: `/sw.js` and `/manifest.webmanifest` are sent `Cache-Control: no-cache`, and `/sw.js` with
+  `Service-Worker-Allowed: /`. A missing `/assets/*` file is a plain-text `404` (never the page). The page fallback
+  names `index.html` relative to its folder, so an install under a dot-folder no longer answers `404`.
+- The service worker never handles `/api`: no API answer is ever stored on the phone. Client side, a read gives up after
+  15 s (5 s while Linear Hub is known to be out of reach; the first `/auth/me` after 6 s), and a 502/503/504 without
+  Linear Hub's own JSON `{ error }` counts as "Can't reach Linear Hub" (`NetworkError.reason`: `unreachable`, `timeout`
+  or `gateway`). Saves have no time limit.
+
+### Validation errors
+
+`400 { error: 'Validation failed', details: [{ path, message }] }` keeps its shape. zod's own messages are plain words
+where a schema gives none of its own ("Required", "Expected a number", "Use at most 6 characters", "Must be more than
+0", "Choose one of: a, b, c", "(or leave it empty)", "Leave this empty", "Enter a valid email address", "Not expected
+here: x"). At most 20 details: a 21st `{ path: '', message: 'And N more problems' }` says how many were left out. A list
+over its limit gives one detail for the list ("At most 200") and none for its items. `PATCH` bodies change only the
+fields they send (`parsePatch`) on `/users/:id`, `/campaigns/:id`, `/events/:id`, `/gauges/:id`,
+`/recruitment/candidates/:id`, `/recruitment/interviews/:id` and `/recruitment/questions/:id`.
+
 ## Seed & demo accounts
-The server seeds `server/data/linear.sqlite` on first start (or `npm run seed` to reset) with deterministic
-sample data for the last 26 weeks. Demo logins (email / employee ID):
+The server seeds `server/data/linear.sqlite` on first start (or `npm run seed` to reset, which since 1.5 refuses a live
+database, a trial database with people of your own or one in use, asks for START AGAIN and backs up first) with
+deterministic sample data for the last 26 weeks. Since 1.5 such a database is in **trial mode** until `npm run golive`
+(LOGIC §18.1), and every demo person is invented, at the invented domain `linearhub.example`. Demo logins (email /
+employee ID):
 
 | Role | Name | Email | Employee ID |
 |---|---|---|---|
-| admin | Danil Varianyk (Owner) | danil@linear-mcr.co.uk | LM-0001 |
-| leader | Amelia Hart (Crew Leader) | amelia.hart@linear-mcr.co.uk | LM-0002 |
-| recruiter | Priya Shah (Recruiter) | priya.shah@linear-mcr.co.uk | LM-0003 |
-| rep | Jordan Lee (Field Rep) | jordan.lee@linear-mcr.co.uk | LM-0010 |
+| admin | Morgan Blake (Owner) | morgan.blake@linearhub.example | LM-0001 |
+| leader | Amelia Hart (Crew Leader) | amelia.hart@linearhub.example | LM-0002 |
+| recruiter | Priya Shah (Recruiter) | priya.shah@linearhub.example | LM-0003 |
+| rep | Jordan Lee (Field Rep) | jordan.lee@linearhub.example | LM-0010 |
 
-Release 1.3.1: team **Sapiens** (Theo leads it) with seven blank accounts — no gauges, events, pay, invoices,
-agreements, learning, check-ins, bookings or audit rows — first names only (`last_name ''`), active, started on the
-business date of the seed, Manchester, the default plan for the position, no PIN:
+The starter team (release 1.3.1, team **Sapiens** in the example): blank accounts — no gauges, events, pay, invoices,
+agreements, learning, check-ins, bookings or audit rows — active, started on the business date of the seed,
+Manchester, the default plan for the position, no PIN. Since 1.5 they come from `server/data/starter-team.json` next to
+the database when it exists (the office's own team: never committed, kept at go-live) and otherwise from the committed
+`server/starter-team.example.json` (invented people, part of the demo company), which has Ava leading the team:
 
 | Role | Name | Email | Employee ID |
 |---|---|---|---|
-| leader | Theo (Team Leader, leads Sapiens) | theo@linear-mcr.co.uk | LM-0101 |
-| leader | Daniel (Team Leader) | daniel@linear-mcr.co.uk | LM-0102 |
-| leader | Ridwan (Team Leader) | ridwan@linear-mcr.co.uk | LM-0103 |
-| leader | Jamie (Team Leader) | jamie@linear-mcr.co.uk | LM-0104 |
-| rep | Olivia (Trainee) | olivia@linear-mcr.co.uk | LM-0105 |
-| rep | Owens (Trainee) | owens@linear-mcr.co.uk | LM-0106 |
-| rep | Yasmin (Trainee) | yasmin@linear-mcr.co.uk | LM-0107 |
+| leader | Ava (Team Leader, leads Sapiens) | ava@linearhub.example | LM-0101 |
+| leader | Ben (Team Leader) | ben@linearhub.example | LM-0102 |
+| leader | Cleo (Team Leader) | cleo@linearhub.example | LM-0103 |
+| leader | Dev (Team Leader) | dev@linearhub.example | LM-0104 |
+| rep | Esme (Trainee) | esme@linearhub.example | LM-0105 |
+| rep | Femi (Trainee) | femi@linearhub.example | LM-0106 |
+| rep | Gina (Trainee) | gina@linearhub.example | LM-0107 |
 
 A fresh seed inserts them at its very end, after every extension seed; an existing demo database gains them once on
 start-up (`db/extensions/sapiens.ts`, docs/LOGIC.md §16.10). The next person added gets LM-0108.
 
-Release 1.4: these demo sign-in accounts (the four, Sapiens' seven and the demo client CL-0001) need no two-step code
-and keep 14-day sessions while the database is still the demo (LOGIC §17.1); every other account needs both. A fresh
-seed gives the people paid weekly obviously fake bank details (sort code 00-00-00, account number `0000` + their id;
-every ninth person none, one change waiting for the admin) and no payment connection.
+The one-tap demo accounts (the four, the starter team and the demo client CL-0001) need no setup code and no two-step
+code while the database is in trial mode, and follow the normal session limit (14 hours by default; 14 days until 1.4).
+They are restricted to the demo company (see [1.5 endpoints](#15-endpoints)). Every other account needs a setup code
+the first time and two-step always. A fresh seed gives the people paid weekly obviously fake bank details (sort code
+00-00-00, account number `0000` + their id; every ninth person none, one change waiting for the admin) and no payment
+connection; every past week is paid (the odd one late), and the only unpaid runs are last week's, due this Friday.
 
 Teams: Northern Lights, Deansgate, Spinningfields, Ancoats (and Sapiens). Campaigns: Breast Cancer Now (fundraising, private sites),
 Children's Hospice North (fundraising, events), Volt Energy (B2B), FibreCity Broadband (residential).
@@ -2067,8 +2263,8 @@ also never has a zero-sales day this week), and an avatar palette with ≥ 4.5:1
 
 Behaviour that the contract above leaves open, as implemented in `server/`:
 
-- **Public endpoints.** `GET /auth/demo-accounts` is public (the login page needs it before a session exists), alongside `/auth/login` and `/health`. It only ever lists the four seeded demo accounts (all present, with their seeded roles, none `left`), plus the demo client (`clientAccounts`) and team Sapiens (`demoTeams`) that the seed recorded, and returns `{ accounts: [] }` otherwise or when the environment variable `LM_DEMO_ACCOUNTS=0` is set — set that on any deployment with real users. Unknown `/api/*` paths return `404 { "error": "Not found" }` whether or not a session is present.
-- **Login & sessions.** Email and employee ID are matched case-insensitively; an unknown email, a wrong ID and a user with status `left` all get the same `401 Invalid email or employee ID` (the distinction is never disclosed). Failed attempts are counted in memory (`lib/limiter.ts`, bounded LRU maps of 10,000 keys, expired entries swept every 5 minutes off the request path) under two keys: **source address + email** (8 in 15 minutes → `429`) and **email alone** (20 in 15 minutes → `429`, a backstop against rotating addresses). The source is `req.socket.remoteAddress`, never `req.ip`/`X-Forwarded-For`. Sessions live in the `sessions` table (32 random bytes, hex) behind the `lm_session` cookie (httpOnly, SameSite=Lax): 14 days until 1.3.1; since 1.4, `sessionMaxHours` after sign-in (14 by default), with the cookie's Max-Age the same, and 14 days only for the demo sign-in accounts while Linear Hub is still the demo. **`TRUST_PROXY`** (env, default off): with it unset the app ignores `X-Forwarded-*` entirely, so `req.secure` is false behind a TLS terminator — set `TRUST_PROXY=1` (one proxy hop), the proxy's IP or CIDR (`10.0.0.0/8`, `loopback`) or a comma list, which makes `req.secure` follow `X-Forwarded-Proto` (Secure cookies, HSTS); the proxy must overwrite inbound `X-Forwarded-For`. `COOKIE_SECURE=1` forces the Secure flag regardless. `authenticate` rejects (and deletes) the session of any user whose status is `left`, and `PATCH /users/:id` with `status: 'left'` deletes all of that user's sessions, so deactivation revokes access immediately. An admin cannot deactivate their own account (`400`).
+- **Public endpoints.** `GET /auth/demo-accounts` is public (the login page needs it before a session exists), alongside `/auth/login` and `/health`. It only ever lists the four seeded demo accounts (all present, with their seeded roles, none `left`), plus the demo client (`clientAccounts`) and team Sapiens (`demoTeams`) that the seed recorded, and returns `{ accounts: [] }` otherwise, when the environment variable `LM_DEMO_ACCOUNTS=0` is set, or (1.5) when the database is not in trial mode or the server is online (built-in HTTPS or `TRUST_PROXY`) without `LM_DEMO_ACCOUNTS=1`. Unknown `/api/*` paths return `404 { "error": "Not found" }` whether or not a session is present.
+- **Login & sessions.** Email and employee ID are matched case-insensitively; an unknown email, a wrong ID and a user with status `left` all get the same `401 Invalid email or employee ID` (the distinction is never disclosed). Failed attempts are counted in memory (`lib/limiter.ts`, bounded LRU maps of 10,000 keys, expired entries swept every 5 minutes off the request path) under two keys: **source address + email** (8 in 15 minutes → `429`) and **email alone** (20 in 15 minutes → `429`, a backstop against rotating addresses). The source is `req.socket.remoteAddress`, or `req.ip` when `trust proxy` is configured (`TRUST_PROXY`: Express then resolves `X-Forwarded-For` through the trusted hops only); without it `X-Forwarded-For` is ignored. Sessions live in the `sessions` table behind the `lm_session` cookie (32 random bytes, hex; httpOnly, SameSite=Lax); since 1.5 the table keeps only the SHA-256 (hex) of the cookie value, and 1.4 rows were converted in place. Lifetime: 14 days until 1.3.1; since 1.4, `sessionMaxHours` after sign-in (14 by default), with the cookie's Max-Age the same (until 1.5 the demo sign-in accounts kept 14 days; since 1.5 they follow the same limit). **`TRUST_PROXY`** (env, default off): with it unset the app ignores `X-Forwarded-*` entirely, so `req.secure` is false behind a TLS terminator — set `TRUST_PROXY=1` (one proxy hop), the proxy's IP or CIDR (`10.0.0.0/8`, `loopback`) or a comma list, which makes `req.secure` follow `X-Forwarded-Proto` (Secure cookies, HSTS); the proxy must overwrite inbound `X-Forwarded-For`. `COOKIE_SECURE=1` forces the Secure flag regardless. `authenticate` rejects (and deletes) the session of any user whose status is `left`, and `PATCH /users/:id` with `status: 'left'` deletes all of that user's sessions, so deactivation revokes access immediately. An admin cannot deactivate their own account (`400`).
 - **Employee IDs.** Because the employee ID is half of the credential, `redactUser`/`redactPayroll` (`server/src/lib/scope.ts`) blank it (`''`) on every user or payroll payload unless the requester is an admin or the row is their own; `q` on `GET /users` searches employee IDs for admins only.
 - **Dates and times.** `from`/`to` are inclusive `BETWEEN` filters, so `from=to=<date>` is an exact-date match (used to prefill an existing gauge entry via `GET /gauges?eventId&userId&from&to`). `parseRange` rejects `from` before `2020-01-01` and spans over 400 days with `400`, so daily trends and weekly summaries are bounded; `limit` is capped at 500. Week keys (`groupBy=week`, `FinanceWeek.weekStart`, `RecruitmentSummary.weekly`) are Monday dates. Dashboard/leaderboard ranges end at **today** (`week` = Monday → today) and the comparison period is the **same to-date span of the previous period** (`previousToDateRange` in `server/src/lib/dates.ts`: week → the same weekdays last week, month → days 1..n of the previous month clamped to its length, quarter → the same day-offset into the previous quarter), returned as `Dashboard.previous`; `deltas` are null when the previous value is 0. Quarter trends are weekly points (the first point is keyed by the quarter's first day and holds that partial week), week/month trends are daily, all zero-filled.
 - **Check-in timestamps.** `checkedInAt` is stored and returned as a *naive wall-clock* timestamp with no zone suffix (`2026-10-15T10:03:00`), matching `isCheckInOnTime`, which reads the event start the same way. Clients should send the naive value the user typed (`YYYY-MM-DDTHH:mm[:ss]`); a zoned value (`…Z` / `±hh:mm`) is converted to **Europe/London** wall-clock time (`toBusinessISO`), never to the container's zone. The server scripts also pin `TZ=Europe/London` so `todayISO()` is the business date; the Dockerfile should set the same `TZ`. Other timestamps (`submittedAt`, `createdAt`, `appliedAt`, …) are full ISO 8601 UTC.
@@ -2080,11 +2276,11 @@ Behaviour that the contract above leaves open, as implemented in `server/`:
 - **FinanceSummary.** The window is snapped to whole pay weeks (`mondayOf(from)`..`sundayOf(to)`; the response echoes the snapped `from`/`to`). Per week, revenue (Σ sales × the entry's snapshotted `payout_per_sale`), payroll (runs with that `weekStart`) and expenses are measured over the same Mon–Sun days — each series is one `GROUP BY` pay-week query over the window, stitched per Monday — and a week that has started, lies after the last materialised week and has no runs is charged at `estimateWeekPayroll` and flagged `estimated`. `payroll.runs` = all runs whose week starts in the window; `paid` = money landed (status `paid` **or** `late`); `late` = the subset paid after the due date; `pending` = status `pending`; failed = `runs − paid − pending`. `onTimeRate` = `(paid − late) / paid` (0 when nothing paid), `avgDaysLate` over the late subset. `byCampaign.commission` = Σ sales × the entry's snapshotted `commission_per_sale` (the selling rep's plan rate when the day was logged; reconciles to payroll commission for complete weeks as long as the plan did not change in between); `CampaignFinance.margin` is in pounds (revenue − that commission). Leaders get the same shape scoped to their team (team members' payroll, team sales/revenue, venue fees of the team's events). `Dashboard.company.payrollOnTimeRate` uses settled runs due in the range; when none were due yet it uses settled runs due in the last 12 weeks up to today and reports `payrollOnTimeWindow: 'last12Weeks'` (`'range'` otherwise). `Dashboard.company.revenue` and `byCampaign` use the same snapshots (one grouped query).
 - **Seed announcements.** The leaderboard announcement (top two by sales and best conversion among people with ≥ 200 stops in the last complete calendar month, plus the crew total) and the "N candidates at interview or observation stage" line are generated from the seeded gauges/candidates, so the numbers they quote are always true for that database.
 - **Recruitment.** `GET /recruitment/interviews` defaults to Monday of this week → today + 14 days (so upcoming interviews show); pass `candidateId` for a candidate's full list. `PATCH /recruitment/candidates/:id` rejects a `stage` field with `400`; `POST …/stage` enforces the stage machine (`assertStageTransition` in `routes/recruitment.ts`: forward, one back, reject/withdraw, `hired` only from `offer`, admin-only reopen to `offer`; `409` otherwise). Duplicates: one open candidate per email (`409`), one employee account per person (hire → `409` when a user with that email exists or the email was hired already). Hiring creates the user with the next `LM-xxxx`, a `first.last@linear-mcr.co.uk` address (`staffEmailLocalPart`: NFD, combining marks stripped, `ł/ø/æ/œ/ß/đ/þ/ð` folded by hand, ASCII letters/digits only, `staff` when nothing is left, numbered if taken), role `rep`, the pay plan for the applied position and the owner's team. `RecruitmentSummary.openByStage` holds the current open pipeline for non-terminal stages and, for `hired`/`rejected`/`withdrawn`, how many reached that stage within the range; `weekly` is one `GROUP BY` week query per series, clipped to `[from, to]`; `overdueActions` is computed in JS with the shared `isOverdue` over the open candidates.
-- **Errors.** Zod failures → `400 { error: 'Validation failed', details: [{ path, message }] }`; invalid funnels → `400 { error: 'Invalid funnel', details: string[] }`; SQLite unique-constraint violations → `409`; CHECK-constraint violations → `400`.
+- **Errors.** Zod failures → `400 { error: 'Validation failed', details: [{ path, message }] }` (since 1.5 zod 4 with plain messages and at most 20 details, see [1.5 endpoints](#validation-errors)); invalid funnels → `400 { error: 'Invalid funnel', details: string[] }`; SQLite unique-constraint violations → `409`; CHECK-constraint violations → `400`.
 - **Event statuses.** `rollForwardEventStatuses` (`db/maintenance.ts`) runs at startup and every 15 minutes: past `scheduled`/`live` events become `completed`, and today's `scheduled` events become `live` only once `start_time` has passed, matching the seed and `POST /events` defaults.
-- **Runtime.** The server runs on plain Node (**≥ 22.18**, which strips TypeScript types natively): `npm start` / `npm run dev` are `node src/index.ts` / `node --watch src/index.ts`, `npm run seed`, `npm run smoke` and `npm test` (`node --test "src/**/*.test.ts"`) likewise; `start:tsx`/`dev:tsx` remain as fallbacks. `server/src` and `shared/src` are kept to erasable syntax (`erasableSyntaxOnly` + `verbatimModuleSyntax` in both tsconfigs: no parameter properties, enums, namespaces or `import x = require`, and type-only imports marked `type`), so typecheck fails on anything Node could not strip.
-- **Database.** `node:sqlite` (`server/data/linear.sqlite`, WAL, foreign keys on). Override the location with `DB_PATH`. The server seeds on first start when the `meta.seeded_at` row is missing; `npm run seed -w server` deletes and rebuilds the file. Seeding is deterministic (mulberry32) but anchored to the real current date, so demo data stays "this week" whenever it is regenerated. **Schema upgrades:** `createSchema` (`db/schema.ts`) runs `CREATE TABLE IF NOT EXISTS` / `CREATE INDEX IF NOT EXISTS` for every table and index and then `upgradeSchema`, which adds any column listed in `COLUMN_UPGRADES` that `PRAGMA table_info` does not report (guarded `ALTER TABLE … ADD COLUMN`) and runs its backfill (`gauge_entries.payout_per_sale`/`commission_per_sale` from the current campaign and plan rates), so a database created by an earlier release is upgraded in place at start-up (the log says `Upgraded schema: added …`). Later columns so far: `users.totp_*`, `users.totp_last_counter`, `gauge_entries.payout_per_sale`, `gauge_entries.commission_per_sale`, `payroll_runs.adjusted_at`; later index: `idx_events_campaign`. `npm run smoke -w server` boots the API on a temporary seeded database and exercises every endpoint (including the upgrade of a first-release database); `npm test -w server` (also run by the root `npm test`) runs the unit and route tests (`src/**/*.test.ts`: RFC 4226/6238 vectors, base32, AES-GCM, weekly history, backups and the service files, and the 1.1 routes on an in-memory database with role scoping and `LM_SMART=0`).
-- **Two-step verification (TOTP).** Lives in `server/src/lib/totp.ts` (pure RFC 4226/6238: HMAC-SHA1, 6 digits, 30 s, base32 without padding, constant-time compare, ±1 step), `lib/crypto.ts` (AES-256-GCM, key = SHA-256 of `LM_APP_SECRET`, payload `v1:<iv>:<tag>:<ciphertext>` base64) and `lib/twofactor.ts` (secrets, recovery codes, challenges, limiter). Storage: `users.totp_secret_enc` (active), `users.totp_pending_enc` (set by `/auth/2fa/setup`, replaced by every new setup, promoted by `/auth/2fa/enable`), `users.totp_enabled_at`; `recovery_codes (user_id, code_hash, used_at)` holds SHA-256 hashes of the normalised `xxxx-xxxx` codes; `two_factor_challenges (token, user_id, created_at, expires_at, attempts)` holds the five-minute login challenges (32 random bytes hex). `USER_SELECT` never selects the secret columns, so no user payload can carry them; `qrSvg` is rendered with the `qrcode` package (`toString`, `type: 'svg'`, margin 1) from the `otpauth://totp/Linear%20Hub:<email>?secret=…&issuer=Linear%20Hub&algorithm=SHA1&digits=6&period=30` URL. **Codes** are accepted with spaces (`123 456`), recovery codes case-insensitively with or without the hyphen; a matching recovery code is marked `used_at` at once (login or disable). **Enable** promotes the pending secret, issues 10 recovery codes and deletes every other session of the user (`DELETE FROM sessions WHERE user_id = ? AND token <> ?`). **Disable** and the **admin reset** clear both secret columns, every recovery code and any open challenge; the admin reset also deletes all sessions, and an admin cannot reset their own account through it (`400`). `GET /auth/2fa` reports `recoveryCodesLeft` as the unused codes (0 while off) and `pendingSetup` only while off with a pending secret. **Login:** with 2FA on, `/auth/login` creates a challenge and returns `{ requiresTwoFactor: true, challengeToken, method: 'totp' }` without a cookie; `/auth/login/2fa` answers `410 { error: 'This sign-in challenge has expired, start again' }` for an unknown, used or expired token (the row is deleted), `401 { error: 'That code is not valid' }` for a wrong code, and on success deletes the challenge, sets the cookie and returns `AuthResponse` with `twoFactorEnabled: true`. The settings endpoints answer `400 { error: 'That code is not valid' }` for a wrong code and `409` for state errors (`setup`/`enable` while on, `enable` with nothing pending, `disable`/`recovery-codes` while off). **Limits:** every wrong code counts in two in-memory counters (`lib/twofactor.ts`, bounded LRU maps): per **source address + user** — the 7th within 10 minutes gets `429 { error: 'Too many attempts, try again in N minutes' }` on every code-checking endpoint (`/auth/login/2fa`, `/auth/2fa/enable|disable|recovery-codes`) from that address until the window passes — and per **user from any address** (30 in 10 minutes) as a backstop against distributed guessing; a correct code clears both. Keying on the source means a stranger who can reach the second step cannot lock the real person out from another device. A wrong code at `/auth/login/2fa` also counts towards the login limiter (8 per source + email in 15 minutes), and that counter is only reset once the second step succeeds. Expired challenges are purged at start-up, every 15 minutes and whenever a new challenge is created; nothing logs a code or a secret. **Client sequence:** `POST /auth/login` → if `requiresTwoFactor`, keep the `challengeToken` and `POST /auth/login/2fa { challengeToken, code }` (or `{ challengeToken, recoveryCode }`) → `AuthResponse`; on `410` return to step one, on `401` let the user retry, on `429` show the message. Settings: `POST /auth/2fa/setup` → show `qrSvg` + `secret` → `POST /auth/2fa/enable { code }` → show `recoveryCodes` once → `GET /auth/2fa` for the card; `POST /auth/2fa/recovery-codes { code }` and `POST /auth/2fa/disable { code | recoveryCode }` as labelled; admins use `POST /users/:id/2fa/reset`. **Codes are single use:** the time-step counter of the last accepted authenticator code is stored in `users.totp_last_counter` and any code whose counter is not greater — a replay of a code already used, even inside the ±1-step window — is refused like a wrong code (login, enable, disable, recovery-code regeneration; RFC 6238 §5.2). **Challenges** are consumed after `CHALLENGE_MAX_ATTEMPTS` = 6 wrong codes (`410 { error: 'Too many wrong codes for this sign-in, start again' }`, row deleted). **Encryption key:** `LM_APP_SECRET` (a long random string) when set; otherwise the server generates 32 random bytes once and keeps them in `app-secret` next to the database (`server/data/app-secret` by default, `LM_APP_SECRET_FILE` relocates it; mode 0600; logged once at start-up as "LM_APP_SECRET is not set: … key in <file>"). Back that file up with the database. There is no usable built-in default key any more; rows written by earlier releases under the old development key are re-encrypted under the real key at start-up (`reencryptLegacySecrets`, logged when it did anything). Changing the secret afterwards makes existing TOTP secrets undecryptable (those users fall back to the admin reset).
+- **Runtime.** The server runs on plain Node (**22.18 or later, 24 or 26** since 1.5, which strip TypeScript types natively): `npm start` / `npm run dev` are `node src/index.ts` / `node --watch src/index.ts`, `npm run seed`, `npm run smoke` and `npm test` (`node --test "src/**/*.test.ts"`) likewise; `start:tsx`/`dev:tsx` remain as fallbacks. `server/src` and `shared/src` are kept to erasable syntax (`erasableSyntaxOnly` + `verbatimModuleSyntax` in both tsconfigs: no parameter properties, enums, namespaces or `import x = require`, and type-only imports marked `type`), so typecheck fails on anything Node could not strip.
+- **Database.** `node:sqlite` (`server/data/linear.sqlite`, WAL, foreign keys on). Override the location with `DB_PATH`. The server seeds on first start when the `meta.seeded_at` row is missing (since 1.5 not where the backups folder shows a database was: a wrong `DB_PATH` stops the start instead); `npm run seed -w server` deletes and rebuilds the file (since 1.5 only after the guards of LOGIC §18.2: never a live database, typed START AGAIN, a checked backup first). Seeding is deterministic (mulberry32) but anchored to the real current date, so demo data stays "this week" whenever it is regenerated. **Schema upgrades:** `createSchema` (`db/schema.ts`) runs `CREATE TABLE IF NOT EXISTS` / `CREATE INDEX IF NOT EXISTS` for every table and index and then `upgradeSchema`, which adds any column listed in `COLUMN_UPGRADES` that `PRAGMA table_info` does not report (guarded `ALTER TABLE … ADD COLUMN`) and runs its backfill (`gauge_entries.payout_per_sale`/`commission_per_sale` from the current campaign and plan rates), so a database created by an earlier release is upgraded in place at start-up (the log says `Upgraded schema: added …`). Later columns so far: `users.totp_*`, `users.totp_last_counter`, `gauge_entries.payout_per_sale`, `gauge_entries.commission_per_sale`, `payroll_runs.adjusted_at`; later index: `idx_events_campaign`. `npm run smoke -w server` boots the API on a temporary seeded database and exercises every endpoint (including the upgrade of a first-release database); `npm test -w server` (also run by the root `npm test`) runs the unit and route tests (`src/**/*.test.ts`: RFC 4226/6238 vectors, base32, AES-GCM, weekly history, backups and the service files, and the 1.1 routes on an in-memory database with role scoping and `LM_SMART=0`).
+- **Two-step verification (TOTP).** Lives in `server/src/lib/totp.ts` (pure RFC 4226/6238: HMAC-SHA1, 6 digits, 30 s, base32 without padding, constant-time compare, ±1 step), `lib/crypto.ts` (AES-256-GCM, key = SHA-256 of `LM_APP_SECRET`, payload `v1:<iv>:<tag>:<ciphertext>` base64) and `lib/twofactor.ts` (secrets, recovery codes, challenges, limiter). Storage: `users.totp_secret_enc` (active), `users.totp_pending_enc` (set by `/auth/2fa/setup`, replaced by every new setup, promoted by `/auth/2fa/enable`), `users.totp_enabled_at`; `recovery_codes (user_id, code_hash, used_at)` holds SHA-256 hashes of the normalised `xxxx-xxxx` codes; `two_factor_challenges (token, user_id, created_at, expires_at, attempts)` holds the five-minute login challenges (32 random bytes hex). `USER_SELECT` never selects the secret columns, so no user payload can carry them; `qrSvg` is rendered with the `qrcode` package (`toString`, `type: 'svg'`, margin 1) from the `otpauth://totp/Linear%20Hub:<email>?secret=…&issuer=Linear%20Hub&algorithm=SHA1&digits=6&period=30` URL. **Codes** are accepted with spaces (`123 456`), recovery codes case-insensitively with or without the hyphen; a matching recovery code is marked `used_at` at once (login or disable). **Enable** promotes the pending secret, issues 10 recovery codes and deletes every other session of the user (`DELETE FROM sessions WHERE user_id = ? AND token <> ?`). **Disable** and the **admin reset** clear both secret columns, every recovery code and any open challenge; the admin reset also deletes all sessions, and an admin cannot reset their own account through it (`400`). `GET /auth/2fa` reports `recoveryCodesLeft` as the unused codes (0 while off) and `pendingSetup` only while off with a pending secret. **Login:** with 2FA on, `/auth/login` creates a challenge and returns `{ requiresTwoFactor: true, challengeToken, method: 'totp' }` without a cookie; `/auth/login/2fa` answers `410 { error: 'This sign-in challenge has expired, start again' }` for an unknown, used or expired token (the row is deleted), `401 { error: 'That code is not valid' }` for a wrong code, and on success deletes the challenge, sets the cookie and returns `AuthResponse` with `twoFactorEnabled: true`. The settings endpoints answer `400 { error: 'That code is not valid' }` for a wrong code and `409` for state errors (`setup`/`enable` while on, `enable` with nothing pending, `disable`/`recovery-codes` while off). **Limits:** every wrong code counts in two in-memory counters (`lib/twofactor.ts`, bounded LRU maps): per **source address + user** — the 7th within 10 minutes gets `429 { error: 'Too many attempts, try again in N minutes' }` on every code-checking endpoint (`/auth/login/2fa`, `/auth/2fa/enable|disable|recovery-codes`) from that address until the window passes — and per **user from any address** (30 in 10 minutes) as a backstop against distributed guessing; a correct code clears both. Keying on the source means a stranger who can reach the second step cannot lock the real person out from another device. A wrong code at `/auth/login/2fa` also counts towards the login limiter (8 per source + email in 15 minutes), and that counter is only reset once the second step succeeds. Expired challenges are purged at start-up, every 15 minutes and whenever a new challenge is created; nothing logs a code or a secret. **Client sequence:** `POST /auth/login` → if `requiresTwoFactor`, keep the `challengeToken` and `POST /auth/login/2fa { challengeToken, code }` (or `{ challengeToken, recoveryCode }`) → `AuthResponse`; on `410` return to step one, on `401` let the user retry, on `429` show the message. Settings: `POST /auth/2fa/setup` → show `qrSvg` + `secret` → `POST /auth/2fa/enable { code }` → show `recoveryCodes` once → `GET /auth/2fa` for the card; `POST /auth/2fa/recovery-codes { code }` and `POST /auth/2fa/disable { code | recoveryCode }` as labelled; admins use `POST /users/:id/2fa/reset`. **Codes are single use:** the time-step counter of the last accepted authenticator code is stored in `users.totp_last_counter` and any code whose counter is not greater — a replay of a code already used, even inside the ±1-step window — is refused like a wrong code (login, enable, disable, recovery-code regeneration; RFC 6238 §5.2). **Challenges** are consumed after `CHALLENGE_MAX_ATTEMPTS` = 6 wrong codes (`410 { error: 'Too many wrong codes for this sign-in, start again' }`, row deleted). **Encryption key:** `LM_APP_SECRET` (a long random string) when set; otherwise a key file, `app-secret` next to the database (`server/data/app-secret` by default, `LM_APP_SECRET_FILE` relocates it; mode 0600). There is no usable built-in default key any more; rows written by earlier releases under the old development key are re-encrypted under the real key at start-up (`reencryptLegacySecrets`, logged when it did anything). Since 1.5 the server makes a new key only for a database with nothing locked yet, records the key's fingerprint in `meta.app_key_fingerprint`, and refuses to start (exit code 78) when the key is missing or does not match a database with locked data (`lib/appKey.ts`, LOGIC §18.6); `npm run key:restore` puts it back. Put the key on the recovery sheet (`npm run recovery-sheet`).
 
 ## Two-step verification (TOTP, authenticator apps) — contract v1
 

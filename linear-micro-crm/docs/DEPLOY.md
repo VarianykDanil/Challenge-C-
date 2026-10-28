@@ -212,9 +212,11 @@ If it made the first owner, it prints their **one-time setup code**.
 1. On your phone or laptop, open `https://hub.linear-mcr.co.uk`. Sign in with your email, employee ID and setup code,
    and set up two-step verification with your authenticator app. Keep the recovery codes somewhere safe, away from the
    phone.
-2. **Settings › Backups › App key and recovery › Make the recovery sheet.** Type a code from your authenticator app,
-   **Print**, then type the last six characters of the key from the paper and tap **I have printed it**.
-   (On the server instead: `sudo linear-hub recovery-sheet`.)
+2. **The recovery sheet is made on the server, never in the app** (the key never travels over the network). Noryn
+   and the owner, over SSH: `sudo linear-hub recovery-sheet` shows the sheet; copy the key onto the paper by hand
+   (16 groups of 4), with the fingerprint and the folders it lists. Then `sudo linear-hub recovery-sheet --confirm`
+   and the owner types the **whole key** back from the paper: a copying mistake is caught here, before the backups stop
+   keeping their copy of the key. **Settings › Backups › App key and recovery** then says "Printed and kept".
 3. Lock the sheet away like a bank card, away from the server and **apart from the passphrase paper**. Without the
    key, bank details, two-step sign-in and PINs cannot be read again.
 4. **Settings › Security › Sign-in rules:** choose when people are signed out (14 hours after signing in by default,
@@ -284,7 +286,8 @@ Tick every line before real people use it.
 - [ ] **Live, not trial:** `sudo linear-hub golive` said "Linear Hub is live" (or "already live"); there is no trial
       banner.
 - [ ] **Two-step for the owner** set up, recovery codes stored away from the phone.
-- [ ] **Recovery sheet** printed, confirmed in Settings › Backups, and locked away.
+- [ ] **Recovery sheet** written, confirmed with `sudo linear-hub recovery-sheet --confirm` (Settings › Backups says
+      "Printed and kept"), and locked away.
 - [ ] **Off-site passphrase** on paper, kept apart from the recovery sheet.
 - [ ] **Restore test passed** (`sudo linear-hub restore-test`) on: ____________
 - [ ] **Monitoring:** the uptime check and the nightly-copy heartbeat (both required) email the owner and Noryn.
@@ -313,7 +316,7 @@ Run on the server with `sudo`. `sudo linear-hub help` lists everything.
 | `sudo linear-hub restore <file>` | Put a backup back (stops Linear Hub meanwhile; lists any payments it would forget and asks for RESTORE). Use a name from `backups`, or an encrypted `.lhbk` anywhere (a file the `linear` user cannot read, say under `/root`, is copied in first) |
 | `sudo linear-hub import <file.lhbk>` | Bring a database from another computer (asks its passphrase, or `--passphrase-file <file>`) |
 | `sudo linear-hub golive` | End the trial (once) |
-| `sudo linear-hub recovery-sheet` | Print the recovery sheet |
+| `sudo linear-hub recovery-sheet` | Show the recovery sheet to copy onto paper; `--confirm` to type the key back from the paper |
 | `sudo linear-hub key:restore` | Put the app key back from the recovery sheet |
 | `sudo linear-hub setup-code <email>` | A new one-time setup code for someone who has not finished setting up |
 | `sudo linear-hub 2fa:reset <email>` / `pin:reset <email>` | Reset someone's two-step or PIN; prints the setup code they sign in with next |

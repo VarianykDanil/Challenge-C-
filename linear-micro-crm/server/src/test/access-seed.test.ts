@@ -31,10 +31,14 @@ test('no real person in the seed: an invented owner and an invented company doma
     const staff = all<{ email: string }>(db, `SELECT email FROM users WHERE role <> 'client'`);
     assert.ok(staff.length > 30);
     for (const s of staff) assert.match(s.email, /@linearhub\.example$/, `${s.email}: the invented domain`);
-    // the seed's own source too (the developer's real name and the customer's domain are gone)
+    // the seed's own source too: every email address written in it is at an invented `.example` domain, and the
+    // customer's own domain is not there at all (no real person's address can come back unnoticed)
     const source = ['server/src/db/seed-data.ts', 'server/src/db/seed.ts', 'server/starter-team.example.json']
       .map((f) => readFileSync(path.join(REPO, f), 'utf8')).join('\n');
-    assert.doesNotMatch(source, /Varianyk|danil@|linear-mcr\.co\.uk/i);
+    const addresses = source.match(/[\w.%+-]+@[\w-]+(?:\.[\w-]+)+/g) ?? [];
+    assert.ok(addresses.length > 0);
+    for (const a of addresses) assert.match(a, /\.example$/, `${a}: only invented addresses in the seed`);
+    assert.doesNotMatch(source, /linear-mcr\.co\.uk/i);
     assert.ok(USERS.every((u) => !u.email), 'every demo email comes from the invented domain');
   } finally {
     db.close();

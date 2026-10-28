@@ -1,27 +1,686 @@
 # Linear Hub — User guide
 
-Step-by-step for everyone at Linear MCR, by role. Start with **Everyone**, then jump to your section. Buttons, tabs and fields are named exactly as they appear in the app, in **bold**.
+Step-by-step for everyone at Linear MCR, by role. Start with **Everyone**, then jump to your section. Buttons, tabs and fields are named exactly as they appear in the app, in **bold**. What changed in each release is in the [Release notes](#release-notes) at the end.
 
-- [What's new in 1.4](#whats-new-in-14) — two-step verification for everyone, signed out 14 hours after signing in, your bank details, and paying people from Linear Hub
-- [What's new in 1.3.1](#whats-new-in-131) — the Sapiens team's demo sign-ins, leaders and recruiters can add people, and invoice lines that say why
-- [What's new in 1.3](#whats-new-in-13) — pay you can check, client accounts, learning videos, PDFs, venues and the audit
-- [What's new in 1.2](#whats-new-in-12) — learning the COD pack and your pitch, and field and office upgrades
-- [What's new in 1.1](#whats-new-in-11) — the smart release
-- [Everyone](#everyone) — signing in, what your role can do, your dashboard, the six gauges, logging a day, ratios and benchmarks, the Gauges page, pay and punctuality, the leaderboard, events, the team directory, settings
-- [Leaders](#leaders) — scheduling events, logging for your team, the team view, announcements
+- [Everyone](#everyone) — signing in, Linear Hub on your phone, what your role can do, your dashboard, the six gauges, logging a day, ratios and benchmarks, the Gauges page, pay and punctuality, the leaderboard, events, the team directory, settings
+- [Leaders](#leaders) — scheduling events, logging for your team, the team view, days to confirm, announcements, adding a person
 - [Recruiters](#recruiters) — your dashboard, the pipeline, adding and moving candidates, interviews, hiring, your pay
-- [Administrators](#administrators) — campaigns, people, gauges and events for anyone, payroll and paying people, expenses, company finance
+- [Administrators](#administrators) — campaigns, people and setup codes, days off, VAT numbers, gauges and events for anyone, payroll and paying people, expenses, company finance, backups and the recovery sheet, trial mode and going live, putting Linear Hub online
+- [Charity and client accounts](#charity-and-client-accounts)
 - [If something goes wrong](#if-something-goes-wrong)
+- [Release notes](#release-notes), newest first:
+  - [What's new in 1.5](#whats-new-in-15) — a safe trial and going live, one-time setup codes, the recovery sheet and off-site backups, a second pair of eyes on money, and Linear Hub with no signal
+  - [What's new in 1.4](#whats-new-in-14) — two-step verification for everyone, signed out 14 hours after signing in, your bank details, and paying people from Linear Hub
+  - [What's new in 1.3.1](#whats-new-in-131) — the starter team's demo sign-ins, leaders and recruiters can add people, and invoice lines that say why
+  - [What's new in 1.3](#whats-new-in-13) — pay you can check, client accounts, learning videos, PDFs, venues and the audit
+  - [What's new in 1.2](#whats-new-in-12) — learning the COD pack and your pitch, and field and office upgrades
+  - [What's new in 1.1](#whats-new-in-11) — the smart release
 
 ---
 
-## What's new in 1.4
+## Everyone
+
+### Signing in
+
+1. Open Linear Hub at the address the office gave you: after going live, its secure address such as
+   `https://hub.linear-mcr.co.uk`; during the trial week, the address of the office computer. (Running it yourself:
+   <http://localhost:5173> during `npm run dev`, or <http://localhost:4000> after `npm run build && npm start`.)
+2. Enter your **Work email** and your **Employee ID** — format `LM-0000`, e.g. `LM-0042`; it is on your welcome
+   message and your payslip or invoice. Capital letters do not matter.
+3. Choose **Sign in**. If you have a PIN, type it next.
+4. **The first time** (and after an administrator resets your PIN or your two-step verification) Linear Hub asks you to
+   **Type your setup code**: the one-time code your administrator gave you, like `ABCD-EFGH-JKMN` (spaces and dashes do
+   not matter). It works once and for 7 days. No code, or has it run out? Ask an administrator for a new one.
+5. Type the 6-digit code from your authenticator app and choose **Verify**. The first time, Linear Hub asks you to set
+   two-step verification up instead (about two minutes; see [What's new in 1.4](#whats-new-in-14)).
+
+You stay signed in on this device for 14 hours from signing in (your administrator may choose 4 to 24 hours), or until
+you sign out or leave it unused for 12 hours.
+
+There is no password, so your employee ID is half of your credential — treat it like one; the setup code and the code
+from your app are what stop someone who knows your email and employee ID from signing in as you. Linear Hub shows
+employee IDs only to administrators and to you: nobody else can read yours on the Team page, a payslip or your profile.
+After **eight wrong tries in fifteen minutes from one network address** (one phone on mobile data, or everyone on the
+same Wi-Fi), signing in with that email is paused from that address, and the message says how many minutes to wait.
+After **twenty wrong tries from anywhere**, it is paused for that email everywhere. If the office sets your status to
+**Left**, you are signed out on every device immediately.
+
+**Recovery codes on the office Wi-Fi.** If you turn on two-step verification from your phone over the office Wi-Fi
+during the trial, the recovery codes are not shown, to keep them safe. Make them on the office computer: **Settings →
+Security → New recovery codes**.
+
+**During the trial week** the sign-in page on the office computer's address also shows **Try a demo account**: one
+button per role, the charity account and the starter team. They need no codes, but they only work on the demo company
+(invented people): they cannot change your own people, anyone's real pay, payments or the office settings, and say
+"Demo accounts cannot …" if you try. Use your own account for real work. Once the owner goes live they are gone, so if
+you do not see them, that is why.
+
+**Signing out:** open your avatar at the top right and choose **Sign out**.
+**Light or dark:** use the sun/moon toggle in the top bar, the **Light** / **Dark** / **Match system** entries in the same avatar menu, or **Settings → Appearance** (**Light**, **Dark**, **System**). The choice is remembered on this device.
+**Finding a page:** the **Go to page…** box in the top bar (⌘K or Ctrl+K) lists every page your role can open. The sidebar groups them into **Workspace**, **Manage** and **Account**.
+
+### Using Linear Hub on your phone
+
+* **Add it to your Home Screen.** In Safari, open Linear Hub, tap **Share**, then **Add to Home Screen**. On Android,
+  in Chrome, use the **⋮** menu, then **Install app** or **Add to Home screen**. You get the Linear Hub icon, and it
+  opens full screen like an app, with no signal too. On iPhone the icon has its own sign-in and its own saved entries,
+  separate from Safari's, so use one or the other for a whole shift.
+* **When the phone has no signal** an amber strip appears under the top bar: **You're offline: saves will send when
+  you're back. Gauges and check-ins wait on this phone.** If the phone has signal but cannot reach Linear Hub (the
+  server is down or restarting, the connection is too weak to get an answer, or you are on a different Wi-Fi from the
+  office computer during the trial) it says **Can't reach Linear Hub: saves will send when it's back.** It goes away by
+  itself as soon as Linear Hub answers; **Try again** checks straight away.
+* **Every page opens with no signal** once Linear Hub has been opened with signal on that phone, even if the phone
+  closed the tab, you open it from the Home Screen, or a new version came out since. Pages that need fresh figures (pay,
+  the leaderboard) say **You're offline. This needs a connection and loads when you're back.** Logging gauges, Quick
+  gauges and checking in work as normal and wait on the phone.
+* **Opening the app with no signal** carries on as the rep or leader last signed in on that phone, so you can log
+  today's event and check in straight away. Whatever you save waits on the phone and sends once you are signed in with
+  signal. This works until the time you would be signed out anyway: 14 hours after you signed in, or after the
+  inactivity time (12 hours by default) since the app last reached Linear Hub. After that it shows the sign-in page,
+  which needs signal. Signing out removes it from the phone straight away.
+* **On a weak signal** the app waits a few seconds, then opens as above and says **Can't reach Linear Hub**; it keeps
+  trying in the background and carries on normally as soon as Linear Hub answers.
+* **This needs the secure (https) address.** On a plain `http://` address (the office Wi-Fi during the trial) the
+  browser cannot keep Linear Hub on the phone: it then works as before, and saves only wait while the page stays open.
+* **A new version.** When a new version of Linear Hub is put live, phones download it in the background and show **A
+  new version of Linear Hub is ready. Reload when you have saved what you are doing.** with a **Reload** button. Until
+  you reload, the app keeps working as it was, with or without signal.
+* **Tables on a phone** show one card per row: who or what first, the amount or status on the right, then every other
+  column with its name. **Sort by** at the top sorts the cards. A long list shows its first 10 cards and **Show all**.
+  Ticking **Select all** in a list shows every card first, so you can see everything you ticked. Nothing needs a
+  sideways swipe.
+* **Pop-ups.** Needs-attention pop-ups appear at the top of a phone screen for 5 seconds, two lines at most, and go away
+  as soon as you open a form or tap into a field; the whole message stays in the bell.
+
+### What your role can see and do
+
+| Role | You can see | You can change |
+|---|---|---|
+| **Representative** | Your own gauges and pay; your team's events, leaderboard and gauges summary; the directory; any event or colleague's profile read-only (other people's check-in times and notes are hidden) | Your own gauges, at your team's events |
+| **Leader** | Everything company-wide — every team's events, the full leaderboard, any profile — plus your own team's check-in times and notes, your team's pay runs, and recruitment | Events for your team; gauges for your team's members at your team's events; candidates, interviews and stage changes; announcements; adding trainees and field representatives to your team; **Days to confirm** for your team |
+| **Recruiter** | The whole recruitment pipeline, the directory, your own pay; events and the leaderboard read-only (no Gauges page) | Candidates, interviews, stage changes — hiring creates the rep's account; adding trainees and field representatives to any team |
+| **Administrator** | Everything, including every employee ID | Everything — people, campaigns, events, any gauges, payroll payments, expenses, announcements (sensitive changes ask for your own two-step code) |
+
+A page your role cannot open shows "This area isn't available on your account" with a **Back to dashboard** link.
+
+### Reading your dashboard
+
+The dashboard greets you by name and shows your position, team and the dates in view. Change the period with **This week**, **This month** or **This quarter**. Reps, leaders and administrators also have **Log gauges** here.
+
+**Today** (reps and leaders) sits at the top when your team has an event today: the event, its times and place, **Check
+in** (or **Checked in 09:17 · on time**), **Log gauges** and **Quick gauges**. Then **Needs attention**, your numbers and
+pay, the team and the next events. From an hour before your team's event starts until it ends, Needs attention says
+**Check in at BCN — Golden Square** until you check in (or log the day): **Starts 09:30 · 5 min grace** before the
+start, **Started 09:30** after; its **Check in** button opens Quick gauges for that event. On a phone, **Your trend and
+funnel**, **Your week in review** and **Company** fold away behind one button each (the phone remembers). The aim reads
+as a sentence: **Your aim: 5 sales. That usually takes about 109 stops, 39 at the table, 22 presentations, 9 closes and
+6 taps.**
+
+| Tile or card | What it shows |
+|---|---|
+| **Sales** | Confirmed sales for the period. Underneath: **Ranked #N of M in your team** (reps — the same people as your leaderboard) or **company-wide** (leaders and administrators). |
+| **Conversion** | sales ÷ stops, tinted against the benchmark. **—** with no colour while you have no stops in the period (nothing to convert yet). |
+| **Stops** | With your presentations underneath. |
+| **Earnings to date** | Gross pay for the period: the pay runs that start in it, plus a live estimate for any week that has no run yet. |
+| **Next payday** / **Overdue pay** | The date and amount of the earliest **unpaid** run. Once its payday has passed the tile reads **Overdue pay** in red (for example "£317.50 · was due 3 months ago"): that pay is not marked paid yet, so ask the office. When nothing is owed it shows this week's payday and the live estimate. |
+| **Punctuality** | The share of your check-ins that were on time. Green from 90%, amber from 75%, red below. |
+| **Your trend** / **Your funnel** | Sales and stops per day; your funnel against the law of averages with one to three coaching notes underneath. |
+| Team card (named after your team) | Stops, sales, conversion and your team's top five. People without a team see **Top performers** across the company instead. |
+| **Upcoming events** | The next five for your team (administrators: the whole company). |
+| **Announcements** | The latest five, pinned first; **Older announcements** underneath lists up to 20 earlier ones. Leaders and administrators see **New announcement** here (**New**, or just the megaphone icon, on a narrow card). |
+
+**The "vs" arrows.** Each change compares with the **same days of the previous period**, and the small label under the tile names them — on Thursday 15 October the week view says "vs 5 Oct – 8 Oct". This week (Monday to today) is compared with last week Monday to the same weekday; this month (1st to today) with the same days of last month; this quarter with the same stretch of the previous quarter. The leaderboard's movement arrows use the same comparison. An arrow is blank when there was nothing in the previous period.
+
+Leaders and administrators also get a **Company** section — sales, revenue, active reps, payroll on time, open candidates, hires, the company trend and sales by campaign. For administrators it comes first and their own gauges follow under **Your activity**; for leaders it sits under their own numbers. Recruiters get a recruitment-first dashboard, described under [Recruiters](#recruiters).
+
+### The six gauges
+
+Every rep records the same six numbers for every event day. They are a funnel: each stage is a subset of the one before, so **no stage can be larger than the previous one**. All six are whole numbers, zero or more.
+
+| # | Gauge | What counts | Rule |
+|---|---|---|---|
+| 1 | **Stops** | Every person you stopped and spoke to. | — |
+| 2 | **To table** | Stops who came over to the table or stand to hear more. | ≤ Stops |
+| 3 | **Presentations** | Full pitches delivered, start to finish. | ≤ To table |
+| 4 | **Closes** | Presentations where you asked for the sale. | ≤ Presentations |
+| 5 | **Taps** | Closes where the customer tapped, signed or confirmed their details. | ≤ Closes |
+| 6 | **Sales** | Confirmed sales that count towards your commission and the campaign. | ≤ Taps |
+
+A valid day might read `120 · 42 · 21 · 9 · 5 · 5`. A day reading `120 · 42 · 21 · 5 · 6 · 5` is rejected, because 6 taps cannot come from 5 closes.
+
+### Logging gauges
+
+Open the form with **Log gauges** on the Dashboard or the Gauges page, or open the event under **Events** and choose **Log gauges** there (**Update my gauges** if you have already logged that event).
+
+1. **Event.** From the Dashboard or Gauges the list shows your team's events from the last three weeks up to today; cancelled events are not offered. From an event page the event is fixed. A future event cannot take gauges — the form says "This event is on … — gauges can be logged from that day." — and neither can a cancelled one.
+2. **Rep.** Reps: this is you. Leaders choose a member of the event's team; administrators anyone.
+3. **Date.** Fixed to the event's date and shown read-only: gauges are recorded against the day the event ran. If you already have an entry for that event the hint says so, and saving will update it.
+4. **Gauges.** Use the six steppers (**Stops**, **To table**, **Presentations**, **Closes**, **Taps**, **Sales**) in order. The checks run as you type: a stage that breaks the funnel rule is highlighted and named in the warning straight away, and a number that is too big says **Use a number from 0 to 2000.** The **Live ratios vs law of averages** panel updates as you type. **What counts as what?** expands the definitions.
+5. **Checked in at.** Tap **Now** when you arrive — this is what your punctuality is measured from; the hint shows the event's start time and the 5-minute grace. Add **Notes** if the day needs explaining.
+6. **Save gauges** — or **Update gauges** when the form is editing an existing entry. You will see "Gauges logged" or "Gauges updated".
+
+There is one entry per person, per event, per day. Saving again for the same event **updates** it rather than adding a second one, and the time you submitted is kept. To change a day later, open the event and choose **Edit** on your row in **Gauges by rep**; only leaders (own team) and administrators can **Delete** an entry.
+
+### Your ratios against the benchmarks
+
+Linear Hub turns your gauges into five stage-to-stage ratios and compares each with the company's **law of averages** benchmarks:
+
+| Ratio | Benchmark | Meaning |
+|---|---|---|
+| Stop → table | **35%** | 35 of every 100 people you stop come to the table |
+| Table → presentation | **50%** | half of those hear the full pitch |
+| Presentation → close | **40%** | you ask for the sale in 4 of every 10 pitches |
+| Close → tap | **60%** | 6 of every 10 asks get a tap |
+| Tap → sale | **90%** | 9 of every 10 taps become confirmed sales |
+
+Hit every benchmark and about **3.8% of stops become sales — roughly 1 sale for every 26 stops**.
+
+**How to read your ratios**
+
+- Ratio cells are tinted: **green** within 10% of the benchmark or above (for a 50% benchmark, 45% and up), **amber** 10–25% below, **red** more than 25% below. Colour is a hint — the number is always shown alongside.
+- Look for the **lowest ratio relative to its benchmark**. That is the stage to coach or practise. The coaching notes under your funnel say it in a sentence: a low stop → table means the opening needs work; a low presentation → close means you are pitching well but not asking.
+- With **fewer than 20 stops** in the period the ratios are too noisy to read much into. The notes say "Early days" until then.
+- A stage nobody has reached yet (4 closes but no taps) is not graded — it is undefined, not poor.
+- The volume target is **2 sales per worked day**. Ratios tell you *how well*; sales per day tells you *how much*.
+
+### The Gauges page
+
+Open **Gauges**. The tabs depend on your role: **My performance** (everyone), **Team** (leaders: your team; administrators: any team via the **Team** picker) and **Company** (administrators). The range picker offers **This week**, **Last week**, **This month**, **Last month**, **This quarter** and **Custom** (type a from and to date).
+
+**My performance** shows six tiles — **Sales** (with per day), **Stops** (with days worked), **Presentations**, **Conversion**, **Stops per sale**, **Punctuality** — then **Funnel vs benchmarks** with coaching notes, your **Trend**, **By campaign** and **Recent entries**. The same panel appears on your profile under **Team**.
+
+**Team** and **Company** show a summary table grouped **By person**, **By team**, **By campaign**, **By day** or **By week**, with the six gauges, sales per day and every ratio tinted against the benchmarks. By day and By week add a **Trend** chart. Clicking a person opens their profile. The **Rep-days** column counts distinct person × day pairs, so for a campaign or a week it is "days of work", not calendar days.
+
+### Checking your pay
+
+Open **Finance**. Everyone lands on **My pay** (the owner and the office land on **Company**):
+
+- Four tiles: **Earned · last 12 weeks**, **Commission**, **Paid on time** (share of your paid runs that landed by the due date) and **Next payday**.
+- **Earnings** — gross pay per week, split into **Base**, **Commission**, **Bonus** and **Overrides** (only the components you actually earn are plotted).
+- **Payslips** — one row per pay week: **Week**, **Days**, **Sales**, **Commission**, **Gross**, **Due**, **Status**. Click a row for the payslip (**Payslip · PAY-2026W41-LM-0010** and so on): **Base pay** (days × your daily rate), **Commission** (sales × your rate), **Bonus** (paid when the week's sales reach your plan's threshold), **Overrides** (leaders: team sales × the override), **Deductions**, **Gross pay**; your **Pay plan** alongside; and **The week's gauges** that fed into it.
+
+**Pay weeks run Monday to Sunday** and are **due on the Friday after the week ends** — a week ending Sunday 18 October is due Friday 23 October. When a week closes, its runs appear by themselves on the Monday as **Pending**.
+
+**Status** badges: **Pending** (not yet paid), **Paid** (on or before the due date), **Paid late**, **Failed** (the transfer bounced or the payment did not go through; the office will pay it again). A pending run past its due date also carries a red **Overdue** badge, and the **Next payday** tile on your dashboard turns red and keeps pointing at it until it is paid — money owed never drops off.
+
+**Days that wait.** A day you logged pays a base day when you were booked on the event or checked in. A day with
+neither (or with nothing logged) waits for your leader (a leader's own days wait for the office): the breakdown says
+"…waiting for a leader to confirm… Not paid as base days until confirmed", and the bell says **"1 of your days waits
+for your leader"**. Next time, book onto the event and check in.
+
+**Check and accept your invoice** (in Needs attention) opens that week's payslip, with **Accept invoice** and
+**Something's wrong** at the top.
+
+Leaders have a **Team pay** tab and administrators a **Company** tab; see their sections.
+
+### Punctuality
+
+Your check-in time at each event is compared with the event's start time. Checking in up to **5 minutes** after the start still counts as on time. Your punctuality rate is the share of recorded check-ins that were on time; days with no check-in recorded do not count either way, so record it. Other people's check-in times are visible only to administrators and to their own team's leader; everyone else sees **—** in the **Check-in** column.
+
+### The leaderboard
+
+Open **Leaderboard**. Choose the period (**This week**, **This month**, **This quarter**) and the metric (**Sales** or **Conversion**). Leaders, recruiters and administrators can pick a **Team**; reps always see their own team, shown as a badge. Everyone who logged sales in the period is ranked — ties share a rank — with the top three on a podium and the full table beneath: **#**, **Rep**, **Team**, **Sales**, **Stops**, **Conv.**, **Days**, **Move**.
+
+When you are ranked, the header says **You're #N of M this week** (month, quarter). For a rep, M is the number of people in your team; for leaders and administrators it is the whole company — the same number your dashboard's Sales tile quotes. The **Move** column compares your rank with the same days of the previous period: an arrow up or down with the number of places, a dash for no change, **New** when you were not ranked last time.
+
+### Events
+
+Open **Events**. The default range is **Upcoming** — a week back to three weeks ahead; the other presets are **This week**, **Last week**, **This month**, **Last month** and **Custom**. Filter by **Team** (reps always see their own team), **Campaign** and **Status** (**Scheduled**, **Live**, **Completed**, **Cancelled**).
+
+Days are listed with **today first** (highlighted), then the days to come, then last week's completed days under an **Earlier** divider, newest first — so nobody scrolls past history to find today. Lists with more than 60 events show two weeks of days and a **Show N more days** button. Each row shows the event, campaign code, venue, times, team, type, sales against target, how many reps have logged, and the status. Statuses follow the clock: today's events turn **Live** at their start time and past events become **Completed**, checked every fifteen minutes.
+
+Open an event for the day's totals, the **Event funnel** against the benchmarks, the notes, and **Gauges by rep** — each person's six gauges, conversion and check-in punctuality. Under the title, the people count reads **7 booked** before the day, **3 logged · 7 booked** on the day, and the number of reps who logged otherwise (or when nobody was booked).
+
+### The team directory
+
+Open **Team**. Team chips at the top (member count and leader) filter by team; the search box **Search name, email or ID…** also finds employee IDs for administrators. Filter by **Team**, **Position** and **Status** (**Active**, **On leave**, **Left**, **Everyone**) and switch between **Card view** and **Table view**. Open a person for their contact details, pay plan name, and their full performance panel for any range (default **This month**). Employee IDs appear on your own card and, for administrators, on everyone's.
+
+### Settings
+
+**Settings** shows your profile as the office holds it (**Employee ID**, **Email**, **Phone**, **Position**, **Role**, **Team**, **Pay plan**, **Start date**, **City** — ask an administrator to change anything), **Appearance**, **Security** (**Two-step verification**, required for everyone since 1.4: your recovery codes left and **New recovery codes**; and your **Sign-in PIN**), **Bank details** (where your pay goes, since 1.4; see [Your bank details](#your-bank-details)), **Invoices** for field people (your invoice details and VAT number) and **About this app** (version and when the sample data was seeded). Administrators also see **Trial mode** (until the owner goes live), **Backups** (see [Backups and the recovery sheet](#backups-and-the-recovery-sheet-administrators)) and **Payments** (see [Paying people from Linear Hub](#paying-people-from-linear-hub-administrators)). On a phone the page starts with **On this page**: tap a section to go to it.
+
+**Bank details someone else typed in.** If an administrator typed in or changed your bank details, the card says, for
+example, **"Your bank details were changed by Ada Admin on Tue 20 Oct. Confirm or report it."** Press **Yes, these are
+mine** (with your authenticator code) or **These are not mine**. Until you say yes (or another administrator confirms
+them), nothing is paid to them; if you report them, nothing is paid to them until the right ones are typed in. When you
+change your own details, the office checks them with you before the next payment goes there. Only you and the office's
+administrators can see them, and only the last digits are ever shown.
+
+**VAT number (reps and leaders who are VAT registered).** **Settings → Invoices → VAT number**: only if you are VAT
+registered. The office checks it with HMRC before VAT at 20% is added to your invoices and paid with your pay. Under
+the field it says, for example, "GB 999 9999 73 is waiting for the office to check it with HMRC. No VAT is added to your
+pay until then", and once checked "… checked by Ada Admin on …: VAT at 20% is added to your invoices". A number that is
+not a UK VAT number (wrong shape or check digits) is refused. Once the office confirms it, invoices you have not
+accepted yet are issued again with VAT for you to check: they show **Total before VAT**, **VAT at 20%**, **Total due**
+and "The VAT shown is your output tax due to HMRC." Invoices you already accepted stay as they were: tell the office if
+one should change. Taking your VAT number off stops VAT at once.
+
+---
+
+## Leaders
+
+Everything above applies to you too. In addition:
+
+### Scheduling an event
+
+1. Open **Events** and choose **New event**.
+2. Fill in **Event name** (what the team will recognise, e.g. "Trafford Centre weekend"), **Campaign** (active campaigns only), **Team** (locked to yours — "Leaders schedule events for their own team."), **Venue**, **City**, **Type** (Private site, Event, B2B, Residential or Retail), **Date**, **Start** and **End** (24-hour; the end must be after the start), **Sales target** and **Notes** (parking, dress code, who to ask for).
+3. **Create event.** It appears on every team member's dashboard and in Events.
+
+The status is set for you: **Completed** for a past date, **Live** for today once the start time has passed, otherwise **Scheduled**. To change anything later, open the event and choose **Edit** — the same form plus a **Status** field (set it to **Cancelled** rather than deleting) — then **Save changes**. Only administrators can **Delete** an event.
+
+### Logging for team members
+
+Choose **Log gauges** (Dashboard, Gauges or the event page), pick the event, then pick the **Rep** from your team. The form is the same as a rep's, with the same funnel, event-date and today-or-earlier rules. You can only log at **your own team's events**: an attempt elsewhere is refused. On the event page every row of **Gauges by rep** has **Edit** (opens **Update gauges**) and **Delete** (asks "Delete this gauge entry?").
+
+### The team view
+
+- **Dashboard** — your team's card with its top five, and the **Company** section under your own numbers.
+- **Gauges → Team** — your team only, grouped **By person** (compare ratios side by side), **By campaign**, **By day** or **By week**.
+- **Team** — open any member for their full performance; for your own team you also see their check-in times and notes on each entry.
+- **Leaderboard** and **Events** — the whole company, with a **Team** picker.
+- **Finance → Team pay** — your team's runs for **This week**, **Last week**, **Last 4 weeks**, **Last 12 weeks**, **This month** or a custom range, with **Team payroll**, **Commission**, **Awaiting payment** and **People paid** on top. Click a run for its payslip. Marking runs paid is an administrator's job.
+- **Recruitment** — full access: add candidates, schedule interviews and move stages, as described under [Recruiters](#recruiters).
+
+### Days to confirm (leaders)
+
+**Pay → Days to confirm.** "A logged day pays a base day when the person was booked on the event or checked in. These
+days had neither (or nothing was logged), so they wait for you: say whether the person worked them."
+
+- **Worked** pays the base day; **Not worked** leaves it out. You can add a short note.
+- You decide for your own team. Your own days are confirmed by the office. Paid weeks are not listed.
+- The bell shows "N days to confirm". Look before each payday.
+- Logging gauges for someone yourself confirms that day.
+- The person sees their waiting days in their pay breakdown ("…waiting for a leader to confirm… Not paid as base days
+  until confirmed") and in their bell: **"1 of your days waits for your leader"**. Tell your team: book onto the event
+  and check in, and the day pays without waiting.
+
+### Announcements
+
+On the Dashboard choose **New announcement**, add a **Title** and the **Message**, switch on **Pinned** if it should stay at the top, and **Post announcement**. Everyone sees it on their dashboard, pinned ones first.
+
+### Adding a person (leaders)
+
+Team Leaders and Crew Leaders can add a new trainee or field representative to their own team.
+
+1. Open **Team** and choose **Add person**.
+2. Fill in **First name**, **Last name**, **Email** (they sign in with it), **Phone** (optional), **Position**
+   (**Trainee** or **Field Representative**) and **Start date**. **Team** shows your own team; you cannot change it.
+3. Choose **Add person**.
+4. **Sign-in details** opens: their name, team, email, **Employee ID** and **one-time setup code** (since 1.5; valid 7
+   days, used once). Choose **Copy instructions** and paste them into a message to the new person — they say which address to open (the one your phone or laptop is using), and to enter the
+   email and the employee ID. On the computer that runs Linear Hub (an address starting `localhost`), they say "Open the
+   Linear Hub sign-in page" instead, because that address would not open on their phone: add the address they use. Since 1.4 they also say to set up two-step verification with an authenticator app at the first sign-in. The button changes to **Copied** once they are on your clipboard. This is the only time
+   you see their employee ID and setup code: afterwards only administrators (on the **Team** page) and the person
+   themselves can see the ID, and an administrator gives a new code if it runs out. Add people on the office computer
+   or over the https address: over plain http from a phone the code is not shown, and an administrator gives one later. A tap
+   beside the box does not close it; choose **Done** when you have sent them.
+
+They start as **Active**, on the standard pay plan for their position. Only an administrator can give someone another
+role or position, a pay plan, a status, an avatar colour or a chosen employee ID, put them on another team, or change
+anything later (**Edit profile**). If something is refused, the message says why in a sentence.
+
+---
+
+## Recruiters
+
+### Your dashboard
+
+Your dashboard opens with the **Needs attention** card (overdue follow-ups, interview outcomes to record, today's interviews), then leads with **Recruitment**: **Open candidates** (with how many are at interview or observation), **Interviews this week**, **Overdue actions**, **Idle beyond target**, **Hires** for the chosen period and **Avg time to hire**; then **Upcoming interviews** (the next two weeks), **Overdue follow-ups** and **Weekly activity** for the last twelve weeks. Below that: **Top performers** across the company, **Upcoming events** and **Announcements**. You do not log gauges, so the Gauges page is not on your menu; Events, Leaderboard and Team are read-only.
+
+### The pipeline
+
+Candidates move through six stages in order, and can leave at any point:
+
+**Applied → Phone screen → Interview → Observation day → Offer → Hired**
+
+**Rejected** and **Withdrawn** are the two other end states. Hired, Rejected and Withdrawn are final; everything else is the **open pipeline**.
+
+Open **Recruitment**. The range picker (**Last 4 weeks**, **Last 12 weeks**, **This quarter**, **This month**, **Last month**, **Custom**) drives the summary: **Applied**, **In interview**, **Hired** (with the share of applicants hired), **Avg time to hire**, **Overdue actions**, plus **Weekly activity** and **Conversion by source**. Below, filter candidates with **Search name or email…**, **Source** and **Owner**, and switch between **Board view** — the open pipeline by stage, with the **Hired** column showing hires made in the range — and **List view**, where **Include closed** also shows rejected, withdrawn and hired candidates.
+
+### Adding a candidate
+
+1. Choose **Add candidate**. New candidates start at Applied.
+2. **First name**, **Last name** and **Email** are required. Add **Phone** and **City**.
+3. Choose the **Position applied for** (Trainee or Field Representative — nobody is hired straight into a leadership or office role), the **Source** (Indeed, LinkedIn, Referral, Website, Walk-in, Agency, University or Other) and, for a referral, **Referred by**.
+4. Set the **Owner** — "who follows up"; it defaults to you — and any **Notes**.
+5. **Add candidate.** The candidate's page opens.
+
+### The candidate page
+
+- **Pipeline** — a stepper showing the stage and since when.
+- **Profile** — email, phone, city, **Source**, **Rating** (click the stars, 1–5), **Owner**, **Position**, and after hiring **Hired as → View profile**.
+- **Notes & next action** — **Notes**, **Next action**, **Due** and **Owner**; **Save**. Every new candidate and every stage move gets a **Due** date from the stage's target (see [Recruitment deadlines](#recruitment-deadlines)); change it here if you need to. When it passes, the candidate is flagged **Overdue** on the board, in the list and on your dashboard, so nothing goes quiet.
+- **Interviews** and **Timeline** — every stage change, newest first, with who made it and the note.
+
+### Moving candidates
+
+Use the **Move to…** dropdown — in the header of the candidate page, or on a card on the board — and pick the new stage. Moving to Hired or Rejected asks you to confirm and lets you add a **Note** (what was decided and why). Hired, Rejected and Withdrawn are final: once there, the dropdown becomes a badge.
+
+### Interviews
+
+Choose **Schedule interview** (or **Schedule** in the Interviews card): the **Type** (Phone screen, First interview, Observation day or Final interview — suggested from the stage), the **Date and time**, the **Interviewer** (leaders, recruiters or the office) and **Notes**, then **Schedule**. Afterwards set the outcome with the dropdown on the interview: **Pending**, **Passed**, **Failed** or **No show**.
+
+### Hiring
+
+Move the candidate to **Hired**. The **Hire …?** dialog asks for the **Team** (it defaults to the owner's team) and the **Position** (Trainee or Field Representative, from the application), with an optional **Note**; **Confirm hire**. Linear Hub creates the employee record straight away: role Representative, the team and position you chose, the standard pay plan for that position, start date today, a work email in the `first.last@linear-mcr.co.uk` pattern and the next free employee ID. You will see "Rep account created · Field Representative · Deansgate" or similar, and the candidate's profile gains **Hired as → View profile**. Since 1.5 the hire also shows **Sign-in details** with the new starter's employee ID and one-time setup code, to send them privately so they can sign in on day one (an administrator can give a new code from **Team** if it runs out).
+
+### Adding a person (recruiters)
+
+Recruiters can add a trainee or field representative straight to any team (for someone who did not come through the
+pipeline; a hire from the pipeline creates the account by itself).
+
+1. Open **Team** and choose **Add person**.
+2. Fill in **First name**, **Last name**, **Email**, **Phone** (optional), **Position** (**Trainee** or **Field
+   Representative**), **Team** (choose one) and **Start date**, then **Add person**.
+3. In **Sign-in details**, choose **Copy instructions** and send them to the new person (they include their one-time
+   setup code and setting up two-step verification at the first sign-in). Their employee ID and setup code are shown
+   only this once (an administrator can find the ID on the **Team** page and give a new code); then **Done**.
+
+As for leaders, the role, pay plan, status, avatar colour and employee ID are the office's to set.
+
+### Your pay
+
+**Finance → My pay** works for you as for everyone. Recruiters are on the **Office recruiter plan**: a daily rate Monday to Friday, no sales commission, and a **bonus in any week with two or more hires**. On your payslips the **Sales** column counts the **hires you closed** that week — candidates you own who were moved to Hired.
+
+---
+
+## Administrators
+
+You can do everything above for anyone, plus:
+
+### Campaigns
+
+Open **Campaigns** (tabs **Active**, **Inactive**, **All**). Choose **New campaign**: **Name**, **Code** (2–6 letters or digits, e.g. `BCN`), **Sector** (Charity, Energy, Telecoms, Broadband, Other), **Type** (Fundraising, B2C, B2B), **Client payout per sale (£)**, **Rep commission per sale (£)** (cannot exceed the payout; a pay plan may override it), **Start date**, **Colour** for charts and chips, **Description**, and the **Active** switch; then **Create campaign**. Use the pencil on a card to edit and **Save changes**. Switch **Active** off to pause a campaign — its history is kept and it is no longer offered when scheduling an event.
+
+### People
+
+On **Team**, choose **Add person**: **First name**, **Last name**, **Work email**, **Employee ID** (format `LM-0000`; used with the email to sign in — leave it blank for the next free ID), **Role** (Administrator, Leader, Recruiter or Representative), **Position** (Trainee, Field Representative, Team Leader, Crew Leader, Assistant Owner, Owner or Recruiter), **Team**, **Pay plan**, **Start date**, **Status** (Active, On leave, Left), **Phone**, **City** and **Avatar colour**; then **Add person**. To change anything, open the person and choose **Edit profile**, then **Save changes**. Someone added without a surname (the starter team's demo accounts) can be saved with **Last name** still empty until you add one; once given, a surname cannot be cleared. Recruiters and leaders can add trainees and field representatives too (see [Leaders](#adding-a-person-leaders)); each addition is in the audit trail under the person who made it.
+
+Each person's page (Team → the person) also shows their **Bank details**, masked: **Ready for payments**, waiting for your check (**Confirm details**, once you have checked the new details with them in person or by phone), or none yet (**Add bank details** lets you type them in for them; since 1.5 details you type in wait for the person to confirm them, or for a different administrator). In **Edit profile**, **Reset two-step verification** is for a lost or new phone: they set it up again at their next sign-in.
+
+**Sign-in details and setup codes (1.5).** After **Add person**, **Sign-in details** shows the new person's employee ID
+and their **one-time setup code** (valid 7 days, used once); **Copy instructions** includes it. Send them privately:
+you will not see the code again. Add people on the office computer or over https, or the code is not shown (give them
+one afterwards). **Team → the person → Edit profile → Sign-in setup → Give a setup code** makes a new one (it replaces
+any older one): for someone whose code ran out, an account from before 1.5, or anyone who has not finished setting up.
+**Reset two-step verification** and **Reset PIN** sign the person out everywhere and show the setup code they sign in
+with next.
+
+**Your own code for sensitive changes.** Making someone an administrator or stopping them being one, setting an
+administrator as left, changing someone's sign-in email or employee ID, resetting someone's two-step verification or
+PIN, and giving a setup code ask for **your own** 6-digit code from your authenticator app. **Edit profile** shows the
+code box as soon as such a change is made in the form, with the reason ("Changing someone's employee ID needs your
+code."). Set up two-step yourself first. These actions, and anything with bank details or payments, only work on the
+computer that runs Linear Hub or over its https address: over plain http from a phone they say "For safety this only
+works over a secure connection".
+
+When someone leaves, set their **Status** to **Left**: they are signed out everywhere at that moment and can no longer sign in; their gauges, pay runs and history stay so the numbers still add up. You cannot set your own status to Left, and setting another administrator as left asks for your code. Only administrators see other people's employee IDs — on the Team page, profiles and payslips — and the Team search finds people by ID for administrators only.
+
+### Days off and leaving date (office staff)
+
+**Team → the person → Days off and leaving date** (administrators): add days off (one day, or a range: weekends are
+skipped) as holiday, sick, unpaid or other, and set the **Last working day**. Office staff are paid Monday to Friday
+less their days off, and nothing after the last working day; a leaver's last week is still paid. A paid week cannot
+change: add an adjustment on a later week instead.
+
+### Checking a VAT number
+
+When someone types in a VAT number, the bell says **"Check Remy Rep's VAT number"**. On **Team → the person → Invoice
+details**, look the number up on HMRC's "Check a UK VAT number" service (the link is on the card): it must show the
+person's name or business. Tick "HMRC shows … belongs to …", type your code and press **Confirm VAT number**. Until
+then no VAT is added. Nobody confirms their own number or a number they typed in for someone else: another
+administrator does, or the person types it in themselves. Ask your accountant how to treat VAT for VAT-registered
+self-employed reps before the first such pay run.
+
+### Gauges and events for anyone
+
+You can **Log gauges** at any team's event for any active member of that team (and for yourself), **Edit** or **Delete** any entry, and **Edit** or **Delete** any event. Deleting an event removes its gauge entries for everyone — set its **Status** to **Cancelled** instead unless it was created in error.
+
+### Payroll
+
+1. Open **Finance → Company**. The range (**Last 4 weeks**, **Last 12 weeks**, **This quarter**, **This month**, **Last month** or **Custom**) is snapped to whole Monday–Sunday pay weeks, so revenue, payroll and expenses always cover the same days.
+2. **Runs to pay** lists every **Pending** run of the last 12 weeks and every **Failed** run, however old, across the company, newest week first (grouped by week in collapsible sections when there are more than twenty). Click a run to check its payslip against the pay plan.
+3. Once the money has gone, choose **Mark paid**. The run is recorded as paid **today** and becomes **Paid** if today is on or before the due date, otherwise **Paid late**; you will see "Marked paid" or "Marked paid (late)". A run that is already paid cannot be paid twice. When the list is empty it says "Everyone is paid up".
+
+Make this a Friday routine: pay weeks close on Sunday, their pending runs appear on Monday, and they are due the following Friday. A **Failed** run (a transfer that bounced) stays in Runs to pay until you mark it paid again.
+
+4. Or pay them from Linear Hub (1.4): tick the runs and choose **Pay N from Linear Hub**, then follow
+   [Paying people from Linear Hub](#paying-people-from-linear-hub-administrators). A run in a payment shows **In a
+   draft payment**, **Payment on its way** or **Payment failed** (with the reason); while a payment is on its way,
+   **Mark paid** on that week waits for it, so nobody is paid twice.
+5. **Check before paying** (1.5). **Runs to pay** shows "N days to confirm" and "£X on unconfirmed subs" where they
+   apply, and each payment's page lists days waiting for a leader (not in this pay), pay resting on subs no client
+   statement has confirmed (in total), and bonuses or adjustments added in the last 7 days with who added them ("You
+   added this" when it was you). Nothing there stops a payment; it is what to look at first.
+
+**Payroll spreadsheet.** **Finance → Company → Runs to pay → Payroll spreadsheet**: "Payroll spreadsheet (CSV) for your accountant or payroll
+software: one week's unpaid runs. Each row adds up, with corrections and VAT in their own columns." Choose
+**Everyone**, **Self-employed (self-billed) only** or **Office staff only**. It is a spreadsheet to map, not a Xero or
+Sage import file.
+
+### Paying people from Linear Hub: what changed in 1.5 (administrators)
+
+The steps are in [Paying people from Linear Hub](#paying-people-from-linear-hub-administrators) (release 1.4). Since
+1.5:
+
+- **Two people approve each payment** (Settings → Payments). When it is on, the first approval sends nothing; a
+  different administrator gives the second with their own code. It is on by default once two administrators use
+  two-step verification, and it stays on if one of them leaves. Every change needs your code.
+  - **Ask to turn off**: while two or more administrators use two-step, one administrator cannot turn it off alone.
+    Your request waits, and the other administrators get a red bell item, "Ada Admin wants to turn off two approvals".
+    A different administrator presses **Agree: turn it off** (with their code), or anyone presses **Keep it on**.
+  - With only one administrator who uses two-step, it stays on and says so: live payments wait, and nobody can give a
+    first approval that could never be completed. Add another administrator with two-step, or turn it off (that one
+    administrator can then turn it off alone; the audit trail records it).
+- **Bank files start in test mode.** A new bank file connection makes files named `TEST-…`, every reference starts
+  `TEST`, and every line has sort code 00-00-00 and account 00000000, so a test file pays nobody even if it is uploaded
+  by mistake. It is for checking the layout and the amounts. Before your first real run, press **Make a 1p test
+  file**: type your own account and your code, upload the file to your bank and approve it there, then press **The bank
+  took it** or **The bank refused it**. Switch the connection to live with **PAY FOR REAL**.
+- **A downloaded bank file counts as sent.** Once you download a live file, its people count as paid out: to cancel it
+  you type **NOT UPLOADED** and your code, and the file becomes void (never upload it afterwards). If the bank paid
+  only some, untick the others in **Mark as paid**, type **NOT PAID** and your code. A new file for those weeks says
+  under each person "Also in bank file payment #N, downloaded … and marked as not uploaded. Check your bank did not pay
+  it", and its references end in 2 (3 for a third file), so the bank can tell the files apart.
+- **Revolut, Wise, TrueLayer:** test the connection, pay one person in test mode through the provider's sandbox and
+  wait for the answer, then switch to live, test the live keys, and make the first live run small (one person). If you
+  change a connection's details while it is in test mode, make the sandbox payment again with the new details.
+  Linear Hub was built from each provider's published API; nothing has run against a real account yet, so the first
+  real run is a test.
+- **Wise:** Linear Hub creates the transfers; you fund them in Wise. Transfers you do not fund in time are cancelled by
+  Wise and go back to Runs to pay.
+- **Bank details you type in for someone** now wait for that person to confirm them (or for a different administrator).
+  Your own changed details are confirmed by another administrator; if you are the only one, the card says so: payments
+  to you are skipped until a second administrator is added (or pay yourself outside Linear Hub). Changing someone
+  else's details, and confirming any, needs your code.
+
+### Expenses
+
+Further down **Finance → Company**, choose **Add expense**: **Date**, **Amount (£)**, **Category** (Venue fees, Travel, Office, Software, Recruitment, Marketing or Other), optionally the **Campaign** it belongs to, and a **Description**; then **Add expense**. The bin icon deletes an expense entered in error (you are asked to confirm). The table shows 25 at a time with a **Show N more** button.
+
+### Company finance
+
+The top of **Finance → Company** shows, for the chosen range:
+
+- Tiles: **Revenue** (sales × campaign payout), **Payroll**, **Expenses**, **Profit** and **Sales**. The week in progress has no runs yet, so its payroll is a live estimate and the tiles say "incl. this week's estimate".
+- **Weekly money flow** — revenue against payroll and expenses per pay week.
+- **Payroll punctuality** — paid on time, paid late, pending and failed, the **On-time rate** and the average days late.
+- **By campaign** — sales, revenue, the commission reps actually earned on that campaign and the margin.
+
+### Announcements
+
+As a leader does: **New announcement** on the Dashboard, with the **Pinned** switch to keep it at the top for everyone.
+
+### Backups and the recovery sheet (administrators)
+
+**Settings › Backups** shows the last backup, how many are kept, and **App key and recovery**:
+
+- **The app key.** Linear Hub locks bank details, two-step sign-in and PINs with one key on the server. If that key is
+  lost, they cannot be read again. So the key goes on a **recovery sheet**, once. Noryn makes it with the owner on the
+  computer that runs Linear Hub, so the key never travels over the network. The owner prints it (or copies it by
+  hand), locks it away like a bank card (not near the server), and then types the key back in once from the paper to
+  check it. The card then says **Printed and kept**. Until then, the backups folder keeps a copy of the key, so nothing
+  can be lost.
+- **If Linear Hub will not start and says the app key is missing**, do not delete anything. Ask Noryn: the key is put
+  back from the sheet, and Linear Hub checks it before saving it.
+- **Off-site copies.** When Noryn has switched them on, every backup is also copied, locked with a passphrase, to a
+  place away from the server. To open one you need that passphrase, which you keep on a separate piece of paper.
+- Every backup now holds the uploaded files too (client statement PDFs and the signature image).
+
+**System health** items in the bell tell administrators when a backup failed, the off-site copy is late or failing,
+the disk is nearly full, the key is not on paper yet, or the server had errors, and, for 14 days after a restore from
+an older backup over newer payments, to check payments with the bank. They say what happened and to ask Noryn; the
+commands are Noryn's.
+
+
+### Trial mode and going live (the owner)
+
+A new Linear Hub starts in **trial mode**, holding the demo company (invented people, history and records) so everyone
+can try it. While it does, every administrator sees **Trial mode: demo sign-ins are on** under the top bar (or **Trial
+mode: the demo company is still here** when the one-tap sign-ins are off) with **How to go live**, and the same item
+first in **Needs attention**. **Settings → Trial mode** lists the steps. The one-tap demo accounts only work on the demo
+company: they cannot change your own people, anyone's real pay, bank details, payments or the office settings ("Demo
+accounts cannot …"). Use your own administrator account for real work, and go live before real pay or bank details go
+in.
+
+**Going live.** On the computer that runs Linear Hub: stop it, run `npm run golive` (on a server set up by Noryn:
+`sudo linear-hub golive`), read what goes and what stays, type **GO LIVE**, start it again, and sign in with the email,
+employee ID and setup code it printed, then set up two-step verification. It backs everything up first. It removes the
+demo company and its one-tap accounts, and keeps your settings, the people you added and everything made during the
+trial. Whoever used a demo account during the trial adds their own account. Then give each of your people a setup code
+(below). Going live is for good: the demo never comes back on that database.
+
+### Putting Linear Hub online
+
+For real use, Linear Hub runs on a small server of Linear MCR's own, in the UK or EU, at an address such as
+`https://hub.linear-mcr.co.uk`. Reps then use it on 4G at any venue, it keeps running when the office laptop is shut,
+and its backups leave the building every night. Going online is agreed first: Noryn quotes it as a fixed-price
+package and both companies sign a short change to the agreement. Then Noryn sets it up with you in about half a day:
+see [`DEPLOY.md`](DEPLOY.md). The office Mac on its Wi-Fi or hotspot is for the trial week only.
+
+### Resetting the sample data
+
+`npm run seed` rebuilds the demo database with the deterministic 26-week sample data, anchored to today, in trial mode.
+It refuses a database that has gone live, a trial database with people of your own, or one Linear Hub has open; it asks
+you to type **START AGAIN** and backs up first. To end the trial, use `npm run golive` instead (see [Trial mode and going
+live](#trial-mode-and-going-live-the-owner)).
+
+---
+
+## Charity and client accounts
+
+A charity or client that works with Linear MCR can have its own account. It sees one page about its own campaign and
+nothing else: never reps' pay, bank details or personal details.
+
+**Signing in.** Open the Linear Hub address from your invite. Type your email and your access code (CL-0002, CL-0003…)
+and, the first time, the one-time setup code from the same invite. Then create a PIN of 4 to 6 digits and set up
+two-step verification with an authenticator app (about two minutes). After that, every sign-in is your email, access
+code, PIN and the 6-digit code from the app. You are signed out 14 hours after signing in, or after 12 hours unused.
+
+**Updates.** One form, three kinds of post:
+- **Update**: news for Linear MCR's office.
+- **Announcement**: published to the Linear MCR team straight away, with your organisation's name on it.
+- **Commission change**: a new rate, and the date it starts. It waits until Linear MCR approves or declines it.
+
+**Your posts** lists everything your organisation posted and where each stands: Published, Waiting for Linear,
+Approved (from a date), Declined (with the reason) or Unpublished.
+
+**Security** shows your account. Change your PIN or your two-step verification there. Forgotten your PIN or lost your
+phone? Ask Linear MCR: they reset it and give you a new setup code.
+
+**For the office.** Invite a charity contact from the campaign page's **Client accounts** card: the invite shows the
+access code and the setup code to send. **Reset PIN** and **Reset two-step** there ask for your own code and show the
+new setup code. More in [Client accounts and campaign pages](#client-accounts-and-campaign-pages) (release 1.3).
+
+---
+
+## If something goes wrong
+
+| You see | What it means | What to do |
+|---|---|---|
+| "We couldn’t match that email and employee ID." | One of them is wrong, or your status is Left. | Check both against your payslip, then ask the office. |
+| "Too many attempts, try again in N minutes" | Eight wrong tries for this email in fifteen minutes from your network address (twenty from anywhere). | Wait the stated minutes; a successful sign-in resets the count. |
+| **Type your setup code** | Your account is new, or an administrator reset your PIN or two-step verification. | Type the one-time code your administrator gave you. |
+| "That setup code is not right, or it has been used or has expired. Ask an administrator for a new one." | The code was mistyped, already used, more than 7 days old, or replaced by a newer one. | Ask an administrator for a new one (Team → your name → Edit profile → Give a setup code). |
+| "Demo accounts cannot … Sign in with your own administrator account, or go live first (npm run golive)." | During the trial, the one-tap demo accounts only work on the demo company. | Sign in with your own account for real work. |
+| "For safety this only works over a secure connection. Open Linear Hub on the office computer itself, or use its https:// address." | Bank details, payments, setup codes and resets are refused over a plain http address from another device. | Do it on the computer that runs Linear Hub, or over its https address. |
+| **Overdue pay** on your dashboard | A payday has passed and that pay is still not marked paid. | Ask the office. |
+| "1 of your days waits for your leader" | You logged a day with no booking or check-in (or with nothing logged), so it does not pay a base day until your leader confirms it. | Ask your leader to look at **Pay → Days to confirm**. Next time, book onto the event and check in. |
+| "Your session has ended" | Your sign-in expired or was revoked. | Sign in again; you return to where you were. |
+| "For security you are signed out 14 hours after signing in. Sign in again to carry on." | It is 14 hours (or the time your administrator chose) since you signed in. | Sign in again with your code. Anything waiting on your phone sends after you sign in. |
+| **Set up two-step verification** instead of the app | Two-step verification is required for everyone since 1.4, and you have not set it up yet. | Tap **Set up now** and follow the steps (about two minutes). **Sign out** if it is not your phone. |
+| "That code is not valid" when signing in | The code was mistyped, already used, or your phone's clock is wrong. | Wait for the next code and type it. Check your phone sets its time automatically. Or **Use a recovery code instead**. |
+| You lost your phone, or got a new one | Your authenticator app was on it. | Sign in with a recovery code, then **New recovery codes**. No codes left: ask an administrator to reset your two-step verification. The only administrator: `npm run 2fa:reset -- <your email>` on the computer Linear Hub runs on (in the `linear-micro-crm` folder). |
+| "That code is not right. Codes change every 30 seconds and each one works once…" when approving a payment or saving bank details | The code was old, mistyped or already used for something else. | Wait for the next code in your app and try again. |
+| **Payment failed** on a run in Runs to pay | The provider or your bank did not pay it; the reason is in the badge's tooltip and on the payment's page. | Fix what the reason says (bank details, a top-up), then pay that week again in a new payment, or **Mark paid** once you have paid it another way. |
+| "Test it in Settings → Payments first" on Pay people | The connection's last test did not work, or it has not been tested since its details changed or it was switched to live. | Open Settings → **Payments** and choose **Test**; the card says what went wrong. |
+| A payment says a provider "did not answer" (or "could not reach") | The provider was slow or offline, or this computer's internet was down, when Linear Hub sent it. | Press **Check now** later, or wait for the 5-minute check: Linear Hub resends with the same references, which the provider recognises as the same payment for a while (TrueLayer 6 hours, Revolut 2 weeks, Wise not documented). A TrueLayer payout not answered within 5 hours of the approval fails with "Linear Hub does not know whether TrueLayer made this payout: …": check the TrueLayer Console before paying that week again. After a long Wise outage, check Wise → Transfers for a transfer made twice. |
+| "This area isn't available on your account" | Your role cannot open that page (recruiters and the Gauges page, for example). | Use **Back to dashboard**; speak to your crew leader or the office if you think you should have access. |
+| **Not saved.** "Invalid funnel" | One stage is larger than the one before it. | Fix the stage named in the message. |
+| **Not saved.** "Gauges are recorded against the event's date" or "Gauges cannot be recorded before the event takes place" | The entry was for a date other than the event's, or the event is in the future. | Pick the right event; log it on or after the day it runs. |
+| **Not saved.** "Reps can only record their own gauges" (or a similar refusal) | Your role does not allow that write — a rep logging for someone else, a leader at another team's event. | Ask your leader or the office. |
+| "This event was cancelled, so gauges cannot be logged for it." | The event's status is Cancelled. | Ask a leader or administrator to reinstate it if it did run. |
+| A pay run shows **Overdue** | It is pending and its Friday due date has passed. | Nothing for you to do; the office sees the same badge in Runs to pay. |
+| A pay run shows **Paid late** | It was marked paid after the due date. | Nothing for you to do; the office tracks the on-time rate. |
+| Your punctuality shows **—** | No check-ins have been recorded yet. | Tap **Now** in **Checked in at** when you arrive at each event. |
+| **Check-in** shows **—** for other people | Their check-in times are only shown to administrators and their own team's leader. | Expected. |
+| "Demo accounts aren’t available right now" | Linear Hub has gone live, the server is online, or demo accounts are switched off. | Sign in with your own details. |
+| An amber strip: **You're offline: saves will send when you're back** | The phone has no signal. | Keep logging; it sends by itself. |
+| An amber strip: **Can't reach Linear Hub** | The phone has signal but Linear Hub does not answer (stopped, restarting, or the signal is too weak; during the trial, the office computer is asleep or on another Wi-Fi). | Keep logging; tell the office if it lasts. |
+| The sign-in page with no signal | The time you would be signed out has passed. | Sign in when you have signal; nothing saved on the phone is lost. |
+| A blue strip: **A new version of Linear Hub is ready** | A new version was put live. | Tap **Reload** when you have saved. |
+| **1 entry needs a look** | Linear Hub already had an entry for that day that this phone had not seen — someone else's correction, or your own earlier entry when the phone could not check for it before saving — or the entry you were changing was deleted while yours waited. | Tap **Review** to see both versions, then **Send mine anyway**, **Open** or **Discard**. |
+| A strip or card you expected is missing (pace note, pay estimate, **Needs attention**) | There is not enough history yet, or the office has switched the smart features off. | Nothing to do; the rest of the page works as before. |
+
+---
+
+## Release notes
+
+What changed in each release, newest first. Each describes the release as it came out; where a later release changed
+something, the guide above is the current word, and the older notes say "since 1.5" where it matters most.
+
+### What's new in 1.5
+
+Linear Hub 1.5 makes it safe to go live. A new Linear Hub starts as a **trial** with an invented demo company, and the
+owner **goes live** when ready. Every new account starts with a **one-time setup code**. The app key that locks bank
+details and sign-ins goes on a printed **recovery sheet**, and backups also go **off-site**, locked with a passphrase.
+Payments get **a second pair of eyes**. And on the secure address, Linear Hub **works with no signal**.
+
+**At a glance, by role**
+
+| You are | What is new for you |
+|---|---|
+| **Everyone** | The first sign-in (and after a reset) asks for a **one-time setup code** from your administrator ([Signing in](#signing-in)). On a phone: **Add to Home Screen** gives a proper app icon; on the secure (https) address every page opens with no signal, a weak signal never leaves it on "Loading…", and a blue strip says when a new version is ready ([Using Linear Hub on your phone](#using-linear-hub-on-your-phone)). Tables are cards on a phone, pop-ups never cover a form, numbers in Log gauges are checked as you type. If someone else changed your bank details, you **confirm or report** them ([Settings](#settings)). The pay tile reads **Overdue pay** in red when a payday has passed and that pay is not marked paid: ask the office. |
+| **Rep** | A **Today** card at the top of your dashboard with **Check in**, **Log gauges** and **Quick gauges**; a **Check in at …** reminder in Needs attention; **Check in** labelled on Quick gauges. A day logged with no booking and no check-in waits for your leader before it pays a base day ("1 of your days waits for your leader"): book onto the event and check in. VAT-registered? Add your VAT number in Settings → Invoices; the office checks it with HMRC first. The pay estimate says how many more subs beat your day rate (no bonus is promised). |
+| **Leader** | All of the rep's, plus **Pay → Days to confirm** for your team ([Days to confirm](#days-to-confirm-leaders)). People you add get a setup code in **Sign-in details**. |
+| **Recruiter** | People you add, and hires, get a setup code in **Sign-in details** ([Adding a person (recruiters)](#adding-a-person-recruiters)). |
+| **Administrator** | Trial mode, the banner and **going live** ([Trial mode and going live](#trial-mode-and-going-live-the-owner)); setup codes and **your own code** for sensitive changes ([People](#people)); **Days off and leaving date** for office staff; **checking VAT numbers**; **Check before paying**, **Two people approve each payment**, bank files in **test mode** with a **1p test file**, a downloaded bank file counting as sent, and the **Payroll spreadsheet** ([Payroll](#payroll)); **Backups**, the recovery sheet and **System health** ([Backups and the recovery sheet](#backups-and-the-recovery-sheet-administrators)); money and secret actions only on the office computer or over https. Finance opens on **Company**. |
+| **Charity and client accounts** | The first sign-in uses the setup code from your invite ([Charity and client accounts](#charity-and-client-accounts)). |
+
+**Pop-ups and numbers.** Needs-attention pop-ups now sit at the top of a phone screen for 5 seconds and go away when you
+open a form. In Log gauges the checks run as you type: type 9 sales with 2 taps and the warning shows straight away; a
+number that is too big says **Use a number from 0 to 2000.**
+
+**Refused forms** say which box needs fixing and why, for example "Name: Required", "Code: Use at most 6 characters" or
+"Sector: Choose one of: charity, energy, telecoms, broadband, other". When there are many problems at once you see the
+first few and how many more there are; fix those and save again.
+
+**Upgrading from 1.4 (the office).** Back up first (`npm run backup`), then update. Accounts without two-step
+verification need a setup code at their next sign-in: give them one from Team, or `npm run setup-code -- <email>` on
+the server. A 1.4 demo database is in trial mode: the demo owner LM-0001 becomes a restricted one-tap demo account, and
+`npm run golive` removes it (records made during a 1.4 trial week are kept). Bank details an administrator typed in and
+confirmed themselves in 1.4 wait again for the person or a second administrator. More in
+[OWNER_NOTES_1.5.md](OWNER_NOTES_1.5.md).
+
+### What's new in 1.4
 
 Linear Hub 1.4 does three things. Everyone who signs in now uses **two-step verification**: a 6-digit code from an
 authenticator app on their phone. Everyone is **signed out 14 hours after signing in**. And the office can **pay
 people from Linear Hub**, in four ways, once each person has added their **bank details**.
 
-### Two-step verification for everyone
+#### Two-step verification for everyone
 
 Linear Hub now asks everyone who signs in for a 6-digit code from an authenticator app (Google Authenticator,
 Microsoft Authenticator, 1Password or Authy). That means administrators, team leaders, recruiters, field reps, and
@@ -56,9 +715,11 @@ off.
   `npm run 2fa:reset -- <their email>` there (see [If something goes wrong](#if-something-goes-wrong)).
 
 **The demo sign-in buttons** on the sign-in page work as before (no code) while Linear Hub is still the demo. Anyone
-the office adds, and every invited charity contact, uses two-step even on the demo.
+the office adds, and every invited charity contact, uses two-step even on the demo. (Since 1.5 the demo is a **trial**:
+the one-tap accounts only work on the demo company, and the owner ends it with `npm run golive`. See
+[Trial mode and going live](#trial-mode-and-going-live-the-owner).)
 
-### Signed out 14 hours after signing in
+#### Signed out 14 hours after signing in
 
 For security, everyone is signed out 14 hours after signing in, however busy they are, and signs in again with their
 code. The sign-in page then says: "For security you are signed out 14 hours after signing in. Sign in again to carry
@@ -72,7 +733,7 @@ Nothing is lost when it happens:
 - a **Check in** tap that was refused because you had just been signed out is kept on the phone and sent after you
   sign in.
 
-### Your bank details
+#### Your bank details
 
 **Settings → Bank details** is where your pay goes. Choose **Add bank details** (or **Change**) and fill in **Name on
 the account**, **Sort code** (6 digits) and **Account number** (8 digits), then the **Code from your authenticator
@@ -82,7 +743,7 @@ app**, and choose **Save bank details**. After that Linear Hub only ever shows t
 When you change them, the office checks the new details with you (in person or by phone) before the next payment goes
 there; until then your payment waits. That stops anyone who got into your account from sending your pay elsewhere.
 
-### Paying people from Linear Hub (administrators)
+#### Paying people from Linear Hub (administrators)
 
 **The four ways to pay.** Settings → **Payments** shows each with its logo, what it can do (✓ or ✗), its fees, **What
 you need to set it up** and **Good to know**. Logos belong to their owners and only identify the service.
@@ -93,7 +754,7 @@ you need to set it up** and **Good to know**. Logos belong to their owners and o
 | Pays from Linear Hub | ✗ | ✓ | ✗ | ✓ |
 | Confirms payment automatically | ✗ (you tick who the bank paid) | ✓ | ✓ | ✓ |
 | You approve the payments in your bank | ✓ | ✗ (unless your Revolut account needs an approver) | ✓ | ✗ |
-| Test mode | ✗ (a file moves nothing until you upload it) | ✓ | ✓ | ✓ |
+| Test mode | ✗ in 1.4 (a file moves nothing until you upload it); ✓ since 1.5, with a 1p test file | ✓ | ✓ | ✓ |
 | Shows your balance | ✗ | ✓ | ✗ | ✓ |
 | Works with any UK business bank | ✓ | — | — | — |
 | Fees | none from Linear Hub; your bank's bulk payment charges | Revolut's transfer fees and your plan | Wise's fee per transfer, shown before you pay | per payout: check your TrueLayer agreement |
@@ -118,7 +779,9 @@ when you **Edit** a connection, leave a key empty to keep the one stored.
   in the TrueLayer Console (Payments → Settings), then paste the **Client ID**, **Client secret**, **Signing key ID**
   and **Signing private key**, and press **Save and test**.
 
-**2. Test mode first, then live.** Revolut, Wise and TrueLayer connections start in **test mode**: they talk to the
+**2. Test mode first, then live.** (Since 1.5 bank files start in test mode too, and an API connection goes live only
+after a sandbox payment: see [what changed in 1.5](#paying-people-from-linear-hub-what-changed-in-15-administrators).)
+Revolut, Wise and TrueLayer connections start in **test mode**: they talk to the
 provider's sandbox, and nobody receives any money. The card shows **Connected**, **Not tested yet** or **Needs a look**,
 and **Test** tries it again. Make a payment in test mode first: it says **Test done: nobody paid**, each person reads
 **Test: not paid**, and the weeks stay on Runs to pay. When you are ready, choose **Switch to live** and type **PAY FOR
@@ -212,13 +875,15 @@ adjustment.
 bank details". Check the new details with them in person or by phone, then open **Team → the person → Bank details**
 and choose **Confirm details**. If they changed them again in the meantime, Linear Hub says "They changed their bank
 details again since you looked: check the new ones before confirming." and shows the new ones, still waiting. Details
-you type in for someone there count as checked by you.
+you type in for someone there count as checked by you. (Since 1.5 they wait for the person to confirm them, or for a
+different administrator, and confirming needs your code: see
+[Paying people from Linear Hub: what changed in 1.5](#paying-people-from-linear-hub-what-changed-in-15-administrators).)
 
 **Signed out while paying?** Being signed out 14 hours after signing in never stops a payment you already approved:
 Linear Hub keeps checking it on its own and marks the weeks paid. A bank file you approved is still there to download
 and mark paid after you sign in again.
 
-### For the administrator: Settings → Security → Sign-in rules
+#### For the administrator: Settings → Security → Sign-in rules
 
 - **Two-step verification is required for everyone**: a plain line now. The old switch "Require two-step verification
   for administrators" is gone.
@@ -232,30 +897,34 @@ Adding someone (**Team → Add person**) or inviting a charity contact (the camp
 **Invite**) gives you sign-in instructions that now end with setting up two-step verification and keeping the recovery
 codes safe. People you added or invited before 1.4 got the old text, so tell them.
 
-## What's new in 1.3.1
+### What's new in 1.3.1
 
-### The Sapiens team on the demo
+#### The Sapiens team on the demo
 
 The demo now has a fifth team, **Sapiens**, with seven people whose accounts start **blank**: every page works, but
 nothing has been logged yet — no gauges, events, pay, invoices, learning or check-ins. They have first names only; an
 administrator adds surnames in **Team → the person → Edit profile** (the last name can stay empty until then).
 
+Since 1.5 this starter team comes from the office's own file (`server/data/starter-team.json` next to the database,
+never published) when there is one, so your real team can try Linear Hub with one tap during the trial and keep their
+accounts after going live. Otherwise it is an invented example team:
+
 | Name | Employee ID | Email | Position |
 | --- | --- | --- | --- |
-| Theo (leads the team) | LM-0101 | theo@linear-mcr.co.uk | Team Leader |
-| Daniel | LM-0102 | daniel@linear-mcr.co.uk | Team Leader |
-| Ridwan | LM-0103 | ridwan@linear-mcr.co.uk | Team Leader |
-| Jamie | LM-0104 | jamie@linear-mcr.co.uk | Team Leader |
-| Olivia | LM-0105 | olivia@linear-mcr.co.uk | Trainee |
-| Owens | LM-0106 | owens@linear-mcr.co.uk | Trainee |
-| Yasmin | LM-0107 | yasmin@linear-mcr.co.uk | Trainee |
+| Ava (leads the team) | LM-0101 | ava@linearhub.example | Team Leader |
+| Ben | LM-0102 | ben@linearhub.example | Team Leader |
+| Cleo | LM-0103 | cleo@linearhub.example | Team Leader |
+| Dev | LM-0104 | dev@linearhub.example | Team Leader |
+| Esme | LM-0105 | esme@linearhub.example | Trainee |
+| Femi | LM-0106 | femi@linearhub.example | Trainee |
+| Gina | LM-0107 | gina@linearhub.example | Trainee |
 
-On the sign-in page, under the four demo buttons, open **Sapiens team (7)** and tap a name to sign in as them. There is
+On the sign-in page, under the four demo buttons, open the team's group and tap a name to sign in as them. There is
 no PIN on these demo accounts. The first time a Sapiens leader or trainee signs in, Linear Hub asks them to read the
 self-billing agreement, as it does for every new field person (**Later** puts it off until the next visit). The group
 is shown only on the demo database, like the other demo buttons; `LM_DEMO_ACCOUNTS=0` hides it.
 
-### A charity account on the demo
+#### A charity account on the demo
 
 Under the demo buttons, **Charity accounts** has a one-tap sign-in for **Hannah Price — Breast Cancer Now**, the demo
 charity's own account (CL-0001, hannah.price@breastcancernow.example, no PIN). It opens the client portal as the charity
@@ -265,14 +934,15 @@ still the demo: the four demo staff accounts (LM-0001, LM-0002, LM-0003, LM-0010
 and none has left (renaming them or changing their emails does not count), and the server is not run with
 `LM_DEMO_ACCOUNTS=0`. Every Linear Hub database starts as the demo, so before real people use yours, deactivate the
 demo accounts (see the go-live checklist in [DEPLOY.md](DEPLOY.md)); `LM_DEMO_ACCOUNTS=0` only hides their buttons.
+(Since 1.5, `npm run golive` removes the demo company, its one-tap accounts included.)
 
-### Leaders and recruiters can add people
+#### Leaders and recruiters can add people
 
 **Team → Add person** is now there for recruiters and for leaders (Team Leaders and Crew Leaders), as well as
 administrators. See [Adding a person (leaders)](#adding-a-person-leaders) and
 [Adding a person (recruiters)](#adding-a-person-recruiters).
 
-### Invoice lines say why
+#### Invoice lines say why
 
 Each line of your self-billing invoice now says why it is what it is, in grey under the line, as **How this week is
 worked out** does: "8 logged, 1 cancelled by CHN", "Not yet confirmed by BCN", or for a correction "2 cancelled by BCN:
@@ -280,18 +950,18 @@ paid for 11, confirmed 9". It is on the printed invoice and the PDF too, so you 
 or tap **Something's wrong**. Invoices issued before this update stay exactly as they were issued (no notes); the next
 version of one, and every new week's invoice, has them.
 
-### Fair-use limit on bookings and interview sheets
+#### Fair-use limit on bookings and interview sheets
 
 **I'm working this** / **I can't make it**, **Edit bookings** and the interview sheet's saves now count towards the
 same limit as check-ins and other quick changes: 60 changes a minute per person. Normal use never comes near it. If
 you do reach it, Linear Hub says "That is more than 60 changes in a minute. Wait a minute, then try again." and
 nothing is changed; on an interview sheet it shows **Not saved** with **Try again**, and your words stay on the screen.
 
-## What's new in 1.3
+### What's new in 1.3
 
 Linear Hub 1.3 makes pay something everyone can check: each week is paid as the base (£63.50 a day) or the commission, whichever is higher; the clients' statements correct cancellations automatically; and a self-billing invoice comes to each person to accept or query. Clients get their own login for updates, Matt can add learning videos, every table downloads as PDF, recruitment keeps much more detail, venues show what it takes to make a sale there, and the audit trail records every action.
 
-### Pay: base or commission, and cancellations
+#### Pay: base or commission, and cancellations
 
 **Everyone on weekly pay: Finance → My pay.**
 
@@ -327,7 +997,7 @@ Linear Hub 1.3 makes pay something everyone can check: each week is paid as the 
 - **Rate per sub, by campaign** lists each campaign's current rep rate and payout. Open one to see its history (who approved a client's change).
 - **Add a rate** adds a new rate from a date. Sales on and after that day use it.
 
-### Self-billing invoices
+#### Self-billing invoices
 
 **Your invoice (reps and leaders).** You are self-employed, so each week Linear MCR Limited writes a self-billing
 invoice for you. Open **Finance → My pay** and tap a week: you see the invoice — your details as the supplier, Linear
@@ -370,7 +1040,7 @@ is listed as *Not paid*, and the other way round), the total, and the deadline.
 - **Team → a person → Invoice details**: their supplier details (you can correct them) and whether they accepted the
   agreement.
 
-### Client statements from Gmail
+#### Client statements from Gmail
 
 **Finance → Statements** (administrators). Every commission statement the clients emailed you (once Gmail is connected)
 or that you uploaded, newest first: the campaign, the period, when it arrived, how many rows matched a person, and its
@@ -417,7 +1087,7 @@ The dashboard's **Needs attention** box (and the bell) shows a statement that ne
 Oct 2026 needs a look", with what to do), one that could not be read, one ready to apply, and a Gmail check that keeps
 failing.
 
-### PDF downloads
+#### PDF downloads
 
 - **Export ▾** (every table that had **Export CSV**: Gauges, a person's gauges and entries, an event's gauges, the
   Leaderboard, Team, Campaigns, Recruitment's list and Hired column, Finance → My pay / Team pay / Company): pick
@@ -438,7 +1108,7 @@ failing.
   recorded when the phone is back online (with several tabs open, once). An invoice, candidate profile, interview
   sheet or venue report PDF made without signal is not recorded yet.
 
-### Learning videos
+#### Learning videos
 
 **Learning → Videos** (everyone): under the pitches on the Learning page. Each video shows its still, length, topic
 and badges: **Required** (for you), **In progress**, **Watched** (with the day) and **Example**. What is required of you
@@ -470,7 +1140,7 @@ counts once you have seen 90% of it. Leaders on **My team**
 **Settings → Learning videos** (administrators): **Leaders can add videos** (off at first), and how many uploaded
 videos the server holds, how big they are and the folder they are in.
 
-### Client accounts and campaign pages
+#### Client accounts and campaign pages
 
 **For clients (the client portal).** Sign in with your email and the access code from your invite (CL-0002…). The
 first time, create a PIN of 4 to 6 digits; you type it after your email and access code every time (a client account
@@ -508,7 +1178,7 @@ money and not the client contact's email or phone. The contact card says who to 
 "Questions for Breast Cancer Now go through your team leader or the Linear MCR office"; a recruiter (office staff, no
 team) or a rep without a team "Questions for Breast Cancer Now go to the owner or another administrator".
 
-### Recruitment: date of birth, schedule and interview sheets
+#### Recruitment: date of birth, schedule and interview sheets
 
 **Recruitment → Schedule.** Every interview by day with its time, type, candidate (and the stage they are at now),
 interviewer and how far the sheet has got. Choose **Today**, **This week** or **Next week**, and filter by interviewer
@@ -542,7 +1212,7 @@ you no longer ask (**Turn on** brings it back). A question already in the list i
 the final interview list"). Ask about the job only; a warning appears if a question seems to be about age,
 health, family, religion, where someone is from or another protected characteristic.
 
-### Venues, rosters and event plans
+#### Venues, rosters and event plans
 
 **Venues** (sidebar, under Events; or **Venues** at the top of the Events page). Every venue the team has worked, each
 with its sales a shift, shifts and visits, "a sale every N stops", the last and next visit and its campaigns. Sort by
@@ -587,9 +1257,13 @@ dashboard's upcoming events and in Quick gauges, where it takes the first line u
 stops → 33 → 18 → 8 → 5 taps", cut short with "…" on a small phone) and the help keeps its first sentence, so all six
 tiles stay on one screen. Plans are estimates: luck evens out over many shifts, not in one.
 
-### Audit of every action
+#### Audit trail: every change, sign-ins and exports
 
-#### Audit (administrators)
+The audit trail records every change anyone makes, every sign-in and failed attempt, and every export and download.
+It also records opening some private records, such as a candidate or an interview sheet. It does not record other
+page views or reading a list.
+
+##### Audit (administrators)
 
 **Audit** now lists **everything** done in Linear Hub, newest first, under the day it happened:
 
@@ -613,7 +1287,7 @@ administrators, the address it came from. **Download PDF** (P4) prints every ent
 first, up to 2,000 — not only the 50 on screen), with the filters written out ("Showing: Sign-ins", "Person: Jordan
 Lee", "Dates: 1 – 21 Oct 2026").
 
-#### Team → person → Activity (administrators)
+##### Team → person → Activity (administrators)
 
 A person's page has an **Activity** card under their performance: everything they did and the failed attempts to sign
 in to their account ("Attempt on this account"), newest first, with their last sign-in, when they were last active
@@ -623,12 +1297,12 @@ more; **Open in the audit trail** shows the full list with every filter.
 
 ---
 
-## What's new in 1.2
+### What's new in 1.2
 
 Linear Hub 1.2 adds a **Learning** page for the COD pack and your campaign pitches, and a set of upgrades for the
 field and the office.
 
-### Learning pack: COD pack lessons, the Learn / Teach checklist and the progression tracker
+#### Learning pack: COD pack lessons, the Learn / Teach checklist and the progression tracker
 
 **Learning** (sidebar, everyone) opens the Learning page:
 
@@ -674,7 +1348,7 @@ ask your leader what each involves. Once you have done it, tap **I've done this*
 **Dashboard** (reps and leaders): a one-line card under the week's pay estimate, e.g. "Your next level: 12 of 14 sales
 this week; 9 of 21 lessons learned". Tap it for the Progress page.
 
-### Pitch studio: campaign pitches, annotations and practice modes
+#### Pitch studio: campaign pitches, annotations and practice modes
 
 **Learning → Pitches.** At the top of the Learning page there is a card for every active campaign (and any inactive
 one that has a pitch). A campaign with a pitch shows its title and when it was last updated; tap it to open the pitch.
@@ -737,7 +1411,7 @@ and the audit trail keeps the history.
 
 Recruiters and reps read every pitch and practise with all three modes; they cannot edit.
 
-### Sign-in PIN and stronger sessions
+#### Sign-in PIN and stronger sessions
 
 **Everyone — your PIN (Settings → Security → Sign-in PIN).** Tap **Set a PIN**, type 4 to 6 digits twice and save.
 Avoid 1234, 0000, the most common PINs and the digits of your employee ID; the screen tells you which rule a PIN breaks.
@@ -771,16 +1445,17 @@ sign in with their email and employee ID and choose a new PIN (straight away, if
 
 **Administrators — your own PIN.** You cannot reset your own PIN from the Team page. If it is locked, wait for the time
 on the sign-in screen, or ask another administrator. If you are the only administrator, whoever looks after the server
-runs `npm run pin:reset -- your.email@linear-mcr.co.uk` there (in the `linear-micro-crm` folder): it clears your PIN and
+runs `npm run pin:reset -- <your email>` there (in the `linear-micro-crm` folder): it clears your PIN and
 its lock, signs you out everywhere and notes it in the audit trail. Then sign in with your email and employee ID and set
 a new PIN.
 
 **Leaders, recruiters and reps** see only their own PIN card; the rules and resets are for administrators.
 
 **Putting Linear Hub online.** `docs/DEPLOY.md`: a small UK/EU server with Caddy (automatic HTTPS) or Fly.io / Render,
-with costs, backups off the server and a go-live checklist.
+with costs, backups off the server and a go-live checklist. (Since 1.5 it is the go-live runbook for a small Ubuntu
+server set up by `deploy/install.sh`: see [Putting Linear Hub online](#putting-linear-hub-online).)
 
-### Bulk gauge entry with WhatsApp paste
+#### Bulk gauge entry with WhatsApp paste
 
 **Leaders** — open **Gauges** and press **Bulk entry** (next to **Tally**).
 
@@ -806,9 +1481,9 @@ change goes through and the payslip is marked "adjusted after payment".
 
 **Reps and recruiters** do not see **Bulk entry**; reps keep logging their own day with **Log gauges** or the tally.
 
-### Audit trail and announcement read receipts
+#### Audit trail and announcement read receipts
 
-#### Administrators
+##### Administrators
 
 - **Audit** (sidebar, under Manage) lists every change, newest first, grouped by day: who made it, at what time, a
   sentence saying what happened and a tag for the kind of record. Each day is headed with its date ("Wednesday 21
@@ -829,7 +1504,7 @@ change goes through and the payslip is marked "adjusted after payment".
   see their names. Earlier ones are under **Older announcements** at the bottom of the card (with how many there
   are): tap it to list up to 20 more, each with the same **Read by** line.
 
-#### Leaders
+##### Leaders
 
 - When you open one of your team's gauge entries to edit it (event page → **Edit**), the **History** section under the
   form shows who logged or changed it, when, and what changed. You do not see the IP address, pay runs or anyone
@@ -837,13 +1512,13 @@ change goes through and the payslip is marked "adjusted after payment".
 - Under announcements you wrote, **Read by 12 of 33** shows how many active people have read it, and tapping it shows
   who, under **Older announcements** too. You do not see these figures for other people's announcements.
 
-#### Reps and recruiters
+##### Reps and recruiters
 
 - Nothing new to do. When an announcement has been on your screen for a moment it counts as read, so whoever posted
   it knows it reached you; one you open under **Older announcements** counts the same way. You do not see who else
   has read it, and there is no Audit page or History section for you.
 
-### One-tap shift check-in
+#### One-tap shift check-in
 
 **Reps and leaders**
 
@@ -888,7 +1563,7 @@ change goes through and the payslip is marked "adjusted after payment".
 
 **Recruiters** see no check-in buttons or roll calls.
 
-### Search, payroll export and a layout fix
+#### Search, payroll export and a layout fix
 
 - **Search (⌘K or Ctrl+K).** The field at the top of every page now finds people, events, candidates and campaigns as
   well as pages. Type two letters or more. Use the arrow keys and Enter, or tap a result. It also offers **Log gauges**,
@@ -902,7 +1577,7 @@ change goes through and the payslip is marked "adjusted after payment".
 
 ---
 
-## What's new in 1.1
+### What's new in 1.1
 
 Linear Hub 1.1 is the **smart release**. It does not add new screens so much as make the existing ones notice things
 for you: how your week is going against your own usual pace, what this week's pay is likely to be, who on a team might
@@ -920,26 +1595,26 @@ also on the screen already, or one tap away (open the event, the run or the pers
 
 | You are | What is new for you |
 |---|---|
-| **Rep** | A note when your week is off (or ahead of) your usual pace; your sales streak on the **Sales** tile; **This week (estimate)** of your pay with how far you are from the bonus; the bell and **Needs attention** card (unlogged days, tomorrow's event, your pay); event forecasts; saves that wait on your phone when the signal drops; the **Tally** counter and **Quick gauges**, the same tally as six big buttons for the field; **Your week in review** of the last finished week. |
+| **Rep** | A note when your week is off (or ahead of) your usual pace; your sales streak on the **Sales** tile; **This week (estimate)** of your pay with how many more subs beat your day rate (since 1.5; it used to say how far you were from a bonus); the bell and **Needs attention** card (unlogged days, tomorrow's event, your pay); event forecasts; saves that wait on your phone when the signal drops; the **Tally** counter and **Quick gauges**, the same tally as six big buttons for the field; **Your week in review** of the last finished week. |
 | **Leader** | All of the rep's, plus **Check in with…** (a private list for your team), **Team coaching**, **Focus** chips, who has not logged an event yet with **Log for …**, suggested targets when you create an event, and team lines in the bell. |
 | **Recruiter** | Deadlines that set themselves when you move a candidate, **Idle** badges and **Longest idle first**, **Record the outcome** prompts, an **Idle beyond target** tile, the bell, and your week in review. |
 | **Owner / administrator** | Company-wide **Check in with…** and **Company coaching**, payroll checks before you pay, **Mark week paid** and paying many runs at once, **Runs to pay** in the bell, the **Backups** card in Settings, and the company review of the last finished week. |
 
-### Links that open the right screen
+#### Links that open the right screen
 
 Some links now take you straight to the action, not just the page. A link to **Log gauges** for an event opens the
 **Log gauges** window with that event already chosen (a leader's or administrator's link can also pick the person);
 after it opens, the address goes back to plain **Gauges**, so pressing Back never opens the window again. An
 administrator's link to **Runs to pay** opens **Finance → Company** and scrolls to the **Runs to pay** card.
 
-### If a card hits a problem
+#### If a card hits a problem
 
 If one card on a page fails to draw, only that card is replaced by **This card hit a problem** with a **Try again**
 button; the rest of the page keeps working. The bell at the top works the same way: if it fails it turns into a
 crossed-out bell, and tapping it tries again. If a whole page fails you see **This page hit a problem** instead — try
 again, or open another page from the menu.
 
-### Your pace and streaks
+#### Your pace and streaks
 
 **Your usual pace (reps, leaders and administrators who log gauges).** Under the coaching tips in **Your funnel** on
 the dashboard, Linear Hub compares this week (Monday to yesterday) with your own last 8 weeks — never with anyone else:
@@ -970,17 +1645,18 @@ readers say the same). Flames only appear on boards you can already see: reps se
 card shows your team, and **Top performers** (administrators and recruiters) shows the company. Only the streak is ever
 shown for a colleague — never their pace notes or personal bests.
 
-### This week's pay estimate and payroll checks
+#### This week's pay estimate and payroll checks
 
 **This week's pay estimate (reps and team leaders).**
 
 - **Dashboard.** Under your tiles, a strip reads **This week (estimate): about £1,050 · £930–£1,140** — what this
-  week's payslip is likely to be, with a low–high range — and one line about your bonus: how many more sales unlock
-  it and roughly how many stops that is at your own rate, or **Bonus unlocked** once you are there. On a phone the
-  same facts are shorter ("~" means "about"), for example **£75 bonus: one more sale · ~23 stops**. Tap the strip to
-  open **Finance → My pay**.
+  week's payslip is likely to be, with a low–high range — and one line about the base or the commission. Under the
+  base-or-commission rule there is no automatic bonus (bonuses are added by the office), so the line says how many more
+  subs beat your day rate and roughly how many stops that is at your own rate, for example "5 more subs and commission
+  beats your £317.50 base — about 120 stops (possible)". On a phone the same facts are shorter ("~" means "about"), for
+  example **Beat the base: 5 more subs · ~120 stops (possible)**. Tap the strip to open **Finance → My pay**.
 - **Finance → My pay → This week so far.** The same estimate with the workings: what you have logged so far, days and
-  sales, the team event days left, and a bar towards the bonus. The **ⓘ** button explains the method, e.g. "your 2.1
+  sales, the team event days left, and how close you are to beating the base. The **ⓘ** button explains the method, e.g. "your 2.1
   sales a day over the last 8 weeks, for the 2 team event days left".
 - It is an **estimate**: it assumes you work every team event day left this week and sell at your usual rate. Friday's
   payslip is the official figure, and **Next payday** still shows the official amount. New starters see "not enough
@@ -1003,7 +1679,7 @@ shown for a colleague — never their pace notes or personal bests.
   1 skipped (already paid) · 0 failed**. A run someone already paid is skipped, not paid twice. Runs that fail stay
   selected so you can try again. While the batch runs, the single **Mark paid** buttons wait (they are greyed out).
 
-### Check in with… (leaders and the owner)
+#### Check in with… (leaders and the owner)
 
 **Check in with…** is a short, private list of people it may be worth a word with this week. It is a list of
 conversation starters, not a ranking or a verdict.
@@ -1041,7 +1717,7 @@ Reps keep their own coaching on the dashboard and the Gauges page exactly as bef
 features off, the check-in list disappears for everyone; Team coaching, Company coaching and the Focus chips stay,
 because they are worked out from the figures already on the page.
 
-### Needs attention
+#### Needs attention
 
 Linear Hub now tells you what needs doing instead of waiting for you to look. Everything comes from one list, shown in
 three places:
@@ -1080,7 +1756,7 @@ What each person sees:
   however old (red when a run is overdue), a payday reminder on Fridays, the whole recruitment pipeline, and a reminder to turn on
   two-step verification if it is off.
 
-### Event forecasts and who has not logged yet
+#### Event forecasts and who has not logged yet
 
 **Event forecasts (everyone).** Upcoming and live events now show what to expect, for example
 **expect ≈ 14 (9–20) · 5 reps usually**: an estimate of about 14 sales, likely between 9 and 20, with the 5 people who
@@ -1113,13 +1789,15 @@ event (once it has started) has a **Log gauges** button that opens the form for 
 **Directions.** Every event row has a directions button (the arrow icon), and the event page has a **Directions**
 link. It opens Google Maps (the Maps app on a phone) at the venue.
 
-### If the signal drops
+#### If the signal drops
 
 **Reps, leaders and administrators** (anyone who logs gauges):
 
-* **When the signal drops** — or Linear Hub itself is not running — an amber strip appears under the top bar: **Can't
-  reach Linear Hub — check the hotspot. Gauges you save are kept on this phone.** It goes away by itself when the
-  connection is back; **Try again** checks straight away.
+* **When the signal drops** — or Linear Hub itself is not running — an amber strip appears under the top bar. Since
+  1.5 it reads **You're offline: saves will send when you're back** when the phone has no signal, or **Can't reach
+  Linear Hub: saves will send when it's back** when the phone has signal but Linear Hub does not answer (see [Using
+  Linear Hub on your phone](#using-linear-hub-on-your-phone)). It goes away by itself when the connection is back;
+  **Try again** checks straight away.
 * **Logging without signal.** Log gauges as normal. The button reads **Save on this phone**. You'll see **Saved on
   this phone — it will send when you're back online**, and a blue strip says **1 entry waiting to send**.
 * **When the signal is back**, it sends by itself and tells you **Sent from this phone — logged** (or **— updated
@@ -1142,8 +1820,10 @@ link. It opens Google Maps (the Maps app on a phone) at the venue.
   phone and sends next time you sign in as Jordan.** Nothing is deleted.
 * **Private browsing.** Some private modes don't let Linear Hub keep anything on the phone. Then a save without signal
   shows **Could not save gauges**, as before. Keep the form open and save again when you have signal.
-* **Keep the page open.** Saves wait safely while Linear Hub is open in the browser. Linear Hub cannot open from
-  scratch without any signal yet (that needs a secure https address; it is on the roadmap).
+* **Opening with no signal.** Since 1.5, on the secure (https) address every page opens with no signal once Linear
+  Hub has been opened with signal on that phone, as the rep or leader last signed in there, until the time they would
+  be signed out anyway (see [Using Linear Hub on your phone](#using-linear-hub-on-your-phone)). On a plain http
+  address, saves wait safely only while Linear Hub stays open in the browser.
 * **Two taps to log.** Opening **Log gauges** from the dashboard or the Gauges page on a day when your team has one
   event under way picks it for you (**Today's event selected**). Around the start of an event (from an hour before to
   an hour and a half after) a **Checking in? Use now (09:58)** button appears. Tap it to record your arrival; it never
@@ -1178,7 +1858,7 @@ link. It opens Google Maps (the Maps app on a phone) at the venue.
 
 **Recruiters** see the same amber strip when Linear Hub can't be reached, without the line about gauges.
 
-### Quick gauges in the field
+#### Quick gauges in the field
 
 **For reps, leaders and administrators.** **Quick gauges** is the tally as six big buttons, made for a phone in your
 hand or an iPad on the stand.
@@ -1215,17 +1895,17 @@ hand or an iPad on the stand.
 
 * **Hold it either way.** Upright, the tiles are two across and three down; sideways, or on an iPad, three across and
   two down. The six tiles fill the screen, with **Finish shift** always in reach at the bottom.
-* **Add it to your Home Screen.** In Safari, open Linear Hub, tap **Share**, then **Add to Home Screen**. You get a
-  Linear Hub icon that opens full screen, without the browser bars, like an app. On Android, in Chrome, use the **⋮**
-  menu, then **Add to Home screen**. Use either the icon or the browser for the whole shift: on iPhone they keep
-  separate counts, and the icon has its own sign-in.
+* **Add it to your Home Screen.** In Safari, open Linear Hub, tap **Share**, then **Add to Home Screen**. On Android,
+  in Chrome, use the **⋮** menu, then **Install app** or **Add to Home screen**. You get the Linear Hub icon, and it
+  opens full screen like an app, with no signal too (since 1.5, on the https address). On iPhone the icon has its own
+  sign-in and its own saved entries, separate from Safari's, so use one or the other for a whole shift.
 * **The screen stays on** while Quick gauges is open, on phones and browsers that allow it. That needs the secure
   (https) address. Over a plain hotspot address it follows your phone's own auto-lock setting, so set auto-lock to a
   few minutes for the shift.
 * **Taps you can feel.** On phones that support it, each tap gives a short buzz, and a tap that can't count gives a
   double buzz.
 
-### Recruitment deadlines
+#### Recruitment deadlines
 
 **Every candidate now gets a real deadline.** A new candidate is due a **Phone screen** within 3 days. Each time you
 move someone to a new stage, their next-action date is set from that stage's target:
@@ -1267,7 +1947,7 @@ eight weeks that they ran or whose candidate they own (the owner sees them all),
 each candidate's page. Deadlines, Idle badges and the **Record the outcome** card stay on even if the office switches
 the smart features off.
 
-### Your week in review
+#### Your week in review
 
 At the bottom of the **Dashboard**, under the team, events and announcements, the **Your week in review · w/c 12 Oct**
 card sums up the last full week (Monday to Sunday) in five to eight short lines.
@@ -1300,7 +1980,11 @@ What each role sees:
 The numbers are the same ones as on your tiles, the leaderboard and the finance and recruitment pages for that week —
 if the review and a tile ever disagree, the tile is looking at a different period.
 
-### Backups and running in the background (administrators)
+#### Backups and running in the background (administrators)
+
+(Since 1.5 every backup also holds the uploaded files, the key goes on a recovery sheet, backups can go off-site
+encrypted, and the card speaks in plain words without commands: see [Backups and the recovery sheet](#backups-and-the-recovery-sheet-administrators).
+This section describes 1.1.)
 
 **Settings › Backups** (only the owner and other administrators see this card) shows:
 
@@ -1338,355 +2022,4 @@ running; `npm run service:uninstall` stops it. The README has the details.
 Everyone else sees no change, except that pages load faster over the hotspot: the server now sends compressed pages
 and data (about a third of the bytes it sent before).
 
----
-
-## Everyone
-
-### Signing in
-
-1. Open Linear Hub at the address the office gave you. (Running it yourself: <http://localhost:5173> during `npm run dev`, or <http://localhost:4000> after `npm run build && npm start`.)
-2. Enter your **Work email** and your **Employee ID** — format `LM-0000`, e.g. `LM-0042`; it is on your welcome email and your payslip or invoice. Capital letters do not matter.
-3. Choose **Sign in**. If you have a PIN, type it next.
-4. Type the 6-digit code from your authenticator app and choose **Verify**. The first time, Linear Hub asks you to set two-step verification up instead (about two minutes; see [What's new in 1.4](#whats-new-in-14)).
-
-You stay signed in on this device for 14 hours from signing in (your administrator may choose 4 to 24 hours), or until you sign out or leave it unused for 12 hours.
-
-There is no password yet, so your employee ID is half of your credential — treat it like one; the code from your app is what stops someone who knows your email and employee ID from signing in as you. Linear Hub shows employee IDs only to administrators and to you: nobody else can read yours on the Team page, a payslip or your profile. After **eight failed attempts in fifteen minutes** the sign-in for that email is paused and the message says how many minutes to wait. If the office sets your status to **Left**, you are signed out on every device immediately.
-
-On a demo database the sign-in page also shows **Try a demo account** — one button per role, then **Sapiens team (7)**: open it for the seven blank Sapiens accounts (see [What's new in 1.3.1](#whats-new-in-131)). These demo accounts need no code while Linear Hub is still the demo. The office switches this off on the live database, so if you do not see it, that is why.
-
-**Signing out:** open your avatar at the top right and choose **Sign out**.
-**Light or dark:** use the sun/moon toggle in the top bar, the **Light** / **Dark** / **Match system** entries in the same avatar menu, or **Settings → Appearance** (**Light**, **Dark**, **System**). The choice is remembered on this device.
-**Finding a page:** the **Go to page…** box in the top bar (⌘K or Ctrl+K) lists every page your role can open. The sidebar groups them into **Workspace**, **Manage** and **Account**.
-
-### What your role can see and do
-
-| Role | You can see | You can change |
-|---|---|---|
-| **Representative** | Your own gauges and pay; your team's events, leaderboard and gauges summary; the directory; any event or colleague's profile read-only (other people's check-in times and notes are hidden) | Your own gauges, at your team's events |
-| **Leader** | Everything company-wide — every team's events, the full leaderboard, any profile — plus your own team's check-in times and notes, your team's pay runs, and recruitment | Events for your team; gauges for your team's members at your team's events; candidates, interviews and stage changes; announcements; adding trainees and field representatives to your team |
-| **Recruiter** | The whole recruitment pipeline, the directory, your own pay; events and the leaderboard read-only (no Gauges page) | Candidates, interviews, stage changes — hiring creates the rep's account; adding trainees and field representatives to any team |
-| **Administrator** | Everything, including every employee ID | Everything — people, campaigns, events, any gauges, payroll payments, expenses, announcements |
-
-A page your role cannot open shows "This area isn't available on your account" with a **Back to dashboard** link.
-
-### Reading your dashboard
-
-The dashboard greets you by name and shows your position, team and the dates in view. Change the period with **This week**, **This month** or **This quarter**. Reps, leaders and administrators also have **Log gauges** here.
-
-| Tile or card | What it shows |
-|---|---|
-| **Sales** | Confirmed sales for the period. Underneath: **Ranked #N of M in your team** (reps — the same people as your leaderboard) or **company-wide** (leaders and administrators). |
-| **Conversion** | sales ÷ stops, tinted against the benchmark. **—** with no colour while you have no stops in the period (nothing to convert yet). |
-| **Stops** | With your presentations underneath. |
-| **Earnings to date** | Gross pay for the period: the pay runs that start in it, plus a live estimate for any week that has no run yet. |
-| **Next payday** | The date and amount of the earliest **unpaid** run. If its due date has passed the tile turns red and says **overdue**; when nothing is owed it shows this week's payday and the live estimate. |
-| **Punctuality** | The share of your check-ins that were on time. Green from 90%, amber from 75%, red below. |
-| **Your trend** / **Your funnel** | Sales and stops per day; your funnel against the law of averages with one to three coaching notes underneath. |
-| Team card (named after your team) | Stops, sales, conversion and your team's top five. People without a team see **Top performers** across the company instead. |
-| **Upcoming events** | The next five for your team (administrators: the whole company). |
-| **Announcements** | The latest five, pinned first; **Older announcements** underneath lists up to 20 earlier ones. Leaders and administrators see **New announcement** here (**New**, or just the megaphone icon, on a narrow card). |
-
-**The "vs" arrows.** Each change compares with the **same days of the previous period**, and the small label under the tile names them — on Thursday 15 October the week view says "vs 5 Oct – 8 Oct". This week (Monday to today) is compared with last week Monday to the same weekday; this month (1st to today) with the same days of last month; this quarter with the same stretch of the previous quarter. The leaderboard's movement arrows use the same comparison. An arrow is blank when there was nothing in the previous period.
-
-Leaders and administrators also get a **Company** section — sales, revenue, active reps, payroll on time, open candidates, hires, the company trend and sales by campaign. For administrators it comes first and their own gauges follow under **Your activity**; for leaders it sits under their own numbers. Recruiters get a recruitment-first dashboard, described under [Recruiters](#recruiters).
-
-### The six gauges
-
-Every rep records the same six numbers for every event day. They are a funnel: each stage is a subset of the one before, so **no stage can be larger than the previous one**. All six are whole numbers, zero or more.
-
-| # | Gauge | What counts | Rule |
-|---|---|---|---|
-| 1 | **Stops** | Every person you stopped and spoke to. | — |
-| 2 | **To table** | Stops who came over to the table or stand to hear more. | ≤ Stops |
-| 3 | **Presentations** | Full pitches delivered, start to finish. | ≤ To table |
-| 4 | **Closes** | Presentations where you asked for the sale. | ≤ Presentations |
-| 5 | **Taps** | Closes where the customer tapped, signed or confirmed their details. | ≤ Closes |
-| 6 | **Sales** | Confirmed sales that count towards your commission and the campaign. | ≤ Taps |
-
-A valid day might read `120 · 42 · 21 · 9 · 5 · 5`. A day reading `120 · 42 · 21 · 5 · 6 · 5` is rejected, because 6 taps cannot come from 5 closes.
-
-### Logging gauges
-
-Open the form with **Log gauges** on the Dashboard or the Gauges page, or open the event under **Events** and choose **Log gauges** there (**Update my gauges** if you have already logged that event).
-
-1. **Event.** From the Dashboard or Gauges the list shows your team's events from the last three weeks up to today; cancelled events are not offered. From an event page the event is fixed. A future event cannot take gauges — the form says "This event is on … — gauges can be logged from that day." — and neither can a cancelled one.
-2. **Rep.** Reps: this is you. Leaders choose a member of the event's team; administrators anyone.
-3. **Date.** Fixed to the event's date and shown read-only: gauges are recorded against the day the event ran. If you already have an entry for that event the hint says so, and saving will update it.
-4. **Gauges.** Use the six steppers (**Stops**, **To table**, **Presentations**, **Closes**, **Taps**, **Sales**) in order. A stage that breaks the funnel rule is highlighted and named in the warning; the **Live ratios vs law of averages** panel updates as you type. **What counts as what?** expands the definitions.
-5. **Checked in at.** Tap **Now** when you arrive — this is what your punctuality is measured from; the hint shows the event's start time and the 5-minute grace. Add **Notes** if the day needs explaining.
-6. **Save gauges** — or **Update gauges** when the form is editing an existing entry. You will see "Gauges logged" or "Gauges updated".
-
-There is one entry per person, per event, per day. Saving again for the same event **updates** it rather than adding a second one, and the time you submitted is kept. To change a day later, open the event and choose **Edit** on your row in **Gauges by rep**; only leaders (own team) and administrators can **Delete** an entry.
-
-### Your ratios against the benchmarks
-
-Linear Hub turns your gauges into five stage-to-stage ratios and compares each with the company's **law of averages** benchmarks:
-
-| Ratio | Benchmark | Meaning |
-|---|---|---|
-| Stop → table | **35%** | 35 of every 100 people you stop come to the table |
-| Table → presentation | **50%** | half of those hear the full pitch |
-| Presentation → close | **40%** | you ask for the sale in 4 of every 10 pitches |
-| Close → tap | **60%** | 6 of every 10 asks get a tap |
-| Tap → sale | **90%** | 9 of every 10 taps become confirmed sales |
-
-Hit every benchmark and about **3.8% of stops become sales — roughly 1 sale for every 26 stops**.
-
-**How to read your ratios**
-
-- Ratio cells are tinted: **green** within 10% of the benchmark or above (for a 50% benchmark, 45% and up), **amber** 10–25% below, **red** more than 25% below. Colour is a hint — the number is always shown alongside.
-- Look for the **lowest ratio relative to its benchmark**. That is the stage to coach or practise. The coaching notes under your funnel say it in a sentence: a low stop → table means the opening needs work; a low presentation → close means you are pitching well but not asking.
-- With **fewer than 20 stops** in the period the ratios are too noisy to read much into. The notes say "Early days" until then.
-- A stage nobody has reached yet (4 closes but no taps) is not graded — it is undefined, not poor.
-- The volume target is **2 sales per worked day**. Ratios tell you *how well*; sales per day tells you *how much*.
-
-### The Gauges page
-
-Open **Gauges**. The tabs depend on your role: **My performance** (everyone), **Team** (leaders: your team; administrators: any team via the **Team** picker) and **Company** (administrators). The range picker offers **This week**, **Last week**, **This month**, **Last month**, **This quarter** and **Custom** (type a from and to date).
-
-**My performance** shows six tiles — **Sales** (with per day), **Stops** (with days worked), **Presentations**, **Conversion**, **Stops per sale**, **Punctuality** — then **Funnel vs benchmarks** with coaching notes, your **Trend**, **By campaign** and **Recent entries**. The same panel appears on your profile under **Team**.
-
-**Team** and **Company** show a summary table grouped **By person**, **By team**, **By campaign**, **By day** or **By week**, with the six gauges, sales per day and every ratio tinted against the benchmarks. By day and By week add a **Trend** chart. Clicking a person opens their profile. The **Rep-days** column counts distinct person × day pairs, so for a campaign or a week it is "days of work", not calendar days.
-
-### Checking your pay
-
-Open **Finance**. Everyone lands on **My pay**:
-
-- Four tiles: **Earned · last 12 weeks**, **Commission**, **Paid on time** (share of your paid runs that landed by the due date) and **Next payday**.
-- **Earnings** — gross pay per week, split into **Base**, **Commission**, **Bonus** and **Overrides** (only the components you actually earn are plotted).
-- **Payslips** — one row per pay week: **Week**, **Days**, **Sales**, **Commission**, **Gross**, **Due**, **Status**. Click a row for the payslip (**Payslip · PAY-2026W41-LM-0010** and so on): **Base pay** (days × your daily rate), **Commission** (sales × your rate), **Bonus** (paid when the week's sales reach your plan's threshold), **Overrides** (leaders: team sales × the override), **Deductions**, **Gross pay**; your **Pay plan** alongside; and **The week's gauges** that fed into it.
-
-**Pay weeks run Monday to Sunday** and are **due on the Friday after the week ends** — a week ending Sunday 18 October is due Friday 23 October. When a week closes, its runs appear by themselves on the Monday as **Pending**.
-
-**Status** badges: **Pending** (not yet paid), **Paid** (on or before the due date), **Paid late**, **Failed** (the transfer bounced or the payment did not go through; the office will pay it again). A pending run past its due date also carries a red **Overdue** badge, and the **Next payday** tile on your dashboard turns red and keeps pointing at it until it is paid — money owed never drops off.
-
-Leaders have a **Team pay** tab and administrators a **Company** tab; see their sections.
-
-### Punctuality
-
-Your check-in time at each event is compared with the event's start time. Checking in up to **5 minutes** after the start still counts as on time. Your punctuality rate is the share of recorded check-ins that were on time; days with no check-in recorded do not count either way, so record it. Other people's check-in times are visible only to administrators and to their own team's leader; everyone else sees **—** in the **Check-in** column.
-
-### The leaderboard
-
-Open **Leaderboard**. Choose the period (**This week**, **This month**, **This quarter**) and the metric (**Sales** or **Conversion**). Leaders, recruiters and administrators can pick a **Team**; reps always see their own team, shown as a badge. Everyone who logged sales in the period is ranked — ties share a rank — with the top three on a podium and the full table beneath: **#**, **Rep**, **Team**, **Sales**, **Stops**, **Conv.**, **Days**, **Move**.
-
-When you are ranked, the header says **You're #N of M this week** (month, quarter). For a rep, M is the number of people in your team; for leaders and administrators it is the whole company — the same number your dashboard's Sales tile quotes. The **Move** column compares your rank with the same days of the previous period: an arrow up or down with the number of places, a dash for no change, **New** when you were not ranked last time.
-
-### Events
-
-Open **Events**. The default range is **Upcoming** — a week back to three weeks ahead; the other presets are **This week**, **Last week**, **This month**, **Last month** and **Custom**. Filter by **Team** (reps always see their own team), **Campaign** and **Status** (**Scheduled**, **Live**, **Completed**, **Cancelled**).
-
-Days are listed with **today first** (highlighted), then the days to come, then last week's completed days under an **Earlier** divider, newest first — so nobody scrolls past history to find today. Lists with more than 60 events show two weeks of days and a **Show N more days** button. Each row shows the event, campaign code, venue, times, team, type, sales against target, how many reps have logged, and the status. Statuses follow the clock: today's events turn **Live** at their start time and past events become **Completed**, checked every fifteen minutes.
-
-Open an event for the day's totals, the **Event funnel** against the benchmarks, the notes, and **Gauges by rep** — each person's six gauges, conversion and check-in punctuality. Under the title, the people count reads **7 booked** before the day, **3 logged · 7 booked** on the day, and the number of reps who logged otherwise (or when nobody was booked).
-
-### The team directory
-
-Open **Team**. Team chips at the top (member count and leader) filter by team; the search box **Search name, email or ID…** also finds employee IDs for administrators. Filter by **Team**, **Position** and **Status** (**Active**, **On leave**, **Left**, **Everyone**) and switch between **Card view** and **Table view**. Open a person for their contact details, pay plan name, and their full performance panel for any range (default **This month**). Employee IDs appear on your own card and, for administrators, on everyone's.
-
-### Settings
-
-**Settings** shows your profile as the office holds it (**Employee ID**, **Email**, **Phone**, **Position**, **Role**, **Team**, **Pay plan**, **Start date**, **City** — ask an administrator to change anything), **Appearance**, **Security** (**Two-step verification**, required for everyone since 1.4: your recovery codes left and **New recovery codes**; and your **Sign-in PIN**), **Bank details** (where your pay goes, since 1.4; see [Your bank details](#your-bank-details)) and **About this app** (version and when the sample data was seeded). Administrators also see **Backups** (see [What's new in 1.1](#backups-and-running-in-the-background-administrators)) and **Payments** (see [Paying people from Linear Hub](#paying-people-from-linear-hub-administrators)).
-
----
-
-## Leaders
-
-Everything above applies to you too. In addition:
-
-### Scheduling an event
-
-1. Open **Events** and choose **New event**.
-2. Fill in **Event name** (what the team will recognise, e.g. "Trafford Centre weekend"), **Campaign** (active campaigns only), **Team** (locked to yours — "Leaders schedule events for their own team."), **Venue**, **City**, **Type** (Private site, Event, B2B, Residential or Retail), **Date**, **Start** and **End** (24-hour; the end must be after the start), **Sales target** and **Notes** (parking, dress code, who to ask for).
-3. **Create event.** It appears on every team member's dashboard and in Events.
-
-The status is set for you: **Completed** for a past date, **Live** for today once the start time has passed, otherwise **Scheduled**. To change anything later, open the event and choose **Edit** — the same form plus a **Status** field (set it to **Cancelled** rather than deleting) — then **Save changes**. Only administrators can **Delete** an event.
-
-### Logging for team members
-
-Choose **Log gauges** (Dashboard, Gauges or the event page), pick the event, then pick the **Rep** from your team. The form is the same as a rep's, with the same funnel, event-date and today-or-earlier rules. You can only log at **your own team's events**: an attempt elsewhere is refused. On the event page every row of **Gauges by rep** has **Edit** (opens **Update gauges**) and **Delete** (asks "Delete this gauge entry?").
-
-### The team view
-
-- **Dashboard** — your team's card with its top five, and the **Company** section under your own numbers.
-- **Gauges → Team** — your team only, grouped **By person** (compare ratios side by side), **By campaign**, **By day** or **By week**.
-- **Team** — open any member for their full performance; for your own team you also see their check-in times and notes on each entry.
-- **Leaderboard** and **Events** — the whole company, with a **Team** picker.
-- **Finance → Team pay** — your team's runs for **This week**, **Last week**, **Last 4 weeks**, **Last 12 weeks**, **This month** or a custom range, with **Team payroll**, **Commission**, **Awaiting payment** and **People paid** on top. Click a run for its payslip. Marking runs paid is an administrator's job.
-- **Recruitment** — full access: add candidates, schedule interviews and move stages, as described under [Recruiters](#recruiters).
-
-### Announcements
-
-On the Dashboard choose **New announcement**, add a **Title** and the **Message**, switch on **Pinned** if it should stay at the top, and **Post announcement**. Everyone sees it on their dashboard, pinned ones first.
-
-### Adding a person (leaders)
-
-Team Leaders and Crew Leaders can add a new trainee or field representative to their own team.
-
-1. Open **Team** and choose **Add person**.
-2. Fill in **First name**, **Last name**, **Email** (they sign in with it), **Phone** (optional), **Position**
-   (**Trainee** or **Field Representative**) and **Start date**. **Team** shows your own team; you cannot change it.
-3. Choose **Add person**.
-4. **Sign-in details** opens: their name, team, email and **Employee ID**. Choose **Copy instructions** and paste them into
-   a message to the new person — they say which address to open (the one your phone or laptop is using), and to enter the
-   email and the employee ID. On the computer that runs Linear Hub (an address starting `localhost`), they say "Open the
-   Linear Hub sign-in page" instead, because that address would not open on their phone: add the address they use. Since 1.4 they also say to set up two-step verification with an authenticator app at the first sign-in. The button changes to **Copied** once they are on your clipboard. This is the only time
-   you see their employee ID: afterwards only administrators (on the **Team** page) and the person themselves can. A tap
-   beside the box does not close it; choose **Done** when you have sent them.
-
-They start as **Active**, on the standard pay plan for their position. Only an administrator can give someone another
-role or position, a pay plan, a status, an avatar colour or a chosen employee ID, put them on another team, or change
-anything later (**Edit profile**). If something is refused, the message says why in a sentence.
-
----
-
-## Recruiters
-
-### Your dashboard
-
-Your dashboard opens with the **Needs attention** card (overdue follow-ups, interview outcomes to record, today's interviews), then leads with **Recruitment**: **Open candidates** (with how many are at interview or observation), **Interviews this week**, **Overdue actions**, **Idle beyond target**, **Hires** for the chosen period and **Avg time to hire**; then **Upcoming interviews** (the next two weeks), **Overdue follow-ups** and **Weekly activity** for the last twelve weeks. Below that: **Top performers** across the company, **Upcoming events** and **Announcements**. You do not log gauges, so the Gauges page is not on your menu; Events, Leaderboard and Team are read-only.
-
-### The pipeline
-
-Candidates move through six stages in order, and can leave at any point:
-
-**Applied → Phone screen → Interview → Observation day → Offer → Hired**
-
-**Rejected** and **Withdrawn** are the two other end states. Hired, Rejected and Withdrawn are final; everything else is the **open pipeline**.
-
-Open **Recruitment**. The range picker (**Last 4 weeks**, **Last 12 weeks**, **This quarter**, **This month**, **Last month**, **Custom**) drives the summary: **Applied**, **In interview**, **Hired** (with the share of applicants hired), **Avg time to hire**, **Overdue actions**, plus **Weekly activity** and **Conversion by source**. Below, filter candidates with **Search name or email…**, **Source** and **Owner**, and switch between **Board view** — the open pipeline by stage, with the **Hired** column showing hires made in the range — and **List view**, where **Include closed** also shows rejected, withdrawn and hired candidates.
-
-### Adding a candidate
-
-1. Choose **Add candidate**. New candidates start at Applied.
-2. **First name**, **Last name** and **Email** are required. Add **Phone** and **City**.
-3. Choose the **Position applied for** (Trainee or Field Representative — nobody is hired straight into a leadership or office role), the **Source** (Indeed, LinkedIn, Referral, Website, Walk-in, Agency, University or Other) and, for a referral, **Referred by**.
-4. Set the **Owner** — "who follows up"; it defaults to you — and any **Notes**.
-5. **Add candidate.** The candidate's page opens.
-
-### The candidate page
-
-- **Pipeline** — a stepper showing the stage and since when.
-- **Profile** — email, phone, city, **Source**, **Rating** (click the stars, 1–5), **Owner**, **Position**, and after hiring **Hired as → View profile**.
-- **Notes & next action** — **Notes**, **Next action**, **Due** and **Owner**; **Save**. Every new candidate and every stage move gets a **Due** date from the stage's target (see [Recruitment deadlines](#recruitment-deadlines)); change it here if you need to. When it passes, the candidate is flagged **Overdue** on the board, in the list and on your dashboard, so nothing goes quiet.
-- **Interviews** and **Timeline** — every stage change, newest first, with who made it and the note.
-
-### Moving candidates
-
-Use the **Move to…** dropdown — in the header of the candidate page, or on a card on the board — and pick the new stage. Moving to Hired or Rejected asks you to confirm and lets you add a **Note** (what was decided and why). Hired, Rejected and Withdrawn are final: once there, the dropdown becomes a badge.
-
-### Interviews
-
-Choose **Schedule interview** (or **Schedule** in the Interviews card): the **Type** (Phone screen, First interview, Observation day or Final interview — suggested from the stage), the **Date and time**, the **Interviewer** (leaders, recruiters or the office) and **Notes**, then **Schedule**. Afterwards set the outcome with the dropdown on the interview: **Pending**, **Passed**, **Failed** or **No show**.
-
-### Hiring
-
-Move the candidate to **Hired**. The **Hire …?** dialog asks for the **Team** (it defaults to the owner's team) and the **Position** (Trainee or Field Representative, from the application), with an optional **Note**; **Confirm hire**. Linear Hub creates the employee record straight away: role Representative, the team and position you chose, the standard pay plan for that position, start date today, a work email in the `first.last@linear-mcr.co.uk` pattern and the next free employee ID. You will see "Rep account created · Field Representative · Deansgate" or similar, and the candidate's profile gains **Hired as → View profile**. An administrator reads the new employee ID off the profile and gives it to the new starter so they can sign in on day one.
-
-### Adding a person (recruiters)
-
-Recruiters can add a trainee or field representative straight to any team (for someone who did not come through the
-pipeline; a hire from the pipeline creates the account by itself).
-
-1. Open **Team** and choose **Add person**.
-2. Fill in **First name**, **Last name**, **Email**, **Phone** (optional), **Position** (**Trainee** or **Field
-   Representative**), **Team** (choose one) and **Start date**, then **Add person**.
-3. In **Sign-in details**, choose **Copy instructions** and send them to the new person (they include setting up
-   two-step verification at the first sign-in). Their employee ID is shown only this once (if it gets lost, an
-   administrator can find it on the **Team** page); then **Done**.
-
-As for leaders, the role, pay plan, status, avatar colour and employee ID are the office's to set.
-
-### Your pay
-
-**Finance → My pay** works for you as for everyone. Recruiters are on the **Office recruiter plan**: a daily rate Monday to Friday, no sales commission, and a **bonus in any week with two or more hires**. On your payslips the **Sales** column counts the **hires you closed** that week — candidates you own who were moved to Hired.
-
----
-
-## Administrators
-
-You can do everything above for anyone, plus:
-
-### Campaigns
-
-Open **Campaigns** (tabs **Active**, **Inactive**, **All**). Choose **New campaign**: **Name**, **Code** (2–6 letters or digits, e.g. `BCN`), **Sector** (Charity, Energy, Telecoms, Broadband, Other), **Type** (Fundraising, B2C, B2B), **Client payout per sale (£)**, **Rep commission per sale (£)** (cannot exceed the payout; a pay plan may override it), **Start date**, **Colour** for charts and chips, **Description**, and the **Active** switch; then **Create campaign**. Use the pencil on a card to edit and **Save changes**. Switch **Active** off to pause a campaign — its history is kept and it is no longer offered when scheduling an event.
-
-### People
-
-On **Team**, choose **Add person**: **First name**, **Last name**, **Work email**, **Employee ID** (format `LM-0000`; used with the email to sign in — leave it blank for the next free ID), **Role** (Administrator, Leader, Recruiter or Representative), **Position** (Trainee, Field Representative, Team Leader, Crew Leader, Assistant Owner, Owner or Recruiter), **Team**, **Pay plan**, **Start date**, **Status** (Active, On leave, Left), **Phone**, **City** and **Avatar colour**; then **Add person**. To change anything, open the person and choose **Edit profile**, then **Save changes**. Someone added without a surname (the Sapiens demo accounts) can be saved with **Last name** still empty until you add one; once given, a surname cannot be cleared. Recruiters and leaders can add trainees and field representatives too (see [Leaders](#adding-a-person-leaders)); each addition is in the audit trail under the person who made it.
-
-Each person's page (Team → the person) also shows their **Bank details**, masked: **Ready for payments**, waiting for your check (**Confirm details**, once you have checked the new details with them in person or by phone), or none yet (**Add bank details** lets you type them in for them). In **Edit profile**, **Reset two-step verification** is for a lost or new phone: they set it up again at their next sign-in.
-
-When someone leaves, set their **Status** to **Left**: they are signed out everywhere at that moment and can no longer sign in; their gauges, pay runs and history stay so the numbers still add up. You cannot set your own status to Left. Only administrators see other people's employee IDs — on the Team page, profiles and payslips — and the Team search finds people by ID for administrators only.
-
-### Gauges and events for anyone
-
-You can **Log gauges** at any team's event for any active member of that team (and for yourself), **Edit** or **Delete** any entry, and **Edit** or **Delete** any event. Deleting an event removes its gauge entries for everyone — set its **Status** to **Cancelled** instead unless it was created in error.
-
-### Payroll
-
-1. Open **Finance → Company**. The range (**Last 4 weeks**, **Last 12 weeks**, **This quarter**, **This month**, **Last month** or **Custom**) is snapped to whole Monday–Sunday pay weeks, so revenue, payroll and expenses always cover the same days.
-2. **Runs to pay** lists every **Pending** run of the last 12 weeks and every **Failed** run, however old, across the company, newest week first (grouped by week in collapsible sections when there are more than twenty). Click a run to check its payslip against the pay plan.
-3. Once the money has gone, choose **Mark paid**. The run is recorded as paid **today** and becomes **Paid** if today is on or before the due date, otherwise **Paid late**; you will see "Marked paid" or "Marked paid (late)". A run that is already paid cannot be paid twice. When the list is empty it says "Everyone is paid up".
-
-Make this a Friday routine: pay weeks close on Sunday, their pending runs appear on Monday, and they are due the following Friday. A **Failed** run (a transfer that bounced) stays in Runs to pay until you mark it paid again.
-
-4. Or pay them from Linear Hub (1.4): tick the runs and choose **Pay N from Linear Hub**, then follow
-   [Paying people from Linear Hub](#paying-people-from-linear-hub-administrators). A run in a payment shows **In a
-   draft payment**, **Payment on its way** or **Payment failed** (with the reason); while a payment is on its way,
-   **Mark paid** on that week waits for it, so nobody is paid twice.
-
-### Expenses
-
-Further down **Finance → Company**, choose **Add expense**: **Date**, **Amount (£)**, **Category** (Venue fees, Travel, Office, Software, Recruitment, Marketing or Other), optionally the **Campaign** it belongs to, and a **Description**; then **Add expense**. The bin icon deletes an expense entered in error (you are asked to confirm). The table shows 25 at a time with a **Show N more** button.
-
-### Company finance
-
-The top of **Finance → Company** shows, for the chosen range:
-
-- Tiles: **Revenue** (sales × campaign payout), **Payroll**, **Expenses**, **Profit** and **Sales**. The week in progress has no runs yet, so its payroll is a live estimate and the tiles say "incl. this week's estimate".
-- **Weekly money flow** — revenue against payroll and expenses per pay week.
-- **Payroll punctuality** — paid on time, paid late, pending and failed, the **On-time rate** and the average days late.
-- **By campaign** — sales, revenue, the commission reps actually earned on that campaign and the margin.
-
-### Announcements
-
-As a leader does: **New announcement** on the Dashboard, with the **Pinned** switch to keep it at the top for everyone.
-
-### Resetting the sample data
-
-From the repository root, `npm run seed` rebuilds the database with the deterministic 26-week sample data, anchored to today. Do not run it against a live company database — and on a live database set `LM_DEMO_ACCOUNTS=0` so the sign-in page offers no demo accounts.
-
----
-
-## If something goes wrong
-
-| You see | What it means | What to do |
-|---|---|---|
-| "We couldn’t match that email and employee ID." | One of them is wrong, or your status is Left. | Check both against your payslip, then ask the office. |
-| "Too many attempts, try again in N minutes" | Eight failed sign-ins for this email in fifteen minutes. | Wait the stated minutes; a successful sign-in resets the count. |
-| "Your session has ended" | Your sign-in expired or was revoked. | Sign in again; you return to where you were. |
-| "For security you are signed out 14 hours after signing in. Sign in again to carry on." | It is 14 hours (or the time your administrator chose) since you signed in. | Sign in again with your code. Anything waiting on your phone sends after you sign in. |
-| **Set up two-step verification** instead of the app | Two-step verification is required for everyone since 1.4, and you have not set it up yet. | Tap **Set up now** and follow the steps (about two minutes). **Sign out** if it is not your phone. |
-| "That code is not valid" when signing in | The code was mistyped, already used, or your phone's clock is wrong. | Wait for the next code and type it. Check your phone sets its time automatically. Or **Use a recovery code instead**. |
-| You lost your phone, or got a new one | Your authenticator app was on it. | Sign in with a recovery code, then **New recovery codes**. No codes left: ask an administrator to reset your two-step verification. The only administrator: `npm run 2fa:reset -- <your email>` on the computer Linear Hub runs on (in the `linear-micro-crm` folder). |
-| "That code is not right. Codes change every 30 seconds and each one works once…" when approving a payment or saving bank details | The code was old, mistyped or already used for something else. | Wait for the next code in your app and try again. |
-| **Payment failed** on a run in Runs to pay | The provider or your bank did not pay it; the reason is in the badge's tooltip and on the payment's page. | Fix what the reason says (bank details, a top-up), then pay that week again in a new payment, or **Mark paid** once you have paid it another way. |
-| "Test it in Settings → Payments first" on Pay people | The connection's last test did not work, or it has not been tested since its details changed or it was switched to live. | Open Settings → **Payments** and choose **Test**; the card says what went wrong. |
-| A payment says a provider "did not answer" (or "could not reach") | The provider was slow or offline, or this computer's internet was down, when Linear Hub sent it. | Press **Check now** later, or wait for the 5-minute check: Linear Hub resends with the same references, which the provider recognises as the same payment for a while (TrueLayer 6 hours, Revolut 2 weeks, Wise not documented). A TrueLayer payout not answered within 5 hours of the approval fails with "Linear Hub does not know whether TrueLayer made this payout: …": check the TrueLayer Console before paying that week again. After a long Wise outage, check Wise → Transfers for a transfer made twice. |
-| "This area isn't available on your account" | Your role cannot open that page (recruiters and the Gauges page, for example). | Use **Back to dashboard**; speak to your crew leader or the office if you think you should have access. |
-| **Not saved.** "Invalid funnel" | One stage is larger than the one before it. | Fix the stage named in the message. |
-| **Not saved.** "Gauges are recorded against the event's date" or "Gauges cannot be recorded before the event takes place" | The entry was for a date other than the event's, or the event is in the future. | Pick the right event; log it on or after the day it runs. |
-| **Not saved.** "Reps can only record their own gauges" (or a similar refusal) | Your role does not allow that write — a rep logging for someone else, a leader at another team's event. | Ask your leader or the office. |
-| "This event was cancelled, so gauges cannot be logged for it." | The event's status is Cancelled. | Ask a leader or administrator to reinstate it if it did run. |
-| A pay run shows **Overdue** | It is pending and its Friday due date has passed. | Nothing for you to do; the office sees the same badge in Runs to pay. |
-| A pay run shows **Paid late** | It was marked paid after the due date. | Nothing for you to do; the office tracks the on-time rate. |
-| Your punctuality shows **—** | No check-ins have been recorded yet. | Tap **Now** in **Checked in at** when you arrive at each event. |
-| **Check-in** shows **—** for other people | Their check-in times are only shown to administrators and their own team's leader. | Expected. |
-| "Demo accounts aren’t available right now" | The database has real users, or demo accounts are switched off. | Sign in with your own details. |
-| An amber strip: **Can't reach Linear Hub — check the hotspot** | Your phone has no signal, or the laptop running Linear Hub is asleep or stopped. | Keep logging: saves wait on this phone (**Save on this phone**) and send by themselves when the connection is back. |
-| **1 entry needs a look** | Linear Hub already had an entry for that day that this phone had not seen — someone else's correction, or your own earlier entry when the phone could not check for it before saving — or the entry you were changing was deleted while yours waited. | Tap **Review** to see both versions, then **Send mine anyway**, **Open** or **Discard**. |
-| A strip or card you expected is missing (pace note, pay estimate, **Needs attention**) | There is not enough history yet, or the office has switched the smart features off. | Nothing to do; the rest of the page works as before. |
-
-*Linear Hub v1.4.0 — © Linear MCR Limited, internal use.*
+*Linear Hub v1.5.0 — © Noryn System Ltd. Licensed to Linear MCR Limited.*

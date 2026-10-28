@@ -86,7 +86,8 @@ Two questions for the providers are in their sections: **ask TrueLayer** which r
   details, make a payment through it (nobody is paid; the weeks stay on Runs to pay), and only then **Switch to live**
   by typing PAY FOR REAL. Your sandbox details do not work live: choose **Edit**, enter the live ones, and **Test**
   again. Then pay **one person, a small amount** (yourself, for example) and check it arrived before you pay the team.
-  A bank file has no test mode: make the first file for one person, upload it, and check your bank takes it.
+  A bank file has no test mode: make the first file for one person, upload it, and check your bank takes it. (Since
+  1.5 a bank file connection starts in test mode and has a 1p test file: see OWNER_NOTES_1.5.md.)
 - **The app secret now also protects bank details and payment keys.** Back it up with the database, as before
   (`LM_APP_SECRET` in your password manager, or the `app-secret` file the backups folder keeps). The backups now hold
   everyone's bank details and the connections' keys, encrypted with it: keep the secret apart from any copy you send

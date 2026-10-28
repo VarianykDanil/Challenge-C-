@@ -1,6 +1,6 @@
 # Linear Hub — business logic reference
 
-Owned by the Logic Builder. Everything described here lives in `shared/src/logic/**` (pure TypeScript,
+Everything described here lives in `shared/src/logic/**` (pure TypeScript,
 no I/O, no React) and is unit-tested with `node:test` (`npm run test -w shared`). Constants live in
 `shared/src/constants.ts`. Import from `@lm/shared`.
 
@@ -16,6 +16,7 @@ no I/O, no React) and is unit-tested with `node:test` (`npm run test -w shared`)
 | `logic/stats.ts` | 1.1: mean, sample SD, z-scores, binomial and two-proportion z, Poisson tail, quantiles, weekly series |
 | `logic/baseline.ts` · `streaks.ts` · `payForecast.ts` · `payrollFlags.ts` · `signals.ts` · `attention.ts` · `eventForecast.ts` · `outbox.ts` · `digest.ts` | 1.1 smart release modules — see section 14 (recruitment SLAs and the outcome rule are in `logic/recruitment.ts`, §14.8) |
 | `logic/payments.ts` · `bankFiles.ts` (and the session limit in `logic/pin.ts`) | 1.4: pence, bank details, the four ways to pay and their abilities, batch statuses, bank file formats — see section 17 |
+| `logic/access.ts` · `moneyChecks.ts` (and the check-in item in `logic/attention.ts`, VAT check digits and copy-numbered references in `logic/invoices.ts` and `logic/payments.ts`) | 1.5: setup codes, trial wording and the step-up rule for staff edits; days waiting, unconfirmed subs, recent changes and the amount to pay — see section 18 (the server-side rules of 1.5 are there too) |
 
 ---
 
@@ -1832,7 +1833,8 @@ funnel rule in plain English.
   member is scored and the top score wins: 100 first + last name · 90 first name + last initial (`Jordan L`) · 85 first
   + near-miss last · 70 first name · 65 near-miss first + last · 60 last name only · 55 near-miss first + last initial ·
   40 near-miss first. A near miss is a typo or swap (one edit, names of four letters or more: Jordon, Aemlia) or a short
-  form of at least three letters (Sam → Samuel, Jord → Jordan); filler words never near-miss ("the" is not Theo).
+  form of at least three letters (Sam → Samuel, Jord → Jordan); filler words never near-miss ("the" never finds the
+  test fixture Theo King).
   Several members on the top score → ambiguous ("2 people match “Jordan” — choose one"); a single near-miss match is
   flagged `guess` ("Best guess for “Calum”").
 - **Repeats.** The last complete line for a person wins (`replacedBy` marks the earlier ones); an incomplete line
@@ -2851,7 +2853,7 @@ on an unpaid week is P1's: `applyConfirmedSales(…, { replacesStatementId })`.
   never loaded.
 - **Page.** A4, millimetres. Tables up to six columns portrait, seven or more landscape (`pdfOrientationFor`). Margins
   14 mm portrait, 12 mm landscape. Page 1: the brand band (the violet mark, "Linear Hub", and on the right "Linear MCR
-  Limited" and "Generated Thu 22 Oct 2026, 15:04 by Danil Varianyk"), the title (17 pt), the subtitle, the filter lines
+  Limited" and "Generated Thu 22 Oct 2026, 15:04 by Morgan Blake"), the title (17 pt), the subtitle, the filter lines
   and the row count, a hairline. Later pages: a slim running header (mark, "Linear Hub", the document title). Every
   page: "Linear Hub · <title>" and "Page x of y" under a hairline. Document metadata: title, author Linear MCR Limited,
   creator Linear Hub, language en-GB. The title and subject keep the real characters (`pdfInfoText`; jsPDF writes
@@ -3350,12 +3352,14 @@ the failure budget and the per-person report limit allow. Retention is unchanged
 
 #### Team Sapiens and seven blank accounts
 
-`server/src/db/seed-data.ts` `DEMO_TEAMS` (Sapiens, `#7C3AED`, a colour none of the four demo teams has) and
-`DEMO_TEAM_ACCOUNTS`: Theo (LM-0101, leads the team), Daniel (LM-0102), Ridwan (LM-0103), Jamie (LM-0104) — role
-`leader`, position `team_leader` — and Olivia (LM-0105), Owens (LM-0106), Yasmin (LM-0107) — role `rep`, position
-`trainee`. Email `<first name>@linear-mcr.co.uk`, `last_name ''`, active, start date = the business date, city
-Manchester, no phone, the default pay plan for the position, no PIN, avatar colour from the palette by employee number.
-First names only: the repository is public.
+The team and its seven accounts come from the starter team file (since 1.5, `lib/starterTeam.ts loadStarterTeam`): the
+starter team from `server/data/starter-team.json` next to the database when it exists (the office's own people, never
+committed), or else `server/starter-team.example.json` (invented people: team Sapiens, `#7C3AED`, a colour none of the
+four demo teams has; Ava (LM-0101, leads the team), Ben (LM-0102), Cleo (LM-0103), Dev (LM-0104) — role `leader`,
+position `team_leader` — and Esme (LM-0105), Femi (LM-0106), Gina (LM-0107) — role `rep`, position `trainee`; email
+`<first name>@linearhub.example`). `last_name ''` unless the file gives one, active, start date = the business date,
+city Manchester, no phone, the default pay plan for the position, no PIN, avatar colour from the palette by employee
+number. No real person is in the repository: it is public.
 
 One function, `lib/demoTeams.ts addDemoTeams(db, today)`, writes them for both paths:
 
@@ -3376,7 +3380,7 @@ One function, `lib/demoTeams.ts addDemoTeams(db, today)`, writes them for both p
 
 `addDemoTeams` reuses a team of that name in any case (a "Sapiens" Matt made by hand, left as it is) and adds only the
 accounts missing **by email** (case-insensitive); an account whose fixed employee ID is taken gets the next number above
-both the IDs in use and the demo's own (LM-0108 and up). A team with no leader gets Theo when Theo is on it. Nothing else
+both the IDs in use and the demo's own (LM-0108 and up). A team with no leader gets the account the file marks `leadsTeam` (Ava in the example) when it is on it. Nothing else
 is written: no gauges, events, pay runs, adjustments, invoices, agreements, learning progress, video views, check-ins,
 bookings or audit rows (`sapiens.test.ts` checks every column that refers to a person).
 
@@ -3387,11 +3391,11 @@ it is staff and not `left` — after the four demo accounts and under the same c
 
 #### Names without a surname (`shared/src/logic/people.ts`)
 
-- `personName(p)` → "Amelia Hart", "Theo": first and last name trimmed, empty parts left out — never a trailing or double
+- `personName(p)` → "Amelia Hart", "Ava": first and last name trimmed, empty parts left out — never a trailing or double
   space. The server's sentences and labels use it, and every SQL name is `TRIM(first_name || ' ' || last_name)`. The
   client's `fullName` is the same function.
-- `personInitials` → "AH", "T" (the first name alone); the Avatar takes initials from the name the same way.
-- `firstNameWithInitial` → "Olivia K."; just "Olivia" without a surname (the roll call and the event page's **Log for**
+- `personInitials` → "AH", "A" (the first name alone); the Avatar takes initials from the name the same way.
+- `firstNameWithInitial` → "Esme K."; just "Esme" without a surname (the roll call and the event page's **Log for**
   chips, which add the initial only when two people share a first name).
 - `personSortKey` / server `lib/people.ts personOrderSql`: surname, then first name, the first name standing in for a
   missing surname, case-insensitive, then id (`GET /users`, the Team cards; Finance's payroll runs and invoices within
@@ -3553,7 +3557,7 @@ any code (so no code is spent or recorded); the demo sign-in accounts may still 
   way back when no administrator can do it in the app: the only administrator lost phone and recovery codes, or the
   app secret was lost so no authenticator code matches (the secrets are encrypted with it; recovery codes are hashes
   and still work). It clears that person's two-step, signs them out on every device and writes an audit row with no
-  actor (action `npm run 2fa:reset`, "Reset two-step verification from the server command: Danil Varianyk"; snapshots
+  actor (action `npm run 2fa:reset`, "Reset two-step verification from the server command: Morgan Blake"; snapshots
   say only `twoFactor`). The PIN is left alone. Honours `DB_PATH`; exit code 0 when done or nothing to reset, 1 for no
   email, no database, a file that is not a Linear Hub database, or no one with that email. Works while the server runs.
 
@@ -3744,7 +3748,7 @@ interface PaymentProviderAdapter {
   its settings or secrets puts it back to `not_connected` and forgets the last test and its balance. Switching to live
   needs `confirm: "PAY FOR REAL"` typed exactly and a connected test, and then a new test against the live service
   (`not_connected` again, balance forgotten). A bank file connection is `mode: 'live'`, `status: 'connected'` from the
-  start and has no test mode (nothing moves until Matt uploads the file); only the test bank file is `mode: 'test'`. Disconnecting wipes the secrets, cancels the
+  start and has no test mode in 1.4 (nothing moves until Matt uploads the file; since 1.5 it starts in test mode, §18.13); only the test bank file is `mode: 'test'`. Disconnecting wipes the secrets, cancels the
   drafts through it and keeps the history; not while a payment through it is on its way (409).
 
 ### 17.6 A payment, from draft to paid (`server/src/lib/payments/batches.ts`, F)
@@ -4056,3 +4060,348 @@ Hub; the week stays paid and is sorted out by hand with an adjustment on a later
 - **Logos** come from `simple-icons` (CC0, pinned at 16.34.0): Revolut, Wise, Starling Bank, Monzo, Barclays, HSBC and
   Tide, imported one by one. It has no TrueLayer mark, so TrueLayer is a neutral "TL" monogram; a bank file with the
   general format shows a bank icon. Logos belong to their owners and only identify the service (said under the cards).
+
+---
+
+## 18. Release 1.5
+
+Release 1.5 answers the independent review of 1.4.0. Six packages: **access** (trial mode and going live, setup codes,
+step-up, sessions, secure connections, §18.1–18.5), **keys** (the app key, backups, restore, updates, System health,
+§18.6–18.11), **money** (§18.12–18.18), **phone** (the offline app, §18.19–18.21), **quality** (validation and the test
+clocks, §18.22) and **docs** (the installer and the documents; no business rules). Pay maths is unchanged except where
+§18.12 (base days need evidence; office staff days) and §18.17 (VAT) say so. Endpoints:
+[API.md, "1.5 endpoints"](API.md#15-endpoints).
+
+### 18.1 Trial mode and demo accounts (access)
+
+- **Trial mode** is three `meta` keys: `ext:access:trial-mode` (`'1'`/`'0'`), `ext:access:demo-people` (the user ids of
+  the demo company) and `ext:access:seed-marks` (the highest id per company table after the seed). The demo seed sets
+  them; the access extension sets them once for an older database (on only for a database the demo seed built, whose
+  four demo staff are intact); `npm run golive` clears them and `seed_today` (it keeps `seeded_at`).
+- **Restricted demo** = trial mode and (a person of the demo company, or a one-tap demo account). What it may write is
+  `lib/demoWrites.ts DEMO_WRITE_RULES`, one rule per write route (`"METHOD /pattern"` as `listApiRoutes` prints it):
+  `allow` (the caller's own things); `people(…)` — every person the request touches is of the demo company or the caller;
+  `money(…)` — only the demo company's pay; `record(table)` — a record at or below the seed mark, or one the audit trail
+  shows a demo account (or the caller) created; `deny(…)` (office settings and secrets). **A write route with no rule is
+  refused**, and `access-demo-writes.test.ts` fails, listing the routes without one. Reads are allowed except
+  `DEMO_READ_RULES` (the payment file, real people's bank details). The guard (`middleware/accessGuards.ts demoGuard`)
+  runs after `authenticate`, before the write limit and the audit.
+- **One-tap sign-ins allowed** (`lib/demoTeams.ts demoAccountsAllowed`): `LM_DEMO_ACCOUNTS=0` no, `=1` yes, otherwise yes
+  unless `TRUST_PROXY` is on or `LM_TLS_CERT_FILE` is set. One-tap accounts are exempt from setup codes and two-step
+  while in trial mode; their sessions follow the normal limits (§17.2).
+- **The trial item** (`lib/attention/trial.ts`, the first provider): `security:trial:demo-on` / `security:trial:demo-off`,
+  danger, administrators only, `href` `/settings#trial`, `at` = now so it sorts first; the banner uses the same
+  sentence (`trialHeadline`).
+- **The demo's pay** (UX-9): every past week is paid (the odd one late); the only unpaid runs are last week's, due this
+  Friday, so nothing is overdue until that payday has passed. The dashboard tile reads **Overdue pay** once the payday of
+  the earliest unpaid run has passed.
+- **Starter team**: `lib/starterTeam.ts` (§16.10): the office's own file when there is one (those people are the
+  office's own and stay at go-live; they are restricted while the trial lasts), else the invented example (part of the
+  demo company).
+
+### 18.2 Going live (`lib/goLive.ts`, `lib/demoRecords.ts`, `golive.ts`)
+
+1. Refused while the database is open (any port, or the background service): the lock, not only the port.
+2. The plan: the demo people and records that go, the demo records kept and why, the demo accounts used during the
+   trial (changes, sign-ins, last use), and the office's people who still need a setup code.
+3. Typed **GO LIVE** (`--confirm "GO LIVE"`), then a checked backup (integrity check, the same number of people; with the
+   uploaded files) before anything changes.
+4. **Keep rules.** A record the demo seed made (id at or below the seed mark of its table) stays when an audit change
+   row by a person of the office's own names it, when it names one of the office's people, or when any staying row
+   references it — `PRAGMA foreign_key_list` over every table plus a few columns without a declared link — repeated
+   until nothing changes. A view or a read never keeps a record. An announcement a demo account wrote after the seed
+   passes to the owner. The one-tap accounts go even if renamed. Statement PDFs are never deleted.
+5. **A 1.4 trial database.** The first start of 1.5 works out the seed marks from the evidence: the lowest id of an
+   audited create after the seed, minus one, and the statements that arrived after the seed. So a trial week spent on
+   1.4 is kept.
+6. The first owner (when none of the office's own administrators is left, or with `--owner-email`): employee ID
+   LM-0001 when free, a setup code printed. Trial mode off; one audit row ("Went live from the server command: removed
+   the demo company (N people, M records); made … the owner"). A second run changes nothing.
+7. `npm run seed` (`lib/seedGuard.ts`) refuses a live database, a trial database with people of the office's own, or one
+   in use; asks for **START AGAIN**; backs up and checks first. A missing database whose backups folder holds backups of
+   one is not seeded by the server (`missingDatabaseRefusal`: check `DB_PATH`, restore, or seed on purpose).
+
+### 18.3 One-time setup codes (`lib/setupCodes.ts`, shared `logic/access.ts`)
+
+- `needsSetupCode` = not a one-tap demo account in trial mode, and (no two-step, or `users.setup_code_required`, which an
+  administrator's PIN reset sets).
+- A code: 12 characters from an alphabet without I, L, O, 0 or 1 (`SETUP_CODE_ALPHABET`), shown in three groups
+  (`ABCD-EFGH-JKMN`); valid `SETUP_CODE_DAYS` = 7 days; single use. `setup_codes(user_id, code_hash, reason, created_at,
+  created_by, expires_at, used_at, held_by)`; hash = SHA-256 of `setup-code:` + the normalised code (case, spaces and
+  dashes do not matter). Issuing deletes the person's unused codes; using one clears `setup_code_required`.
+- **No two-step yet:** the code is used at `/auth/login`. **Two-step on (after a PIN reset):** `/auth/login` sets
+  `held_by` to the new challenge's token, and `/auth/login/2fa` uses the code held for that challenge only after the
+  two-step code is right. An abandoned two-step step leaves the code needed.
+- Missing and wrong codes count against the login limiter like a wrong PIN. A wrong, used or expired code gets one
+  sentence (`ACCESS_MESSAGES.setupCodeWrong`), so the answer never says which.
+- Over an insecure connection from another device a new code is made but not shown (`setupCodeWithheld`).
+
+### 18.4 The administrator's own code for sensitive actions (step-up)
+
+`staffEditStepUp(existing, patch)` (shared, used by `PATCH /users/:id` and the Edit profile form): a fresh two-step code
+is needed to make someone an administrator, to change an administrator's role, to set an administrator's status to
+`left`, and to change someone's email or employee ID (case does not count). Also: creating an administrator, resetting
+two-step or a PIN (staff and client accounts), changing a client account's email, giving a setup code, and (§18.14–18.17)
+the money actions. One code covers a change that is sensitive twice over. Each code works once; wrong codes count
+towards the same limit as at sign-in; an administrator without two-step is told to set it up first
+(`two_factor_required`). Changing a position needs no code: only the admin role carries office-wide rights.
+
+### 18.5 Sessions, secure connections and built-in HTTPS
+
+- `sessions.token` holds SHA-256 (hex) of the cookie value; the access extension converts 1.4 rows in place.
+- **Secure request** (`lib/secureRequest.ts isSecureRequest`) = `req.secure` (TLS, or `X-Forwarded-Proto: https` from a
+  trusted proxy) or a loopback peer (`req.ip` behind a trusted proxy, else the socket; all of 127/8 and ::1). Behind
+  Caddy on the same host every request comes from loopback, so the check relies on Caddy forcing HTTPS — which is why
+  `HOST` must stay `127.0.0.1` with `TRUST_PROXY` (the server warns otherwise).
+- **Secure-only routes** (`middleware/accessGuards.ts SECURE_ONLY_ROUTES`, API.md): bank details, payment approval and
+  file, payment connections and their 1p test file, the two-approvals setting, VAT confirmation, freeing a downloaded
+  file's weeks, setup codes, resets and new recovery codes.
+- **Built-in HTTPS** (`lib/tls.ts`): both `LM_TLS_CERT_FILE` and `LM_TLS_KEY_FILE` → `https.createServer` on `PORT`;
+  one alone or an unreadable file stops the start before the database opens. No reload (restart after renewing), no
+  redirect. HSTS `max-age=15552000; includeSubDomains` on every secure answer.
+
+### 18.6 The app key (keys: `lib/appKey.ts`)
+
+- **Fingerprint** = HMAC-SHA256(SHA-256(secret), `"linear-hub:key-fingerprint"`), hex, stored in
+  `meta.app_key_fingerprint`; the short form is the first 12 hex digits in groups of four, upper case (`3F2A-91BC-07DE`).
+  It identifies the key but cannot be turned back into it.
+- **Locked data** = any two-step secret, peppered PIN, bank details, payment connection secret, approved payee, bank
+  file or the Gmail password.
+- **Start-up check**, before anything reads or makes a key: key missing + locked data → refuse; key missing + nothing
+  locked → make a key and record its fingerprint; fingerprint recorded and different + locked data → refuse; no
+  fingerprint yet (a 1.4.0 database) → try the key on a few locked values, record it if it opens them (or they were
+  written under the old development key), refuse if it opens none. Then key creation is switched off for the rest of
+  the process. A refusal exits with code 78 (`RestartPreventExitStatus=78` in the units) and names the database, what
+  is locked, the fingerprint it needs, and `npm run key:restore` (typed, `--file`, `--from <file>.lhbk`).
+- `key:restore` checks the key against the database first; an existing different key file is kept as
+  `app-secret.replaced-<time>`. Backups never overwrite a key copy: a different key is saved beside it as
+  `app-secret-<first 12 of fingerprint>`.
+- `npm run seed` locks the demo data with the key file the server will use for that `DB_PATH`.
+
+### 18.7 The recovery sheet
+
+Made and confirmed only on the server computer (`recoverySheet.ts`): no route makes, returns or confirms it, because
+secrets are never returned by the API and the app key unlocks every other secret. The sheet holds the key (64 hex
+characters in groups of four), its fingerprint, where the server reads it, the database, backups and off-site folders,
+and the recovery steps — never the off-site passphrase. `--confirm` asks for the whole key typed back from the paper and
+never shows it (`keyFromPaper`: a 64-character hex key ignores case, spaces and dashes; any other key is compared
+trimmed); a key on the command line is refused. Only a confirmation *for the key in use* removes the key copies of that
+key from the backups folder and keeps it out of later backups; copies of other keys stay (older backups may need them).
+A new key needs a new sheet. The audit trail records making and confirming it, never the key.
+
+### 18.8 Backups and off-site copies (`lib/backup.ts`, `lib/backupFiles.ts`, `lib/offsite.ts`)
+
+- A backup is the checked database plus `linear-….files/` (`statements/`, `uploads/`; `media/` with
+  `LM_BACKUP_VIDEOS=1`); an unchanged file is a hard link to the previous copy. Files are mode 600, folders 700. The key
+  copy is kept until a confirmed sheet for that key (§18.7).
+- **Rotation** (local and off-site): the newest per day for 30 days and the newest per ISO week for 8 weeks; never
+  anything younger than 24 hours; the newest always kept; only files matching the name pattern; a snapshot goes with
+  its database file (an orphan after 24 hours).
+- **Off-site** (`LM_OFFSITE_DIR` + `LM_BACKUP_PASSPHRASE_FILE`, at least 12 characters): after every backup,
+  `linear-YYYY-MM-DD-HHmm.lhbk` = `"LHBKUP1\n"` · header length (uint32 BE) · header JSON (format, scrypt settings, nonce,
+  a passphrase check; authenticated) · ciphertext · 16-byte GCM tag. AES-256-GCM; key from the passphrase with scrypt
+  (N = 2^17, r = 8, p = 1, a fresh 16-byte salt per file). The plaintext is gzip of entries `len(uint32) · {"name","size"}
+  · bytes` ending with a zero length (`manifest.json`, `linear.sqlite`, `app-secret`,
+  `files/<statements|uploads|media>/…`). Written to a private `.partial` name, read back and checked, then renamed. The
+  folder is never created by Linear Hub (a missing folder usually means the drive is not mounted); that, a missing or
+  short passphrase or a failed write is recorded and shown, and the local backup is still made.
+
+### 18.9 Restore (`restore.ts`, `lib/restoreCheck.ts`)
+
+Before asking, restore compares the money records of the current database and the backup **by content, not by clock**:
+live payments approved that the backup has not approved; payments sent or paid that the backup has as not sent; bank
+files made; bank details changed (the backup has the old details); pay runs marked paid. Any → typed **RESTORE**
+(`--yes` alone is not enough; without a terminal `--yes --forget-payments`), and the restored database carries
+`meta.restore_payment_warning` (System health, 14 days). When the comparison cannot be made it fails closed: it says so,
+still asks for RESTORE, and stores the warning marked `unknown`. The key that opens the backup (the key in use,
+`app-secret` or any `app-secret-<fp>` beside it, or the key inside an off-site copy) is put in place, an existing
+different key file kept as `<key file>.before-restore-<time>`. The files snapshot is put back: missing files copied,
+different ones replaced (the live one kept as `<name>.before-restore-<time>`), files added since left alone.
+
+### 18.10 Updates, service settings and the database connection
+
+- **`npm run latest`** (`update.ts`): refuses with local edits; with a background service, takes the service's own
+  settings for anything the terminal leaves unset; stops the service (or the terminal copy) and waits on its port; backs
+  up and checks that database (integrity, core tables, the same number of people, gauges and pay runs) — no good backup,
+  no update, and the service is started again as it was; pulls, installs, builds; prints the way back; starts again.
+- **Service settings** (`service.ts`, `serviceEnv.ts`): for `service:install` and `npm run latest`, a setting set in the
+  terminal wins, else the installed service's; `--fresh` uses the terminal only. The hand-run commands (`doctor`,
+  `backup`, `restore`, `key:restore`, `recovery-sheet`, `golive`, `setup-code`, `pin:reset`, `2fa:reset`) use the
+  installed *user* service's settings and its environment-file key only when the terminal sets no `DB_PATH`. A system
+  unit on a VPS is not read: load its environment file (DEPLOY.md).
+- **Connection** (`db/connection.ts`): `PRAGMA busy_timeout = 5000`, `PRAGMA synchronous = FULL`; `transaction()` nests
+  with `SAVEPOINT`s (an inner throw undoes only its own writes); `createSchema` runs in one transaction (all or nothing).
+- **Node**: `engines` `^22.18.0 || ^24.0.0 || ^26.0.0`, equal to `NODE_ENGINES` in `lib/nodeSupport.ts` (a test keeps
+  them equal); one start-up warning on any other Node.
+
+### 18.11 System health (`lib/attention/system.ts`, kind `system`, administrators)
+
+| Item | Threshold | Severity |
+| --- | --- | --- |
+| The last backup failed (until a later one works) | — | danger |
+| Automatic backups are off | — | warning |
+| No backup for 36 hours (a fresh install gets 36 hours) | 36 h | warning |
+| Off-site copy failing, or cannot run | — | danger |
+| No off-site copy for 2 days | 48 h | warning |
+| Off-site copies on, none yet / off altogether | — | info |
+| Free space on the data disk | < 1 GB / < 200 MB | warning / danger |
+| The key is not on a confirmed recovery sheet | — | warning |
+| Server errors in the last 24 hours (`system:errors`, one key with its count) | 24 h | warning |
+| Restored from an older backup over payments | 14 days | danger |
+
+One SQL statement per call (the meta values); the off-site and disk checks are cached for a minute. Office
+administrators see plain words, never commands or setting names (`offsiteIssue` has an operator's wording for doctor
+and a plain one for the bell); a raw system error is cut on a word boundary. The error log is
+`<data dir>/logs/errors.log` (rotated at 1 MB, five kept), never with a query string or request body. Feed budget:
+13 statements for administrators, 12 for everyone else.
+
+### 18.12 Base days need evidence; office staff days (money: `lib/payDays.ts`, `lib/staffDays.ts`)
+
+- **Paid base days (MON-1).** Per person and date, a logged day counts as a base day when any of its gauge rows has
+  something logged (> 0) **and** the person was on the event's roster or checked in to it that day — or a
+  `pay_day_checks` row says `confirmed`. `not_worked` never pays. A day without evidence and without a decision is
+  **waiting**: not paid as a base day, listed in Days to confirm (unpaid weeks, the last 35 days), named in the pay
+  breakdown and in the person's own bell. A leader or the office logging gauges for someone else confirms the day
+  (`source 'logged'`; `noteGaugeWrite`, which every gauge write calls). Leaders decide for their own team, never their
+  own days (`officeOnly`). Commission is unchanged: it follows the subs. Evidence can be self-made (a rep can book
+  themselves onto an event and check in): left for the owner to decide after the trial.
+- **Grandfathering.** The check starts with meta `ext:pay:day_checks = 'on'`, set once (in a transaction) by the upgrade
+  of an existing database, the end of a fresh demo seed or the first gauge write; every day already logged then is
+  recorded `confirmed` with `source 'before'`, so no existing pay changes.
+- **Office staff (MON-8).** Mon–Fri from the start date to today (and to `users.leaving_date`), less the weekdays in
+  `staff_absences` (holiday, sick, unpaid, other). A leaver keeps the run of their last week even when marked as left. A
+  paid week cannot change (`409`).
+
+### 18.13 Bank files: test mode, the 1p test file, downloads (money: `lib/payments/batches.ts`, shared `bankFiles.ts`)
+
+- **Test mode (CLM-3).** A new bank file connection starts `mode: 'test'`. A test file's name starts `TEST-`, every
+  reference starts `TEST` (`testPaymentReference`), and every line is written with sort code `000000` and account
+  `00000000` (`buildBankFile(…, { test: true })`; the real details are still checked, so a line the bank would refuse
+  still shows). Mark as paid on a test file marks no week paid; its download is recorded but does not count as sent.
+  Going live needs PAY FOR REAL. A 1.4.0 bank file connection that was live stays live.
+- **The 1p test file (MON-6)**: one £0.01 line to the administrator's own account in the connection's layout, made with
+  a fresh code (the full account number is in the file only; the audit row has the last 4 digits), then
+  `test-file-result` records whether the bank took it.
+- **Downloaded counts as sent (MON-2).** A live file counts as sent from its first download (`downloaded_at`). Freeing its
+  items afterwards (cancel, or marking some as not paid) needs the typed words (NOT UPLOADED / NOT PAID) and a fresh code
+  (`freed_confirmed_at`); a cancel makes the file void. A new live payment for a person-week in a file downloaded in the
+  last 7 days and freed without that confirmation is skipped (`recent_file`). The upgrade reads 1.4.0 downloads from the
+  audit trail (meta `ext:payments:downloads`).
+- **References**: each item of a new live file carries a copy number (1 + the earlier live downloaded files that held the
+  same person-week and let it go): `defaultPaymentReference(week, name, copy)` → "LINEAR 05OCT JL 2" (at most 18
+  characters). The payment page names the earlier file (`earlierFile`).
+
+### 18.14 Bank details someone else typed in (MON-3)
+
+Payments use details only when they were confirmed after their last change by someone other than whoever made it: the
+person's own change → an administrator (with a fresh code); an administrator's change → the person ("Yes, these are
+mine") or a different administrator. Details whose changer was deleted count as the person's own change. Reported
+details ("These are not mine") are held until new ones are saved. In an office with one administrator nobody can
+confirm that administrator's own details (`noOtherAdmin`): payments to them are skipped. The upgrade re-holds, once,
+1.4.0 details an administrator typed in and "confirmed" themselves (meta `ext:payments:bank-rehold`, a system audit
+row).
+
+### 18.15 Two people approve each payment (MONEY-MISSED-2)
+
+Meta `ext:payments:two_approvals`: `on` / `off` (an administrator chose) or `auto-on` (stored the first time it is read,
+or at start-up, once two or more active administrators use two-step; never switched off by a change in that count).
+Unset with fewer than two → off. It applies to live payments only. The first approval sets `first_approved_at/by`; the
+payment stays a draft and nothing is sent; the second must be a different administrator, and the payment's
+`approved_at/by` is the second (business clock, `businessNow`). `stuck` = on with fewer than two such administrators: a
+first approval is refused (it could never be completed); one already given can still get its second. Turning off: with
+two or more such administrators the first request is stored (`ext:payments:two_approvals_off_request { by, at }`,
+`202`) and the setting stays on; a different administrator's `false` turns it off; any `true` cancels the request; with
+fewer than two, `false` turns it off at once. Every change checks a fresh code last and is audited. An administrator who
+can mark the other as left (or reset their two-step) can then turn it off alone; the audit trail records each step.
+
+### 18.16 Going live with an API provider (MON-5)
+
+`firstRun.sandboxPaymentAt` = the first approved test-mode payment through the connection with an item the sandbox
+answered (a provider reference), approved at or after `payment_connections.details_changed_at` (set whenever an API
+connection's settings or secrets change). Switching to live is refused (`409`) before it. Provider adapters get
+real-clock times; nothing in Linear Hub has yet run against a real Revolut, Wise or TrueLayer account.
+
+### 18.17 VAT on self-billed invoices (MON-7, `lib/invoices.ts`)
+
+- VAT = floor(net pence × 20 / 100), from the invoice's stored total and supplier block, only when that block has
+  `vatCharged: true` — so it is frozen with the accepted invoice; a 1.4.0 invoice that printed a VAT number charges
+  none. Payment amount = run gross + VAT (`amountToPayPence`).
+- A supplier block prints the VAT number and sets `vatCharged` only when the person's number is confirmed
+  (`users.vat_confirmed_at`). Typing a different number (person or administrator) records `vat_changed_at/by` and
+  clears the confirmation; taking it off clears all four. `confirmInvoiceVat` needs an administrator who is not the
+  person and not `vat_changed_by`, the number they checked (normalised, equal to the stored one) and a fresh code
+  (checked last).
+- VAT starting or stopping reissues open invoices that do not count as accepted yet (a system audit row); accepted,
+  deemed-accepted and in-payment ones keep what was accepted.
+- **Check digits** (`isValidVatCheckDigits`): 8, 7, 6, 5, 4, 3, 2 × the first seven digits, plus the last two as a
+  number, ≡ 0 (mod 97), or ≡ 42 for numbers from 100 000 000 (the 9755 scheme); all-zero numbers are refused; a branch's
+  three extra digits are not checked. Linear Hub does not ask HMRC whether a number is registered: the administrator
+  checks that on HMRC's service before confirming.
+
+### 18.18 Unconfirmed subs, recent changes and the payroll spreadsheet
+
+- **Pay resting on unconfirmed subs (MONEY-MISSED-3):** from the stored calculation of a base-or-commission week, amount
+  = paid now − max(base, commission − the commission of campaigns whose subs no statement confirmed). Listed per run
+  (`checks.unconfirmed`) and in total per payment; campaigns whose client sends no statements are named. Nothing there
+  stops a payment.
+- **Recent changes:** bonuses and adjustments added in the last 7 days, with who added them ("You added this").
+- **Payroll spreadsheet (MON-4):** Base + Commission + Bonus + Overrides − Deductions + Adjustments = Gross pay; Gross
+  pay + VAT = Total to pay. Worker = "Self-employed (self-billed)" for reps and leaders, "Office staff" otherwise. It is
+  a spreadsheet for an accountant to map, not a Xero or Sage import file.
+- **The pay estimate (CLM-9)** never promises a bonus under the base-or-commission rule (bonuses are added by hand); it
+  says how many more subs beat the base.
+
+### 18.19 The offline app (phone: `client/sw/`, `client/build/`)
+
+- **Never handled by the service worker:** anything not GET, other origins, `/api` and `/api/*` (a payslip PDF opened as
+  a page included), and `/sw.js` itself. So no personal data is ever stored by it.
+- **Pages** (navigations): the network first, with a 4-second limit. With no signal, no answer in time, or any 5xx
+  (behind Caddy a stopped or restarting app is a 502/503/504 from the proxy): the saved `index.html`. With nothing saved:
+  the network's answer, or with no network a one-line "open it once with signal" page (503).
+- **`/assets/*` and other app files:** this release's saved copy, then any other saved copy (the release waiting to take
+  over, the previous release), then the network (kept in `lm-runtime-v1`, at most 120 files, never an HTML answer to a
+  file request). Lookups ignore `Vary`.
+- **Install** saves the precache (the entry and everything it reaches by static or dynamic import, CSS, Inter's Latin
+  subsets, `index.html`, the manifest, icons; about 220 files, 2.6 MB before compression at 1.5.0; the PDF tools, other
+  font subsets and lesson pictures load when first used) into `lm-shell-<version>`, copying unchanged hashed files from
+  earlier caches. **Activate** moves the old release's own bundles into `lm-previous-v1` (one release back only),
+  deletes old `lm-shell-*` caches and takes control. A new release waits until the person taps **Reload**
+  (`SKIP_WAITING`). The version is a hash of the precache list, `index.html` and the worker's own built code.
+- Registered only on a secure address (https, or the server's own computer), never in development; update checks every
+  30 minutes and when the app comes back to the front. On plain http the app behaves as in 1.4 (saves wait only while
+  the page is open), and the screen can still turn off during Quick gauges (Wake Lock needs https).
+- `buildStatus` counts `client/sw`, `client/build` and `client/tsconfig.node.json` as client sources, so a release that
+  only changes the service worker is rebuilt.
+
+### 18.20 "Can't reach Linear Hub" (next to the outbox, §14.7)
+
+A request counts as not reaching Linear Hub (a `NetworkError`: the strip, gauges and check-ins wait in the outbox, the
+field kit on a cold start) when fetch throws, when a read gets no first answer in time (15 s; 5 s while the last request
+already failed; the sign-in check when the app opens 6 s), or when the answer is a 502, 503 or 504 without Linear Hub's
+own JSON `{ error }` (the proxy's page). Saves (POST, PUT, PATCH, DELETE) have no time limit: a slow save may still have
+been made, and gauge days and check-ins sent twice are stored once. While Linear Hub cannot be reached, the app checks
+the session again every 15 s and as soon as anything answers; failed reads load again by themselves.
+
+### 18.21 The field kit and the check-in item
+
+- **Field kit** (`client/src/offline/fieldKit.ts`, localStorage `lm-field-kit`, version 2): the last signed-in **rep or
+  leader** (id, names, role, position, team, avatar colour, status, start date — never email, employee ID, phone, city
+  or pay plan), up to 60 loggable events, when the session ends (`endsAt`) and the inactivity limit (`idleMs`, from
+  `session.idleHours`). Used only while now < `endsAt` and now − the last contact < `idleMs` (a demo session with no end:
+  14 hours from the last contact). Removed on sign-out, any 401, and when someone of another role signs in. Saves made
+  meanwhile still wait for that person's sign-in; the server checks every request.
+- **Check in at …** (`shared/src/logic/attention.ts checkInItems`): for a rep or leader whose team has an event today,
+  from 60 minutes before its start until its end, while they have no check-in and no gauge row for it there; `info`
+  before the start, `warning` after; key `events:checkin:<eventId>`, `href` `/quick?eventId=<id>`. The route adds one
+  sub-select to the feed's existing attendance statement, so the feed stays within its budget.
+
+### 18.22 Validation and the test clocks (quality)
+
+- Request bodies are checked with zod 4. A PATCH keeps only the fields the body has (`parsePatch`): zod 4 would otherwise
+  fill in the create form's defaults for every field left out (`patch-only-sent.test.ts` fails if a route uses
+  `.partial().parse(`). zod's own messages are replaced by plain ones (`plainMessage`, `lib/validate.ts`); a refused
+  request lists at most 20 problems, then "And N more problems"; a list over its limit gives one problem.
+- Tests whose answer depends on the day call `pinBusinessClock()` (Wed 21 Oct 2026, 15:00 London) or work their dates
+  out from the clock. A UK day is 23 hours on the last Sunday of March and 25 on the last Sunday of October: a span
+  within a day is worked out from the clock, never a fixed number of minutes. `npm run test:dates` moves `Date` in every
+  test process (`scripts/fake-now.mjs`); timers, file times and SQLite's own `'now'` stay real.
