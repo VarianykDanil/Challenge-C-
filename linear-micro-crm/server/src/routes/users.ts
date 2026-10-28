@@ -211,6 +211,7 @@ export function usersRouter(db: Db): Router {
     const existing = getStaffUser(db, id);
     if (!existing) throw notFound('User');
     const patch = patchBody.parse(req.body);
+    if (patch.status === 'left' && id === me.id) throw badRequest('You cannot deactivate your own account');
     // who is an administrator, and what someone signs in with (shared staffEditStepUp): refused for a demo account, and
     // it needs this admin's fresh two-step code
     const sensitive = staffEditStepUp(existing, patch);
@@ -218,7 +219,6 @@ export function usersRouter(db: Db): Router {
     if (patch.lastName === '' && existing.lastName.trim() !== '') {
       throw badRequest('Enter their last name', [{ path: 'lastName', message: 'Enter their last name' }]);
     }
-    if (patch.status === 'left' && id === me.id) throw badRequest('You cannot deactivate your own account');
     if (patch.employeeId && get(db, `SELECT 1 FROM users WHERE lower(employee_id) = lower(?) AND id <> ?`, [patch.employeeId, id])) throw conflict(`Employee ID ${patch.employeeId} is already in use`);
     if (patch.email && get(db, `SELECT 1 FROM users WHERE lower(email) = lower(?) AND id <> ?`, [patch.email, id])) throw conflict(`Email ${patch.email} is already in use`);
     if (patch.teamId !== undefined && patch.teamId !== null && !get(db, `SELECT 1 FROM teams WHERE id = ?`, [patch.teamId])) throw badRequest('Unknown teamId');

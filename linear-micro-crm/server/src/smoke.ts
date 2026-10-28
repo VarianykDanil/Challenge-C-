@@ -166,6 +166,34 @@ async function main(): Promise<void> {
   const leader = new Client(base, 'leader');
   const recruiter = new Client(base, 'recruiter');
   const rep = new Client(base, 'rep');
+  /**
+   * A real administrator of the office's own (not the demo company) with two-step on. During the trial the one-tap demo
+   * administrator only works on the demo company (lib/demoWrites.ts), so the checks that change the office's own
+   * people, a campaign's pay, or reset a sign-in use this owner; a real one needs a fresh code for the sensitive ones.
+   */
+  const owner = new Client(base, 'owner');
+  let ownerId = 0;
+  let ownerSecret = '';
+  const ownerCode = (): string => {
+    run(db, `UPDATE users SET totp_last_counter = NULL WHERE id = ?`, [ownerId]);
+    return totp(ownerSecret);
+  };
+  const signInOwner = async (): Promise<void> => {
+    if (ownerId) return;
+    ownerId = Number(run(
+      db,
+      `INSERT INTO users (employee_id, email, first_name, last_name, role, position, team_id, pay_plan_id, start_date, status, phone, avatar_color, city)
+       SELECT 'LM-0990', 'smoke.owner@linearhub.example', 'Smoke', 'Owner', 'admin', 'owner', NULL, pay_plan_id, ?, 'active', NULL, '#0E7490', NULL FROM users WHERE id = 1`,
+      [todayISO()],
+    ).lastInsertRowid);
+    bumpDataVersion();
+    const setupCode = issueSetupCode(db, ownerId, { createdBy: null, reason: 'command' }).code;
+    status(await owner.post('/auth/login', { email: 'smoke.owner@linearhub.example', employeeId: 'LM-0990', setupCode }), 200, 'owner signs in with a setup code');
+    const setup = await owner.post('/auth/2fa/setup');
+    status(setup, 201, 'owner: two-step setup');
+    status(await owner.post('/auth/2fa/enable', { code: totp(setup.json.secret) }), 200, 'owner: two-step on');
+    ownerSecret = setup.json.secret;
+  };
 
   const today = todayISO();
   const monday = mondayOf(today);
@@ -559,7 +587,10 @@ async function main(): Promise<void> {
     newUserId = r.json.id;
     status(await admin.post('/users', body), 409, 'duplicate');
     status(await admin.post('/users', { ...body, employeeId: 'LM-0901', email: 'not-an-email' }), 400, 'validation');
-    const p = await admin.patch(`/users/${newUserId}`, { position: 'field_rep', city: 'Salford' });
+    // someone the demo admin added is one of the office's own: only a real administrator changes them afterwards
+    status(await admin.patch(`/users/${newUserId}`, { city: 'Salford' }), 403, 'the demo admin cannot change them');
+    await signInOwner();
+    const p = await owner.patch(`/users/${newUserId}`, { position: 'field_rep', city: 'Salford' });
     status(p, 200, 'patch');
     eq(p.json.position, 'field_rep', 'patched position');
     status(await admin.patch('/users/99999', { city: 'X' }), 404, 'patch missing');
@@ -586,7 +617,8 @@ async function main(): Promise<void> {
     ok(typeof created.json.setupCode === 'string', 'a one-time setup code for the new account');
     status(await leaver.post('/auth/login', { email: body.email, employeeId: body.employeeId, setupCode: created.json.setupCode }), 200, 'login');
     status(await leaver.get('/auth/me'), 200, 'session works while active');
-    status(await admin.patch(`/users/${leaverId}`, { status: 'left' }), 200, 'patch left');
+    await signInOwner();
+    status(await owner.patch(`/users/${leaverId}`, { status: 'left' }), 200, 'patch left');
     eq(get<Json>(db, `SELECT COUNT(*) AS n FROM sessions WHERE user_id = ?`, [leaverId])!.n, 0, 'sessions deleted on deactivation');
     status(await leaver.get('/auth/me'), 401, 'existing session rejected');
     status(await leaver.get('/me/dashboard'), 401, 'dashboard rejected');
@@ -832,9 +864,12 @@ async function main(): Promise<void> {
     const okExp = await admin.post('/finance/expenses', { date: today, category: 'other', amount: 1_000_000, description: 'Smoke ceiling' });
     status(okExp, 201, '£1,000,000 accepted');
     status(await admin.del(`/finance/expenses/${okExp.json.id}`), 204, 'cleanup');
-    status(await admin.patch('/campaigns/1', { payoutPerSale: 0 }), 400, 'campaign payout must be > 0');
-    status(await admin.patch('/campaigns/1', { payoutPerSale: 2_000_000 }), 400, 'campaign payout above the ceiling');
-    status(await admin.patch('/campaigns/1', { repCommissionPerSale: -1 }), 400, 'negative commission');
+    // a campaign's pay per sale is real pay: the demo admin may not change it, a real administrator may
+    status(await admin.patch('/campaigns/1', { payoutPerSale: 125 }), 403, 'the demo admin cannot change pay per sale');
+    await signInOwner();
+    status(await owner.patch('/campaigns/1', { payoutPerSale: 0 }), 400, 'campaign payout must be > 0');
+    status(await owner.patch('/campaigns/1', { payoutPerSale: 2_000_000 }), 400, 'campaign payout above the ceiling');
+    status(await owner.patch('/campaigns/1', { repCommissionPerSale: -1 }), 400, 'negative commission');
     eq((await admin.get('/campaigns')).json.find((c: Json) => c.id === 1).payoutPerSale, 120, 'campaign untouched');
   });
   await check('POST/PATCH /gauges integrity: event date, cancelled, future, inactive user, other team', async () => {
@@ -846,7 +881,8 @@ async function main(): Promise<void> {
     status(await admin.post('/gauges', { ...body, eventId: cancelledNlEvent.id, date: cancelledNlEvent.date }), 409, 'cancelled event (admin too)');
     status(await rep.post('/gauges', { ...body, eventId: futureNlEvent.id, date: futureNlEvent.date }), 400, 'future event');
     status(await admin.post('/gauges', { ...body, eventId: futureNlEvent.id, date: futureNlEvent.date }), 400, 'future event (admin too)');
-    status(await leader.post('/gauges', { ...body, userId: leaverId }), 400, 'inactive (left) user');
+    await signInOwner();
+    status(await owner.post('/gauges', { ...body, userId: leaverId }), 400, 'inactive (left) user');
     const otherTeam = (await admin.get(`/events?teamId=2&status=completed&from=${twelveWeeksAgo}&to=${today}`)).json[0];
     ok(otherTeam, 'need a completed team-2 event');
     status(await leader.post('/gauges', { ...body, userId: 2, eventId: otherTeam.id, date: otherTeam.date }), 403, "leader cannot log at another team's event");
@@ -1205,13 +1241,14 @@ async function main(): Promise<void> {
     const starter = await admin.post('/users', { employeeId: 'LM-0930', email: 'smoke.starter@linearhub.example', firstName: 'Smoke', lastName: 'Starter', role: 'rep', position: 'trainee', teamId: 1, startDate: lastCompletedMonday, status: 'active', phone: null, city: 'Manchester' });
     status(starter, 201, 'new starter');
     eq(runOf(starter.json.id), undefined, 'no run yet');
-    const g = await admin.post('/gauges', { eventId: syncEventId, userId: starter.json.id, date: syncDate, stops: 20, table: 8, presentations: 4, closes: 2, taps: 2, sales: 2 });
+    await signInOwner();
+    const g = await owner.post('/gauges', { eventId: syncEventId, userId: starter.json.id, date: syncDate, stops: 20, table: 8, presentations: 4, closes: 2, taps: 2, sales: 2 });
     status(g, 201, 'admin logs the starter');
     const created = runOf(starter.json.id);
     ok(created && created.status === 'pending', 'pending run created for the complete week');
     eq(created.gross, 63.5, '1 day × £63.50 beats 2 subs × £20 (BCN): paid the base');
     ok(/^PAY-\d{6}-LM-0930$/.test(get<Json>(db, `SELECT reference FROM payroll_runs WHERE id = ?`, [created.id])!.reference), 'reference');
-    status(await admin.del(`/gauges/${g.json.id}`), 204, 'entry removed');
+    status(await owner.del(`/gauges/${g.json.id}`), 204, 'entry removed');
     eq(runOf(starter.json.id), undefined, 'run removed with its only entry');
     const p = await rep.patch(`/gauges/${r.json.id}`, { sales: 2, taps: 2 });
     status(p, 200, 'rep patches the entry');
@@ -1295,7 +1332,8 @@ async function main(): Promise<void> {
     const range = `from=${lastCompletedMonday}&to=${addDays(lastCompletedMonday, 6)}`;
     const before = (await admin.get(`/finance/summary?${range}`)).json;
     const dashBefore = (await admin.get('/me/dashboard?range=quarter')).json.company.revenue;
-    status(await admin.patch('/campaigns/1', { payoutPerSale: 130 }), 200, 'raise BCN payout 120 → 130');
+    await signInOwner();
+    status(await owner.patch('/campaigns/1', { payoutPerSale: 130 }), 200, 'raise BCN payout 120 → 130');
     const after = (await admin.get(`/finance/summary?${range}`)).json;
     eq(after.totals.revenue, before.totals.revenue, 'past revenue unchanged');
     eq(JSON.stringify(after.byCampaign), JSON.stringify(before.byCampaign), 'by-campaign revenue/commission/margin unchanged');
@@ -1307,7 +1345,7 @@ async function main(): Promise<void> {
     eq(snap.c, get<Json>(db, `SELECT pp.commission_per_sale AS c FROM users u JOIN pay_plans pp ON pp.id = u.pay_plan_id WHERE u.id = 9`)!.c, "commission snapshot from the person's plan");
     const withNew = (await admin.get(`/finance/summary?${range}`)).json;
     eq(withNew.totals.revenue, round2(after.totals.revenue + 2 * 130), 'the new sales count at £130');
-    status(await admin.patch('/campaigns/1', { payoutPerSale: 120 }), 200, 'restore the rate');
+    status(await owner.patch('/campaigns/1', { payoutPerSale: 120 }), 200, 'restore the rate');
     eq((await admin.get(`/finance/summary?${range}`)).json.totals.revenue, withNew.totals.revenue, 'restoring the rate does not restate the new entry either');
     eq(get<Json>(db, `SELECT COUNT(*) AS n FROM gauge_entries WHERE payout_per_sale IS NULL OR commission_per_sale IS NULL`)!.n, 0, 'every seeded row carries a snapshot');
     status(await leader.del(`/gauges/${g.json.id}`), 204, 'cleanup');
@@ -1603,31 +1641,6 @@ async function main(): Promise<void> {
   let tfaCodes: string[] = [];
   /** A one-time setup code for the smoke user, as an administrator would hand over (npm run setup-code does the same). */
   const freshSetupCode = (): string => issueSetupCode(db, tfaUserId, { createdBy: null, reason: 'command' }).code;
-  /**
-   * A real administrator (not one of the demo company's people) with two-step on: a demo administrator may not reset
-   * anyone's sign-in, and a real one needs a fresh code from their own authenticator for it.
-   */
-  const owner = new Client(base, 'owner');
-  let ownerId = 0;
-  let ownerSecret = '';
-  const ownerCode = (): string => {
-    run(db, `UPDATE users SET totp_last_counter = NULL WHERE id = ?`, [ownerId]);
-    return totp(ownerSecret);
-  };
-  const signInOwner = async (): Promise<void> => {
-    if (ownerId) return;
-    ownerId = Number(run(
-      db,
-      `INSERT INTO users (employee_id, email, first_name, last_name, role, position, team_id, pay_plan_id, start_date, status, phone, avatar_color, city)
-       SELECT 'LM-0990', 'smoke.owner@linearhub.example', 'Smoke', 'Owner', 'admin', 'owner', NULL, pay_plan_id, ?, 'active', NULL, '#0E7490', NULL FROM users WHERE id = 1`,
-      [today],
-    ).lastInsertRowid);
-    bumpDataVersion();
-    const setupCode = issueSetupCode(db, ownerId, { createdBy: null, reason: 'command' }).code;
-    status(await owner.post('/auth/login', { email: 'smoke.owner@linearhub.example', employeeId: 'LM-0990', setupCode }), 200, 'owner signs in with a setup code');
-    ownerSecret = (await enable2fa(owner)).secret;
-  };
-
   await check('2FA setup → enable: QR + otpauth, wrong code 400, 10 recovery codes, other sessions signed out', async () => {
     const created = await admin.post('/users', tfa);
     status(created, 201, 'create user');
@@ -1827,12 +1840,12 @@ async function main(): Promise<void> {
     status(await c.post('/auth/login/2fa', { challengeToken: step1.json.challengeToken, code: code(secret) }), 200, 'second device signed in');
     status(await rep.post(`/users/${tfaUserId}/2fa/reset`), 403, 'rep cannot reset');
     status(await leader.post(`/users/${tfaUserId}/2fa/reset`), 403, 'leader cannot reset');
-    status(await admin.post('/users/1/2fa/reset'), 400, 'admin cannot reset their own via this route');
-    status(await admin.post('/users/99999/2fa/reset'), 404, 'unknown user');
     const demo = await admin.post(`/users/${tfaUserId}/2fa/reset`);
     status(demo, 403, 'the demo administrator cannot reset anyone (trial mode)');
     eq(demo.json.details?.code, 'demo_account', 'demo refusal');
     await signInOwner();
+    status(await owner.post(`/users/${ownerId}/2fa/reset`, { code: ownerCode() }), 400, 'admin cannot reset their own via this route');
+    status(await owner.post('/users/99999/2fa/reset', { code: ownerCode() }), 404, 'unknown user');
     status(await owner.post(`/users/${tfaUserId}/2fa/reset`, {}), 400, 'a real admin needs a fresh code');
     status(await owner.post(`/users/${tfaUserId}/2fa/reset`, { code: '000000' }), 400, 'a wrong code');
     const reset = await owner.post(`/users/${tfaUserId}/2fa/reset`, { code: ownerCode() });

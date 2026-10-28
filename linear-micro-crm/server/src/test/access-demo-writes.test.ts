@@ -186,6 +186,20 @@ test('a demo account still works the demo company, its own account and the recor
   assert.notEqual(own.json?.details?.code, 'demo_account', JSON.stringify(own.json));
 });
 
+test('a demo write to a record or person that does not exist gets the route’s own 404, not a demo refusal', async () => {
+  srv = await startTestServer({ seed: true });
+  const demo = await srv.login('admin');
+  for (const [what, p] of [
+    ['an interview for no candidate', demo.post('/recruitment/interviews', { candidateId: 999999, type: 'first', scheduledAt: `${todayISO()}T10:00`, interviewerId: null })],
+    ['no event', demo.patch('/events/999999', { name: 'x' })],
+    ['no candidate', demo.patch('/recruitment/candidates/999999', { notes: 'x' })],
+    ['no person', demo.patch('/users/999999', { city: 'Bury' })],
+  ] as const) {
+    const r = await p;
+    assert.equal(r.status, 404, `${what}: ${r.status} ${JSON.stringify(r.json)}`);
+  }
+});
+
 test('demoting an administrator, setting one as left or changing someone’s employee ID needs the admin’s fresh code', async () => {
   srv = await startTestServer();
   const admin = await srv.login('admin');
@@ -215,6 +229,10 @@ test('demoting an administrator, setting one as left or changing someone’s emp
   assert.equal(id.status, 200, JSON.stringify(id.json));
   // the same ID again is no change: no code needed
   assert.equal((await admin.patch(`/users/${rep}`, { employeeId: 'fx-0444', phone: '07700 900111' })).status, 200);
+  // setting yourself as left is never allowed: that answer comes first, before any code is asked for
+  const self = await admin.patch(`/users/${me}`, { status: 'left' });
+  assert.equal(self.status, 400);
+  assert.equal(self.json.error, 'You cannot deactivate your own account');
 });
 
 test('every write route has a rule for demo accounts, and every rule names a real route', async () => {

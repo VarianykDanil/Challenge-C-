@@ -80,8 +80,9 @@ export function isDemoRecord(db: Db, me: Pick<UserWithTeam, 'id'>, table: SeedMa
   return typeof creator === 'number' && (creator === me.id || isDemoPerson(db, creator));
 }
 
+/** A record that does not exist is let through, so the route answers its own 404. */
 const record = (table: SeedMarkTable, source: (c: DemoCall) => number[] = param('id')): DemoCheck => (c) =>
-  source(c).every((id) => isDemoRecord(c.db, c.me, table, id)) ? null : DEMO_REFUSALS.records;
+  source(c).every((id) => !get(c.db, `SELECT 1 FROM ${table} WHERE id = ?`, [id]) || isDemoRecord(c.db, c.me, table, id)) ? null : DEMO_REFUSALS.records;
 
 const all_ = (...checks: DemoCheck[]): DemoCheck => (c) => {
   for (const check of checks) {
