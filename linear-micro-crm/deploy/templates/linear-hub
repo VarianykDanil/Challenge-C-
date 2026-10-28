@@ -33,12 +33,14 @@ linear-hub: everyday jobs on this Linear Hub server (https://$DOMAIN). Run with 
   status              running? does https answer? newest backup and off-site copy, free disk
   logs [-f]           the service log (-f keeps following it)
   start | stop | restart
-  update [TAG]        back up, check the backup, update the code, start again (TAG: move to that release)
+  update [TAG]        back up, check the backup, update the code, start again (TAG: move to that release); prints
+                      the way back
   import FILE.lhbk [--passphrase-file FILE]
                       bring a database from another computer (asks that copy's passphrase, or reads it from the
                       file), then start; add --yes --forget-payments to confirm without a terminal
   golive              end the trial: removes the demo company, makes the first owner (stops the service meanwhile)
-  restore FILE        put a backup back (stops the service meanwhile; lists any payments it would forget)
+  restore FILE        put a backup back: a name from "backups", or a path (stops the service meanwhile; lists any
+                      payments it would forget)
   restore-test        open the newest off-site copy in a scratch folder, start it, check it, then delete it
   offsite-sync        copy the encrypted backups off this server now
   key:restore         put the app key back from the recovery sheet (stops the service meanwhile)
@@ -174,15 +176,21 @@ cmd_status() {
 }
 
 cmd_update() {
-  local to=${1:-}
+  local to=${1:-} from='' backup=''
   [[ -z $to || $to =~ ^[A-Za-z0-9][A-Za-z0-9._/-]*$ ]] || die "$to is not a release name"
   service_stop
   local rc=0
   if [[ -n $to ]]; then
+    from=$(app git -C "$APP_ROOT" rev-parse --short=12 HEAD 2>/dev/null) || from=''
     say "Backing up first…"
     npm_script backup || rc=$?
+    backup=$(newest "$(setting LM_BACKUP_DIR)" 'linear-*.sqlite')
     if ((rc == 0)); then
       app git fetch --tags --quiet origin && app git checkout --quiet "$to" && app npm run --silent setup || rc=$?
+    fi
+    # The way back, as npm run latest prints it: the code as it was, and the database as it was before the update.
+    if [[ -n $from ]]; then
+      say "The way back, if this release is wrong:  sudo linear-hub update $from${backup:+   then   sudo linear-hub restore $backup}"
     fi
   elif [[ -z $(app git -C "$APP_ROOT" symbolic-ref -q HEAD 2>/dev/null || true) ]]; then
     service_start || true
@@ -195,6 +203,30 @@ cmd_update() {
   fi
   service_start || rc=$?
   ((rc == 0)) && ok "updated to $(app git describe --tags --always)"
+  return "$rc"
+}
+
+# cmd_restore FILE [--yes] [--forget-payments]: a name from `linear-hub backups`, or a path. The restore runs as the
+# service user, so a file it cannot read (say, one under /root) is copied in first, as import does. (An encrypted .lhbk
+# holds everything; a plain .sqlite brings its uploaded files only from the backups folder, so use a name from there.)
+cmd_restore() {
+  local file='' copy='' args=() a
+  for a in "$@"; do
+    if [[ -z $file && $a != -* ]]; then file=$a; else args+=("$a"); fi
+  done
+  [[ -n $file ]] || die "Say which backup, e.g.  sudo linear-hub restore linear-2026-11-02-0200.sqlite  (sudo linear-hub backups lists them)"
+  if [[ -f $file ]]; then
+    file=$(realpath "$file") # a path as typed here; the restore itself runs in the app folder
+    if ! runuser -u "$SERVICE_USER" -- test -r "$file"; then
+      install -d -m 0700 -o "$SERVICE_USER" -g "$SERVICE_USER" "$DATA_DIR/import"
+      copy=$DATA_DIR/import/$(basename "$file")
+      install -m 0600 -o "$SERVICE_USER" -g "$SERVICE_USER" "$file" "$copy"
+      file=$copy
+    fi
+  fi
+  local rc=0
+  with_service_stopped npm_script restore "$file" "${args[@]}" || rc=$?
+  [[ -z $copy ]] || rm -f "$copy"
   return "$rc"
 }
 
@@ -329,7 +361,8 @@ case $cmd in
   restore-test) cmd_restore_test ;;
   offsite-sync) cmd_offsite_sync ;;
   # (Not seed or share: a live server never needs the demo company, and it is reached by its address, not the LAN.)
-  golive | restore | key:restore) with_service_stopped npm_script "$cmd" "$@" ;;
+  restore) cmd_restore "$@" ;;
+  golive | key:restore) with_service_stopped npm_script "$cmd" "$@" ;;
   doctor | backup | backups | recovery-sheet | setup-code | 2fa:reset | pin:reset) npm_script "$cmd" "$@" ;;
   *) die "Unknown job: $cmd (sudo linear-hub help lists them)" ;;
 esac
