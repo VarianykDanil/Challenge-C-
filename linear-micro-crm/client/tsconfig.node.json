@@ -11,5 +11,5 @@
     "isolatedModules": true,
     "types": ["node"]
   },
-  "include": ["vite.config.ts", "build/**/*.ts", "sw/policy.test.ts"]
+  "include": ["vite.config.ts", "build/**/*.ts", "sw/policy.test.ts", "sw/handlers.test.ts"]
 }

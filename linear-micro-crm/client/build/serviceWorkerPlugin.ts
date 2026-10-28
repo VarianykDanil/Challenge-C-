@@ -3,8 +3,8 @@
 // 1. From Vite's output it works out which files to save on the phone (build/precache.ts): every page chunk, the
 //    stylesheet, the Latin fonts, index.html, the manifest and the icons.
 // 2. It compiles sw/sw.ts on its own (one classic script, no imports left) and puts the release version and that list
-//    in front of it. The version is a hash of the list and index.html, so every release that changes anything gives
-//    phones a new sw.js, and they offer to reload.
+//    in front of it. The version is a hash of the list, index.html and the worker's code, so every release that
+//    changes anything gives phones a new sw.js, and they offer to reload.
 // 3. It adds a preload for the Latin font to index.html, so text does not change face after the first paint.
 // Only runs for `vite build`; `vite` (development) has no service worker.
 import { createHash } from 'node:crypto';
@@ -59,8 +59,6 @@ export function serviceWorkerPlugin(opts: { swEntry: string }): Plugin {
       const publicFiles = filesUnder(outDir).filter((f) => !f.startsWith('assets/'));
       const plan = planPrecache({ chunks, assets, publicFiles });
       const indexHtml = readFileSync(path.join(outDir, 'index.html'), 'utf8');
-      const version = createHash('sha256').update(JSON.stringify(plan.precache)).update(indexHtml).update(readFileSync(opts.swEntry)).digest('hex').slice(0, 12);
-
       const result = await build({
         configFile: false,
         logLevel: 'warn',
@@ -76,6 +74,9 @@ export function serviceWorkerPlugin(opts: { swEntry: string }): Plugin {
       const output = (Array.isArray(result) ? result[0] : result) as { output: Array<{ type: string; code?: string }> };
       const code = output.output.find((o) => o.type === 'chunk')?.code;
       if (!code) throw new Error('The service worker did not build');
+      // The release version names the cache: a hash of the file list, the page and the worker's own built code (so a
+      // change anywhere in sw/ gives phones a new worker and a fresh cache).
+      const version = createHash('sha256').update(JSON.stringify(plan.precache)).update(indexHtml).update(code).digest('hex').slice(0, 12);
       const header = `self.__LM_SW__=${JSON.stringify({ version, precache: plan.precache })};\n`;
       writeFileSync(path.join(outDir, 'sw.js'), header + code);
 

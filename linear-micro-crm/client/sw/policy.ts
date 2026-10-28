@@ -23,6 +23,9 @@ export const RUNTIME_CACHE = 'lm-runtime-v1';
 /** At most this many files in the runtime cache; the oldest go first. */
 export const RUNTIME_LIMIT = 120;
 
+/** The previous release's bundles that this release does not have, for a page still running it (sw/handlers.ts). */
+export const PREVIOUS_CACHE = 'lm-previous-v1';
+
 const SHELL_PREFIX = 'lm-shell-';
 
 /** The cache that holds one release's app shell: a new release gets a new cache and the old one is removed. */
@@ -37,6 +40,15 @@ export function isShellCache(name: string): boolean {
 /** A file whose content can be copied from the last release's cache: hashed bundles never change under one name. */
 export function reusableFromOldCache(path: string): boolean {
   return path.startsWith('/assets/');
+}
+
+/**
+ * A page answered with this status gets the saved app shell instead (when one is saved): a 5xx means the app did not
+ * answer properly. Behind a proxy (Caddy) a stopped, crashed or restarting app is a 502, 503 or 504 page from the
+ * proxy, which would otherwise replace the app on the phone.
+ */
+export function servesSavedShell(status: number): boolean {
+  return status >= 500;
 }
 
 export function routeFor(req: RequestLike, origin: string): Route {
