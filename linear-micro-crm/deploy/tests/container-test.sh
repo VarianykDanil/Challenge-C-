@@ -14,7 +14,12 @@
 #      127.0.0.1 only;
 #   4. linear-hub backup (an encrypted .lhbk lands in the off-site folder), linear-hub offsite-sync (it reaches the
 #      "off-site" folder), linear-hub restore-test (downloads it, decrypts it, starts it, checks it), linear-hub golive;
-#   5. starts the server again on a read-only system with only the data folder writable, as ProtectSystem=strict does.
+#   5. a Hetzner-like Storage Box over SFTP (an OpenSSH server on port 23 in the container, two boxes by two names):
+#      the installer run with --yes records the box's host keys and shows the key to add; once added, the next run
+#      connects; a run with a new box, user and folder moves both remotes there; the nightly copy and the restore test
+#      then use the new box (a half-uploaded video is skipped);
+#   6. linear-hub update to a release tag (prints the way back) and linear-hub restore of a file under /root;
+#   7. starts the server again on a read-only system with only the data folder writable, as ProtectSystem=strict does.
 #
 # Settings for the test machine only (none of them change the installer):
 #   LH_TEST_IMAGE        image to start from (default ubuntu:24.04)
@@ -22,6 +27,8 @@
 #                        network, so pick a free one); the restore test uses LH_TEST_PORT2 (default LH_TEST_PORT+100)
 #   LH_TEST_PREINSTALL=1 put Node 22 (from nodejs.org, checksum checked) and Caddy (Ubuntu's package) in first, for
 #                        networks that block deb.nodesource.com and dl.cloudsmith.io; the installer then finds them
+#   LH_TEST_NODE_DIR     with LH_TEST_PREINSTALL=1: copy Node 22 from this folder of the test machine (an unpacked
+#                        nodejs.org release, e.g. /opt/node22) instead of downloading it
 #   HTTPS_PROXY / LH_TEST_CA  a proxy and its CA certificate, passed into the container (apt is switched to https)
 set -Eeuo pipefail
 
@@ -44,10 +51,13 @@ cleanup() {
 trap cleanup EXIT
 
 git clone -q --bare "$REPO" "$WORK/repo.git"
+# A release tag on the code being tested, for `linear-hub update <tag>`.
+git -C "$WORK/repo.git" tag lh-test-release "$REF"
 mounts=(-v "$WORK/repo.git:/src/repo.git:ro" -v "$DEPLOY:/src/deploy:ro")
 envs=()
 if [[ -n ${HTTPS_PROXY:-} ]]; then envs+=(-e "HTTPS_PROXY=$HTTPS_PROXY" -e "https_proxy=$HTTPS_PROXY" -e "NO_PROXY=${NO_PROXY:-}"); fi
 if [[ -n ${LH_TEST_CA:-} ]]; then mounts+=(-v "$LH_TEST_CA:/src/test-ca.crt:ro"); fi
+if [[ -n ${LH_TEST_NODE_DIR:-} ]]; then mounts+=(-v "$LH_TEST_NODE_DIR:/src/node:ro"); fi
 envs+=(-e "LH_TEST_PREINSTALL=${LH_TEST_PREINSTALL:-0}" -e "LH_TEST_PORT=$PORT" -e "LH_RESTORE_TEST_PORT=$PORT2" -e "REF=$REF")
 
 echo "Starting a throwaway $IMAGE container…"
@@ -76,11 +86,20 @@ if [[ -f /src/test-ca.crt ]]; then
   cp /src/test-ca.crt /usr/local/share/ca-certificates/test-ca.crt && update-ca-certificates >/dev/null 2>&1 || true
 fi
 git config --system safe.directory '*' 2>/dev/null || { apt-get install -y -qq git >/dev/null; git config --system safe.directory '*'; }
-if [[ $LH_TEST_PREINSTALL == 1 ]]; then
+if [[ $LH_TEST_PREINSTALL == 1 && -x /src/node/bin/node ]]; then
+  install -m 0755 /src/node/bin/node /usr/local/bin/node
+  mkdir -p /usr/local/lib/node_modules /usr/local/include
+  cp -a /src/node/lib/node_modules/npm /usr/local/lib/node_modules/
+  cp -a /src/node/include/node /usr/local/include/ 2>/dev/null || true
+  ln -sf ../lib/node_modules/npm/bin/npm-cli.js /usr/local/bin/npm
+  ln -sf ../lib/node_modules/npm/bin/npx-cli.js /usr/local/bin/npx
+elif [[ $LH_TEST_PREINSTALL == 1 ]]; then
   v=v22.22.0
   curl -fsSLO "https://nodejs.org/dist/$v/node-$v-linux-x64.tar.xz"
   curl -fsSL "https://nodejs.org/dist/$v/SHASUMS256.txt" | grep " node-$v-linux-x64.tar.xz\$" | sha256sum -c - >/dev/null
   tar -xJf "node-$v-linux-x64.tar.xz" -C /usr/local --strip-components=1 && rm "node-$v-linux-x64.tar.xz"
+fi
+if [[ $LH_TEST_PREINSTALL == 1 ]]; then
   apt-get install -y -qq caddy >/dev/null 2>&1 || apt-get install -y -qq caddy
   echo "  Node $(node -v) and Caddy $(caddy version | cut -d' ' -f1) put in first (this network blocks their own repositories)"
 fi
@@ -99,6 +118,9 @@ if bash /src/deploy/install.sh "${common[@]}" --offsite none >/tmp/run1.log 2>&1
   bad "the installer finishes"; tail -40 /tmp/run1.log; exit 1
 fi
 check "it warns that the backups stay on the server" grep -q "stay on this server" /tmp/run1.log
+# Caddy checks the Caddyfile as the user it runs as: newer Caddy versions create the log file while checking, and a log
+# file made by root would stop Caddy (running as caddy) from starting.
+check "Caddy's file is checked as the caddy user" grep -q 'runuser -u caddy -- env -i HOME=.* caddy validate --config /etc/caddy/Caddyfile' /tmp/run1.log
 key1=$(sha256sum /etc/linear-hub/keys/app-secret | cut -c1-16)
 pass1=$(sha256sum /etc/linear-hub/keys/backup-passphrase | cut -c1-16)
 
@@ -115,11 +137,16 @@ check "second run: says it kept them" bash -c "grep -q 'app key: kept' /tmp/run2
 check "second run: the code is not cloned again" grep -q "already cloned" /tmp/run2.log
 check "second run: connected to the off-site store" grep -q "connected to offsite:linear-hub" /tmp/run2.log
 check "the answers were kept for the next run" grep -qx "DOMAIN=hub.example.test" /etc/linear-hub/install.conf
+# A Caddy log file left by root (as `caddy validate` run by hand as root leaves it on Caddy 2.8 and newer).
+install -d -m 0755 /var/log/caddy
+install -m 0600 -o root -g root /dev/null /var/log/caddy/linear-hub.log
 if bash /src/deploy/install.sh "${common[@]}" --offsite existing >/tmp/run3.log 2>&1 && ! grep -q '· wrote ' /tmp/run3.log; then
   ok "a third run with the same answers changes no file"
 else
   bad "a third run with the same answers changes no file"; grep '· wrote ' /tmp/run3.log || true
 fi
+check "…and gives a Caddy log file left by root back to caddy" test "$(stat -c '%U:%G' /var/log/caddy/linear-hub.log)" = caddy:caddy
+check "…which caddy can then write to" runuser -u caddy -- sh -c ': >>/var/log/caddy/linear-hub.log'
 
 echo "== 3. Files, folders and modes"
 mode() { stat -c '%a %U:%G' "$1"; }
@@ -135,7 +162,7 @@ for line in HOST=127.0.0.1 COOKIE_SECURE=1 TRUST_PROXY=1 LM_DEMO_ACCOUNTS=0 DB_P
   check "settings: $line" grep -qx "$line" /etc/linear-hub/linear-hub.env
 done
 check "the service user has no shell" test "$(getent passwd linear | cut -d: -f7)" = /usr/sbin/nologin
-check "Caddy accepts the Caddyfile" caddy validate --config /etc/caddy/Caddyfile --adapter caddyfile
+check "Caddy accepts the Caddyfile (checked as caddy, as it runs)" runuser -u caddy -- env -i HOME=/var/lib/caddy PATH=/usr/bin:/bin caddy validate --config /etc/caddy/Caddyfile --adapter caddyfile
 check "the Caddyfile serves hub.example.test" grep -qx "hub.example.test {" /etc/caddy/Caddyfile
 check "the screens were built" test -f /opt/linear-hub/app/linear-micro-crm/client/dist/index.html
 check "the service file is in place" grep -qx "User=linear" /etc/systemd/system/linear-hub.service
@@ -211,13 +238,94 @@ check "…it printed the first owner's setup code" grep -Eq '[A-HJ-KMNP-Z2-9]{4}
 check "linear-hub status runs" linear-hub status
 check "linear-hub help runs" linear-hub help
 
+echo "== 5c. A Storage Box over SFTP: --yes, the key added by hand, then a new box, user and folder"
+# Test machine only: an OpenSSH server on port 23, as a Hetzner Storage Box has, under two names, with two users.
+apt-get install -y -qq openssh-server >/dev/null
+ssh-keygen -A >/dev/null
+install -d -m 0755 /run/sshd
+printf '%s\n' 'Port 23' 'ListenAddress 127.0.0.1' 'PasswordAuthentication no' 'KbdInteractiveAuthentication no' \
+  'UsePAM no' 'Subsystem sftp internal-sftp' 'PidFile /run/sshd-box.pid' >/etc/ssh/sshd_box_config
+/usr/sbin/sshd -f /etc/ssh/sshd_box_config
+printf '127.0.0.1 box1.example.test box2.example.test\n' >>/etc/hosts
+for u in box1 box2; do
+  useradd -m -s /bin/bash "$u" && usermod -p '*' "$u"
+  install -d -m 0700 -o "$u" -g "$u" "/home/$u/.ssh"
+done
+authorise() { # authorise USER: what the owner does in the Hetzner console with the key the installer shows
+  install -m 0600 -o "$1" -g "$1" /opt/linear-hub/.ssh/offsite_ed25519.pub "/home/$1/.ssh/authorized_keys"
+}
+box=(--offsite storagebox --storagebox-host box1.example.test --storagebox-user box1 --offsite-path linear-hub)
+if bash /src/deploy/install.sh "${common[@]}" "${box[@]}" >/tmp/box1.log 2>&1; then ok "a run with --yes and a new Storage Box finishes"; else
+  bad "a run with --yes and a new Storage Box finishes"; tail -30 /tmp/box1.log
+fi
+check "…it records the box's host keys for rclone (every key type)" \
+  bash -c "[[ \$(runuser -u linear -- ssh-keygen -F '[box1.example.test]:23' -f /opt/linear-hub/.ssh/known_hosts | grep -vc '^#') -ge 2 ]]"
+check "…and shows their fingerprints to compare" grep -q 'SHA256:' /tmp/box1.log
+check "…and, with no terminal, shows the key to add on the box" grep -qF "$(cut -d' ' -f2 /opt/linear-hub/.ssh/offsite_ed25519.pub)" /tmp/box1.log
+check "…and says the copies wait meanwhile" grep -q 'Could not write to offsite:linear-hub yet' /tmp/box1.log
+authorise box1
+bash /src/deploy/install.sh "${common[@]}" "${box[@]}" >/tmp/box1b.log 2>&1 || true
+check "once the key is on the box, the next run connects (it writes a check file there)" \
+  bash -c "grep -q 'connected to offsite:linear-hub' /tmp/box1b.log && test -s /home/box1/linear-hub/.linear-hub-check"
+check "…keeping the remote it made (rclone's own additions to it do not count as a change)" \
+  grep -q "the remote 'offsite' is set up for box1@box1.example.test" /tmp/box1b.log
+check "…rclone has noted what it learned about the box" grep -q '^shell_type = ' /opt/linear-hub/.config/rclone/rclone.conf
+bash /src/deploy/install.sh "${common[@]}" "${box[@]}" >/tmp/box1c.log 2>&1 || true
+check "a run with the same answers keeps the remote" \
+  bash -c "grep -q \"the remote 'offsite' is set up for box1@box1.example.test\" /tmp/box1c.log && ! grep -q \"rclone remote 'offsite' set up\" /tmp/box1c.log"
+install -d -o linear -g linear -m 700 /var/lib/linear-hub/media/videos
+head -c 300000 /dev/urandom | runuser -u linear -- tee /var/lib/linear-hub/media/videos/v1.mp4 >/dev/null
+head -c 1000 /dev/urandom | runuser -u linear -- tee /var/lib/linear-hub/media/videos/v2.upload >/dev/null
+if linear-hub offsite-sync >/tmp/box1-sync.log 2>&1; then ok "linear-hub offsite-sync to the Storage Box"; else
+  bad "linear-hub offsite-sync to the Storage Box"; tail -20 /tmp/box1-sync.log
+fi
+check "…the encrypted backups are on the box" bash -c "ls /home/box1/linear-hub/backups/linear-*.lhbk"
+check "…the video went, encrypted, and the half-uploaded one did not" \
+  bash -c "[[ \$(find /home/box1/linear-hub/media-encrypted -type f | wc -l) == 1 ]] && ! grep -rqa . /home/box1/linear-hub/media-encrypted --include='*.mp4'"
+authorise box2
+box2=(--offsite storagebox --storagebox-host box2.example.test --storagebox-user box2 --offsite-path hub2)
+if bash /src/deploy/install.sh "${common[@]}" "${box2[@]}" >/tmp/box2.log 2>&1; then ok "a run with a new box, user and folder finishes"; else
+  bad "a run with a new box, user and folder finishes"; tail -30 /tmp/box2.log
+fi
+rc_show() { runuser -u linear -- rclone --config /opt/linear-hub/.config/rclone/rclone.conf config show "$1"; }
+check "…the remote moved to the new box and user" bash -c "$(declare -f rc_show); rc_show offsite | grep -qx 'host = box2.example.test' && rc_show offsite | grep -qx 'user = box2'"
+check "…the videos' remote moved to the new folder" bash -c "$(declare -f rc_show); rc_show offsite-media | grep -qx 'remote = offsite:hub2/media-encrypted'"
+check "…the nightly copy goes to the new folder" grep -qx 'OFFSITE_TARGET=offsite:hub2' /etc/linear-hub/offsite.conf
+check "…the new box's host keys are recorded too" runuser -u linear -- ssh-keygen -F '[box2.example.test]:23' -f /opt/linear-hub/.ssh/known_hosts
+check "…and it is connected there" bash -c "grep -q 'connected to offsite:hub2' /tmp/box2.log && test -s /home/box2/hub2/.linear-hub-check"
+if linear-hub offsite-sync >/tmp/box2-sync.log 2>&1; then ok "linear-hub offsite-sync to the new box"; else
+  bad "linear-hub offsite-sync to the new box"; tail -20 /tmp/box2-sync.log
+fi
+check "…the encrypted backups are on the new box" bash -c "ls /home/box2/hub2/backups/linear-*.lhbk"
+if linear-hub restore-test >/tmp/box2-restoretest.log 2>&1; then ok "linear-hub restore-test from the new box"; else
+  bad "linear-hub restore-test from the new box"; tail -30 /tmp/box2-restoretest.log
+fi
+check "…it downloaded from the box" grep -q 'from the off-site store (offsite:hub2)' /tmp/box2-restoretest.log
+
+echo "== 5d. Updating to a release, and putting back a backup kept under /root"
+if linear-hub update lh-test-release >/tmp/update.log 2>&1; then ok "linear-hub update lh-test-release"; else
+  bad "linear-hub update lh-test-release"; tail -30 /tmp/update.log
+fi
+check "…it is on that release" grep -q 'updated to lh-test-release' /tmp/update.log
+check "…it backed up first and printed the way back" grep -Eq 'The way back, if this release is wrong: +sudo linear-hub update [0-9a-f]{12} +then +sudo linear-hub restore linear-.*\.sqlite' /tmp/update.log
+check "a plain update on a fixed release says which release to name" bash -c "! linear-hub update >/tmp/update2.log 2>&1 && grep -q 'fixed release' /tmp/update2.log"
+linear-hub backup >/dev/null 2>&1 || true
+newest_copy=$(find /var/lib/linear-hub/offsite -maxdepth 1 -name 'linear-*.lhbk' -printf '%f\n' | sort | tail -n1)
+cp "/var/lib/linear-hub/offsite/$newest_copy" /root/kept.lhbk && chmod 600 /root/kept.lhbk
+if (cd /root && linear-hub restore kept.lhbk --yes --forget-payments) >/tmp/restore-root.log 2>&1; then
+  ok "linear-hub restore of a file under /root (named from /root)"
+else bad "linear-hub restore of a file under /root (named from /root)"; tail -30 /tmp/restore-root.log; fi
+check "…the copy it made for the service user is gone again" bash -c "[[ -z \$(ls -A /var/lib/linear-hub/import) ]]"
+check "…and Linear Hub starts on it" start_server
+stop_server
+
 echo "${pass} ${fail}" >/tmp/result
 INSIDE
 
 read -r pass fail < <(docker exec "$NAME" cat /tmp/result)
 
-echo "== 6. Read-only system: only the data folder can be written (as ProtectSystem=strict + ReadWritePaths)"
-docker exec "$NAME" bash -c "pkill -f '[n]ode src/index.ts' || true"
+echo "== 7. Read-only system: only the data folder can be written (as ProtectSystem=strict + ReadWritePaths)"
+docker exec "$NAME" bash -c "pkill -f '[n]ode src/index.ts' || true; pkill -f '[s]shd -f /etc/ssh/sshd_box_config' || true"
 docker commit "$NAME" "$NAME-img" >/dev/null
 docker volume create "$NAME-data" >/dev/null
 docker run -d --name "$NAME-ro" --network host --read-only --tmpfs /tmp --tmpfs /run \
