@@ -34,6 +34,7 @@ import { computeWeek, DAY_RATE_KEY, payCalcContext, RULE_FROM_KEY } from '../lib
 import { carryForwardCorrections, insertRun, runFiguresOf, runIsDue } from './maintenance.ts';
 import * as D from '../lib/dates.ts';
 import * as S from './seed-data.ts';
+import { configureAppSecret } from '../lib/crypto.ts';
 
 export const DEFAULT_DB_PATH = path.resolve(import.meta.dirname, '../../data/linear.sqlite');
 
@@ -889,6 +890,9 @@ export function resetAndSeed(file: string): SeedStats {
 const isMain = process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url);
 if (isMain) {
   const file = process.env.DB_PATH ? path.resolve(process.env.DB_PATH) : DEFAULT_DB_PATH;
+  // lock the demo data with the key the server will use for this database (index.ts): LM_APP_SECRET, else
+  // LM_APP_SECRET_FILE, else app-secret next to the database (made here when there is none yet)
+  configureAppSecret(process.env.LM_APP_SECRET_FILE ? path.resolve(process.env.LM_APP_SECRET_FILE) : path.join(path.dirname(file), 'app-secret'));
   const started = performance.now();
   const stats = resetAndSeed(file);
   const ms = Math.round(performance.now() - started);

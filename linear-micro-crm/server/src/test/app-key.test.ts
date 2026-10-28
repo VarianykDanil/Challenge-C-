@@ -232,3 +232,30 @@ describe('npm run doctor', () => {
     db.close();
   });
 });
+
+// Found while checking the review by hand: `DB_PATH=<elsewhere> npm run seed` locked the demo bank details with the
+// default server/data/app-secret, while the server reads the key next to DB_PATH, so the new database would not start
+// (1.4.0 quietly made a new key instead, and the bank details were lost). The seed now uses the server's key.
+describe('npm run seed', () => {
+  test('locks the data with the key the server will use for that database', () => {
+    const dir = path.join(tmp, 'seed-elsewhere');
+    mkdirSync(dir, { recursive: true });
+    const dbPath = path.join(dir, 'linear.sqlite');
+    const r = spawnSync(process.execPath, [path.join(serverDir, 'src', 'db', 'seed.ts')], {
+      cwd: serverDir,
+      encoding: 'utf8',
+      env: { ...process.env, NODE_NO_WARNINGS: '1', DB_PATH: dbPath, LM_APP_SECRET: '', LM_APP_SECRET_FILE: '', TZ: 'Europe/London' },
+      timeout: 120_000,
+    });
+    assert.equal(r.status, 0, r.stderr);
+    const keyFile = path.join(dir, 'app-secret');
+    assert.ok(existsSync(keyFile), 'the key sits next to the database, where the server looks');
+    const db = new DatabaseSync(dbPath, { readOnly: true });
+    try {
+      assert.ok(encryptedData(db).total > 0, 'the demo company has locked data');
+      assert.equal(checkAppKey(db, readFileSync(keyFile, 'utf8').trim()).status, 'ok');
+    } finally {
+      db.close();
+    }
+  });
+});
