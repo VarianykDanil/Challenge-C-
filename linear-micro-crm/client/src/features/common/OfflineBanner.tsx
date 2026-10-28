@@ -10,7 +10,7 @@ import { useCallback, useEffect, useState } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 import { RefreshCw, WifiOff } from 'lucide-react';
 import { Button } from '@/components/ui';
-import { api, NETWORK_EVENT, type NetworkEventDetail } from '@/api/client';
+import { api, appReachable, NETWORK_EVENT, type NetworkEventDetail } from '@/api/client';
 
 const PROBE_MS = 30_000;
 
@@ -21,7 +21,9 @@ export interface OfflineBannerProps {
 
 export function OfflineBanner({ gaugeNote = true }: OfflineBannerProps) {
   const qc = useQueryClient();
-  const [offline, setOffline] = useState(() => typeof navigator !== 'undefined' && navigator.onLine === false);
+  // offline from the start when the phone has no signal, or a request already failed before this strip was shown (the
+  // sign-in check when the app opens with no signal)
+  const [offline, setOffline] = useState(() => (typeof navigator !== 'undefined' && navigator.onLine === false) || !appReachable());
   // the phone has no connection at all (rather than a server that does not answer)
   const [noSignal, setNoSignal] = useState(() => typeof navigator !== 'undefined' && navigator.onLine === false);
   const [retrying, setRetrying] = useState(false);

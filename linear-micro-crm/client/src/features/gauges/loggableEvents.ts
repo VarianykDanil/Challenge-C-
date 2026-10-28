@@ -5,13 +5,15 @@
 // signal: TanStack Query pauses it, or it failed), the lists already in the cache stand in — the dashboard's upcoming
 // events, any event list or event page seen this session — so a rep who loses signal can still log today's event.
 // When the app was opened with no signal the cache is empty: the events kept in the field kit (src/offline/) stand in,
-// and every time the list loads online it is kept there for next time.
+// and every time the list loads online it is kept there for next time. While Linear Hub is known to be out of reach the
+// fallback shows straight away, without waiting for the request to give up.
 import { useEffect, useMemo } from 'react';
 import { useQueryClient, type QueryClient } from '@tanstack/react-query';
 import { subDays } from 'date-fns';
 import type { Dashboard, SalesEventWithMeta, UserWithTeam } from '@lm/shared';
 import { isNetworkError } from '@/api/client';
 import { useEvents } from '@/api/hooks';
+import { useAppReachable } from '@/api/useAppReachable';
 import { useCurrentUser } from '@/auth/AuthProvider';
 import { todayISO, toISODate } from '@/lib/dates';
 import { kitEvents, rememberKitEvents } from '@/offline/fieldKit';
@@ -66,7 +68,10 @@ export function useLoggableEvents(opts: { enabled?: boolean } = {}): LoggableEve
   const params = useMemo(() => loggableEventsParams(me, today), [me, today]);
   const q = useEvents(params, { enabled: opts.enabled ?? true });
   const live = q.data;
-  const offline = q.fetchStatus === 'paused' || (q.isError && !q.isFetching && isNetworkError(q.error));
+  // also while Linear Hub is known to be out of reach and the list is still being asked for (a weak signal): the saved
+  // events show at once instead of after the request gives up
+  const reachable = useAppReachable();
+  const offline = q.fetchStatus === 'paused' || (!reachable && !live) || (q.isError && !q.isFetching && isNetworkError(q.error));
   useEffect(() => {
     if (live) rememberKitEvents(me.id, live);
   }, [live, me.id]);

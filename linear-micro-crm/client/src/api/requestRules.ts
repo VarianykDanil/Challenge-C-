@@ -22,15 +22,19 @@ export function isGatewayFailure(status: number, body: unknown): boolean {
 export const AUTH_PROBE_TIMEOUT_MS = 6_000;
 /** Any other read: after this long with no first answer the page says "You're offline" instead of loading forever. */
 export const GET_TIMEOUT_MS = 15_000;
+/** A read while the last request could not reach Linear Hub: the page falls back to what the phone has sooner. */
+export const UNREACHABLE_GET_TIMEOUT_MS = 5_000;
 
 /**
  * How long a request may wait for the server's first answer (its headers; a long download after that is not cut
  * short). Reads only: a save that took too long may still have been made, so saves wait as long as the browser does.
- * `explicit` (a number, or null for no limit) overrides the rule.
+ * `explicit` (a number, or null for no limit) overrides the rule. `reachable`: false while the last request could not
+ * reach Linear Hub, so reads give up sooner until something answers again.
  */
-export function requestTimeoutMs(method: string | undefined, explicit?: number | null): number | null {
+export function requestTimeoutMs(method: string | undefined, explicit?: number | null, reachable = true): number | null {
   if (explicit !== undefined) return explicit;
-  return (method ?? 'GET').toUpperCase() === 'GET' ? GET_TIMEOUT_MS : null;
+  if ((method ?? 'GET').toUpperCase() !== 'GET') return null;
+  return reachable ? GET_TIMEOUT_MS : UNREACHABLE_GET_TIMEOUT_MS;
 }
 
 /** The time limit passed with no answer from the server. */

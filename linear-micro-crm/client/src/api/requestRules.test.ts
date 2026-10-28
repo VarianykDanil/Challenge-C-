@@ -1,7 +1,7 @@
 // When a request counts as "can't reach Linear Hub" (src/api/requestRules.ts). Run by `npm test`.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { AUTH_PROBE_TIMEOUT_MS, GET_TIMEOUT_MS, RequestTimeout, fetchWithin, isGatewayFailure, requestTimeoutMs } from './requestRules.ts';
+import { AUTH_PROBE_TIMEOUT_MS, GET_TIMEOUT_MS, RequestTimeout, UNREACHABLE_GET_TIMEOUT_MS, fetchWithin, isGatewayFailure, requestTimeoutMs } from './requestRules.ts';
 
 test("a proxy's 502, 503 or 504 page is no answer from the app", () => {
   for (const status of [502, 503, 504]) {
@@ -24,6 +24,14 @@ test('reads have a time limit, saves do not (a slow save may still have been mad
   assert.equal(requestTimeoutMs('GET', AUTH_PROBE_TIMEOUT_MS), AUTH_PROBE_TIMEOUT_MS, 'the sign-in check sets its own');
   assert.equal(requestTimeoutMs('GET', null), null, 'a caller can ask for no limit');
   assert.ok(AUTH_PROBE_TIMEOUT_MS < GET_TIMEOUT_MS);
+});
+
+test('while Linear Hub is known to be unreachable, reads give up sooner, so every page falls back at once', () => {
+  assert.equal(requestTimeoutMs('GET', undefined, false), UNREACHABLE_GET_TIMEOUT_MS);
+  assert.ok(UNREACHABLE_GET_TIMEOUT_MS < GET_TIMEOUT_MS);
+  assert.equal(requestTimeoutMs('GET', undefined, true), GET_TIMEOUT_MS);
+  assert.equal(requestTimeoutMs('POST', undefined, false), null, 'saves still have no limit');
+  assert.equal(requestTimeoutMs('GET', AUTH_PROBE_TIMEOUT_MS, false), AUTH_PROBE_TIMEOUT_MS, 'an explicit limit wins');
 });
 
 /** A server that accepts the connection and never answers: the promise settles only when the request is aborted. */

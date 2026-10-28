@@ -55,7 +55,16 @@ if (typeof window !== 'undefined') {
 export const NETWORK_EVENT = 'lm:network';
 export interface NetworkEventDetail { online: boolean }
 
+/** Whether the last request reached Linear Hub (true until one fails). */
+let reachable = true;
+
+/** False while the last request could not reach Linear Hub; true again as soon as anything answers. */
+export function appReachable(): boolean {
+  return reachable;
+}
+
 function announceNetwork(online: boolean): void {
+  reachable = online;
   if (typeof window === 'undefined') return;
   try {
     window.dispatchEvent(new CustomEvent<NetworkEventDetail>(NETWORK_EVENT, { detail: { online } }));
@@ -91,7 +100,7 @@ export async function apiRaw<T>(path: string, init: ApiInit = {}): Promise<ApiRe
         body: json !== undefined ? JSON.stringify(json) : rest.body,
         ...rest,
       },
-      requestTimeoutMs(rest.method, timeoutMs),
+      requestTimeoutMs(rest.method, timeoutMs, reachable),
     );
   } catch (e) {
     // fetch rejects with a TypeError only when no HTTP answer came back. An abort (TanStack Query cancelling a query)
