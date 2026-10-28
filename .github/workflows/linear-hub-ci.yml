@@ -56,6 +56,9 @@ jobs:
         run: npm run typecheck
       - name: Unit and route tests (shared logic and server)
         run: npm test
+      - name: Extra loopback addresses the smoke test sends from as other devices (a Mac has only 127.0.0.1)
+        if: runner.os == 'macOS'
+        run: sudo ifconfig lo0 alias 127.0.0.2 up && sudo ifconfig lo0 alias 127.0.0.3 up
       - name: API smoke test
         run: npm run smoke -w server
       - name: Build client
