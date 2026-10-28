@@ -5,9 +5,9 @@
 // throws a NetworkError) the tap is kept on this phone with the time it was tapped (features/checkins/outbox.ts) and
 // reads "saved on this phone"; CheckInOutboxReplay sends it from any page. A check-in never logs gauges.
 // Mounted, each in an ErrorBoundary with fallback={null}:
-//  - pages/QuickGauges.tsx header (variant 'compact'): a 40 px button — the header is tight on a phone, so below
-//    640 px and held sideways it is an icon (the event's name keeps the width); tapping a check-in that is done
-//    shows its time (and Undo) in a toast;
+//  - pages/QuickGauges.tsx header (variant 'compact'): a 40 px button that always says "Check in" (on a phone too:
+//    an unlabelled pin was easy to miss), then the time it was done; tapping a check-in that is done shows its time
+//    (and Undo) in a toast;
 //  - features/dashboard/UpcomingEvents.tsx under every row dated today, and the event page's roll call card
 //    (variant 'row'): the button with the start time, then the status line with Undo.
 // It renders nothing unless it applies: a rep / leader (or admin) of the event's team, today, not cancelled, and —
@@ -116,11 +116,11 @@ export function CheckInButton({ event, variant = 'row', className }: CheckInButt
           onClick={() => void tap()}
           loading={checkIn.isPending}
           leftIcon={<MapPinCheck className="h-4 w-4" aria-hidden />}
-          className={clsx('max-sm:w-10 max-sm:px-0 short:w-10 short:px-0', className)}
+          className={clsx('shrink-0 whitespace-nowrap max-sm:px-2.5 short:px-2.5', className)}
           data-checkin-button="compact"
           title={`Check in at ${event.name}`}
         >
-          <span className="sr-only sm:not-sr-only short:sr-only">Check in</span>
+          Check in
         </Button>
       );
     }
@@ -138,7 +138,7 @@ export function CheckInButton({ event, variant = 'row', className }: CheckInButt
           })
         }
         className={clsx(
-          'focus-ring inline-flex h-10 shrink-0 items-center justify-center gap-1.5 rounded-lg px-2.5 text-sm font-semibold tabular-nums transition-colors max-sm:w-10 max-sm:px-0 short:w-10 short:px-0',
+          'focus-ring inline-flex h-10 shrink-0 items-center justify-center gap-1.5 rounded-lg px-2.5 text-sm font-semibold tabular-nums transition-colors',
           onPhone ? 'bg-info-soft text-info' : late ? 'bg-warning-soft text-warning' : 'bg-success-soft text-success',
           className,
         )}
@@ -148,7 +148,7 @@ export function CheckInButton({ event, variant = 'row', className }: CheckInButt
         data-checkin-state={onPhone ? 'phone' : late ? 'late' : 'on-time'}
       >
         <Icon className="h-[18px] w-[18px] shrink-0" aria-hidden />
-        <span className="hidden sm:inline short:hidden">{current.checkedInAt.slice(11, 16)}</span>
+        <span>{current.checkedInAt.slice(11, 16)}</span>
       </button>
     );
   }

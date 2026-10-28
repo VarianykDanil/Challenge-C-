@@ -102,6 +102,7 @@ function input(role: Role, p: Partial<AttentionInput> & { meId?: number; teamId?
     interviews: p.interviews ?? [],
     attendance: p.attendance ?? null,
     pipelineOverdue: p.pipelineOverdue ?? null,
+    checkedInToday: p.checkedInToday ?? null,
   };
 }
 
@@ -229,6 +230,46 @@ test('rep / leader: tomorrow’s own-team event → events:tomorrow (info) with 
   assert.ok(byKey(attentionItems(input('leader', { events: [e] }), NOW), 'events:tomorrow:80'));
   assert.equal(byKey(attentionItems(input('rep', { events: [{ ...e, status: 'cancelled' }] }), NOW), 'events:tomorrow:80'), undefined);
   assert.equal(attentionItems(input('admin', { events: [e] }), NOW).filter((i) => i.key.startsWith('events:tomorrow')).length, 0, 'admins have no team calendar');
+});
+
+test('rep / leader: today’s team event, not checked in yet → events:checkin with a Check in button', () => {
+  const e = ev({ id: 91, date: '2026-10-15', status: 'live', startTime: '09:00', endTime: '17:00', venue: 'Arndale' });
+  const it = byKey(attentionItems(input('rep', { events: [e], checkedInToday: [] }), NOW), 'events:checkin:91')!;
+  assert.ok(it, 'item present');
+  assert.equal(it.kind, 'events');
+  assert.equal(it.severity, 'warning', 'it has started');
+  assert.equal(it.title, 'Check in at BCN — Arndale');
+  assert.equal(it.body, 'Started 09:00. Tap Check in when you get there.');
+  assert.equal(it.href, '/quick?eventId=91');
+  assert.equal(it.actionLabel, 'Check in');
+  assert.ok(byKey(attentionItems(input('leader', { events: [e], checkedInToday: [] }), NOW), 'events:checkin:91'), 'leaders too');
+});
+
+test('check-in item: gone once checked in or once the day is logged; a teammate’s row does not count', () => {
+  const e = ev({ id: 92, date: '2026-10-15', status: 'live' });
+  const has = (p: Partial<AttentionInput>, role: Role = 'rep') => !!byKey(attentionItems(input(role, { events: [e], ...p }), NOW), 'events:checkin:92');
+  assert.equal(has({ checkedInToday: [92] }), false);
+  assert.equal(has({ checkedInToday: [], entries: [row(1, 92, 10, '2026-10-15')] }), false, 'logged the day');
+  assert.equal(has({ checkedInToday: [], entries: [row(2, 92, 11, '2026-10-15')] }, 'leader'), true, 'someone else logged');
+  assert.equal(has({ checkedInToday: null }), false, 'not known (an older server): no nagging');
+  assert.equal(has({}), false);
+});
+
+test('check-in item: from an hour before the start until the end; never cancelled, another day, admins or recruiters', () => {
+  const later = ev({ id: 93, date: '2026-10-15', status: 'scheduled', startTime: '16:00', endTime: '20:00', venue: 'MediaCity' });
+  const soon = byKey(attentionItems(input('rep', { events: [later], checkedInToday: [] }), NOW), 'events:checkin:93')!;
+  assert.equal(soon.severity, 'info', 'not started yet');
+  assert.equal(soon.body, 'Starts 16:00 · 5 min grace. Tap Check in when you get there.');
+  const at = (nowHHMM: string) => ({ ...NOW, nowHHMM });
+  const has = (e: SalesEventWithMeta, now = NOW, role: Role = 'rep') => attentionItems(input(role, { events: [e], checkedInToday: [] }), now).some((i) => i.key.startsWith('events:checkin:'));
+  assert.equal(has({ ...later, startTime: '16:01' }), false, 'more than an hour before');
+  assert.equal(has(later, at('20:00')), true, 'until the end');
+  assert.equal(has(later, at('20:01')), false, 'after the end');
+  assert.equal(has({ ...later, status: 'cancelled' }), false);
+  assert.equal(has({ ...later, date: '2026-10-16' }), false, 'tomorrow has its own item');
+  assert.equal(has({ ...later, teamId: TEAM_B }), false, 'another team');
+  assert.equal(has(later, NOW, 'admin'), false);
+  assert.equal(has(later, NOW, 'recruiter'), false);
 });
 
 // ───────────────────────────── pay ─────────────────────────────
