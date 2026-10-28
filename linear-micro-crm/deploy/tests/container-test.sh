@@ -19,7 +19,12 @@
 #      connects; a run with a new box, user and folder moves both remotes there; the nightly copy and the restore test
 #      then use the new box (a half-uploaded video is skipped);
 #   6. linear-hub update to a release tag (prints the way back) and linear-hub restore of a file under /root;
-#   7. starts the server again on a read-only system with only the data folder writable, as ProtectSystem=strict does.
+#   7. starts the server again on a read-only system with only the data folder writable, as ProtectSystem=strict does;
+#   8. with LH_TEST_SYSTEMD=1: boots the installed machine with systemd (a privileged container with no network) and
+#      runs the real units: the locked-down service starts and answers, systemd-analyze rates it, Caddy runs as caddy,
+#      the nightly copy runs under its own lock-down (and may write rclone's settings), linear-hub restart works, a
+#      missing app key is made anew while nothing is locked with it, and once something is, a missing key stops the
+#      service with exit code 78 instead of restarting it in a loop.
 #
 # Settings for the test machine only (none of them change the installer):
 #   LH_TEST_IMAGE        image to start from (default ubuntu:24.04)
@@ -30,6 +35,8 @@
 #   LH_TEST_NODE_DIR     with LH_TEST_PREINSTALL=1: copy Node 22 from this folder of the test machine (an unpacked
 #                        nodejs.org release, e.g. /opt/node22) instead of downloading it
 #   HTTPS_PROXY / LH_TEST_CA  a proxy and its CA certificate, passed into the container (apt is switched to https)
+#   LH_TEST_SYSTEMD=1    also run step 8 (needs a Docker that allows --privileged; the systemd container has no network)
+#   LH_TEST_KEEP_IMAGE=1 keep the installed image at the end (to look into a failure)
 set -Eeuo pipefail
 
 REPO=${1:?usage: container-test.sh <git repository folder> <branch>}
@@ -43,9 +50,9 @@ NAME=lh-install-test-$$
 WORK=$(mktemp -d)
 
 cleanup() {
-  docker rm -f "$NAME" "$NAME-ro" >/dev/null 2>&1 || true
+  docker rm -f "$NAME" "$NAME-ro" "$NAME-sd" >/dev/null 2>&1 || true
   docker volume rm "$NAME-data" >/dev/null 2>&1 || true
-  docker rmi "$NAME-img" >/dev/null 2>&1 || true
+  if [[ ${LH_TEST_KEEP_IMAGE:-0} == 1 ]]; then echo "Kept the installed image: $NAME-img"; else docker rmi "$NAME-img" >/dev/null 2>&1 || true; fi
   rm -rf "$WORK"
 }
 trap cleanup EXIT
@@ -58,7 +65,8 @@ envs=()
 if [[ -n ${HTTPS_PROXY:-} ]]; then envs+=(-e "HTTPS_PROXY=$HTTPS_PROXY" -e "https_proxy=$HTTPS_PROXY" -e "NO_PROXY=${NO_PROXY:-}"); fi
 if [[ -n ${LH_TEST_CA:-} ]]; then mounts+=(-v "$LH_TEST_CA:/src/test-ca.crt:ro"); fi
 if [[ -n ${LH_TEST_NODE_DIR:-} ]]; then mounts+=(-v "$LH_TEST_NODE_DIR:/src/node:ro"); fi
-envs+=(-e "LH_TEST_PREINSTALL=${LH_TEST_PREINSTALL:-0}" -e "LH_TEST_PORT=$PORT" -e "LH_RESTORE_TEST_PORT=$PORT2" -e "REF=$REF")
+envs+=(-e "LH_TEST_PREINSTALL=${LH_TEST_PREINSTALL:-0}" -e "LH_TEST_SYSTEMD=${LH_TEST_SYSTEMD:-0}" -e "LH_TEST_PORT=$PORT"
+  -e "LH_RESTORE_TEST_PORT=$PORT2" -e "REF=$REF")
 
 echo "Starting a throwaway $IMAGE container…"
 docker run -d --name "$NAME" --network host "${envs[@]}" "${mounts[@]}" "$IMAGE" sleep infinity >/dev/null
@@ -102,6 +110,10 @@ fi
 if [[ $LH_TEST_PREINSTALL == 1 ]]; then
   apt-get install -y -qq caddy >/dev/null 2>&1 || apt-get install -y -qq caddy
   echo "  Node $(node -v) and Caddy $(caddy version | cut -d' ' -f1) put in first (this network blocks their own repositories)"
+fi
+if [[ $LH_TEST_SYSTEMD == 1 ]]; then
+  # Installed now, but not running until step 8: the installer still sees a machine without systemd.
+  apt-get install -y -qq systemd systemd-sysv >/dev/null
 fi
 # A network that re-signs TLS: npm (run by the installer with a clean environment) trusts the test CA through its
 # global settings file, which needs no change to the installer.
@@ -319,6 +331,12 @@ check "…the copy it made for the service user is gone again" bash -c "[[ -z \$
 check "…and Linear Hub starts on it" start_server
 stop_server
 
+if [[ $LH_TEST_SYSTEMD == 1 ]]; then
+  # For step 8: units that have no business in a test container (or would touch the host's devices) stay off.
+  systemctl mask systemd-udevd.service systemd-udev-trigger.service systemd-networkd.service systemd-resolved.service \
+    systemd-timesyncd.service systemd-logind.service getty@tty1.service console-getty.service ssh.service ssh.socket \
+    unattended-upgrades.service apt-daily.timer apt-daily-upgrade.timer >/dev/null 2>&1 || true
+fi
 echo "${pass} ${fail}" >/tmp/result
 INSIDE
 
@@ -347,6 +365,81 @@ for _ in $(seq 1 45); do
 done
 echo "  FAIL it did not start read-only:"; tail -30 /tmp/server.log; exit 1
 READONLY
+
+if [[ ${LH_TEST_SYSTEMD:-0} == 1 ]]; then
+  echo "== 8. The real units under systemd (no network)"
+  docker run -d --name "$NAME-sd" --privileged --cgroupns=private --network none --tmpfs /run --tmpfs /run/lock \
+    "$NAME-img" /lib/systemd/systemd >/dev/null
+  read -r p8 f8 < <(docker exec -i "$NAME-sd" bash -s <<'SYSTEMD'
+set -Euo pipefail
+pass=0
+fail=0
+ok() { pass=$((pass + 1)); printf '  ok   %s\n' "$1" >&2; }
+bad() { fail=$((fail + 1)); printf '  FAIL %s\n' "$1" >&2; }
+check() { local what=$1; shift; if "$@" >/dev/null 2>&1; then ok "$what"; else bad "$what"; fi; }
+port=$(grep -E '^PORT=' /etc/linear-hub/linear-hub.env | cut -d= -f2)
+health() { curl -fsS -m 5 "http://127.0.0.1:$port/api/health" 2>/dev/null | grep -q '"ok":true'; }
+wait_health() { for _ in $(seq 1 45); do health && return 0; sleep 2; done; return 1; }
+for _ in $(seq 1 30); do case $(systemctl is-system-running 2>/dev/null) in running | degraded) break ;; esac; sleep 1; done
+check "systemd is up" bash -c "systemctl is-system-running | grep -Eq 'running|degraded'"
+systemctl start linear-hub.service
+check "the locked-down linear-hub.service starts and answers /api/health" wait_health
+journalctl -u linear-hub.service --no-pager | grep -iE 'EROFS|EACCES|EPERM|operation not permitted' >&2 && bad "…without permission errors in its log" || ok "…without permission errors in its log"
+exposure=$(systemd-analyze security linear-hub.service 2>/dev/null | grep -o 'Overall exposure level.*' || true)
+printf '       %s\n' "$exposure" >&2
+check "systemd-analyze security rates it 2.0 or less" systemd-analyze --threshold=20 security linear-hub.service
+check "Caddy runs as its own unit" systemctl is-active caddy.service
+check "…as the caddy user" bash -c "[[ \$(ps -o user= -C caddy | head -n1) == caddy ]]"
+check "…and its log file is caddy's (or not made yet)" bash -c "[[ ! -e /var/log/caddy/linear-hub.log || \$(stat -c %U /var/log/caddy/linear-hub.log) == caddy ]]"
+# No network here, so no certificate: Caddy's answer on port 80 (the redirect to https for the site in the Caddyfile)
+# shows it loaded the installer's Caddyfile and holds ports 80 and 443 as the caddy user.
+check "…and answers for the site: http:// sends visitors to https://" \
+  bash -c "curl -sS -o /dev/null -w '%{http_code} %{redirect_url}' -H 'Host: hub.example.test' http://127.0.0.1/ | grep -Eq '^30[18] https://hub.example.test/'"
+# The nightly copy, under its own lock-down, to the stand-in Storage Box from step 5c.
+install -d -m 0755 /run/sshd
+/usr/sbin/sshd -f /etc/ssh/sshd_box_config
+printf '127.0.0.1 box1.example.test box2.example.test\n' >>/etc/hosts
+# Forget what rclone learned about the box, so the run must write it back into its settings.
+sed -i -E '/^(shell_type|md5sum_command|sha1sum_command) = /d' /opt/linear-hub/.config/rclone/rclone.conf
+if linear-hub offsite-sync >/tmp/sd-sync.log 2>&1; then ok "linear-hub offsite-sync runs linear-hub-offsite.service"; else
+  bad "linear-hub offsite-sync runs linear-hub-offsite.service"; tail -20 /tmp/sd-sync.log >&2
+fi
+check "…the service ended well" bash -c "[[ \$(systemctl show -p Result --value linear-hub-offsite.service) == success ]]"
+check "…and could write rclone's settings (what it learned about the box is back)" grep -q '^shell_type = ' /opt/linear-hub/.config/rclone/rclone.conf
+check "linear-hub status sees the running service" bash -c "linear-hub status 2>&1 | grep -q 'service: running'"
+check "linear-hub restart" bash -c "linear-hub restart >/dev/null 2>&1 && systemctl is-active linear-hub.service"
+key=/etc/linear-hub/keys/app-secret
+as_linear_sql() { runuser -u linear -- sqlite3 /var/lib/linear-hub/linear.sqlite "$1"; }
+# While nothing is locked with the key (this database has no two-step, PIN or bank details yet), a missing key is made
+# anew, as on a first start: the service may write its own key folder.
+systemctl stop linear-hub.service
+cp -p "$key" /root/app-secret.before
+rm -f "$key"
+systemctl start linear-hub.service
+check "with nothing locked yet, a missing app key is made anew and the service starts" \
+  bash -c "$(declare -f health wait_health); port=$port; wait_health && [[ -s $key ]] && ! cmp -s $key /root/app-secret.before && [[ \$(stat -c '%a %U' $key) == '600 linear' ]]"
+# Once something is locked with the key (here a PIN), a missing key stops the service with exit code 78, and it is not
+# restarted again and again.
+systemctl stop linear-hub.service
+as_linear_sql "UPDATE users SET pin_hash = 'scrypt-hmac\$test' WHERE id = (SELECT MIN(id) FROM users)"
+mv "$key" /root/app-secret.aside
+systemctl start linear-hub.service || true
+sleep 15
+state=$(systemctl show -p ActiveState -p ExecMainStatus -p NRestarts linear-hub.service | tr '\n' ' ')
+printf '       %s\n' "$state" >&2
+check "with something locked and the key missing, it stops with exit code 78" bash -c "[[ \$(systemctl show -p ExecMainStatus --value linear-hub.service) == 78 ]]"
+check "…and is not restarted in a loop" bash -c "[[ \$(systemctl show -p NRestarts --value linear-hub.service) == 0 ]] && ! systemctl is-active --quiet linear-hub.service"
+check "…and its log says how to put the key back" bash -c "journalctl -u linear-hub.service --no-pager | grep -q 'key:restore'"
+mv /root/app-secret.aside "$key"
+systemctl reset-failed linear-hub.service
+systemctl start linear-hub.service
+check "with the key back it starts again" wait_health
+echo "$pass $fail"
+SYSTEMD
+  )
+  pass=$((pass + ${p8:-0}))
+  fail=$((fail + ${f8:-1}))
+fi
 
 echo
 echo "$pass passed, $fail failed"
