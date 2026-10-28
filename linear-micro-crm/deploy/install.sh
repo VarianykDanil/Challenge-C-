@@ -81,7 +81,7 @@ Questions (asked when not given; kept for the next run):
   --storagebox-user USER    e.g. u123456 (or a sub-account such as u123456-sub1)
   --s3-endpoint URL         e.g. https://fsn1.your-objectstorage.com or https://s3.eu-west-2.amazonaws.com
   --s3-bucket NAME          the bucket (make it first, private)
-  --s3-region NAME          optional, e.g. eu-west-2
+  --s3-region NAME          e.g. eu-west-2 (worked out from AWS, Hetzner and Backblaze addresses; asked otherwise)
   --s3-access-key-id ID     the access key; the secret comes from S3_SECRET_ACCESS_KEY or is asked (never shown)
   --offsite-path PATH       folder inside the off-site store (default: linear-hub)
   --heartbeat-url URL       optional: pinged after each good off-site copy (e.g. a Healthchecks.io check)
@@ -120,6 +120,40 @@ valid_bucket() { [[ $1 =~ ^[a-z0-9][a-z0-9.-]{1,61}[a-z0-9]$ ]]; }
 valid_path() { [[ $1 =~ ^[A-Za-z0-9][A-Za-z0-9._/-]*$ && $1 != *..* ]]; }
 valid_user() { [[ $1 =~ ^[a-z0-9][a-z0-9_-]{0,31}$ ]]; }
 valid_port() { [[ $1 =~ ^[0-9]{4,5}$ ]] && (($1 >= 1024 && $1 <= 65535)); }
+valid_region() { [[ $1 =~ ^[a-z0-9][a-z0-9-]{1,30}$ ]]; }
+
+# s3_region_for ENDPOINT: the region named in the usual S3 addresses (AWS, Hetzner Object Storage, Backblaze B2), or
+# nothing. AWS refuses a request signed for the wrong region, and rclone signs for us-east-1 when it is given none.
+s3_region_for() {
+  local host=${1#*://}
+  host=${host%%[/:]*}
+  if [[ $host =~ ^s3[.-](dualstack\.)?([a-z0-9-]+)\.amazonaws\.com$ ]]; then
+    printf '%s' "${BASH_REMATCH[2]}"
+  elif [[ $host == s3.amazonaws.com ]]; then
+    printf 'us-east-1'
+  elif [[ $host =~ ^([a-z0-9-]+)\.your-objectstorage\.com$ || $host =~ ^s3\.([a-z0-9-]+)\.backblazeb2\.com$ ]]; then
+    printf '%s' "${BASH_REMATCH[1]}"
+  fi
+  return 0
+}
+
+# s3_provider_for ENDPOINT: how rclone should talk to it (AWS for Amazon's own addresses, else a generic S3 store).
+s3_provider_for() {
+  local host=${1#*://}
+  host=${host%%[/:]*}
+  if [[ $host == *.amazonaws.com ]]; then printf 'AWS'; else printf 'Other'; fi
+}
+
+# remote_matches SHOWN key=value…: true when the rclone remote SHOWN (what `rclone config show NAME` prints) has exactly
+# these settings: none missing, none different and none left over from an earlier answer. Secrets are not compared.
+remote_matches() {
+  local shown=$1 have want kv
+  shift
+  [[ -n $shown ]] || return 1
+  have=$(grep -E '^[a-z0-9_]+ = ' <<<"$shown" | grep -Ev '^(secret_access_key|password|password2|pass|key_file_pass) = ' | sort) || true
+  want=$(for kv in "$@"; do printf '%s = %s\n' "${kv%%=*}" "${kv#*=}"; done | sort)
+  [[ $have == "$want" ]]
+}
 
 # version_ge A B: true when version A >= version B (both like 22.18.0).
 version_ge() { [[ $(printf '%s\n%s\n' "$2" "$1" | sort -V | head -n1) == "$2" ]]; }
@@ -437,7 +471,12 @@ gather_answers() {
       ask S3_ENDPOINT "S3 endpoint (https://…)" "" valid_url "is not an https:// address"
       ask S3_BUCKET "Bucket name" "" valid_bucket "is not a bucket name"
       ask S3_ACCESS_KEY_ID "Access key ID" "" valid_path "is not an access key ID"
-      if [[ -n $S3_REGION ]] && ! valid_path "$S3_REGION"; then die "$S3_REGION is not a region name"; fi
+      # The region is worked out from AWS, Hetzner and Backblaze addresses; only a region given here is kept as an
+      # answer, so a new endpoint on a later run works its own out.
+      if [[ -z $S3_REGION && -z $(s3_region_for "$S3_ENDPOINT") ]] && interactive; then
+        read -r -p "  The bucket's region (Enter if your provider names none): " S3_REGION
+      fi
+      if [[ -n $S3_REGION ]] && ! valid_region "$S3_REGION"; then die "$S3_REGION is not a region name (like eu-west-2)"; fi
       OFFSITE_PATH=${OFFSITE_PATH:-linear-hub}
       valid_path "$OFFSITE_PATH" || die "$OFFSITE_PATH is not a folder name"
       ;;
@@ -568,7 +607,10 @@ step_ssh() {
       rm -f /etc/ssh/sshd_config.d/10-linear-hub.conf
       die "The SSH settings did not check out, so they were taken back out. Nothing else changed in SSH."
     fi
-    if [[ $HAVE_SYSTEMD == 1 ]]; then run systemctl reload ssh; fi
+    # try-reload-or-restart: Ubuntu 24.04 starts SSH on demand (ssh.socket), so ssh.service may not be running when
+    # the installer runs from the provider's console; a plain reload would then fail and stop the install. A service
+    # that is not running reads the new setting when it next starts.
+    if [[ $HAVE_SYSTEMD == 1 ]]; then run systemctl try-reload-or-restart ssh; fi
   fi
   ok "SSH accepts keys only"
 }
@@ -789,10 +831,11 @@ step_caddy() {
   fi
   if render "$TEMPLATES/Caddyfile" DOMAIN="$DOMAIN" ACME_EMAIL="$ACME_EMAIL" APP_PORT="$APP_PORT" |
     put_file "$caddyfile" 0644 root root; then
-    if ! run caddy validate --config "$caddyfile" --adapter caddyfile; then
+    if ! caddy_validate "$caddyfile"; then
       if [[ -n $backup ]]; then cp -p "$backup" "$caddyfile"; fi
       die "Caddy did not accept the new Caddyfile, so the previous one was put back."
     fi
+    caddy_owns_log
     if [[ $HAVE_SYSTEMD == 1 ]]; then
       run systemctl enable caddy.service
       run systemctl reload-or-restart caddy.service
@@ -809,6 +852,22 @@ step_caddy() {
     warn "https://$DOMAIN does not answer yet. Usually the domain does not point at this server yet: Caddy keeps"
     warn "trying by itself once it does. Check with:  sudo linear-hub status"
   fi
+}
+
+# caddy_validate FILE: checks the Caddyfile as the caddy user, the way Caddy runs it. Checking opens the log file named
+# in it: as root, newer Caddy versions would create that file for root only, and Caddy (as caddy) could then not open
+# it, so it would not start or reload.
+caddy_validate() {
+  local home
+  home=$(getent passwd caddy 2>/dev/null | cut -d: -f6) || true
+  run runuser -u caddy -- env -i HOME="${home:-/var/lib/caddy}" PATH=/usr/bin:/bin caddy validate --config "$1" --adapter caddyfile
+}
+
+# caddy_owns_log: a log file left by root (an earlier check run as root) is given back to Caddy.
+caddy_owns_log() {
+  local log=/var/log/caddy/linear-hub.log
+  [[ $DRY_RUN == 0 && -e $log ]] || return 0
+  [[ $(stat -c '%U' "$log") == caddy ]] || run chown caddy:caddy "$log"
 }
 
 check_dns() {
@@ -832,58 +891,129 @@ check_dns() {
 # ── step 11: off-site copies ───────────────────────────────────────────────────────────────────────────────────────
 rclone_linear() { as_linear rclone --config "$RCLONE_CONF" "$@"; }
 passphrase_text() { [[ $DRY_RUN == 1 ]] || tr -d '\n' <"$KEYS_DIR/backup-passphrase"; }
+# Short time limits for the reachability check, so a store that does not answer fails in seconds, not minutes.
+RCLONE_QUICK=(--contimeout 15s --timeout 60s --retries 1 --low-level-retries 2)
 # (Output is read whole before matching: with pipefail, `| grep -q` can fail when grep stops reading early.)
 remote_exists() {
   local remotes
   remotes=$(as_linear_quiet rclone --config "$RCLONE_CONF" listremotes 2>/dev/null) || return 1
   grep -qx "$1:" <<<"$remotes"
 }
+# remote_show NAME: the remote's settings as `rclone config show` prints them, or nothing.
+remote_show() { as_linear_quiet rclone --config "$RCLONE_CONF" config show "$1" 2>/dev/null || true; }
+
+# put_remote NAME TYPE key=value…: makes the rclone remote NAME with exactly these settings. `config create` replaces a
+# remote of that name whole. (Never `config update`: it cannot change a remote's type, and it reads a type word as a
+# setting, so a changed answer would be quietly ignored.) REMOTE_SECRET_KEY / REMOTE_SECRET, when set, add one secret
+# setting, which is never printed or logged.
+REMOTE_SECRET_KEY=''
+REMOTE_SECRET=''
+put_remote() {
+  local name=$1 type=$2 shown
+  shift 2
+  local cmd=(rclone --config "$RCLONE_CONF" config create "$name" "$type" "$@")
+  shown="rclone --config $RCLONE_CONF config create $name $type $*"
+  if [[ -n $REMOTE_SECRET_KEY ]]; then
+    cmd+=("$REMOTE_SECRET_KEY=$REMOTE_SECRET" --obscure)
+    shown+=" $REMOTE_SECRET_KEY=*** --obscure"
+  fi
+  REMOTE_SECRET_KEY=''
+  REMOTE_SECRET=''
+  as_linear_masked "$shown --non-interactive" "${cmd[@]}" --non-interactive
+  [[ $DRY_RUN == 1 ]] || note "rclone remote '$name' set up ($type)"
+}
+
+# learn_storagebox_keys: records the Storage Box's SSH host keys for rclone, which refuses a host it does not know.
+# Every key type the box offers is recorded: rclone may choose any of them, and refuses with "key mismatch" when the one
+# it chose is missing. The fingerprints are shown so they can be compared with the ones Hetzner publishes.
+learn_storagebox_keys() {
+  local kh=$SSH_DIR/known_hosts keys
+  if [[ $DRY_RUN == 0 ]] && as_linear_quiet ssh-keygen -F "[$STORAGEBOX_HOST]:23" -f "$kh" >/dev/null 2>&1; then
+    ok "the Storage Box's host keys are known"
+    return 0
+  fi
+  log_cmd "runuser -u $SERVICE_USER -- ssh-keyscan -p 23 $STORAGEBOX_HOST >> $kh"
+  [[ $DRY_RUN == 1 ]] && return 0
+  keys=$(as_linear_exec "$HOME_DIR" ssh-keyscan -p 23 -T 15 "$STORAGEBOX_HOST" 2>/dev/null | grep -v '^#') || true
+  if [[ -z $keys ]]; then
+    warn "The Storage Box $STORAGEBOX_HOST does not answer on port 23. Turn on SSH support for it in the Hetzner console."
+    return 0
+  fi
+  printf '%s\n' "$keys" | as_linear_exec "$HOME_DIR" tee -a "$kh" >/dev/null
+  say "  The Storage Box's host keys are recorded. Their fingerprints (compare them with the ones Hetzner publishes"
+  say "  for Storage Boxes; if they differ, stop and tell Noryn):"
+  ssh-keygen -lf - <<<"$keys" | sed 's/^/    /'
+}
+
+# reach_offsite TARGET: true when the store can be written to. It writes a small check file there, because
+# `rclone mkdir` alone proves nothing on S3 (it does nothing there).
+reach_offsite() {
+  log_cmd "runuser -u $SERVICE_USER -- rclone --config $RCLONE_CONF mkdir $1/backups"
+  log_cmd "runuser -u $SERVICE_USER -- date -Is | rclone --config $RCLONE_CONF rcat $1/.linear-hub-check"
+  [[ $DRY_RUN == 1 ]] && return 0
+  as_linear_quiet rclone --config "$RCLONE_CONF" "${RCLONE_QUICK[@]}" mkdir "$1/backups" >/dev/null 2>&1 &&
+    date -Is | as_linear_exec "$HOME_DIR" rclone --config "$RCLONE_CONF" "${RCLONE_QUICK[@]}" rcat "$1/.linear-hub-check" >/dev/null 2>&1
+}
+
+# storagebox_authorise KEY: puts this server's key on the Storage Box (the box's password is typed once, not stored).
+# Returns 1 when that cannot be done here (no terminal), after saying how to do it.
+storagebox_authorise() {
+  say "  The Storage Box does not accept this server's key yet. Turn on SSH support for the Storage Box in the"
+  say "  Hetzner console, then type its password once when asked (it is not stored)."
+  if interactive; then
+    as_linear ssh-copy-id -s -p 23 -i "$1.pub" -o StrictHostKeyChecking=yes \
+      -o UserKnownHostsFile="$SSH_DIR/known_hosts" "$STORAGEBOX_USER@$STORAGEBOX_HOST" || true
+    return 0
+  fi
+  say "  Without a terminal: run the installer again without --yes, or add this public key to the Storage Box as"
+  say "  Hetzner's guide to Storage Box SSH keys describes, then run the installer again:"
+  say "    $(cat "$1.pub")"
+  return 1
+}
 
 step_offsite() {
   step "Off-site copies of the backups"
-  local target='' enabled=0
+  local target='' enabled=0 key=$SSH_DIR/offsite_ed25519
   case $OFFSITE in
     none)
       note "none chosen: the encrypted copies stay on this server until an off-site store is set up"
       ;;
     storagebox)
       target="offsite:$OFFSITE_PATH"
-      local key=$SSH_DIR/offsite_ed25519 verb=create
       if [[ $DRY_RUN == 1 || ! -f $key ]]; then
         as_linear ssh-keygen -q -t ed25519 -N '' -C "linear-hub-offsite@$DOMAIN" -f "$key"
       fi
-      remote_exists offsite && verb=update
-      rclone_linear config "$verb" offsite sftp host="$STORAGEBOX_HOST" user="$STORAGEBOX_USER" port=23 \
-        key_file="$key" known_hosts_file="$SSH_DIR/known_hosts" --non-interactive
-      if [[ $DRY_RUN == 0 ]] && ! as_linear_quiet rclone --config "$RCLONE_CONF" mkdir "$target/backups" >/dev/null 2>&1; then
-        say "  The Storage Box does not know this server's key yet. Turn on SSH support for the Storage Box in"
-        say "  the Hetzner console, then type its password once when asked (it is not stored)."
-        if interactive; then
-          as_linear ssh-copy-id -s -p 23 -i "$key.pub" -o StrictHostKeyChecking=accept-new \
-            -o UserKnownHostsFile="$SSH_DIR/known_hosts" "$STORAGEBOX_USER@$STORAGEBOX_HOST" || true
-        else
-          say "  Or add this key in the Hetzner console:  $(cat "$key.pub")"
-        fi
+      learn_storagebox_keys
+      local box=(host="$STORAGEBOX_HOST" user="$STORAGEBOX_USER" port=23 key_file="$key" known_hosts_file="$SSH_DIR/known_hosts")
+      if remote_matches "$(remote_show offsite)" type=sftp "${box[@]}"; then
+        ok "the remote 'offsite' is set up for $STORAGEBOX_USER@$STORAGEBOX_HOST"
+      else
+        put_remote offsite sftp "${box[@]}"
       fi
       ;;
     s3)
       target="offsite:$S3_BUCKET/$OFFSITE_PATH"
-      local secret=${S3_SECRET_ACCESS_KEY:-}
-      if remote_exists offsite && [[ -z $secret ]]; then
-        ok "the remote 'offsite' is already set up (give S3_SECRET_ACCESS_KEY to change its keys)"
+      local secret=${S3_SECRET_ACCESS_KEY:-} region current
+      region=${S3_REGION:-$(s3_region_for "$S3_ENDPOINT")}
+      local bucket=(provider="$(s3_provider_for "$S3_ENDPOINT")" endpoint="$S3_ENDPOINT" access_key_id="$S3_ACCESS_KEY_ID"
+        acl=private no_check_bucket=true)
+      [[ -n $region ]] && bucket+=(region="$region")
+      current=$(remote_show offsite)
+      if [[ -z $secret ]] && remote_matches "$current" type=s3 "${bucket[@]}"; then
+        ok "the remote 'offsite' is set up for $S3_ENDPOINT (give S3_SECRET_ACCESS_KEY to change its secret key)"
       else
+        # The settings changed but no new secret key was given: keep the one the remote already holds.
+        if [[ -z $secret ]] && grep -qx 'type = s3' <<<"$current"; then
+          secret=$(sed -n 's/^secret_access_key = //p' <<<"$current")
+        fi
         if [[ -z $secret && $DRY_RUN == 0 ]]; then
           interactive || die "Give the bucket's secret key in S3_SECRET_ACCESS_KEY (it is never shown or saved in the answers)."
           read -r -s -p "  Secret access key (not shown): " secret
           printf '\n'
         fi
-        local args=(offsite s3 provider=Other endpoint="$S3_ENDPOINT" access_key_id="$S3_ACCESS_KEY_ID" acl=private
-          no_check_bucket=true)
-        [[ -n $S3_REGION ]] && args+=(region="$S3_REGION")
-        local verb=create
-        remote_exists offsite && verb=update
-        as_linear_masked "rclone --config $RCLONE_CONF config $verb ${args[*]} secret_access_key=*** --non-interactive" \
-          rclone --config "$RCLONE_CONF" config "$verb" "${args[@]}" secret_access_key="$secret" --non-interactive
+        REMOTE_SECRET_KEY=secret_access_key
+        REMOTE_SECRET=$secret
+        put_remote offsite s3 "${bucket[@]}"
       fi
       ;;
     existing)
@@ -900,26 +1030,25 @@ step_offsite() {
     # Learning videos are not inside the nightly backup (they are large), so they get their own encrypted copy,
     # locked with the same passphrase as the backups.
     # (rclone takes the password as an argument for a moment; on this single-purpose server only root could see it.)
-    local mverb=create
-    remote_exists offsite-media && mverb=update
-    local media_now=''
-    [[ $mverb == update ]] && media_now=$(as_linear_quiet rclone --config "$RCLONE_CONF" config show offsite-media 2>/dev/null)
-    if grep -qx "remote = $target/media-encrypted" <<<"$media_now"; then
+    local media=(remote="$target/media-encrypted" filename_encryption=standard directory_name_encryption=true)
+    if remote_matches "$(remote_show offsite-media)" type=crypt "${media[@]}"; then
       ok "the encrypted copy of the learning videos is set up"
     else
-      local media_args=(offsite-media crypt remote="$target/media-encrypted" filename_encryption=standard
-        directory_name_encryption=true)
-      as_linear_masked "rclone --config $RCLONE_CONF config $mverb ${media_args[*]} password=*** --obscure --non-interactive" \
-        rclone --config "$RCLONE_CONF" config "$mverb" "${media_args[@]}" password="$(passphrase_text)" --obscure --non-interactive
+      REMOTE_SECRET_KEY=password
+      REMOTE_SECRET=$(passphrase_text)
+      put_remote offsite-media crypt "${media[@]}"
     fi
-    if [[ $DRY_RUN == 1 ]]; then
-      rclone_linear mkdir "$target/backups"
-      OFFSITE_READY=1
-    elif as_linear_quiet rclone --config "$RCLONE_CONF" mkdir "$target/backups" >/dev/null 2>&1; then
-      ok "connected to $target"
+    local reached=0
+    if reach_offsite "$target"; then
+      reached=1
+    elif [[ $OFFSITE == storagebox ]] && storagebox_authorise "$key" && reach_offsite "$target"; then
+      reached=1
+    fi
+    if ((reached)); then
+      [[ $DRY_RUN == 1 ]] || ok "connected to $target (a check file was written there)"
       OFFSITE_READY=1
     else
-      warn "Could not reach $target yet. The copies wait on this server; run the installer again once it is reachable."
+      warn "Could not write to $target yet. The copies wait on this server; run the installer again once it works."
     fi
   fi
   render "$TEMPLATES/offsite.conf" ENABLED="$enabled" TARGET="$target" HEARTBEAT_URL="$HEARTBEAT_URL" \
@@ -970,6 +1099,10 @@ EOF
     say ""
     warn "Off-site copies are not set up: the encrypted backups stay on this server. If the server is lost, so are they."
     warn "Run the installer again with --offsite storagebox (or s3) to fix that."
+  elif [[ -z $HEARTBEAT_URL ]]; then
+    say ""
+    warn "No heartbeat address: a nightly off-site copy that fails shows only in  sudo linear-hub status."
+    warn "Add a Healthchecks.io check and run the installer again with --heartbeat-url (docs/DEPLOY.md, step 9)."
   fi
   if [[ $NEW_PASSPHRASE == 2 ]]; then
     say ""

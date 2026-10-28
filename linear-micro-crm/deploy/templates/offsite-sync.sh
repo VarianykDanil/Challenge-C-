@@ -38,16 +38,18 @@ if ((count == 0)); then
   echo "No encrypted backups in $offsite_dir yet: Linear Hub writes one after each backup (the first ten minutes after it starts, then nightly)."
 fi
 
-# --immutable: a file already there is never replaced; --size-only: compare by size (the names carry the time).
+# --size-only: compare by size (each name carries its time, and a finished copy never changes). A copy cut off half-way
+# (a dropped connection, the 04:30 restart) is shorter than the file here, so the next night sends it again.
 if ! rclone --config "$rclone_conf" copy "$offsite_dir" "$target/backups" --include 'linear-*.lhbk' \
-  --immutable --size-only --log-level NOTICE; then
+  --size-only --log-level NOTICE; then
   record failed "could not copy the backups to $target"
   echo "Could not copy the backups to $target." >&2
   exit 1
 fi
 
 if [[ -d $media_dir ]] && [[ -n $(find "$media_dir" -type f -print -quit 2>/dev/null) ]]; then
-  if ! rclone --config "$rclone_conf" copy "$media_dir" offsite-media: --size-only --log-level NOTICE; then
+  # *.upload: a video still being uploaded to Linear Hub (renamed when it is complete).
+  if ! rclone --config "$rclone_conf" copy "$media_dir" offsite-media: --exclude '*.upload' --size-only --log-level NOTICE; then
     record failed "the backups were copied, but the learning videos were not"
     echo "Could not copy the learning videos." >&2
     exit 1

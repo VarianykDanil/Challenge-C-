@@ -109,6 +109,28 @@ check "merge: LM_APP_SECRET is kept (removing it would change the key) but warne
 check "a Storage Box host is accepted" valid_host u123456.your-storagebox.de
 check "a host with a port is refused" bash -c "! (source '$INSTALL'; valid_host 'u1.your-storagebox.de:23')"
 
+# S3: the region is worked out from the usual endpoint addresses (AWS signs for us-east-1 without one and refuses).
+check "S3 region: AWS London" test "$(s3_region_for https://s3.eu-west-2.amazonaws.com)" = eu-west-2
+check "S3 region: AWS, old dash form" test "$(s3_region_for https://s3-eu-west-1.amazonaws.com)" = eu-west-1
+check "S3 region: AWS dual-stack" test "$(s3_region_for https://s3.dualstack.eu-west-2.amazonaws.com)" = eu-west-2
+check "S3 region: AWS without a region is us-east-1" test "$(s3_region_for https://s3.amazonaws.com)" = us-east-1
+check "S3 region: Hetzner Object Storage" test "$(s3_region_for https://fsn1.your-objectstorage.com)" = fsn1
+check "S3 region: Backblaze B2" test "$(s3_region_for https://s3.eu-central-003.backblazeb2.com)" = eu-central-003
+check "S3 region: unknown provider gives none" test -z "$(s3_region_for https://minio.example.co.uk)"
+check "S3 provider: AWS for amazonaws.com" test "$(s3_provider_for https://s3.eu-west-2.amazonaws.com)" = AWS
+check "S3 provider: Other for anything else" test "$(s3_provider_for https://fsn1.your-objectstorage.com)" = Other
+
+# An rclone remote is kept only when every setting already has the wanted value.
+shown=$'[offsite]\ntype = sftp\nhost = a.example.co.uk\nuser = u1\nport = 23'
+check "remote_matches: same settings" remote_matches "$shown" type=sftp host=a.example.co.uk user=u1 port=23
+check "remote_matches: a setting left over from an earlier answer does not match" \
+  bash -c "! (source '$INSTALL'; remote_matches \"\$1\" type=sftp host=a.example.co.uk port=23)" _ "$shown"
+check "remote_matches: secrets are not compared" \
+  remote_matches $'[s]\ntype = s3\nsecret_access_key = x\nregion = eu-west-2' type=s3 region=eu-west-2
+check "remote_matches: a changed host does not match" bash -c "! (source '$INSTALL'; remote_matches \"\$1\" type=sftp host=b.example.co.uk)" _ "$shown"
+check "remote_matches: a changed type does not match" bash -c "! (source '$INSTALL'; remote_matches \"\$1\" type=s3 host=a.example.co.uk)" _ "$shown"
+check "remote_matches: no remote does not match" bash -c "! (source '$INSTALL'; remote_matches '' type=sftp)"
+
 set -e
 
 echo "3. A dry run on a pretend fresh server"
@@ -182,6 +204,22 @@ check "off-site: the heartbeat URL survives & in it" has_line "$OFFCONF" "HEARTB
 check "off-site: settings are 0640 root:linear" has_line "$MODES" "/etc/linear-hub/offsite.conf 0640 root:linear"
 check "off-site: the Storage Box remote is made with an SSH key on port 23" \
   bash -c "grep -q 'rclone .*config create offsite sftp' '$CMDS' && grep -q 'port=23' '$CMDS' && grep -q 'key_file=/opt/linear-hub/.ssh/offsite_ed25519' '$CMDS'"
+# `rclone config update NAME TYPE key=value` reads TYPE as a setting and swallows the next one, and cannot change a
+# remote's type: a changed answer must make the remote afresh.
+check "off-site: no remote is ever changed with rclone config update" lacks_text "$CMDS" "config update"
+# rclone refuses a Storage Box whose host keys are not in known_hosts, and with only one key type recorded it can still
+# fail ("key mismatch"), so every key type the box offers is recorded, and the fingerprints are shown to compare.
+check "off-site: the Storage Box host keys (every type) are recorded for rclone" \
+  grep -Eq '^runuser -u linear -- .*ssh-keyscan -p 23 u123456\.your-storagebox\.de( |$)' "$CMDS"
+check "off-site: …not only one key type" bash -c "! grep -E 'ssh-keyscan .*-t ' '$CMDS'"
+check "off-site: the store is proven by writing to it, not by mkdir alone (mkdir does nothing on S3)" \
+  has_text "$CMDS" "rcat offsite:linear-hub/.linear-hub-check"
+check "Caddy's file is checked as the caddy user (a log file made by root would stop Caddy starting)" \
+  grep -Eq '^runuser -u caddy -- .*caddy validate --config /etc/caddy/Caddyfile --adapter caddyfile' "$CMDS"
+SYNC="$PREVIEW/usr/local/lib/linear-hub/offsite-sync.sh"
+check "off-site copy: no --immutable (a copy cut off half-way must be sent again, not refused for ever)" lacks_text "$SYNC" "--immutable"
+check "off-site copy: compares by size, so a short copy is sent again" has_text "$SYNC" "--size-only"
+check "off-site copy: half-uploaded videos are skipped" has_text "$SYNC" "--exclude '*.upload'"
 
 check "updates: security updates every day" has_text "$PREVIEW/etc/apt/apt.conf.d/20auto-upgrades" 'APT::Periodic::Unattended-Upgrade "1";'
 check "updates: restart at night when an update needs it" has_text "$PREVIEW/etc/apt/apt.conf.d/52linear-hub-unattended-upgrades" 'Automatic-Reboot "true"'
@@ -247,6 +285,31 @@ fi
 check "…the remote points at the bucket" has_line "$WORK/p4/etc/linear-hub/offsite.conf" "OFFSITE_TARGET=offsite:linear-hub-backups/linear-hub"
 check "…the secret key never appears in the commands shown" bash -c "! grep -rq test-secret '$WORK/p4' '$WORK/s3.out'"
 check "…an SSH repository gets a deploy key" has_text "$WORK/p4/COMMANDS" "deploy_ed25519"
+check "…the given region is used" grep -Eq 'config create offsite s3 .*region=eu-central-1' "$WORK/p4/COMMANDS"
+if S3_SECRET_ACCESS_KEY=test-secret bash "$INSTALL" --dry-run --preview "$WORK/p5" --yes --domain hub.example.co.uk \
+  --email ops@example.co.uk --repo https://github.com/example/linear-hub.git --ref main --offsite s3 \
+  --s3-endpoint https://s3.eu-west-2.amazonaws.com --s3-bucket linear-hub-backups --s3-access-key-id AKIDTEST \
+  >"$WORK/aws.out" 2>&1; then
+  pass "AWS S3 London without --s3-region"
+else
+  fail "AWS S3 London without --s3-region"
+  tail -5 "$WORK/aws.out" | sed 's/^/       /'
+fi
+check "…the region is worked out from the endpoint" grep -Eq 'config create offsite s3 .*region=eu-west-2' "$WORK/p5/COMMANDS"
+check "…as an AWS bucket" grep -Eq 'config create offsite s3 provider=AWS ' "$WORK/p5/COMMANDS"
+check "…the region is not saved as an answer (a new endpoint works it out again)" has_line "$WORK/p5/etc/linear-hub/install.conf" "S3_REGION="
+
+echo "6. SSH keys only"
+if bash "$INSTALL" --dry-run --preview "$WORK/p6" --yes --domain hub.example.co.uk --email ops@example.co.uk \
+  --repo https://github.com/example/linear-hub.git --ref main --offsite none --ssh-keys-only yes >"$WORK/ssh.out" 2>&1; then
+  pass "keys-only SSH"
+else
+  fail "keys-only SSH"
+fi
+check "…the setting is written" test -f "$WORK/p6/etc/ssh/sshd_config.d/10-linear-hub.conf"
+# Ubuntu 24.04 starts SSH on demand (ssh.socket): from a provider's console ssh.service may not be running, and a
+# plain reload would then stop the installer.
+check "…SSH picks it up without failing when ssh.service is not running" has_line "$WORK/p6/COMMANDS" "systemctl try-reload-or-restart ssh"
 
 echo
 echo "$passed passed, $failed failed"
