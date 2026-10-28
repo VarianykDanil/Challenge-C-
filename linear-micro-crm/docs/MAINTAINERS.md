@@ -52,7 +52,7 @@ The checks every change must pass (CI runs the same):
 
 ```bash
 npm run typecheck              # shared, server and client
-npm test                       # shared + server suites (TZ=Europe/London is set by the scripts)
+npm test                       # every workspace's tests: shared, server and client (TZ=Europe/London is set)
 npm run smoke -w server        # boots a temporary server and calls every endpoint as each role
 npm run build                  # the client production build
 bash deploy/tests/run.sh       # the installer: shellcheck, helpers and a full dry run
@@ -221,6 +221,11 @@ the server's settings and stops the service around the ones that need the databa
 - Never commit `server/data/` (databases, keys, backups, uploads), `.env` files, real people's names, emails, phone
   numbers or bank details: the demo uses invented people and `@linearhub.example` addresses. Never log, audit, export
   or return secrets or full bank numbers.
+- **Never let an AI tool read the live server, its database, its backups or any copy of Linear MCR's data**, and
+  never paste real data into one. Linear Hub was built with AI coding agents (see [`TEAM.md`](TEAM.md)); they work on
+  the code and the invented demo data only. The agreement says so (Schedule 3, 3.7: no Customer Data in any AI tool
+  or online service that is not a listed sub-processor, and no such tool reading it while connected to the server).
+  Work on the live server by hand, over SSH, with the least access the task needs.
 
 ## 8. Reading the code's history comments
 
@@ -229,10 +234,11 @@ package** of which release wrote the code, not a person and not who owns it now:
 
 | Code | Release | Package |
 | --- | --- | --- |
-| `p2`–`p9` | 1.1 (the smart features) | p2 personal pace and streaks, p3 pay estimate and payroll checks, p4 leader check-ins and coaching, p5 Needs attention, p6 event forecasts and rosters, p7 saves that wait for signal (the outbox), p9 the weekly review |
+| `p1`–`p10` | 1.1 (the smart features) | p1 the foundation (the route-test harness, the role matrix and payload contracts of the new endpoints), p2 personal pace and streaks, p3 pay estimate and payroll checks, p4 leader check-ins and coaching, p5 Needs attention, p6 event forecasts and rosters, p7 saves that wait for signal (the outbox), p8 recruitment deadlines for each stage, p9 the weekly review, p10 nightly backups, the background service and compression |
 | `r2-foundation`, `L1`, `L2`, `U1`–`U5` | 1.2 | foundation; L1 learning pack, L2 pitch studio; U1 PIN, U2 bulk gauge entry, U3 audit trail, U4 shift check-ins, U5 search and payroll export |
-| `r3-foundation`, `P1`–`P9` | 1.3 | foundation; P1 pay rule, P2 invoices, P3 statements, P4 PDFs, P5 videos, P6 client accounts, P7 recruitment, P8 venues, P9 audit of everything |
-| `F`, `P`, `A`, `S` | 1.4 | F payments foundation, P bank payment files, A API connections (Revolut, Wise, TrueLayer), S security (two-step for everyone) |
+| `r3-foundation`, `P1`–`P9`, `I1`–`I5` | 1.3 | foundation; P1 pay rule, P2 invoices, P3 statements, P4 PDFs, P5 videos, P6 client accounts, P7 recruitment, P8 venues, P9 audit of everything; `I1`–`I5` the fix rounds after merging them (for example I3 the guard on every line a PDF prints) |
+| Sapiens | 1.3.1 | the demo team Sapiens and its one-tap accounts, and recruiters and leaders adding people |
+| `F`, `P`, `A`, `S`, `r4-` | 1.4 | F payments foundation, P bank payment files, A API connections (Revolut, Wise, TrueLayer), S security (two-step for everyone); `r4-` files are the 1.4 tests that cut across them (`r4-security.test.ts`, `r4-integration.test.ts`) |
 | access, keys, money, phone, docs, quality | 1.5 | sign-in and trial mode; app key and backups; money controls; phone app; docs and installer; CI and dependencies |
 
 "Owned by the Product Designer" and similar role names in older comments come from an earlier, wrong description of
@@ -241,8 +247,10 @@ them as dates.
 
 ## 9. Known limits
 
-- **One process, synchronous SQLite.** 430 to 800 requests a second on one core in the load tests
-  ([`LOAD_TEST.md`](LOAD_TEST.md)), far above Linear MCR's needs. It cannot run as two copies. A move to Postgres would
+- **One process, synchronous SQLite.** About 430 requests a second for release 1.0 before its response cache, and 700
+  to 900 for 1.1, on one core of a 4-vCPU Xeon test machine in October 2026 ([`LOAD_TEST.md`](LOAD_TEST.md)); 1.5 has
+  not been measured, nor has a small shared 2-vCPU server. Even several times slower would be far above Linear MCR's
+  needs (a few requests a second). It cannot run as two copies. A move to Postgres would
   mean a new data layer (around 700 synchronous calls in about 90 server files, with SQLite-only SQL): weeks of work,
   only worth it for several offices or hundreds of people at once ([`ROADMAP.md`](ROADMAP.md)).
 - **`node:sqlite` is still marked experimental by Node.** Linear Hub pins the Node lines it is tested on (22.18+, 24,

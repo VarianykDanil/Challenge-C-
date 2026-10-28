@@ -39,6 +39,8 @@ describe('who built it', () => {
       const text = read(file);
       for (const name of INVENTED_TEAM) assert.ok(!text.includes(name), `${file} still names ${name}`);
       assert.ok(!/\bsquad\b/i.test(text), `${file} still talks about a squad`);
+      // "Lead" developer implies other developers; there is one.
+      assert.ok(!/\blead developer\b/i.test(text), `${file} still says "lead developer"`);
     }
   });
 
@@ -50,6 +52,8 @@ describe('who built it', () => {
     assert.match(team, /tests/i);
     assert.match(team, /review/i);
     assert.ok(!/14-day/.test(team), 'sessions end 14 hours after signing in, not 14 days');
+    // Release 1.4.0's last change (db65a60) is dated 26 October 2026.
+    assert.ok(!/1\.4\.0 on 25 October/.test(team), 'TEAM.md dates 1.4.0 to 25 October; its final version is from 26 October');
   });
 });
 
@@ -139,6 +143,25 @@ describe('going online', () => {
       assert.ok(deploy.includes(must), `DEPLOY.md does not mention ${must}`);
     }
     assert.match(section(deploy, /Trial only/), /For the trial week only/);
+  });
+});
+
+describe('the maintainers’ guide', () => {
+  it('names every history code the comments use', () => {
+    const table = section(read('docs/MAINTAINERS.md'), /Reading the code's history comments/);
+    for (const code of [/\bp1\b/, /\bp8\b/, /\bp10\b/, /\bI1\b/, /\bI5\b/, /Sapiens/, /\br4-/]) assert.match(table, code, `§8 does not explain ${code}`);
+  });
+
+  it('says AI tools never read the live server or its data (agreement Schedule 3, 3.7)', () => {
+    assert.match(section(read('docs/MAINTAINERS.md'), /Keys, secrets and data/), /AI tool/);
+  });
+
+  it('gives the load-test figures with the release and the machine they were measured on', () => {
+    for (const doc of ['docs/MAINTAINERS.md', 'docs/ROADMAP.md']) {
+      const text = read(doc);
+      assert.ok(!/430 to 800 requests a second/.test(text) || /1\.0 and 1\.1/.test(text), `${doc} quotes load figures without saying from which release`);
+      assert.match(text, /test machine/, `${doc} does not say the figures are from a test machine`);
+    }
   });
 });
 

@@ -36,8 +36,8 @@ not do.
 
 ## What this means for Linear MCR
 
-- **It moves fast.** Release 1.0 came out on 15 October 2026 and 1.4.0 on 25 October: each release takes days, not
-  months.
+- **It moves fast.** Release 1.0 came out on 15 October 2026 and 1.4.0's final version on 26 October: each release
+  takes days, not months.
 - **The safety net is the tests and the reviews,** not a person reading every line. No one has read all of the
   roughly 130,000 lines line by line. The parts that matter most (pay, payments, sign-in, backups) have the most tests
   and the strictest reviews, and each review's findings are written down and answered in the next release.

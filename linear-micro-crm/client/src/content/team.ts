@@ -18,10 +18,10 @@ export const TEAM_MEMBERS: TeamMember[] = [
     color: '#2563EB',
   },
   {
-    name: 'One lead developer',
+    name: 'One developer',
     role: 'Directs the work',
     focus: 'Agrees the scope with Linear MCR, splits each release into work packages and decides what ships.',
-    initials: 'OL',
+    initials: 'OD',
     color: '#8B5CF6',
   },
   {
