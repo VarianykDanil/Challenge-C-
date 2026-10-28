@@ -15,8 +15,11 @@ on:
 permissions:
   contents: read
 
+# A newer push to the same pull request replaces the older run. Every other run (a push to a branch, the Monday run,
+# a manual run) has a group of its own, so it is never cancelled or dropped from the queue: every commit gets a
+# finished run.
 concurrency:
-  group: linear-hub-ci-${{ github.ref }}
+  group: linear-hub-ci-${{ github.event_name == 'pull_request' && github.ref || github.run_id }}
   cancel-in-progress: true
 
 jobs:
@@ -67,8 +70,8 @@ jobs:
         if: runner.os == 'Linux'
         run: docker build -t linear-hub:ci .
 
-  # Known security problems in the packages the app runs with. High or critical fails the build; the full report
-  # (tools included) is printed for information.
+  # Known security problems in the packages the app runs with. Moderate, high or critical fails the build; the full
+  # report (tools included) is printed for information.
   audit:
     runs-on: ubuntu-latest
     timeout-minutes: 10
@@ -82,8 +85,8 @@ jobs:
       - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6.5.0
         with:
           node-version: '22'
-      - name: npm audit (production dependencies, fails on high or critical)
-        run: npm audit --omit=dev --audit-level=high
+      - name: npm audit (production dependencies, fails on moderate or worse)
+        run: npm audit --omit=dev --audit-level=moderate
       - name: npm audit (everything, for information)
         if: always()
         run: npm audit || true
