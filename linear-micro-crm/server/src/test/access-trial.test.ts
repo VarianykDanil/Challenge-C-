@@ -79,6 +79,17 @@ test('admins see trial mode: GET /auth/me carries it and the Needs-attention fee
   }
 });
 
+test('the trial item comes first in Needs attention, even above old failed transfers (an upgraded 1.4 trial database)', async () => {
+  srv = await startTestServer({ seed: true });
+  // what a 1.4 demo database still holds: past runs whose transfers failed
+  run(db(), `UPDATE payroll_runs SET status = 'failed' WHERE id IN (SELECT id FROM payroll_runs WHERE status = 'paid' ORDER BY week_start DESC LIMIT 3)`);
+  srv.resetCache();
+  const admin = await srv.login('admin');
+  const items = (await admin.get('/me/attention')).json.items as Json[];
+  assert.ok(items.some((i) => i.kind === 'payroll' && i.severity === 'danger'), JSON.stringify(items.map((i) => [i.key, i.severity])));
+  assert.match(items[0]!.key, /^security:trial/, JSON.stringify(items.map((i) => i.key)));
+});
+
 /** Runs `fn` with these environment variables (undefined: unset), then puts them back. */
 async function withEnv(vars: Record<string, string | undefined>, fn: () => Promise<void>): Promise<void> {
   const prev = Object.fromEntries(Object.keys(vars).map((k) => [k, process.env[k]]));

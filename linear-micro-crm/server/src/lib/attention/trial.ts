@@ -1,6 +1,6 @@
 /**
  * Trial mode in the Needs-attention feed, for administrators only: while the database still holds the demo company,
- * the first thing every admin sees is that it is a trial and that it must go live before real pay or bank details go
+ * the first thing every admin sees (stamped with the current time, so it sorts first) is that it is a trial and that it must go live before real pay or bank details go
  * in. One cached read (lib/trialMode.ts), within the feed's statement budget.
  */
 import { ACCESS_MESSAGES, trialHeadline, type AttentionItem } from '@lm/shared';
@@ -9,7 +9,7 @@ import type { AttentionProvider } from './types.ts';
 
 export const provider: AttentionProvider = {
   name: 'trial',
-  items(db, me) {
+  items(db, me, now) {
     if (me.role !== 'admin') return [];
     const status = trialStatus(db);
     if (!status.trialMode) return [];
@@ -21,6 +21,8 @@ export const provider: AttentionProvider = {
       body: ACCESS_MESSAGES.trialBody,
       href: '/settings#trial',
       actionLabel: 'How to go live',
+      // it is about right now, so it sorts above every other danger item (old failed transfers included)
+      at: now.nowISO,
     };
     return [item];
   },
