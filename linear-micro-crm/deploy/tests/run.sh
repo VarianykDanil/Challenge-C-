@@ -198,8 +198,10 @@ check "no key or passphrase is written into the preview" \
 check "unit: runs as linear" has_line "$UNIT" "User=linear"
 check "unit: reads the environment file" has_line "$UNIT" "EnvironmentFile=/etc/linear-hub/linear-hub.env"
 check "unit: NODE_ENV=production" has_line "$UNIT" "Environment=NODE_ENV=production"
-check "unit: may write only the data folder" \
-  bash -c "grep -qx 'ProtectSystem=strict' '$UNIT' && grep -qx 'ReadWritePaths=/var/lib/linear-hub' '$UNIT'"
+# The key folder too: the app makes a key for a database with nothing locked yet (lib/appKey.ts), and under
+# ProtectSystem=strict a read-only key folder made it crash and restart every 5 seconds instead.
+check "unit: may write only the data folder and the key folder" \
+  bash -c "grep -qx 'ProtectSystem=strict' '$UNIT' && grep -qx 'ReadWritePaths=/var/lib/linear-hub /etc/linear-hub/keys' '$UNIT'"
 for line in NoNewPrivileges=yes ProtectHome=yes PrivateTmp=yes PrivateDevices=yes CapabilityBoundingSet= \
   RestrictSUIDSGID=yes SystemCallFilter=@system-service RestartPreventExitStatus=78 UMask=0077; do
   check "unit: $line" has_line "$UNIT" "$line"
@@ -241,6 +243,17 @@ check "off-site copy: half-uploaded videos are skipped" has_text "$SYNC" "--excl
 check "off-site service: rclone may write its own settings" \
   has_line "$PREVIEW/etc/systemd/system/linear-hub-offsite.service" "ReadWritePaths=/var/lib/linear-hub /opt/linear-hub/.config/rclone"
 
+# How exposed each service is, as systemd itself rates it (0 = locked down, 10 = wide open), from the unit files alone.
+# Needs systemd-analyze 250 or newer; skipped where it is missing (macOS, containers without systemd).
+if command -v systemd-analyze >/dev/null 2>&1 && systemd-analyze --offline=true security --help >/dev/null 2>&1; then
+  # --threshold counts in tenths: 20 means an overall exposure of 2.0 or less.
+  check "the Linear Hub service is rated 2.0 or less by systemd-analyze security" \
+    systemd-analyze --offline=true --threshold=20 security "$PREVIEW/etc/systemd/system/linear-hub.service"
+  check "the off-site copy service is rated 2.5 or less by systemd-analyze security" \
+    systemd-analyze --offline=true --threshold=25 security "$PREVIEW/etc/systemd/system/linear-hub-offsite.service"
+else
+  echo "  skip systemd-analyze security (systemd-analyze 250 or newer is not installed)"
+fi
 check "updates: security updates every day" has_text "$PREVIEW/etc/apt/apt.conf.d/20auto-upgrades" 'APT::Periodic::Unattended-Upgrade "1";'
 check "updates: restart at night when an update needs it" has_text "$PREVIEW/etc/apt/apt.conf.d/52linear-hub-unattended-upgrades" 'Automatic-Reboot "true"'
 

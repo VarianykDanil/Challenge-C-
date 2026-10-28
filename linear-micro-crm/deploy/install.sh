@@ -798,7 +798,8 @@ step_service() {
   step "The Linear Hub service"
   local unit_changed=0
   if render "$TEMPLATES/linear-hub.service" SERVICE_USER="$SERVICE_USER" APP_ROOT="$APP_ROOT" ENV_FILE="$ENV_FILE" \
-    DATA_DIR="$DATA_DIR" NODE_BIN="$NODE_BIN" | put_file /etc/systemd/system/linear-hub.service 0644 root root; then
+    DATA_DIR="$DATA_DIR" KEYS_DIR="$KEYS_DIR" NODE_BIN="$NODE_BIN" |
+    put_file /etc/systemd/system/linear-hub.service 0644 root root; then
     unit_changed=1
   fi
   if [[ $HAVE_SYSTEMD == 0 ]]; then

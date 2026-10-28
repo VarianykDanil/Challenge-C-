@@ -21,11 +21,12 @@ RestartPreventExitStatus=78
 TimeoutStopSec=30
 UMask=0077
 
-# Locked down: the app may write only its data folder; it cannot gain privileges, see other processes, change the
-# system, load kernel modules or open raw network sockets.
+# Locked down: the app may write only its data folder and its key folder; it cannot gain privileges, see other
+# processes, change the system, load kernel modules or open raw network sockets. (It writes the key folder only to make
+# a key for a database that has nothing locked yet, as on a first start; it never replaces a key.)
 NoNewPrivileges=yes
 ProtectSystem=strict
-ReadWritePaths=@DATA_DIR@
+ReadWritePaths=@DATA_DIR@ @KEYS_DIR@
 ProtectHome=yes
 PrivateTmp=yes
 PrivateDevices=yes

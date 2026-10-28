@@ -14,6 +14,9 @@ Environment=RCLONE_CACHE_DIR=@DATA_DIR@/.cache/rclone
 Nice=10
 IOSchedulingClass=idle
 TimeoutStartSec=6h
+UMask=0077
+
+# Locked down like the app itself: it may write only the data folder and rclone's own settings, and reach the network.
 NoNewPrivileges=yes
 ProtectSystem=strict
 # rclone writes what it learns about the store (and refreshed sign-in tokens) back into its own settings.
@@ -23,6 +26,20 @@ PrivateTmp=yes
 PrivateDevices=yes
 ProtectKernelTunables=yes
 ProtectKernelModules=yes
+ProtectKernelLogs=yes
 ProtectControlGroups=yes
+ProtectClock=yes
+ProtectHostname=yes
+ProtectProc=invisible
+RestrictNamespaces=yes
+RestrictRealtime=yes
 RestrictSUIDSGID=yes
+LockPersonality=yes
+MemoryDenyWriteExecute=yes
+RemoveIPC=yes
 CapabilityBoundingSet=
+AmbientCapabilities=
+SystemCallArchitectures=native
+SystemCallFilter=@system-service
+SystemCallErrorNumber=EPERM
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6 AF_NETLINK
