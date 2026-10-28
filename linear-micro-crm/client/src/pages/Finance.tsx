@@ -25,7 +25,8 @@ import { csvFilename, sortRows } from '@/lib/csv';
 import { todayISO } from '@/lib/dates';
 import { formatDate, formatDateShort, formatDecimal, formatGBP, formatNumber, formatPct, formatRangeLabel, formatRelative } from '@/lib/format';
 import { usePageTitle } from '@/lib/usePageTitle';
-import { useActionParam } from '@/lib/useActionParam';
+import { idFromParam, useActionParam } from '@/lib/useActionParam';
+import { financeTabs, openingFinanceTab } from './financeTabs';
 import { COPY } from '@/content/copy';
 // Release 1.3 (P2): bulk Mark paid skips runs whose invoice is not accepted; the confirm step counts only the rest.
 import { bulkConfirmDescription, payableRuns } from '@/features/finance/bulkPay';
@@ -46,26 +47,28 @@ function nextPaydayTile(nextPayday: string | null, nextPayAmount: number | null,
 export function FinancePage() {
   usePageTitle(COPY.nav.finance.title);
   const me = useCurrentUser();
-  const tabs = useMemo(() => {
-    const t: { value: Tab; label: string }[] = [{ value: 'me', label: 'My pay' }];
-    if (me.role === 'leader' && me.teamId != null) t.push({ value: 'team', label: 'Team pay' });
-    if (me.role === 'admin') t.push({ value: 'company', label: 'Company' });
-    return t;
-  }, [me.role, me.teamId]);
-  // Deep links (p1): /finance?tab=me|team|company picks a tab this person has; #runs (admin) lands on Runs to pay.
+  const tabs = useMemo(() => financeTabs(me.role, me.teamId), [me.role, me.teamId]);
+  // Deep links (p1): /finance?tab=me|team|company picks a tab this person has; #runs (admin) lands on Runs to pay;
+  // &run=<id> opens that payslip (the "Check and accept your invoice" item). With no link the owner and office open on
+  // Company, everyone else on My pay (pages/financeTabs.ts).
   const location = useLocation();
   const linkTab = (tabParam: string | null, hash: string): Tab | null => {
     if (hash === '#runs' && me.role === 'admin' && (tabParam === null || tabParam === 'company')) return 'company';
     return tabs.find((t) => t.value === tabParam)?.value ?? null;
   };
-  const [tab, setTab] = useState<Tab>(() => linkTab(new URLSearchParams(location.search).get('tab'), location.hash) ?? 'me');
+  const [tab, setTab] = useState<Tab>(() => {
+    const q = new URLSearchParams(location.search);
+    return openingFinanceTab(me.role, me.teamId, { tab: q.get('tab'), hash: location.hash, run: q.get('run') });
+  });
   // Only a link that resolves to Company scrolls (?tab=me#runs opens My pay and must not jump later when Company is
   // opened by hand). On the first render `tab` is the resolved link tab.
   const [scrollToRuns, setScrollToRuns] = useState(() => location.hash === '#runs' && me.role === 'admin' && tab === 'company');
-  useActionParam(['tab'], (p, hash) => {
-    const next = linkTab(p.tab, hash);
+  const [openRunId, setOpenRunId] = useState<number | null>(null);
+  useActionParam(['tab', 'run'], (p, hash) => {
+    const next = linkTab(p.tab, hash) ?? (p.run ? 'me' : null);
     if (next) setTab(next);
     setScrollToRuns(hash === '#runs' && me.role === 'admin' && next === 'company');
+    setOpenRunId(idFromParam(p.run));
   }, { hashes: ['#runs'] });
   const [payslip, setPayslip] = useState<PayrollRunWithUser | null>(null);
 
@@ -73,7 +76,7 @@ export function FinancePage() {
     <>
       <PageHeader title={COPY.nav.finance.title} description={tab === 'me' ? COPY.nav.finance.description : tab === 'team' ? 'Payroll for your team, week by week.' : 'Revenue, payroll, expenses and profit across the company.'} />
       {tabs.length > 1 && <Tabs items={tabs} value={tab} onChange={(v) => setTab(v as Tab)} className="mb-6" />}
-      {tab === 'me' && <MyPay onOpen={setPayslip} />}
+      {tab === 'me' && <MyPay onOpen={setPayslip} openRunId={openRunId} onOpened={() => setOpenRunId(null)} />}
       {tab === 'team' && me.teamId != null && <TeamPay teamId={me.teamId} onOpen={setPayslip} />}
       {tab === 'company' && <Company onOpen={setPayslip} scrollToRuns={scrollToRuns} onScrolled={() => setScrollToRuns(false)} />}
       <PayslipModal run={payslip} onClose={() => setPayslip(null)} />
@@ -81,10 +84,17 @@ export function FinancePage() {
   );
 }
 
-function MyPay({ onOpen }: { onOpen: (r: PayrollRunWithUser) => void }) {
+function MyPay({ onOpen, openRunId, onOpened }: { onOpen: (r: PayrollRunWithUser) => void; openRunId?: number | null; onOpened?: () => void }) {
   const me = useCurrentUser();
   const q = useMyFinance(12);
   const d = q.data;
+  // a link to one payslip (?run=<id>) opens it once the list has loaded
+  useEffect(() => {
+    if (openRunId == null || !d) return;
+    const run = d.runs.find((r) => r.id === openRunId);
+    if (run) onOpen(run);
+    onOpened?.();
+  }, [openRunId, d, onOpen, onOpened]);
   if (q.isError) return <ErrorState error={q.error} onRetry={() => void q.refetch()} />;
   const trend = d ? [...d.runs].sort((a, b) => a.weekStart.localeCompare(b.weekStart)).map((r) => ({ week: r.weekStart, base: r.basePay, commission: r.commission, bonus: r.bonus, overrides: r.overrides })) : [];
   // Only plot the pay components this person actually earns (a trainee has no overrides, an owner no base).
@@ -316,11 +326,11 @@ function Company({ onOpen, scrollToRuns = false, onScrolled }: { onOpen: (r: Pay
   }, [scrollToRuns, settled, onScrolled]);
 
   const expenseColumns: Column<Expense>[] = [
-    { key: 'date', header: 'Date', render: (e) => <span className="whitespace-nowrap">{formatDate(e.date)}</span>, sortValue: (e) => e.date },
+    { key: 'date', header: 'Date', sortWords: ['oldest first', 'newest first'], render: (e) => <span className="whitespace-nowrap">{formatDate(e.date)}</span>, sortValue: (e) => e.date },
     { key: 'category', header: 'Category', render: (e) => <Badge tone={e.category === 'venue' ? 'primary' : e.category === 'travel' ? 'info' : e.category === 'recruitment' ? 'accent' : 'neutral'}>{EXPENSE_CATEGORY_LABELS[e.category]}</Badge>, sortValue: (e) => e.category },
-    { key: 'description', header: 'Description', render: (e) => <span className="text-fg">{e.description}</span>, sortValue: (e) => e.description },
+    { key: 'description', header: 'Description', card: 'title', render: (e) => <span className="text-fg">{e.description}</span>, sortValue: (e) => e.description },
     { key: 'campaign', header: 'Campaign', render: (e) => { const c = campaignName(e.campaignId); return c ? <ColourChip color={c.color} label={c.name} /> : <span className="text-muted">—</span>; }, sortValue: (e) => campaignName(e.campaignId)?.name ?? '' },
-    { key: 'amount', header: 'Amount', align: 'right', render: (e) => <span className="font-medium tabular-nums text-fg">{formatGBP(e.amount, { cents: true })}</span>, sortValue: (e) => e.amount },
+    { key: 'amount', header: 'Amount', card: 'aside', align: 'right', render: (e) => <span className="font-medium tabular-nums text-fg">{formatGBP(e.amount, { cents: true })}</span>, sortValue: (e) => e.amount },
     { key: 'actions', header: <span className="sr-only">Actions</span>, align: 'right', render: (e) => <StopRowEvents className="inline-flex"><Button size="sm" variant="ghost" className="text-danger" aria-label={`Delete expense ${e.description}`} onClick={() => setDeleting(e)}><Trash2 className="h-4 w-4" aria-hidden /></Button></StopRowEvents> },
   ];
 
@@ -460,7 +470,7 @@ function Company({ onOpen, scrollToRuns = false, onScrolled }: { onOpen: (r: Pay
               columns={[
                 { key: 'name', header: 'Campaign', render: (r) => <ColourChip color={r.campaignColor} label={r.campaignName} className="font-medium text-fg" />, sortValue: (r) => r.campaignName },
                 { key: 'sales', header: 'Sales', align: 'right', render: (r) => formatNumber(r.sales), sortValue: (r) => r.sales },
-                { key: 'revenue', header: 'Revenue', align: 'right', render: (r) => <span className="tabular-nums">{formatGBP(r.revenue)}</span>, sortValue: (r) => r.revenue },
+                { key: 'revenue', header: 'Revenue', card: 'aside', align: 'right', render: (r) => <span className="tabular-nums">{formatGBP(r.revenue)}</span>, sortValue: (r) => r.revenue },
                 { key: 'commission', header: 'Commission', align: 'right', render: (r) => <span className="tabular-nums">{formatGBP(r.commission)}</span>, sortValue: (r) => r.commission },
                 { key: 'margin', header: 'Margin', align: 'right', render: (r) => <span className={`font-medium tabular-nums ${r.margin >= 0 ? 'text-success' : 'text-danger'}`}>{formatGBP(r.margin)}{r.revenue ? <span className="ml-1 text-xs font-normal text-muted">({formatPct(r.margin / r.revenue)})</span> : null}</span>, sortValue: (r) => r.margin },
               ]}

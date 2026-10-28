@@ -336,6 +336,7 @@ function PayCard({ s }: { s: StatementDetail }) {
     {
       key: 'effect',
       header: 'Pay effect',
+      card: 'wide',
       render: (p) => {
         const e = personEffect(effect?.people, p.userId);
         if (!effect || !effect.people.length) return <span className="text-muted">—</span>;
@@ -499,6 +500,7 @@ function RowsCard({ s }: { s: StatementDetail }) {
     {
       key: 'person',
       header: 'Person',
+      card: 'wide',
       render: (r) => {
         const showPicker = !applied && (r.match === 'none' || editing === r.id);
         if (showPicker) {

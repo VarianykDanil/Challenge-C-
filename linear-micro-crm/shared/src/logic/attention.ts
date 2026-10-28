@@ -23,6 +23,8 @@ import type {
   SalesEventWithMeta,
   User,
 } from '../types.ts';
+import { LATE_GRACE_MINUTES } from '../constants.ts';
+import { SHIFT_CHECK_IN_EARLY_MINUTES } from '../types/checkins.ts';
 import { addDays, daysBetween, dayOfWeek, isValidISODate, startOfWeekISO } from './dates.ts';
 import { estimateWeekPay, paydayForWeek } from './finance.ts';
 import { isOverdue, outcomesToRecord } from './recruitment.ts';
@@ -137,6 +139,11 @@ export interface AttentionInput {
    * sentence says so and quotes this figure when it is larger.
    */
   pipelineOverdue?: number | null;
+  /**
+   * Rep / leader only: the ids of today's events the caller has checked in at. Null or absent when not known (no
+   * check-in item is made then, so an older server never nags).
+   */
+  checkedInToday?: ReadonlyArray<number> | null;
 }
 
 // ───────────────────────────── formatting (en-GB) ─────────────────────────────
@@ -390,6 +397,38 @@ function tomorrowItems(input: AttentionInput, now: AttentionNow, out: AttentionI
       href: `/events/${e.id}`,
       actionLabel: 'View event',
       at: `${e.date}T${e.startTime}`,
+    });
+  }
+}
+
+/** "HH:MM" → minutes after midnight. */
+const minutesOfDay = (hhmm: string) => Number(hhmm.slice(0, 2)) * 60 + Number(hhmm.slice(3, 5));
+
+/**
+ * Today's own-team event, from SHIFT_CHECK_IN_EARLY_MINUTES before it starts until it ends, while the caller has not
+ * checked in there or logged the day: "Check in at BCN — Arndale" · Check in (Quick gauges for that event, whose first
+ * button is Check in). Info before the start, warning once started. The same window as the Check in button.
+ */
+function checkInItems(input: AttentionInput, now: AttentionNow, out: AttentionItem[]): void {
+  const { me } = input;
+  if ((me.role !== 'rep' && me.role !== 'leader') || me.teamId === null || !input.checkedInToday) return;
+  const checkedIn = new Set(input.checkedInToday);
+  const nowMin = minutesOfDay(now.nowHHMM);
+  for (const e of input.events) {
+    if (e.teamId !== me.teamId || e.date !== now.today || e.status === 'cancelled' || checkedIn.has(e.id)) continue;
+    if (input.entries.some((g) => g.userId === me.id && g.eventId === e.id && g.date === now.today)) continue;
+    const start = e.startTime.slice(0, 5);
+    if (nowMin < minutesOfDay(start) - SHIFT_CHECK_IN_EARLY_MINUTES || nowMin > minutesOfDay(e.endTime.slice(0, 5))) continue;
+    const started = nowMin >= minutesOfDay(start);
+    out.push({
+      key: `events:checkin:${e.id}`,
+      kind: 'events',
+      severity: started ? 'warning' : 'info',
+      title: `Check in at ${eventLabel(e)}`,
+      body: started ? `Started ${start}. Tap Check in when you get there.` : `Starts ${start} · ${LATE_GRACE_MINUTES} min grace. Tap Check in when you get there.`,
+      href: `/quick?eventId=${e.id}`,
+      actionLabel: 'Check in',
+      at: `${e.date}T${start}`,
     });
   }
 }
@@ -698,6 +737,7 @@ export function attentionItems(input: AttentionInput, now: AttentionNow): Attent
   const out: AttentionItem[] = [];
   ownGaugeItems(input, now, out);
   tomorrowItems(input, now, out);
+  checkInItems(input, now, out);
   payItems(input, now, out);
   teamEventItems(input, now, out);
   recruitmentItems(input, now, out);

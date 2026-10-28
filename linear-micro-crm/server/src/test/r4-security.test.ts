@@ -25,6 +25,7 @@ import { demoTeamMarkers, isDemoSignInAccount } from '../lib/demoTeams.ts';
 import { totp } from '../lib/totp.ts';
 import { isWriteLimited } from '../middleware/writeLimit.ts';
 import { purgeExpiredSessions } from '../middleware/auth.ts';
+import { writeSecuritySettings } from '../lib/pin.ts';
 import { DEMO_ACCOUNTS, FIXTURE_ACCOUNTS, buildFixture, currentCode, startTestServer, type Credentials, type TestClient, type TestResponse, type TestServer } from './helpers.ts';
 
 const HOUR = 3_600_000;
@@ -293,6 +294,15 @@ test('a session lasts 14 hours from sign-in and the cookie matches; the one-tap 
   assert.equal(maxAgeOf(demo.last), 14 * 3600, 'demo cookie Max-Age 14 hours');
   assert.ok(Math.abs(lifetimeHours(session(demo.client)!) - 14) < 0.001);
   assert.equal((await demo.client.get('/auth/me')).json.session.maxHours, 14);
+});
+
+test("the session details carry the inactivity sign-out, so a phone opened with no signal stops at the same time", async () => {
+  await start();
+  const { client, last } = await signInSteps(FIXTURE_ACCOUNTS.rep);
+  assert.equal(last.json.session.idleHours, 12, 'the sign-in answer: the default 12 hours');
+  assert.equal((await client.get('/auth/me')).json.session.idleHours, 12);
+  writeSecuritySettings(db(), { sessionIdleHours: 2 });
+  assert.equal((await client.get('/auth/me')).json.session.idleHours, 2, "the admin's new setting");
 });
 
 test('the 14-hour boundary for every role: alive at 13:59, signed out at 14:01 with the reason', async () => {

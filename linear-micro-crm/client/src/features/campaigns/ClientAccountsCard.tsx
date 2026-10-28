@@ -13,6 +13,7 @@ import { ConfirmDialog } from '@/features/common/ConfirmDialog';
 import { apiMessage, errorMessage } from '@/features/common/QueryStates';
 import { SetupCodeDialog } from '@/features/access/SetupCodeDialog';
 import { StepUpCodeField, StepUpDialog } from '@/features/access/StepUpDialog';
+import { copyText } from '@/lib/clipboard';
 import { fullName } from '@/lib/format';
 
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
@@ -251,13 +252,10 @@ function InviteModal({ campaignId, campaignName, onClose }: { campaignId: number
     }
   }
 
+  // copyText falls back to a hidden text box on a plain http:// address, where navigator.clipboard does not exist
   async function copy(text: string) {
-    try {
-      await navigator.clipboard.writeText(text);
-      toast.success('Copied', 'Paste it into an email to them.');
-    } catch {
-      toast.error('Could not copy', 'Select the text and copy it yourself.');
-    }
+    if (await copyText(text)) toast.success('Copied', 'Paste it into an email to them.');
+    else toast.error('Could not copy', 'Select the text and copy it yourself.');
   }
 
   if (result) {

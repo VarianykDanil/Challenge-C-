@@ -41,6 +41,8 @@ interface OwnRow {
   resolutionNote: string | null;
   /** The total of the version this one replaced (null for version 1). */
   previousTotal: number | null;
+  /** The payroll run the invoice is for (the link opens that payslip). */
+  runId: number;
 }
 
 /**
@@ -72,7 +74,7 @@ export const provider: AttentionProvider = {
     if (isInvoicedRole(me.role)) {
       const own = all<OwnRow>(
         db,
-        `SELECT i.id, i.number, i.version, i.status, i.issued_at AS issuedAt, i.deem_at AS deemAt, i.total, p.week_start AS weekStart,
+        `SELECT i.id, i.number, i.version, i.status, i.issued_at AS issuedAt, i.deem_at AS deemAt, i.total, p.week_start AS weekStart, p.id AS runId,
                 i.resolved_at AS resolvedAt, i.resolution_action AS resolutionAction, i.resolution_note AS resolutionNote,
                 (SELECT v.total FROM invoice_versions v WHERE v.invoice_id = i.id AND v.version = i.version - 1) AS previousTotal
          FROM invoices i JOIN payroll_runs p ON p.id = i.payroll_run_id
@@ -88,8 +90,8 @@ export const provider: AttentionProvider = {
             severity: 'info',
             title: 'The office replied about your invoice',
             body: `${formatWeek(r.weekStart)}, ${money(r.total)}: kept as it is. "${(r.resolutionNote ?? '').slice(0, 140)}"`,
-            href: '/finance?tab=me',
-            actionLabel: 'Open My pay',
+            href: `/finance?tab=me&run=${r.runId}`,
+            actionLabel: 'Open the payslip',
             at: r.resolvedAt ?? r.issuedAt,
           });
           continue;
@@ -108,8 +110,9 @@ export const provider: AttentionProvider = {
               : moved ? `Your invoice changed: ${money(r.total)} (was ${money(r.previousTotal!)})` : 'Your invoice was reissued')
             : soon ? `Check and accept your invoice by ${deadlineText(r.deemAt)}` : 'Check and accept your invoice',
           body: `${formatWeek(r.weekStart)}, ${money(r.total)}. Accept it or say what's wrong by ${deadlineText(r.deemAt)}; after that it counts as accepted.`,
-          href: '/finance?tab=me',
-          actionLabel: 'Open My pay',
+          // opens that week's payslip, where Accept and "Something's wrong" are
+          href: `/finance?tab=me&run=${r.runId}`,
+          actionLabel: 'Open the invoice',
           at: r.issuedAt,
         });
       }

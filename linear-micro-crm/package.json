@@ -34,7 +34,7 @@
     "service:uninstall": "npm run service:uninstall -w server --",
     "service:status": "npm run service:status -w server --",
     "typecheck": "npm run typecheck -w shared && npm run typecheck -w server && npm run typecheck -w client",
-    "test": "npm run test -w shared && npm run test -w server",
+    "test": "npm run test -w shared && npm run test -w server && npm run test -w client",
     "test:dates": "node scripts/test-at.mjs"
   },
   "devDependencies": {

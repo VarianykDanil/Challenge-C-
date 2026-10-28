@@ -7,7 +7,7 @@ import { GAUGE_KEYS, GAUGE_LABELS, MIN_STOPS_FOR_INSIGHTS, weakestStage } from '
 import { Badge, DataTable, type Column } from '@/components/ui';
 import { ColourChip, RatioCell } from '@/features/common';
 import { formatDate, formatDateShort, formatDecimal, formatNumber } from '@/lib/format';
-import { RATIO_SHORT_LABELS, type RatioKey } from '@/lib/ratios';
+import { RATIO_LABELS, RATIO_SHORT_LABELS, type RatioKey } from '@/lib/ratios';
 
 const RATIO_COLUMNS: RatioKey[] = ['stopToTable', 'tableToPresentation', 'presentationToClose', 'closeToTap', 'tapToSale', 'overallConversion'];
 
@@ -84,6 +84,7 @@ export function GaugeSummaryTable({ rows, groupBy, loading, onRowClick, showDays
       (k): Column<GaugeSummaryRow> => ({
         key: k,
         header: RATIO_SHORT_LABELS[k],
+        cardLabel: RATIO_LABELS[k],
         align: 'center',
         render: (r) => <RatioCell keyName={k} value={r.ratios[k]} digits={k === 'overallConversion' ? 1 : 0} />,
         sortValue: (r) => r.ratios[k],

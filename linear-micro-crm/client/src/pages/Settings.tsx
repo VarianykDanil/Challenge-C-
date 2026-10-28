@@ -19,6 +19,7 @@ import { QuestionBankSection } from '@/features/recruitment/QuestionBankSection'
 import { IntegrationsSection } from '@/features/statements/IntegrationsSection';
 import { VideoSettingsSection } from '@/features/videos/VideoSettingsSection';
 import { TwoFactorSection } from '@/features/settings/TwoFactorSection';
+import { SettingsJumpMenu, SettingsSection } from '@/features/settings/SettingsNav';
 // Release 1.4 (F): Bank details (every staff role, their own) and Settings → Payments (admin, loaded lazily).
 import { BankDetailsCard } from '@/features/payments/BankDetailsCard';
 import { LazyPaymentsSettingsSection } from '@/features/payments';
@@ -27,6 +28,7 @@ import { formatDate, formatDateTime, formatRelative, fullName, pluralise } from 
 import { useTheme, type Theme } from '@/components/layout';
 import { usePageTitle } from '@/lib/usePageTitle';
 import { COPY } from '@/content/copy';
+import { OWNERSHIP_NOTICE } from '@/content/ownership';
 
 const THEMES: { value: Theme; label: string; description: string; icon: typeof Sun }[] = [
   { value: 'light', label: 'Light', description: 'Bright surfaces, best outdoors', icon: Sun },
@@ -55,9 +57,11 @@ export function SettingsPage() {
   return (
     <>
       <PageHeader title={COPY.nav.settings.title} description={COPY.nav.settings.description} />
+      <SettingsJumpMenu className="mb-6 lg:hidden" />
       <div className="grid gap-6 lg:grid-cols-3">
         <div className="min-w-0 space-y-6 lg:col-span-2">
-          {user.role === 'admin' && <ErrorBoundary name="settings-trial" fallback={null}><TrialSettingsSection /></ErrorBoundary>}
+          {user.role === 'admin' && <SettingsSection id="section-trial" title="Trial mode"><ErrorBoundary name="settings-trial" fallback={null}><TrialSettingsSection /></ErrorBoundary></SettingsSection>}
+          <SettingsSection id="section-profile" title="Profile">
           <Card>
             <CardHeader title="Profile" description="Details are managed by the office — ask an administrator to change them." />
             <div className="mb-5 flex items-center gap-4">
@@ -79,28 +83,30 @@ export function SettingsPage() {
               ))}
             </dl>
           </Card>
+          </SettingsSection>
 
-          <SecurityCard />
+          <SettingsSection id="section-security" title="Security"><SecurityCard /></SettingsSection>
 
-          {/* Release 1.3 slots (nothing until the packages land) */}
-          <ErrorBoundary name="settings-invoices" fallback={null}><InvoiceSettingsSection /></ErrorBoundary>
-          {user.role !== 'client' && <ErrorBoundary name="settings-bank-details" fallback={null}><BankDetailsCard /></ErrorBoundary>}
-          {(user.role === 'admin' || user.role === 'recruiter') && <ErrorBoundary name="settings-questions" fallback={null}><QuestionBankSection /></ErrorBoundary>}
+          {/* Each card in a named section for "On this page" (an empty one is hidden and left off the list) */}
+          <SettingsSection id="section-invoices" title="Invoices"><ErrorBoundary name="settings-invoices" fallback={null}><InvoiceSettingsSection /></ErrorBoundary></SettingsSection>
+          {user.role !== 'client' && <SettingsSection id="section-bank-details" title="Bank details"><ErrorBoundary name="settings-bank-details" fallback={null}><BankDetailsCard /></ErrorBoundary></SettingsSection>}
+          {(user.role === 'admin' || user.role === 'recruiter') && <SettingsSection id="section-interview-questions" title="Interview questions"><ErrorBoundary name="settings-questions" fallback={null}><QuestionBankSection /></ErrorBoundary></SettingsSection>}
 
-          {user.role === 'admin' && <BackupsCard />}
+          {user.role === 'admin' && <SettingsSection id="section-backups" title="Backups"><BackupsCard /></SettingsSection>}
 
           {user.role === 'admin' && (
             <>
-              <ErrorBoundary name="settings-pay" fallback={null}><PaySettingsSection /></ErrorBoundary>
-              <ErrorBoundary name="settings-company" fallback={null}><CompanySettingsSection /></ErrorBoundary>
-              <ErrorBoundary name="settings-payments" fallback={null}><LazyPaymentsSettingsSection /></ErrorBoundary>
-              <ErrorBoundary name="settings-integrations" fallback={null}><IntegrationsSection /></ErrorBoundary>
-              <ErrorBoundary name="settings-videos" fallback={null}><VideoSettingsSection /></ErrorBoundary>
+              <SettingsSection id="section-pay" title="Pay"><ErrorBoundary name="settings-pay" fallback={null}><PaySettingsSection /></ErrorBoundary></SettingsSection>
+              <SettingsSection id="section-company" title="Company details"><ErrorBoundary name="settings-company" fallback={null}><CompanySettingsSection /></ErrorBoundary></SettingsSection>
+              <SettingsSection id="section-payments" title="Payments"><ErrorBoundary name="settings-payments" fallback={null}><LazyPaymentsSettingsSection /></ErrorBoundary></SettingsSection>
+              <SettingsSection id="section-integrations" title="Statements by email"><ErrorBoundary name="settings-integrations" fallback={null}><IntegrationsSection /></ErrorBoundary></SettingsSection>
+              <SettingsSection id="section-videos" title="Learning videos"><ErrorBoundary name="settings-videos" fallback={null}><VideoSettingsSection /></ErrorBoundary></SettingsSection>
             </>
           )}
         </div>
 
         <div className="min-w-0 space-y-6">
+          <SettingsSection id="section-appearance" title="Appearance">
           <Card>
             <CardHeader title="Appearance" description="Theme is saved on this device." />
             <div role="radiogroup" aria-label="Theme" className="grid gap-2">
@@ -126,7 +132,9 @@ export function SettingsPage() {
               })}
             </div>
           </Card>
+          </SettingsSection>
 
+          <SettingsSection id="section-about" title="About">
           <Card>
             <CardHeader title="About this app" />
             <dl className="space-y-2 text-sm">
@@ -137,7 +145,9 @@ export function SettingsPage() {
               <div className="flex justify-between gap-4"><dt className="text-muted">Website</dt><dd><a className="text-primary hover:underline" href={BRAND.website} target="_blank" rel="noreferrer">{BRAND.website.replace('https://', '')}</a></dd></div>
             </dl>
             <p className="mt-3 text-xs text-muted">{BRAND.tagline}</p>
+            <p className="mt-1 text-xs text-muted">{OWNERSHIP_NOTICE}</p>
           </Card>
+          </SettingsSection>
         </div>
       </div>
     </>

@@ -1,5 +1,5 @@
 // Owned by the Product Designer. Contract: docs/TEAM_CONTRACT.md → "Layout contract".
-import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
+import { Suspense, lazy, useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
 import { useLocation } from 'react-router-dom';
 import type { UserWithTeam } from '@lm/shared';
 import clsx from 'clsx';
@@ -9,6 +9,10 @@ import { ErrorBoundary } from '@/features/common/ErrorBoundary';
 // Smart release 1.1 (p7): imported by file path, not through the barrels, to keep the shell's first download small.
 import { OfflineBanner } from '@/features/common/OfflineBanner';
 import { OutboxBanner } from '@/features/gauges/OutboxBanner';
+import { UpdateBanner } from '@/offline/UpdateBanner';
+
+// Loaded after the first screen (it pulls in the events query and date helpers the shell does not otherwise need).
+const FieldKitSync = lazy(() => import('@/offline/FieldKitSync').then((m) => ({ default: m.FieldKitSync })));
 import { getOutbox } from '@/features/gauges/outbox';
 // Release 1.2 slot (U4): replays check-ins queued without signal, whatever page is open.
 import { CheckInOutboxReplay } from '@/features/checkins/CheckInOutboxReplay';
@@ -103,9 +107,9 @@ export function AppShell({ user, onLogout, children, title, fluid }: AppShellPro
 
   const sidebarWidth = collapsed ? SIDEBAR_COLLAPSED_WIDTH : SIDEBAR_WIDTH;
 
-  // Quick gauges is the field screen, and pages are lazy chunks with no service worker: fetch its code (and Log
-  // gauges') once the app is idle after sign-in, so it still opens after the signal drops. The shell stays the same
-  // size; the browser keeps the module, and the page's own lazy import then resolves from it.
+  // Quick gauges is the field screen: fetch its code once the app is idle after sign-in, so it opens after the signal
+  // drops even where there is no service worker (a plain http:// address, where the browser has none). With the service
+  // worker every page's code is saved on the phone anyway.
   const canGauge = GAUGE_ROLES.includes(user.role);
   useEffect(() => {
     if (!canGauge || !navigator.onLine) return;
@@ -164,8 +168,9 @@ export function AppShell({ user, onLogout, children, title, fluid }: AppShellPro
           aria-label="Navigation"
           tabIndex={-1}
           className={clsx(
-            'absolute inset-y-0 left-0 w-[min(84vw,300px)] shadow-modal outline-none transition-transform duration-250 ease-[cubic-bezier(0.16,1,0.3,1)] motion-reduce:transition-none',
-            mobileOpen ? 'translate-x-0' : '-translate-x-full',
+            'absolute inset-y-0 left-0 w-[min(84vw,300px)] outline-none transition-[transform,box-shadow] duration-250 ease-[cubic-bezier(0.16,1,0.3,1)] motion-reduce:transition-none',
+            // the shadow only while open: off-screen it still spilled a grey haze along the left edge of every page
+            mobileOpen ? 'translate-x-0 shadow-modal' : '-translate-x-full shadow-none',
           )}
         >
           <Sidebar items={items} collapsed={false} onToggleCollapsed={toggleCollapsed} drawer onClose={() => setMobileOpen(false)} />
@@ -188,6 +193,9 @@ export function AppShell({ user, onLogout, children, title, fluid }: AppShellPro
           <ErrorBoundary name="offline-banner" fallback={null}>
             <OfflineBanner gaugeNote={GAUGE_ROLES.includes(user.role)} />
           </ErrorBoundary>
+          <ErrorBoundary name="update-banner" fallback={null}>
+            <UpdateBanner />
+          </ErrorBoundary>
           <ErrorBoundary name="outbox-banner" fallback={null}>
             <OutboxBanner user={user} />
           </ErrorBoundary>
@@ -197,6 +205,11 @@ export function AppShell({ user, onLogout, children, title, fluid }: AppShellPro
           <ErrorBoundary name="agreement-prompt" fallback={null}>
             <AgreementPrompt user={user} />
           </ErrorBoundary>
+          {canGauge && (
+            <ErrorBoundary name="field-kit" fallback={null}>
+              <Suspense fallback={null}><FieldKitSync /></Suspense>
+            </ErrorBoundary>
+          )}
         </div>
         <main
           id="main"

@@ -37,7 +37,7 @@ export function TeamCard({ dashboard: d, meId, role, companyBoard, streaks, chec
           <dl className="mb-3 grid grid-cols-3 gap-2 text-center">
             <div className="rounded-lg bg-surface-2 p-2"><dt className="text-[11px] text-muted">Stops</dt><dd className="text-sm font-semibold tabular-nums text-fg">{formatNumber(d.team.totals.stops)}</dd></div>
             <div className="rounded-lg bg-surface-2 p-2"><dt className="text-[11px] text-muted">Sales</dt><dd className="text-sm font-semibold tabular-nums text-fg">{formatNumber(d.team.totals.sales)}</dd></div>
-            <div className="rounded-lg bg-surface-2 p-2"><dt className="text-[11px] text-muted">Conv.</dt><dd className="text-sm font-semibold tabular-nums text-fg">{formatPct(d.team.ratios.overallConversion, 1)}</dd></div>
+            <div className="rounded-lg bg-surface-2 p-2"><dt className="text-[11px] text-muted">Conversion</dt><dd className="text-sm font-semibold tabular-nums text-fg">{formatPct(d.team.ratios.overallConversion, 1)}</dd></div>
           </dl>
           {/* MiniLeaderboard is p2's file (streak flames): its own boundary keeps the card's header and totals. */}
           <ErrorBoundary name="mini-leaderboard"><MiniLeaderboard rows={d.team.leaderboard} highlightUserId={meId} streaks={streaks} /></ErrorBoundary>

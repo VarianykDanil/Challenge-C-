@@ -29,7 +29,8 @@ export function MiniLeaderboard({ rows, highlightUserId, limit = 5, streaks }: M
           <li key={r.userId} className={`flex items-center gap-3 py-2 ${me ? 'rounded-md bg-primary/5 px-2' : ''}`}>
             <span className="w-5 text-right text-xs font-semibold tabular-nums text-muted">{r.rank}</span>
             <Avatar name={r.userName} color={r.avatarColor} size="sm" />
-            <Link to={`/team/${r.userId}`} className="min-w-0 flex-1 truncate text-sm font-medium text-fg hover:underline">
+            {/* -my-3 py-3: a 44 px tall tap target on the name, the row's height unchanged */}
+            <Link to={`/team/${r.userId}`} className="-my-3 min-w-0 flex-1 truncate py-3 text-sm font-medium text-fg hover:underline">
               {r.userName}{me && <span className="ml-1 text-xs text-primary">(you)</span>}
             </Link>
             <StreakFlame streak={streakOf(r)} />

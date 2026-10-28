@@ -1,6 +1,7 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { CheckCircle2, Info, TriangleAlert, X, XCircle } from 'lucide-react';
 import clsx from 'clsx';
+import { useMediaQuery } from '@/lib/useMediaQuery';
 
 export type ToastTone = 'success' | 'error' | 'info' | 'warning';
 export interface ToastMessage {
@@ -12,7 +13,17 @@ export interface ToastMessage {
   duration?: number;
   /** Optional inline action, e.g. Undo. */
   action?: { label: string; onClick: () => void };
+  /**
+   * A heads-up the person did not just cause (a "Needs attention" item). It goes away as soon as a form opens or a
+   * field gets the focus, so it never sits over what they are filling in; it stays in the bell.
+   */
+  notice?: boolean;
 }
+
+/** Window event a dialog fires when it opens (components/ui/Modal.tsx): notices make way for it. */
+export const DIALOG_OPEN_EVENT = 'lm:dialog-open';
+
+const FORM_FIELD = 'input:not([type="checkbox"]):not([type="radio"]):not([type="button"]):not([type="submit"]), textarea, select, [contenteditable="true"]';
 
 interface ToastContextValue {
   toast: (t: Omit<ToastMessage, 'id'>) => number;
@@ -39,10 +50,15 @@ const ACCENT: Record<ToastTone, string> = {
   info: 'before:bg-info',
 };
 
+/** On a phone a notice sits over the top of the page, so it goes sooner (it stays in the bell). */
+const PHONE_NOTICE_MS = 5000;
+
 function ToastItem({ t, onDismiss }: { t: ToastMessage; onDismiss: (id: number) => void }) {
   const [leaving, setLeaving] = useState(false);
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const duration = t.duration ?? (t.tone === 'error' ? 6000 : 4000);
+  const phone = useMediaQuery('(max-width: 639.98px)');
+  const asked = t.duration ?? (t.tone === 'error' ? 6000 : 4000);
+  const duration = t.notice && phone && asked ? Math.min(asked, PHONE_NOTICE_MS) : asked;
 
   const close = useCallback(() => {
     setLeaving(true);
@@ -79,7 +95,8 @@ function ToastItem({ t, onDismiss }: { t: ToastMessage; onDismiss: (id: number) 
       <Icon className={clsx('mt-0.5 h-5 w-5 shrink-0', cls)} aria-hidden />
       <div className="min-w-0 flex-1">
         <div className="text-sm font-semibold leading-snug text-fg">{t.title}</div>
-        {t.description && <div className="mt-0.5 text-xs leading-relaxed text-muted">{t.description}</div>}
+        {/* a notice keeps to two lines of text on a phone; the bell has the rest */}
+        {t.description && <div className={clsx('mt-0.5 text-xs leading-relaxed text-muted', t.notice && 'max-sm:line-clamp-2')}>{t.description}</div>}
         {t.action && (
           <button
             type="button"
@@ -108,6 +125,21 @@ export function ToastProvider({ children, position = 'bottom-right' }: { childre
   const seq = useRef(0);
 
   const dismiss = useCallback((id: number) => setItems((prev) => prev.filter((i) => i.id !== id)), []);
+
+  // Notices make way for forms: a dialog opening, or the focus moving into a field outside the toasts.
+  useEffect(() => {
+    const clearNotices = () => setItems((prev) => (prev.some((i) => i.notice) ? prev.filter((i) => !i.notice) : prev));
+    const onFocus = (e: FocusEvent) => {
+      const el = e.target as HTMLElement | null;
+      if (el?.matches?.(FORM_FIELD) && !el.closest('[data-toast-region]')) clearNotices();
+    };
+    window.addEventListener(DIALOG_OPEN_EVENT, clearNotices);
+    document.addEventListener('focusin', onFocus);
+    return () => {
+      window.removeEventListener(DIALOG_OPEN_EVENT, clearNotices);
+      document.removeEventListener('focusin', onFocus);
+    };
+  }, []);
   const toast = useCallback((t: Omit<ToastMessage, 'id'>) => {
     const id = ++seq.current;
     setItems((prev) => [...prev.slice(-4), { ...t, id }]);
@@ -123,8 +155,10 @@ export function ToastProvider({ children, position = 'bottom-right' }: { childre
     warning: (title, description) => toast({ title, description, tone: 'warning' }),
   }), [toast, dismiss]);
 
+  // On a phone they sit at the top, under the top bar: forms open as sheets from the bottom, and a toast there covered
+  // the fields being filled in (and the Save button).
   const pos = {
-    'bottom-right': 'bottom-4 right-4 items-end',
+    'bottom-right': 'bottom-4 right-4 items-end max-sm:bottom-auto max-sm:right-0 max-sm:left-0 max-sm:top-[calc(4.25rem+env(safe-area-inset-top))] max-sm:items-center',
     'top-right': 'top-4 right-4 items-end',
     'bottom-center': 'bottom-4 left-1/2 -translate-x-1/2 items-center',
   }[position];
@@ -132,7 +166,7 @@ export function ToastProvider({ children, position = 'bottom-right' }: { childre
   return (
     <ToastContext.Provider value={value}>
       {children}
-      <div className={clsx('pointer-events-none fixed z-[80] flex flex-col gap-2', pos)} role="region" aria-label="Notifications" aria-live="polite" aria-relevant="additions">
+      <div className={clsx('pointer-events-none fixed z-[80] flex flex-col gap-2', pos)} role="region" aria-label="Notifications" aria-live="polite" aria-relevant="additions" data-toast-region>
         {items.map((t) => <ToastItem key={t.id} t={t} onDismiss={dismiss} />)}
       </div>
     </ToastContext.Provider>

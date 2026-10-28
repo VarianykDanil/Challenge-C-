@@ -34,6 +34,7 @@ import { ThemeToggle } from '@/components/layout/theme';
 import { Badge, Card, Dropdown, KpiTile } from '@/components/ui';
 import { Sparkline, TrendChart } from '@/components/charts';
 import { LANDING, type LandingFeature, type LandingIcon, type LandingLadderLevel } from '@/content/landing';
+import { OWNERSHIP_NOTICE } from '@/content/ownership';
 
 /* ───────────────────────────── static maps ───────────────────────────── */
 
@@ -546,7 +547,7 @@ function SiteFooter({ year }: { year: number }) {
       </Container>
       <div className="border-t border-border">
         <Container className="flex flex-col gap-2 py-5 text-xs text-muted sm:flex-row sm:items-center sm:justify-between">
-          <span>© {year} {BRAND.legalName}. {f.rights}</span>
+          <span>{OWNERSHIP_NOTICE}</span>
           <span className="inline-flex items-center gap-1.5">
             <LogoMark size={14} title="" /> {BRAND.product} · {BRAND.city}
           </span>

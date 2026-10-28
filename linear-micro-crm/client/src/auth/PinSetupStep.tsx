@@ -7,7 +7,7 @@ import { useId, useState, type FormEvent, type ReactNode } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useQueryClient } from '@tanstack/react-query';
 import { CircleAlert, KeyRound, LogOut, ShieldCheck } from 'lucide-react';
-import { BRAND, PIN_PROBLEM_MESSAGES, pinProblem } from '@lm/shared';
+import { PIN_PROBLEM_MESSAGES, pinProblem } from '@lm/shared';
 import { useAuth, useCurrentUser } from '@/auth/AuthProvider';
 import { useSetPin } from '@/api/pin';
 import { Logo } from '@/components/brand/Logo';
@@ -20,6 +20,7 @@ import { CLIENT_PIN_COPY, clientPinProblemMessage } from '@/features/client/clie
 import { TwoFactorSetupModal } from '@/features/settings/TwoFactorSetupModal';
 import { COPY } from '@/content/copy';
 import { fullName } from '@/lib/format';
+import { OWNERSHIP_NOTICE } from '@/content/ownership';
 
 /** The page around a step: logo and theme toggle on top, one narrow column, the company line at the foot. */
 function StepFrame({ testId, children }: { testId: string; children: ReactNode }) {
@@ -33,7 +34,7 @@ function StepFrame({ testId, children }: { testId: string; children: ReactNode }
         <div className="w-full max-w-[420px] animate-slide-up">{children}</div>
       </main>
       <footer className="px-4 py-5 text-center text-xs text-muted sm:px-8">
-        © {new Date().getFullYear()} {BRAND.legalName}
+        {OWNERSHIP_NOTICE}
       </footer>
     </div>
   );

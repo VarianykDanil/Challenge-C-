@@ -41,12 +41,14 @@ export interface NewSession {
 export function createSession(db: Db, user: DemoSignInSubject): NewSession {
   const token = randomBytes(32).toString('hex');
   const now = new Date();
-  const maxHours = readSecuritySettings(db).sessionMaxHours;
+  const settings = readSecuritySettings(db);
+  const maxHours = settings.sessionMaxHours;
   const maxAgeMs = maxHours * 3_600_000;
   const signedInAt = now.toISOString();
   const endsAt = new Date(now.getTime() + maxAgeMs).toISOString();
   run(db, `INSERT INTO sessions (token, user_id, created_at, expires_at, last_seen_at) VALUES (?, ?, ?, ?, ?)`, [sessionKey(token), user.id, signedInAt, endsAt, signedInAt]);
-  return { token, maxAgeMs, info: { signedInAt, endsAt, maxHours } };
+  // idleHours: a phone opened with no signal stops acting as this person when the inactivity sign-out would apply
+  return { token, maxAgeMs, info: { signedInAt, endsAt, maxHours, idleHours: settings.sessionIdleHours } };
 }
 
 /** Ends the session whose cookie carries `token`. */
@@ -204,6 +206,7 @@ export function authenticate(db: Db): RequestHandler {
       signedInAt: createdAt,
       endsAt: ownEnd ? expiresAt : limitEnd,
       maxHours: ownEnd ? ownHours : settings.sessionMaxHours,
+      idleHours: settings.sessionIdleHours,
     };
     next();
   };

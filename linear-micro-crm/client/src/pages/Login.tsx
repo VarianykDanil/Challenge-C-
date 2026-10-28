@@ -21,6 +21,7 @@ import { Logo, LogoMark } from '@/components/brand/Logo';
 import { BrandBackdrop } from '@/components/brand/BrandBackdrop';
 import { ThemeToggle } from '@/components/layout/theme';
 import { Avatar, Badge, Button, Divider, Field, Input, Skeleton } from '@/components/ui';
+import { OWNERSHIP_NOTICE } from '@/content/ownership';
 
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const NETWORK_ERROR = 'We couldn’t reach the server. Check your connection and try again.';
@@ -388,7 +389,6 @@ export function LoginPage() {
   }
 
   const busy = submitting !== null;
-  const year = new Date().getFullYear();
   // The API may legitimately return no demo accounts; then the whole section disappears (no skeleton, no note).
   const demoAccounts = demo.data?.accounts ?? [];
   // Release 1.3 (P6): the seeded demo client portal account(s), listed apart from the four staff accounts.
@@ -625,7 +625,7 @@ export function LoginPage() {
         </div>
 
         <footer className="flex flex-col items-center justify-between gap-2 px-5 py-5 text-xs text-muted sm:flex-row sm:px-8">
-          <span>© {year} {BRAND.legalName}. All rights reserved.</span>
+          <span>{OWNERSHIP_NOTICE}</span>
           <span className="inline-flex flex-wrap items-center justify-center gap-x-2 gap-y-1">
             <Link to="/welcome" className="focus-ring rounded-md font-medium text-primary underline-offset-4 hover:underline max-sm:inline-flex max-sm:min-h-10 max-sm:items-center">
               About {BRAND.name}

@@ -89,9 +89,9 @@ export function parseTrustProxy(value: string | undefined): boolean | number | s
 
 /**
  * The Content-Security-Policy for the built client. Scripts are same-origin plus the SHA-256 of each inline
- * `<script>` in `index.html` (Vite emits the theme bootstrap inline), styles may be inline (React/Tailwind) or from
- * Google Fonts, fonts from gstatic, no framing of the app, no foreign form targets or base URLs. Release 1.3: frames
- * and thumbnails from the learning-video providers only (lib/videoEmbeds.ts, P5).
+ * `<script>` in `index.html` (Vite emits the theme bootstrap inline), styles may be inline (React/Tailwind), fonts,
+ * the offline service worker and the web app manifest come from this server only, no framing of the app, no foreign
+ * form targets or base URLs. Frames and thumbnails come from the learning-video providers only (lib/videoEmbeds.ts).
  */
 export function contentSecurityPolicy(staticDir?: string): string {
   const hashes: string[] = [];
@@ -105,8 +105,12 @@ export function contentSecurityPolicy(staticDir?: string): string {
   return [
     "default-src 'self'",
     `script-src 'self'${hashes.length ? ` ${hashes.join(' ')}` : ''}`,
-    "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com",
-    "font-src 'self' https://fonts.gstatic.com data:",
+    "style-src 'self' 'unsafe-inline'",
+    // Inter is bundled with the app (client/src/main.tsx imports @fontsource-variable/inter): nothing is fetched from Google.
+    "font-src 'self'",
+    // The offline service worker (client/dist/sw.js) and the home-screen manifest.
+    "worker-src 'self'",
+    "manifest-src 'self'",
     `img-src 'self' data: ${VIDEO_THUMBNAIL_ORIGINS.join(' ')}`,
     "connect-src 'self'",
     // Release 1.3 (P5): learning videos linked from YouTube, Vimeo or Google Drive play in an embed (lib/videoEmbeds.ts);
@@ -265,22 +269,33 @@ export function createApp(db: Db, opts: AppOptions = {}): Express {
   app.use('/api', api);
 
   if (opts.staticDir && existsSync(opts.staticDir)) {
-    const indexHtml = path.join(opts.staticDir, 'index.html');
+    const staticDir = opts.staticDir;
+    const indexHtml = path.join(staticDir, 'index.html');
     // Vite's hashed bundles never change under one name: cache them for a year, immutable.
     app.use('/assets', express.static(path.join(opts.staticDir, 'assets'), { immutable: true, maxAge: '1y', index: false }));
-    // The shell (index.html) must always be revalidated or it would pin bundle names that no longer exist.
+    // A bundle that is not there (an old release's name) is a plain 404, never the page below: a page answered as code
+    // breaks the app, and the service worker would keep it.
+    app.use('/assets', (_req, res) => {
+      res.status(404).type('text/plain').set('Cache-Control', 'no-store').send('Not found');
+    });
+    // The shell (index.html), the service worker and the manifest must always be revalidated: the shell would pin
+    // bundle names that no longer exist, and a cached service worker would hold phones on the old release.
     app.use(
       express.static(opts.staticDir, {
         index: 'index.html',
         setHeaders: (res, filePath) => {
-          res.setHeader('Cache-Control', filePath.endsWith('.html') ? 'no-cache' : 'public, max-age=3600');
+          const base = path.basename(filePath);
+          const revalidate = filePath.endsWith('.html') || base === 'sw.js' || base === 'manifest.webmanifest';
+          res.setHeader('Cache-Control', revalidate ? 'no-cache' : 'public, max-age=3600');
+          if (base === 'sw.js') res.setHeader('Service-Worker-Allowed', '/');
         },
       }),
     );
-    // Express 5 wildcard syntax; API paths never reach here because the /api router answers 404 itself.
+    // Express 5 wildcard syntax; API paths never reach here because the /api router answers 404 itself. The file is
+    // named relative to `root` so a dot-folder higher up the install path (~/.local/…) is not refused as a dotfile.
     app.get('/{*splat}', (req, res, next) => {
       if (req.path.startsWith('/api')) return next();
-      res.sendFile(indexHtml, { cacheControl: false, headers: { 'Cache-Control': 'no-cache' } });
+      res.sendFile(path.basename(indexHtml), { root: staticDir, cacheControl: false, headers: { 'Cache-Control': 'no-cache' } });
     });
   }
 

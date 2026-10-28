@@ -19,7 +19,7 @@
  * days; admin: the Runs to pay card's set), open candidates with a due follow-up (and, for recruiters, the whole
  * pipeline's overdue count: the "Overdue actions" tile), pending interviews of open candidates from
  * `outcomeLookbackFrom(now)` (56 days back: the shared outcome rule's look-back, recruitment.ts) to 2 days ahead, and
- * the caller's usual attendance (pay-cost wording).
+ * the caller's usual attendance (pay-cost wording) with, in the same statement, the events they checked in at today.
  * Date-bounded where the table is large: events, gauge rows, runs and the attendance count use their indexes. Open
  * candidates, interviews and the admin's member list are small full scans (no index on interviews.scheduled_at or on
  * candidates' open stages; the seed has ~160 interviews, 120 candidates, 34 users). An index on
@@ -151,19 +151,23 @@ export function attentionInput(db: Db, me: UserWithTeam, now: AttentionNow): Att
     );
   }
 
-  // (8) how often the caller logged on their team's completed event days in the 4 weeks before the window
+  // (8) how often the caller logged on their team's completed event days in the 4 weeks before the window, and (same
+  //     statement, so the feed's budget holds) the events they have checked in at today, for the "Check in at …" item
   let attendance: AttentionAttendance | null = null;
+  let checkedInToday: number[] | null = null;
   if (fieldRole && me.teamId !== null) {
     const lastDay = addDays(from, -1);
     const firstDay = addDays(lastDay, -(ATTENTION_RULES.usualAttendanceDays - 1));
-    const row = get<{ teamDays: number; workedDays: number }>(
+    const row = get<{ teamDays: number; workedDays: number; checkedIn: string | null }>(
       db,
       `SELECT COUNT(DISTINCT e.date) AS teamDays,
-              COUNT(DISTINCT CASE WHEN EXISTS (SELECT 1 FROM gauge_entries g WHERE g.user_id = ? AND g.date = e.date) THEN e.date END) AS workedDays
+              COUNT(DISTINCT CASE WHEN EXISTS (SELECT 1 FROM gauge_entries g WHERE g.user_id = ? AND g.date = e.date) THEN e.date END) AS workedDays,
+              (SELECT GROUP_CONCAT(k.event_id) FROM check_ins k WHERE k.user_id = ? AND k.date = ?) AS checkedIn
        FROM events e WHERE e.team_id = ? AND e.status = 'completed' AND e.date BETWEEN ? AND ? AND e.date >= ?`,
-      [me.id, me.teamId, firstDay, lastDay, me.startDate],
+      [me.id, me.id, today, me.teamId, firstDay, lastDay, me.startDate],
     );
     attendance = { teamDays: Number(row?.teamDays ?? 0), workedDays: Number(row?.workedDays ?? 0) };
+    checkedInToday = row?.checkedIn ? row.checkedIn.split(',').map(Number).filter(Number.isSafeInteger) : [];
   }
 
   return {
@@ -177,6 +181,7 @@ export function attentionInput(db: Db, me: UserWithTeam, now: AttentionNow): Att
     interviews,
     attendance,
     pipelineOverdue,
+    checkedInToday,
   };
 }
 

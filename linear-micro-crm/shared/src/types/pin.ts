@@ -100,6 +100,12 @@ export interface SessionInfo {
   signedInAt: string;
   endsAt: string;
   maxHours: number | null;
+  /**
+   * The inactivity sign-out in hours (the admin's setting), so a phone opened with no signal stops acting as this
+   * person once the server would have signed them out for inactivity (client/src/offline/fieldKitLogic.ts). Optional:
+   * older answers leave it out.
+   */
+  idleHours?: number;
 }
 
 

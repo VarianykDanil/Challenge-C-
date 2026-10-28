@@ -38,12 +38,16 @@ export interface DepsStatus {
 /** npm's record of the installed packages, rewritten by every install: newer than the build = rebuild with them. */
 const INSTALL_RECORD = 'node_modules/.package-lock.json';
 
-/** What `npm run build` (client) reads: its sources, the shared package it imports, and its config. */
-const SOURCE_DIRS = ['client/src', 'client/public', 'shared/src'];
+/**
+ * What `npm run build` (client) reads: its sources, the offline service worker (client/sw) and the build step that
+ * writes it (client/build), the shared package it imports, and its config.
+ */
+const SOURCE_DIRS = ['client/src', 'client/public', 'client/sw', 'client/build', 'shared/src'];
 const SOURCE_FILES = [
   'client/index.html',
   'client/vite.config.ts',
   'client/tsconfig.json',
+  'client/tsconfig.node.json',
   'client/package.json',
   'shared/package.json',
   // written by every npm install / npm ci: the installed packages changed (not merely the lockfile's timestamp)

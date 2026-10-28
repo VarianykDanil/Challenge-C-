@@ -90,6 +90,29 @@ test('rep: yesterday’s unlogged team-A event → gauges:event, gone after POST
   }
 });
 
+test('rep and leader: today’s team event asks them to check in until they do; the feed stays within its budget', async () => {
+  const srv = await startTestServer();
+  try {
+    const fx = srv.fixture!;
+    const key = `events:checkin:${fx.events.todayA}`;
+    for (const role of ['rep', 'leader'] as const) {
+      const c = await srv.login(role);
+      const item = ((await c.get('/me/attention')).json.items as Json[]).find((i) => i.key === key);
+      assert.ok(item, `${role}: ${key}`);
+      assert.equal(item.actionLabel, 'Check in');
+      assert.equal(item.href, `/quick?eventId=${fx.events.todayA}`);
+      assert.equal((await c.post('/checkins', { eventId: fx.events.todayA, source: 'button' })).status, 201);
+      assert.ok(!keysOf(await c.get('/me/attention')).includes(key), `${role}: gone once checked in`);
+    }
+    // team B's event is never in team A's feed
+    const b = await srv.login('repB');
+    assert.ok(keysOf(await b.get('/me/attention')).includes(`events:checkin:${fx.events.todayB}`));
+    assert.ok(!keysOf(await b.get('/me/attention')).includes(key));
+  } finally {
+    await srv.close();
+  }
+});
+
 test('leader: own team only — a gap for team A’s missing rep, never team-B event ids; admin sees both teams', async () => {
   const srv = await startTestServer();
   try {

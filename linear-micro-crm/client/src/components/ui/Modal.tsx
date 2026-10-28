@@ -2,6 +2,7 @@ import { useEffect, useId, useRef, useState, type CSSProperties, type ReactNode,
 import { createPortal } from 'react-dom';
 import { X } from 'lucide-react';
 import clsx from 'clsx';
+import { DIALOG_OPEN_EVENT } from './Toast';
 
 export interface ModalProps {
   open: boolean;
@@ -51,8 +52,8 @@ const stop = (e: SyntheticEvent) => e.stopPropagation();
 
 let openCount = 0;
 
-/** Fired on window whenever a Modal opens. */
-export const DIALOG_OPENED_EVENT = 'lm:dialog-opened';
+/** Fired on window whenever a Modal opens: the same event as Toast.tsx's DIALOG_OPEN_EVENT (one signal, two listeners). */
+export const DIALOG_OPENED_EVENT = DIALOG_OPEN_EVENT;
 
 /**
  * On a phone, a page that overflows horizontally inflates the layout viewport, so `inset-0` no
@@ -93,8 +94,9 @@ export function Modal({ open, onClose, title, description, children, footer, siz
     if (!open) return;
     restoreRef.current = document.activeElement as HTMLElement | null;
     openCount += 1;
-    // the Needs-attention toasts step aside (NotificationsBell), so none covers this dialog's buttons on a phone
-    window.dispatchEvent(new Event(DIALOG_OPENED_EVENT));
+    // pop-ups make way for the dialog, so none covers its buttons on a phone: notice toasts (components/ui/Toast.tsx)
+    // and the Needs-attention toasts (NotificationsBell), which listen for the same event
+    window.dispatchEvent(new Event(DIALOG_OPEN_EVENT));
     const prevOverflow = document.body.style.overflow;
     const prevPad = document.body.style.paddingRight;
     const scrollbar = window.innerWidth - document.documentElement.clientWidth;

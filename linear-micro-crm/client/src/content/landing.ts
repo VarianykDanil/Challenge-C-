@@ -264,6 +264,5 @@ export const LANDING = {
     exploreHeading: 'Explore',
     signIn: 'Sign in',
     publicPage: 'Public page',
-    rights: 'All rights reserved.',
   },
 } as const;

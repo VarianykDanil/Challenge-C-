@@ -12,6 +12,9 @@ import { ErrorBoundary, ErrorState } from '@/features/common';
 import { LogGaugesModal } from '@/features/gauges';
 import { ProgressCard } from '@/features/learning/ProgressCard';
 import { TodayTallyLink } from '@/features/gauges/TallyLinks';
+import { TodayShift } from '@/features/dashboard/TodayShift';
+import { PhoneFold } from '@/features/dashboard/PhoneFold';
+import { showsTodayCard } from '@/features/dashboard/todayShift';
 import { LazyAttentionCard, LazyWeekInReview, LazyWeekPayStrip } from '@/features/smart';
 import { COPY, greetingFor, motivationForDate } from '@/content/copy';
 import { formatDate, formatDateShort, formatRangeLabel } from '@/lib/format';
@@ -43,6 +46,9 @@ export function DashboardPage() {
   const showPayStrip = me.role === 'rep' || me.role === 'leader';
   // Release 1.2 (L1): "Your next level" under the tiles, for the field ladder (reps and leaders).
   const showProgress = me.role === 'rep' || me.role === 'leader';
+  // Reps and leaders: today's event (Check in, Log gauges) first, then what needs doing, their numbers and the next
+  // events; the charts come after them (on a phone they were the second and third screens).
+  const fieldFirst = showsTodayCard(me);
 
   return (
     <>
@@ -53,7 +59,7 @@ export function DashboardPage() {
           <>
             <SegmentedControl<DashboardRange> aria-label="Period" options={RANGE_ITEMS} value={range} onChange={setRange} />
             {canLog && (
-              <Button onClick={() => setLogOpen(true)} leftIcon={<PlusCircle className="h-4 w-4" aria-hidden />}>
+              <Button onClick={() => setLogOpen(true)} leftIcon={<PlusCircle className="h-4 w-4" aria-hidden />} className="max-sm:h-11">
                 Log gauges
               </Button>
             )}
@@ -62,6 +68,9 @@ export function DashboardPage() {
       />
 
       <p className="-mt-3 mb-6 flex items-center gap-2 text-sm italic text-muted"><Quote className="h-3.5 w-3.5 shrink-0 text-accent" aria-hidden />{motivationForDate()}</p>
+
+      {/* shown even when the dashboard cannot load (no signal): it works from the events kept on the phone */}
+      {fieldFirst && <ErrorBoundary name="today-shift" fallback={null} className="mb-8"><TodayShift onLog={() => setLogOpen(true)} /></ErrorBoundary>}
 
       {q.isError ? (
         <ErrorState error={q.error} onRetry={() => void q.refetch()} title="Could not load your dashboard" />
@@ -90,8 +99,8 @@ export function DashboardPage() {
             </div>
           )}
 
-          {/* Personal charts */}
-          {!recruiterFirst && <PersonalCharts dashboard={d} canLog={canLog} onLog={() => setLogOpen(true)} baseline={insights?.personal.baseline} direction={insights?.personal.direction} />}
+          {/* Personal charts (for reps and leaders, after the events below) */}
+          {!recruiterFirst && !fieldFirst && <PersonalCharts dashboard={d} canLog={canLog} onLog={() => setLogOpen(true)} baseline={insights?.personal.baseline} direction={insights?.personal.direction} />}
 
           {/* Team, events, announcements: two columns (announcements across both) until 1360 px, where three cards still
               leave room for names beside the sidebar (1.3.1 UI review: at 1024 px a third of the row cut them to "H.") */}
@@ -110,9 +119,25 @@ export function DashboardPage() {
             <AnnouncementsCard dashboard={d} canAnnounce={canAnnounce} onNew={() => setAnnounceOpen(true)} className="lg:col-span-2 min-[1360px]:col-span-1" />
           </div>
 
-          <ErrorBoundary name="week-in-review"><LazyWeekInReview /></ErrorBoundary>
+          {fieldFirst && (
+            <PhoneFold id="my-charts" title="Your trend and funnel" hint="Charts of your sales and stops, and tips">
+              <PersonalCharts dashboard={d} canLog={canLog} onLog={() => setLogOpen(true)} baseline={insights?.personal.baseline} direction={insights?.personal.direction} />
+            </PhoneFold>
+          )}
 
-          {!companyFirst && d?.company && <ErrorBoundary name="company"><CompanySection company={d.company} rangeLabel={`${formatDate(d.from)} – ${formatDate(d.to)}`} checkIns={insights?.company?.checkIns} /></ErrorBoundary>}
+          {fieldFirst ? (
+            <PhoneFold id="week-review" title="Your week in review" hint="Last week's numbers and highlights">
+              <ErrorBoundary name="week-in-review"><LazyWeekInReview /></ErrorBoundary>
+            </PhoneFold>
+          ) : (
+            <ErrorBoundary name="week-in-review"><LazyWeekInReview /></ErrorBoundary>
+          )}
+
+          {!companyFirst && d?.company && (
+            <PhoneFold id="company" title="Company" hint="How every team is doing">
+              <ErrorBoundary name="company"><CompanySection company={d.company} rangeLabel={`${formatDate(d.from)} – ${formatDate(d.to)}`} checkIns={insights?.company?.checkIns} /></ErrorBoundary>
+            </PhoneFold>
+          )}
         </div>
       )}
 

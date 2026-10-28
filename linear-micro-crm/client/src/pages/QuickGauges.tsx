@@ -127,7 +127,7 @@ export function QuickGaugesPage() {
             <p className="group-has-[[data-plan-strip]]/side:max-h-[14px] group-has-[[data-plan-strip]]/side:overflow-hidden"><TallyHelp /></p>
           </div>
         )}
-        {/* Release 1.2: the campaign's pitch (L2) and one-tap check-in (U4), 40 px icons on a phone, 4 px apart. */}
+        {/* Release 1.2: the campaign's pitch (L2, a 40 px icon on a phone) and one-tap check-in (U4, always labelled). */}
         {selected && (
           <div className="flex shrink-0 items-center gap-1 empty:hidden sm:gap-3 short:gap-1">
             <ErrorBoundary name="pitch-link" fallback={null}>

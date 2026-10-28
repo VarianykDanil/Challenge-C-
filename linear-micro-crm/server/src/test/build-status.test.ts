@@ -50,6 +50,18 @@ describe('clientBuildStatus', () => {
     assert.match(staleBuildMessage(s) ?? '', /out of date/);
   });
 
+  it('counts the offline service worker and the build plugin as client sources', () => {
+    // a release that only fixes the worker (client/sw) or its file list (client/build) must still be rebuilt
+    for (const rel of ['client/sw/sw.ts', 'client/build/precache.ts', 'client/tsconfig.node.json']) {
+      const { root, touch } = checkout(1_000_000);
+      touch('client/dist/index.html', 1_000_100);
+      touch(rel, 1_000_500);
+      const s = clientBuildStatus(root);
+      assert.equal(s.stale, true, rel);
+      assert.equal(s.newest?.file, path.join(...rel.split('/')), rel);
+    }
+  });
+
   it('counts shared code and a fresh install as client sources, but not a lockfile timestamp or files in client/dist', () => {
     const shared = checkout(1_000_000);
     shared.touch('client/dist/index.html', 1_000_100);
