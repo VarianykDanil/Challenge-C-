@@ -9,6 +9,16 @@ response field is renamed or removed, and new fields are optional.
 
 What comes next is in [docs/ROADMAP.md](docs/ROADMAP.md).
 
+### Changed
+
+- The public page (`/welcome`, and `/` when signed out) no longer shows anything about pay or the internal playbook.
+  Gone: the six gauges, the law of averages and its benchmarks, weekly pay and paydays, the sample payday figure and
+  sales funnel, and the "One sign-in per person" section with its sign-in instructions. In their place: "How we work"
+  (training, teach-backs, coaching and planned events), the training pack's three core principles and its full
+  eight-level career ladder (what you learn at each level and what it takes to move up, with no pay, incentives or
+  targets), and a "Private and secure" section. A new test (`server/src/test/public-page.test.ts`) fails if pay,
+  money amounts, the gauges, the benchmarks or the sign-in details ever come back.
+
 ### Fixed
 
 - `npm run build`, `npm start`, `npm run latest` and the other commands now also work from the top folder of the

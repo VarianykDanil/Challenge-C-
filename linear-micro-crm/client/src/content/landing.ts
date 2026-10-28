@@ -2,9 +2,9 @@
 // (`/` when signed out, always at `/welcome`). British English, confident and specific, no hype.
 // Facts about the company are limited to what the business has told us or publishes itself: founded 2024,
 // Deansgate office, campaign types, the careers line. No statistics are quoted anywhere on this page.
+// This page is public: nothing about pay, commission or incentives, and nothing from the internal playbook (the six
+// gauges, the benchmarks or the law of averages). content/landing.test.ts checks this.
 // Names, legal name and website come from BRAND in shared/src/constants.ts.
-import type { Position } from '@lm/shared';
-
 /** Icon names resolved to lucide-react icons in pages/Landing.tsx. */
 export type LandingIcon =
   | 'Store'
@@ -12,18 +12,17 @@ export type LandingIcon =
   | 'Home'
   | 'HeartHandshake'
   | 'Target'
-  | 'Wallet'
   | 'Smartphone'
-  | 'Gauge'
   | 'CalendarDays'
   | 'Trophy'
   | 'UserPlus'
   | 'GraduationCap'
   | 'Users'
-  | 'PoundSterling'
   | 'ShieldCheck';
 
 export interface LandingFeature { icon: LandingIcon; title: string; body: string }
+/** One level of the public career ladder: its focus, what you learn there and what it takes to move up. */
+export interface LandingLadderLevel { title: string; focus: string; learn: readonly string[]; next: readonly string[] }
 export interface LandingSectionId { id: 'what-we-do' | 'how-we-work' | 'careers' | 'linear-hub'; label: string }
 
 export const LANDING = {
@@ -39,14 +38,14 @@ export const LANDING = {
     eyebrow: 'Face-to-face sales · Manchester',
     headline: 'Face-to-face sales, done properly.',
     subheadline:
-      'Linear MCR runs outsourced face-to-face campaigns for brands and charities across Greater Manchester and the North West: private-site events, B2B, B2C residential and retail, and fundraising. Founded in 2024 and based on Deansgate, we measure every day the same way and pay every week.',
+      'Linear MCR runs outsourced face-to-face campaigns for brands and charities across Greater Manchester and the North West: private-site events, B2B, B2C residential and retail, and fundraising. Founded in 2024 and based on Deansgate, we train every representative ourselves and promote from within.',
     primaryCta: 'Sign in',
     secondaryCta: 'See what we do',
     facts: [
       { label: 'Founded', value: '2024' },
       { label: 'Based', value: 'Deansgate, Manchester' },
       { label: 'Campaigns', value: 'B2B · B2C · Charity' },
-      { label: 'Pay', value: 'Weekly' },
+      { label: 'Promotions', value: '100% internal' },
     ],
     previewLabel: 'Illustrative',
     previewCaption: 'A representative’s week in Linear Hub. Illustrative figures, not live data.',
@@ -71,7 +70,7 @@ export const LANDING = {
       {
         icon: 'Home',
         title: 'B2C residential and retail',
-        body: 'Residential canvassing and in-store activity for consumer brands, with every stop logged so the client can see the territory being worked.',
+        body: 'Residential canvassing and in-store activity for consumer brands, with every visit planned so the client can see the territory being worked.',
       },
       {
         icon: 'HeartHandshake',
@@ -83,32 +82,39 @@ export const LANDING = {
 
   howWeWork: {
     eyebrow: 'How we work',
-    title: 'Six numbers, logged every day.',
+    title: 'Trained properly. Coached in the field.',
     intro:
-      'Every representative on every event records the same six gauges, in funnel order. Each stage is a subset of the one before, so the numbers cannot drift and the ratios between them show exactly where a day went right or wrong.',
-    gaugesHeading: 'The six gauges',
-    lawOfAverages: {
-      title: 'The law of averages',
-      /** `{stopsPerSale}` and `{overall}` are filled in by the page from the company benchmarks. */
-      body:
-        'The company benchmark for each stage is the ratio a trained representative hits on an ordinary day. Hit all five and roughly one stop in {stopsPerSale} becomes a sale ({overall} overall). Fall short on one and the coaching conversation starts there, not with a hunch.',
-      chipsLabel: 'Benchmarks, stage to stage',
-    },
+      'Every representative is trained before they speak for a client and keeps learning on the job, alongside someone who has done it. We plan every event with the client, turn up ready and represent their brand the way they would.',
     pillars: [
       {
-        icon: 'Target',
-        title: 'Coaching on ratios, not opinions',
-        body: 'Leaders see every representative’s stage-to-stage ratios against the benchmarks, graded on track, watch or below, so feedback is specific: more presentations, a cleaner close, a firmer ask.',
+        icon: 'GraduationCap',
+        title: 'Trained, not just briefed',
+        body: 'Product knowledge, the pitch and how to hold an honest conversation come first. Nobody represents a client until they are ready.',
       },
       {
-        icon: 'Wallet',
-        title: 'Weekly pay you can see',
-        body: 'Pay weeks run Monday to Sunday and are paid the following Friday. Every payslip is itemised against the pay plan, and every payday is tracked for punctuality.',
+        icon: 'Users',
+        title: 'Learn it, then teach it back',
+        body: 'Training is checked, not assumed: you learn a part of the pack, then teach it back to your leader in your own words.',
+      },
+      {
+        icon: 'Target',
+        title: 'Coaching from someone who has done it',
+        body: 'Leaders work alongside their teams every day, so feedback is specific, practical and given on the spot.',
+      },
+      {
+        icon: 'CalendarDays',
+        title: 'Planned with the client',
+        body: 'Every event is agreed with the client and the site in advance, staffed by a team that knows the campaign.',
+      },
+      {
+        icon: 'ShieldCheck',
+        title: 'Representing the brand properly',
+        body: 'Smart, on time and honest. Customers should understand exactly what they are signing up to, every time.',
       },
       {
         icon: 'Smartphone',
-        title: 'Logged where it happens',
-        body: 'Gauges go in from a phone between stops, in under a minute, with the funnel rule enforced as you type.',
+        title: 'Organised on one platform',
+        body: 'Events, training and the team’s day are kept in Linear Hub, our own platform, so nothing lives on scraps of paper.',
       },
     ] satisfies LandingFeature[],
   },
@@ -119,24 +125,96 @@ export const LANDING = {
     quote: 'We don’t hire CVs. We develop people.',
     quoteAttribution: 'Linear MCR',
     intro:
-      'Our roles are entry level by design. You need no sales experience to start, because the training is the job: product knowledge, the pitch, the gauges and the law of averages, taught in the field by someone who has done it. From there the ladder is the same for everyone, and progression is earned on results rather than time served.',
-    ladderHeading: 'The progression ladder',
-    /** Field positions in order; labels come from POSITION_LABELS. */
-    ladder: ['trainee', 'field_rep', 'team_leader', 'crew_leader', 'assistant_owner', 'owner'] satisfies Position[],
-    ladderNotes: {
-      trainee: 'Learn the pitch and the gauges alongside a mentor.',
-      field_rep: 'Run your own stops and own your ratios.',
-      team_leader: 'Coach a small team and run its events.',
-      crew_leader: 'Lead several teams across campaigns.',
-      assistant_owner: 'Run the office side: recruitment, clients and pay.',
-      owner: 'Lead the business and develop its next leaders.',
-    } satisfies Partial<Record<Position, string>>,
+      'Our roles are entry level by design. You need no sales experience to start, because the training is the job: product knowledge, the pitch and the fundamentals of a good conversation, taught in the field by someone who has done it. From there the ladder is the same for everyone, all the way to running your own office.',
+    principlesHeading: 'Three core principles',
+    /** From the training pack's core principles, without anything about pay. */
+    principles: [
+      {
+        icon: 'UserPlus',
+        title: '100% internal promotions',
+        body: 'Everyone progresses from within. There are unlimited vacancies, so you never wait for someone above you to leave or be promoted.',
+      },
+      {
+        icon: 'Users',
+        title: 'No seniority',
+        body: 'Progression is criteria based. It does not depend on age, gender, time served or being anyone’s favourite.',
+      },
+      {
+        icon: 'Trophy',
+        title: 'Performance decides',
+        body: 'How far and how fast you go comes down to your own results, so you stay in control of your progression.',
+      },
+    ] satisfies LandingFeature[],
+    ladderHeading: 'How you develop',
+    ladderIntro: 'Eight levels, from your first day to overseeing several offices. Each one has a clear focus, what you learn there and what it takes to move up.',
+    /** The training pack's career ladder (pre-management and post-management), public version: no pay, incentives or targets. */
+    ladderPhases: [
+      {
+        title: 'Before management',
+        levels: [
+          {
+            title: 'Entry level',
+            focus: 'Master the basic fundamentals.',
+            learn: ['The 5 steps to a conversation', 'The 8 working habits', 'The 6 impulse factors'],
+            next: ['Consistent results', 'Learn and teach back the training pack'],
+          },
+          {
+            title: 'Leadership',
+            focus: 'Learn the 7 key areas of leadership.',
+            learn: ['Field', 'Recruitment', 'Training', 'Atmosphere', 'Road trips', 'Networking', 'Development'],
+            next: ['Teach and train 3 people from entry level to leadership', 'Show you can train different personalities'],
+          },
+          {
+            title: 'Campaign Manager',
+            focus: 'Manage the campaign.',
+            learn: ['Run office trips', 'Oversee a medium-sized team'],
+            next: ['A strong, consistent team'],
+          },
+          {
+            title: 'Assistant Director',
+            focus: 'Learn the back end of the business.',
+            learn: ['HR', 'Recruitment', 'Client liaison', 'Design your own brand', 'Manage a team of 10–15'],
+            next: ['A profitable team', 'You are ready'],
+          },
+        ],
+      },
+      {
+        title: 'Management',
+        levels: [
+          {
+            title: 'Senior Director',
+            focus: 'Open and run your own office.',
+            learn: ['Full control of operations', 'Choice of client, campaign and location', 'Morning and leaders’ meetings', 'Interviews'],
+            next: ['Coach and mentor someone from entry level to opening their own office'],
+          },
+          {
+            title: 'Promoting Owner',
+            focus: 'Run your own office and oversee at least one other.',
+            learn: ['Grow the offices you have mentored'],
+            next: ['Coach and mentor 4 first-generation offices'],
+          },
+          {
+            title: 'Regional Consultant',
+            focus: 'Consult and oversee more than 4 separate offices.',
+            learn: ['Support offices across a region'],
+            next: ['Coach and mentor 7 first-generation offices'],
+          },
+          {
+            title: 'National Consultant',
+            focus: 'Oversee 7 offices.',
+            learn: ['Lead the network nationally'],
+            next: [],
+          },
+        ],
+      },
+    ],
+    ladderLabels: { learn: 'What you learn', next: 'To move up' },
     offersHeading: 'What you can expect',
     offers: [
-      { icon: 'GraduationCap', title: 'Full training from day one', body: 'Product, pitch and the six gauges, taught in the field.' },
+      { icon: 'GraduationCap', title: 'Full training from day one', body: 'The product, the pitch and the fundamentals, taught in the field.' },
       { icon: 'Users', title: 'A mentor, not a manual', body: 'Someone who has done the job walks the first weeks with you.' },
-      { icon: 'PoundSterling', title: 'Weekly pay, itemised', body: 'Paid the Friday after each week, with every line explained.' },
-      { icon: 'Trophy', title: 'Progression on results', body: 'The same ladder for everyone, from trainee to owner.' },
+      { icon: 'UserPlus', title: 'No waiting for a vacancy', body: 'Every role is filled from within, and there is always room for the next leader.' },
+      { icon: 'Trophy', title: 'Progression on results', body: 'The same ladder for everyone, from entry level to your own office.' },
     ] satisfies LandingFeature[],
     cta: 'Interested in joining? Visit our website',
   },
@@ -145,24 +223,29 @@ export const LANDING = {
     eyebrow: 'Linear Hub',
     title: 'The platform behind the day.',
     intro:
-      'Linear Hub is our own team platform. It puts the gauges, the people and the money in one place, built around the way Linear already works rather than asking the business to change.',
+      'Linear Hub is our own team platform. It keeps the team’s day, events, training and recruitment in one place, built around the way Linear already works rather than asking the business to change.',
     features: [
-      { icon: 'Gauge', title: 'Gauges in seconds', body: 'Six numbers in funnel order, validated as you type, from a phone between stops.' },
-      { icon: 'Target', title: 'Ratios against the benchmarks', body: 'Every stage graded against the law of averages, for you and for your leader.' },
+      { icon: 'Smartphone', title: 'The day in seconds', body: 'Each day goes in from a phone between visits, in under a minute.' },
       { icon: 'CalendarDays', title: 'Events and check-ins', body: 'Where the team is working, when to be there and who arrived on time.' },
-      { icon: 'Trophy', title: 'Leaderboard', body: 'Sales and conversion by week, month and quarter, by person and by team.' },
-      { icon: 'UserPlus', title: 'Recruitment pipeline', body: 'Application to observation day to hire, with a representative account created the moment someone joins.' },
-      { icon: 'Wallet', title: 'Pay and punctuality', body: 'Itemised payslips, tracked paydays and campaign payouts the office can reconcile.' },
+      { icon: 'GraduationCap', title: 'Training and progress', body: 'The training pack, lessons and teach-backs, with a clear view of the next step up.' },
+      { icon: 'Trophy', title: 'Leaderboard', body: 'Friendly competition by week, month and quarter, for people and for teams.' },
+      { icon: 'UserPlus', title: 'Recruitment pipeline', body: 'From application to observation day to the first day in the field.' },
+      { icon: 'Target', title: 'Coaching that is specific', body: 'Leaders see where each person is doing well and where to help next.' },
     ] satisfies LandingFeature[],
-    rolesHeading: 'One sign-in per person',
-    rolesIntro: 'What you see depends on your role.',
-    signInNote: 'Signing in needs your work email and employee ID. There is nothing to download.',
+    safetyHeading: 'Private and secure',
+    safetyIntro: 'Built for a team, with the office in control.',
+    safety: [
+      { icon: 'ShieldCheck', title: 'Two-step sign-in', body: 'Every account signs in with a code from an authenticator app as well as its own details.' },
+      { icon: 'Users', title: 'Only what your role needs', body: 'Each person sees their own part of the business, and nothing more.' },
+      { icon: 'Target', title: 'Every change recorded', body: 'Who changed what, and when, is kept in an audit trail the office can check.' },
+      { icon: 'Smartphone', title: 'Nothing to install', body: 'It runs in the browser on any phone or laptop. Access is given by the office.' },
+    ] satisfies LandingFeature[],
   },
 
   cta: {
     signedOut: {
       title: 'Already on the team? Sign in.',
-      body: 'Use your work email and the employee ID from your welcome email. New starters receive theirs on observation day.',
+      body: 'Use the sign-in details from your welcome email. New starters receive theirs on their first day.',
       button: 'Sign in',
     },
     signedIn: {

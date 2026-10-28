@@ -8,80 +8,47 @@ import {
   ArrowRight,
   Briefcase,
   CalendarDays,
-  CreditCard,
+  CheckCircle2,
   ExternalLink,
-  Footprints,
-  Gauge,
   GraduationCap,
-  Handshake,
   HeartHandshake,
   Home,
   LogIn,
   MapPin,
   Menu as MenuIcon,
-  PoundSterling,
-  Presentation,
   ShieldCheck,
   Smartphone,
   Store,
-  Table2,
   Target,
   Trophy,
   UserPlus,
   Users,
-  Wallet,
 } from 'lucide-react';
 import clsx from 'clsx';
-import {
-  BENCHMARK_RATIOS,
-  BRAND,
-  GAUGE_KEYS,
-  GAUGE_LABELS,
-  POSITION_LABELS,
-  RATIO_KEYS,
-  ROLE_LABELS,
-  type GaugeKey,
-  type GaugeTotals,
-  type Role,
-} from '@lm/shared';
+import { BRAND } from '@lm/shared';
 import { useAuth } from '@/auth/AuthProvider';
 import { usePageTitle } from '@/lib/usePageTitle';
 import { Logo, LogoMark } from '@/components/brand/Logo';
 import { BrandBackdrop } from '@/components/brand/BrandBackdrop';
 import { ThemeToggle } from '@/components/layout/theme';
 import { Badge, Card, Dropdown, KpiTile } from '@/components/ui';
-import { FunnelChart, Sparkline, TrendChart } from '@/components/charts';
-import { GAUGE_HELP } from '@/content/copy';
-import { ABOUT } from '@/content/about';
-import { LANDING, type LandingFeature, type LandingIcon } from '@/content/landing';
+import { Sparkline, TrendChart } from '@/components/charts';
+import { LANDING, type LandingFeature, type LandingIcon, type LandingLadderLevel } from '@/content/landing';
 
 /* ───────────────────────────── static maps ───────────────────────────── */
 
 const ICONS: Record<LandingIcon, LucideIcon> = {
-  Store, Briefcase, Home, HeartHandshake, Target, Wallet, Smartphone, Gauge, CalendarDays, Trophy, UserPlus, GraduationCap, Users, PoundSterling, ShieldCheck,
+  Store, Briefcase, Home, HeartHandshake, Target, Smartphone, CalendarDays, Trophy, UserPlus, GraduationCap, Users, ShieldCheck,
 };
 
-const GAUGE_ICONS: Record<GaugeKey, LucideIcon> = {
-  stops: Footprints,
-  table: Table2,
-  presentations: Presentation,
-  closes: Handshake,
-  taps: CreditCard,
-  sales: PoundSterling,
-};
-
-const ROLE_TONE: Record<Role, 'primary' | 'accent' | 'info' | 'success'> = { admin: 'accent', leader: 'primary', recruiter: 'info', rep: 'success', client: 'info' };
-
-/** Stage-to-stage benchmarks in funnel order, paired with the gauges they connect. */
-const BENCHMARKS = RATIO_KEYS.map((key, i) => ({ key, from: GAUGE_KEYS[i]!, to: GAUGE_KEYS[i + 1]!, value: BENCHMARK_RATIOS[key] }));
-const OVERALL_BENCHMARK = BENCHMARKS.reduce((acc, b) => acc * b.value, 1);
-const STOPS_PER_SALE = Math.round(1 / OVERALL_BENCHMARK);
-const pct = (n: number, digits = 0) => `${(n * 100).toFixed(digits)}%`;
-
-/** Illustrative figures for the product preview — a plausible week that sits on every benchmark. Not live data. */
-const PREVIEW_TOTALS: GaugeTotals = { stops: 312, table: 118, presentations: 61, closes: 26, taps: 16, sales: 15 };
+/** Illustrative figures for the product preview. Not live data. */
 const PREVIEW_SALES_BY_WEEK = [9, 11, 10, 13, 12, 14, 13, 15];
 const PREVIEW_TREND = PREVIEW_SALES_BY_WEEK.map((sales, i) => ({ week: `W${i + 1}`, sales }));
+const PREVIEW_EVENTS = [
+  { day: 'Mon', place: 'Shopping centre stand', kind: 'Charity', done: true },
+  { day: 'Wed', place: 'Business visits', kind: 'B2B', done: false },
+  { day: 'Sat', place: 'Retail park event', kind: 'B2C', done: false },
+];
 
 /* ───────────────────────────── page ───────────────────────────── */
 
@@ -317,7 +284,6 @@ function Hero({ signedIn, appHref }: { signedIn: boolean; appHref: string }) {
 
 /** A stylised mock of the rep dashboard, built from the real UI kit and charts with illustrative figures. */
 function DashboardPreview() {
-  const conversion = PREVIEW_TOTALS.sales / PREVIEW_TOTALS.stops;
   return (
     <Card padded={false} className="overflow-hidden text-fg shadow-modal" role="group" aria-label="Illustrative preview of the Linear Hub dashboard">
       <div className="flex items-center justify-between gap-3 border-b border-border bg-surface-2/60 px-4 py-3">
@@ -333,24 +299,42 @@ function DashboardPreview() {
         <KpiTile
           size="sm"
           className="shadow-none"
-          label={GAUGE_LABELS.sales}
-          value={PREVIEW_TOTALS.sales}
+          label="Sales"
+          value={PREVIEW_SALES_BY_WEEK[PREVIEW_SALES_BY_WEEK.length - 1]!}
           delta={0.07}
           deltaLabel="vs last week"
           tone="primary"
           sparkline={<Sparkline data={PREVIEW_SALES_BY_WEEK} width={72} height={28} ariaLabel="Sales trend, eight weeks, rising" />}
         />
-        <KpiTile size="sm" className="shadow-none" label="Conversion" value={pct(conversion, 1)} tone="success" hint="sales ÷ stops" />
-        <KpiTile size="sm" className="shadow-none" label="Next payday" value="Friday" hint="£675.00 · gross, this week" />
+        <KpiTile size="sm" className="shadow-none" label="Events" value={PREVIEW_EVENTS.length} tone="success" hint="this week" />
+        <KpiTile size="sm" className="shadow-none" label="Training" value="14 / 21" hint="lessons done" />
       </div>
 
-      <div className="grid gap-3 px-4 pb-4 lg:grid-cols-[1.15fr_1fr]">
+      <div className="grid gap-3 px-4 pb-4 lg:grid-cols-[1fr_1.15fr]">
         <div className="min-w-0 rounded-xl border border-border p-3">
           <div className="mb-2 flex items-center justify-between gap-2">
-            <span className="text-xs font-semibold text-fg">Funnel</span>
-            <span className="text-[11px] text-muted">vs benchmark</span>
+            <span className="text-xs font-semibold text-fg">This week</span>
+            <span className="text-[11px] text-muted">Events</span>
           </div>
-          <FunnelChart totals={PREVIEW_TOTALS} showBenchmarks compact barHeight={64} />
+          <ul className="divide-y divide-border">
+            {PREVIEW_EVENTS.map((e) => (
+              <li key={e.day} className="flex items-center justify-between gap-2 py-2">
+                <span className="min-w-0">
+                  <span className="block truncate text-xs font-medium text-fg">
+                    {e.day} · {e.place}
+                  </span>
+                  <span className="text-[11px] text-muted">{e.kind}</span>
+                </span>
+                {e.done ? (
+                  <span className="inline-flex shrink-0 items-center gap-1 text-[11px] font-medium text-success">
+                    <CheckCircle2 className="h-3.5 w-3.5" aria-hidden /> Checked in
+                  </span>
+                ) : (
+                  <span className="shrink-0 text-[11px] text-muted">Booked</span>
+                )}
+              </li>
+            ))}
+          </ul>
         </div>
         <div className="min-w-0 rounded-xl border border-border p-3">
           <div className="mb-2 flex items-center justify-between gap-2">
@@ -381,55 +365,9 @@ function WhatWeDo() {
 
 function HowWeWork() {
   const s = LANDING.howWeWork;
-  const law = s.lawOfAverages.body.replace('{stopsPerSale}', String(STOPS_PER_SALE)).replace('{overall}', pct(OVERALL_BENCHMARK, 1));
   return (
     <Section id="how-we-work" tone="alt" eyebrow={s.eyebrow} title={s.title} intro={s.intro}>
-      <h3 className="sr-only">{s.gaugesHeading}</h3>
-      <ol className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-        {GAUGE_KEYS.map((key, i) => {
-          const Icon = GAUGE_ICONS[key];
-          return (
-            <li key={key} className="flex min-w-0 gap-4 rounded-xl border border-border bg-bg p-5">
-              <span className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-primary-soft text-primary" aria-hidden>
-                <Icon className="h-5 w-5" />
-              </span>
-              <div className="min-w-0">
-                <div className="flex items-baseline gap-2">
-                  <span className="kpi-number text-xs text-primary" aria-hidden>
-                    {String(i + 1).padStart(2, '0')}
-                  </span>
-                  <h4 className="text-base font-semibold text-fg">{GAUGE_LABELS[key]}</h4>
-                </div>
-                <p className="mt-1.5 text-sm leading-relaxed text-muted">{GAUGE_HELP[key]}</p>
-              </div>
-            </li>
-          );
-        })}
-      </ol>
-
-      <Card tone="primary" className="mt-6">
-        <div className="grid gap-6 lg:grid-cols-[minmax(0,1.1fr)_minmax(0,1fr)] lg:items-center">
-          <div>
-            <h3 className="text-xl font-semibold text-fg">{s.lawOfAverages.title}</h3>
-            <p className="mt-2 text-sm leading-relaxed text-fg/85 sm:text-base">{law}</p>
-          </div>
-          <div>
-            <p className="text-[11px] font-semibold uppercase tracking-[0.08em] text-muted">{s.lawOfAverages.chipsLabel}</p>
-            <ul className="mt-2 flex flex-wrap gap-2">
-              {BENCHMARKS.map((b) => (
-                <li key={b.key} className="inline-flex max-w-full items-center gap-1.5 rounded-full border border-border bg-surface px-3 py-1.5 text-xs text-fg">
-                  <span className="truncate text-muted">{GAUGE_LABELS[b.from]}</span>
-                  <ArrowRight className="h-3 w-3 shrink-0 text-muted" aria-hidden />
-                  <span className="truncate text-muted">{GAUGE_LABELS[b.to]}</span>
-                  <span className="font-semibold tabular text-success">{pct(b.value)}</span>
-                </li>
-              ))}
-            </ul>
-          </div>
-        </div>
-      </Card>
-
-      <ul className="mt-6 grid gap-4 sm:grid-cols-3">
+      <ul className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
         {s.pillars.map((p) => (
           <FeatureCard key={p.title} {...p} surface="bg" />
         ))}
@@ -448,26 +386,29 @@ function Careers() {
       afterTitle={<p className="mt-3 text-sm font-medium text-muted">— {s.quoteAttribution}</p>}
       intro={s.intro}
     >
-      <h3 className="text-[11px] font-semibold uppercase tracking-[0.08em] text-muted">{s.ladderHeading}</h3>
-      <ol className="relative mt-5 grid gap-7 sm:grid-cols-3 lg:grid-cols-6 lg:gap-5">
-        {/* connecting line: vertical on phones, horizontal from lg */}
-        <div className="absolute bottom-3 left-4 top-3 w-px bg-border-strong sm:hidden" aria-hidden />
-        <div className="absolute left-0 right-0 top-4 hidden h-px bg-border-strong lg:block" aria-hidden />
-        {s.ladder.map((pos, i) => (
-          <li key={pos} className="relative flex min-w-0 gap-4 sm:block">
-            <span className="kpi-number relative z-10 inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-primary text-sm text-primary-fg ring-4 ring-bg" aria-hidden>
-              {i + 1}
-            </span>
-            <div className="min-w-0 sm:mt-4">
-              <h4 className="text-sm font-semibold text-fg">
-                <span className="sr-only">Step {i + 1}: </span>
-                {POSITION_LABELS[pos]}
-              </h4>
-              <p className="mt-1 text-xs leading-relaxed text-muted">{s.ladderNotes[pos]}</p>
-            </div>
-          </li>
+      <h3 className="text-[11px] font-semibold uppercase tracking-[0.08em] text-muted">{s.principlesHeading}</h3>
+      <ul className="mt-5 grid gap-4 sm:grid-cols-3">
+        {s.principles.map((p) => (
+          <FeatureCard key={p.title} {...p} as="h4" />
         ))}
-      </ol>
+      </ul>
+
+      <h3 className="mt-14 text-[11px] font-semibold uppercase tracking-[0.08em] text-muted">{s.ladderHeading}</h3>
+      <p className="mt-2 max-w-2xl text-sm leading-relaxed text-muted">{s.ladderIntro}</p>
+      {s.ladderPhases.map((phase, phaseIndex) => {
+        // Levels are numbered across both phases (1–8).
+        const first = s.ladderPhases.slice(0, phaseIndex).reduce((n, p) => n + p.levels.length, 1);
+        return (
+          <div key={phase.title} className="mt-8">
+            <h4 className="text-base font-semibold text-fg">{phase.title}</h4>
+            <ol className="mt-4 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+              {phase.levels.map((level, i) => (
+                <LadderStep key={level.title} step={first + i} level={level} />
+              ))}
+            </ol>
+          </div>
+        );
+      })}
 
       <h3 className="mt-14 text-[11px] font-semibold uppercase tracking-[0.08em] text-muted">{s.offersHeading}</h3>
       <ul className="mt-5 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
@@ -483,6 +424,47 @@ function Careers() {
   );
 }
 
+/** One level of the career ladder: number, title, focus, what you learn and what it takes to move up. */
+function LadderStep({ step, level }: { step: number; level: LandingLadderLevel }) {
+  const labels = LANDING.careers.ladderLabels;
+  return (
+    <li className="flex min-w-0 flex-col rounded-xl border border-border bg-surface p-5 shadow-card">
+      <div className="flex items-center gap-3">
+        <span className="kpi-number inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-primary text-sm text-primary-fg" aria-hidden>
+          {step}
+        </span>
+        <h5 className="min-w-0 text-sm font-semibold text-fg">
+          <span className="sr-only">Level {step}: </span>
+          {level.title}
+        </h5>
+      </div>
+      <p className="mt-3 text-sm font-medium leading-relaxed text-fg">{level.focus}</p>
+      <p className="mt-3 text-[11px] font-semibold uppercase tracking-[0.08em] text-muted">{labels.learn}</p>
+      <ul className="mt-1.5 space-y-1 text-xs leading-relaxed text-muted">
+        {level.learn.map((item) => (
+          <li key={item} className="flex gap-1.5">
+            <span className="mt-[7px] h-1 w-1 shrink-0 rounded-full bg-primary" aria-hidden />
+            <span className="min-w-0">{item}</span>
+          </li>
+        ))}
+      </ul>
+      {level.next.length > 0 && (
+        <>
+          <p className="mt-3 text-[11px] font-semibold uppercase tracking-[0.08em] text-muted">{labels.next}</p>
+          <ul className="mt-1.5 space-y-1 text-xs leading-relaxed text-muted">
+            {level.next.map((item) => (
+              <li key={item} className="flex gap-1.5">
+                <ArrowRight className="mt-0.5 h-3 w-3 shrink-0 text-primary" aria-hidden />
+                <span className="min-w-0">{item}</span>
+              </li>
+            ))}
+          </ul>
+        </>
+      )}
+    </li>
+  );
+}
+
 function Hub() {
   const s = LANDING.hub;
   return (
@@ -494,23 +476,13 @@ function Hub() {
       </ul>
 
       <div className="mt-14">
-        <h3 className="text-xl font-semibold text-fg">{s.rolesHeading}</h3>
-        <p className="mt-1 text-sm text-muted">{s.rolesIntro}</p>
+        <h3 className="text-xl font-semibold text-fg">{s.safetyHeading}</h3>
+        <p className="mt-1 text-sm text-muted">{s.safetyIntro}</p>
         <ul className="mt-5 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-          {ABOUT.whoItsFor.map((r) => (
-            <li key={r.role} className="min-w-0 rounded-xl border border-border bg-bg p-5">
-              <div className="flex items-start justify-between gap-2">
-                <h4 className="text-sm font-semibold text-fg">{r.title}</h4>
-                <Badge tone={ROLE_TONE[r.role]} size="sm">{ROLE_LABELS[r.role]}</Badge>
-              </div>
-              <p className="mt-2 text-sm leading-relaxed text-muted">{r.description}</p>
-            </li>
+          {s.safety.map((f) => (
+            <FeatureCard key={f.title} {...f} as="h4" surface="bg" />
           ))}
         </ul>
-        <p className="mt-6 inline-flex items-start gap-2 text-sm text-muted">
-          <ShieldCheck className="mt-0.5 h-4 w-4 shrink-0 text-primary" aria-hidden />
-          {s.signInNote}
-        </p>
       </div>
     </Section>
   );
