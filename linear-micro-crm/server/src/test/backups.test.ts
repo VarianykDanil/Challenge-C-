@@ -4,7 +4,7 @@
  */
 import { after, before, test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, rmSync } from 'node:fs';
+import { mkdtempSync, rmSync, utimesSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { backupNow, configureBackupDir } from '../lib/backup.ts';
@@ -32,6 +32,9 @@ test('GET /api/health: admin sees backup {lastAt, file, count, dir, enabled}; ot
   assert.deepEqual(before.json.backup, { lastAt: null, file: null, count: 0, dir, enabled: true });
 
   const r = await backupNow(srv.db, { dir });
+  // The file's time is the backup's own, as on a computer whose clock and file times agree (npm run test:dates moves
+  // only the clock, so in the past the file would look newer than its record).
+  utimesSync(r.path, new Date(r.at), new Date(r.at));
   const a = await admin.get('/health');
   assert.equal(a.status, 200);
   assert.equal(a.json.ok, true);
