@@ -54,6 +54,7 @@ const KIND_LABELS: Record<AttentionKind, string> = {
   client: 'Client updates',
   // Release 1.4 (F)
   payments: 'Payments',
+  system: 'System health',
 };
 
 /** Groups in the order their first (most severe, newest) item appears in the sorted feed. */

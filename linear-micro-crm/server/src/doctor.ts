@@ -6,15 +6,21 @@
  * boot of the server on a temporary database and a random port (does it answer /api/health and stay up?). Exit code
  * 1 when any check fails; warnings and notes (ℹ) do not fail it.
  */
+import './serviceEnv.ts'; // first: the installed service's settings, before anything reads them
 import { spawn } from 'node:child_process';
 import { existsSync, mkdirSync, mkdtempSync, rmSync, statSync, statfsSync, unlinkSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { DEFAULT_DB_PATH } from './db/seed.ts';
-import { BACKUP_RULES, backupDirFor, backupStatus, backupsEnabled, formatBytes, hoursSince } from './lib/backup.ts';
+import { BACKUP_RULES, backupDirFor, backupStatus, backupsEnabled, formatBytes, hoursSince, lastBackupFailure } from './lib/backup.ts';
+import { OFFSITE_RULES, listArchives, offsiteConfig, offsiteProblem } from './lib/offsite.ts';
 import { findPortHolder, portBusyMessage } from './lib/boot.ts';
 import { clientBuildStatus, depsStatus, shortStamp, staleBuildMessage } from './lib/buildStatus.ts';
 import { installedServiceFile, staleNodeWarning } from './service.ts';
+import { appKeyRefusal, checkAppKey } from './lib/appKey.ts';
+import { readSecretFile, secretFingerprint, shortFingerprint } from './lib/crypto.ts';
+import { sheetStatus } from './lib/recoverySheet.ts';
+import { NODE_ENGINES, nodeSupport, sqliteStatus } from './lib/nodeSupport.ts';
 
 type Status = 'ok' | 'info' | 'warn' | 'fail';
 interface Check {
@@ -37,14 +43,13 @@ const port = Number(process.env.PORT ?? 4000);
 
 console.log(`Linear Hub doctor — ${new Date().toISOString()}\n`);
 
-// 1. Runtime
+// 1. Runtime: the Node version (supported lines only) and what this Node says about node:sqlite
 {
-  const [major = 0, minor = 0] = process.versions.node.split('.').map(Number);
-  const supported = major > 22 || (major === 22 && minor >= 18);
+  const support = nodeSupport();
   report(
-    supported ? 'ok' : 'fail',
-    `Node ${process.versions.node} on ${process.platform}/${process.arch} (${process.execPath})`,
-    supported ? undefined : 'Linear Hub needs Node 22.18 or newer (type stripping + node:sqlite). Install the current LTS from https://nodejs.org.',
+    support.status,
+    `Node ${process.versions.node} on ${process.platform}/${process.arch} (${process.execPath})${support.status === 'ok' ? `: a supported version (${NODE_ENGINES})` : ''}`,
+    support.message ?? undefined,
   );
   const injected = ['NODE_OPTIONS', 'NODE_EXTRA_CA_CERTS', 'VSCODE_INSPECTOR_OPTIONS']
     .filter((k) => process.env[k])
@@ -59,14 +64,21 @@ console.log(`Linear Hub doctor — ${new Date().toISOString()}\n`);
   } else {
     report('ok', 'No NODE_OPTIONS injected into node processes');
   }
-  try {
-    const sqlite = await import('node:sqlite');
-    report(typeof sqlite.DatabaseSync === 'function' ? 'ok' : 'fail', 'node:sqlite is available');
-    if (typeof (sqlite as { backup?: unknown }).backup !== 'function') {
-      report('warn', 'This Node has no node:sqlite backup(), so backups cannot run', 'Backups need Node 22.16 or newer. Install the current LTS from https://nodejs.org.');
-    }
-  } catch (err) {
-    report('fail', 'node:sqlite is not available in this Node', String(err));
+  const sqlite = sqliteStatus();
+  if (!sqlite.available) {
+    report('fail', 'node:sqlite does not work in this Node', `${sqlite.error ?? ''}\nLinear Hub keeps its data with node:sqlite. Install Node 22 or 24 LTS from https://nodejs.org.`);
+  } else {
+    report(
+      sqlite.experimental ? 'info' : 'ok',
+      `node:sqlite works (SQLite ${sqlite.sqliteVersion ?? 'unknown'})${sqlite.experimental ? '; this Node still marks it experimental' : ''}`,
+      sqlite.experimental
+        ? 'Node labels node:sqlite "experimental" (the npm scripts hide that warning). Linear Hub supports only the Node versions it is tested on, so a Node update cannot change it unnoticed: npm run doctor warns about any other version.'
+        : undefined,
+    );
+  }
+  const backup = await import('node:sqlite').then((m) => (m as { backup?: unknown }).backup).catch(() => undefined);
+  if (sqlite.available && typeof backup !== 'function') {
+    report('fail', 'This Node has no node:sqlite backup(), so backups cannot run', 'Install Node 22 or 24 LTS from https://nodejs.org.');
   }
 }
 
@@ -118,18 +130,51 @@ console.log(`Linear Hub doctor — ${new Date().toISOString()}\n`);
   }
 }
 
-// 5. The app secret (the two-step and PIN key)
+// 5. The app key (two-step sign-in, PINs, bank details, payment connections) and the database
 {
-  if (process.env.LM_APP_SECRET) {
-    report('ok', 'LM_APP_SECRET is set (two-step secrets are encrypted and sign-in PINs peppered with it)');
+  const file = process.env.LM_APP_SECRET_FILE ? path.resolve(process.env.LM_APP_SECRET_FILE) : path.join(path.dirname(dbPath), 'app-secret');
+  const envSecret = process.env.LM_APP_SECRET || null;
+  const secret = envSecret ?? readSecretFile(file);
+  const where = envSecret ? 'LM_APP_SECRET' : `app key file ${file}`;
+  if (!envSecret && existsSync(file)) {
+    const mode = statSync(file).mode & 0o777;
+    if (process.platform !== 'win32' && mode !== 0o600) report('warn', `The app key file ${file} can be read by others (mode ${mode.toString(8)})`, `Run:  chmod 600 "${file}"`);
+  }
+  if (!existsSync(dbPath)) {
+    report('ok', secret ? `App key: ${where} (fingerprint ${shortFingerprint(secretFingerprint(secret))})` : `App key not made yet (${file}): made on first start`);
   } else {
-    const file = process.env.LM_APP_SECRET_FILE ? path.resolve(process.env.LM_APP_SECRET_FILE) : path.join(path.dirname(dbPath), 'app-secret');
-    if (!existsSync(file)) {
-      report('ok', `App secret file (the two-step and PIN key) not created yet (${file}): generated on first start`);
-    } else {
-      const mode = statSync(file).mode & 0o777;
-      const tight = process.platform === 'win32' || mode === 0o600;
-      report(tight ? 'ok' : 'warn', `App secret file (the two-step and PIN key) ${file} (mode ${mode.toString(8)})`, tight ? undefined : `Run:  chmod 600 "${file}"`);
+    try {
+      const { DatabaseSync } = await import('node:sqlite');
+      const db = new DatabaseSync(dbPath, { readOnly: true });
+      let check: ReturnType<typeof checkAppKey>;
+      let sheet: ReturnType<typeof sheetStatus>;
+      try {
+        check = checkAppKey(db, secret);
+        sheet = sheetStatus(db, secret ? secretFingerprint(secret) : null);
+      } finally {
+        db.close();
+      }
+      if (check.status === 'missing' || check.status === 'mismatch') {
+        report(
+          'fail',
+          check.status === 'missing' ? 'The app key is missing for this database' : 'The app key does not match this database',
+          appKeyRefusal(check, { dbPath, keyFile: envSecret ? null : file, backupDir: backupDirFor(dbPath) }),
+        );
+      } else if (check.status === 'create') {
+        report('ok', `App key not made yet (${file}): nothing in the database is locked yet, so it is made on first start`);
+      } else {
+        report('ok', `App key matches the database: ${where} (fingerprint ${shortFingerprint(check.fingerprint)})`);
+        if (!sheet.confirmedForThisKey) {
+          report(
+            'warn',
+            'No recovery sheet confirmed for this key yet',
+            'Without a copy of the key kept away from this computer, losing the computer loses the locked data (bank details, two-step sign-in). ' +
+              'Make one here with the owner:  npm run recovery-sheet -- --print  (or without --print to show it on screen), lock it away, then  npm run recovery-sheet -- --confirm  and type the key back from the paper.',
+          );
+        }
+      }
+    } catch (err) {
+      report('warn', 'Could not compare the app key with the database', String(err));
     }
   }
 }
@@ -195,6 +240,37 @@ console.log(`Linear Hub doctor — ${new Date().toISOString()}\n`);
   if (service) {
     const stale = staleNodeWarning(service);
     report(stale ? 'warn' : 'ok', stale ? 'The background service runs a different Node' : `Background service installed (${service})`, stale ?? undefined);
+  }
+}
+
+// 6b. Off-site copies (LM_OFFSITE_DIR) and the last backup failure
+{
+  const offsite = offsiteConfig();
+  if (!offsite) {
+    report('info', 'Off-site copies are off: the backups stay on this computer', 'Set LM_OFFSITE_DIR and LM_BACKUP_PASSPHRASE_FILE to keep an encrypted copy of every backup somewhere else (docs/DEPLOY.md).');
+  } else {
+    const problem = offsiteProblem(offsite);
+    const copies = listArchives(offsite.dir);
+    if (problem) report('fail', 'Off-site copies are switched on but cannot be written', problem);
+    else if (!copies.length) report('warn', `No off-site copy yet in ${offsite.dir}`, 'Make one now with:  npm run backup');
+    else {
+      const ageH = (Date.now() - copies[0]!.mtimeMs) / 3_600_000;
+      report(ageH > OFFSITE_RULES.staleHours ? 'warn' : 'ok', `Newest off-site copy ${copies[0]!.name} (${Math.round(ageH)} h ago, ${copies.length} kept in ${offsite.dir})`);
+    }
+  }
+  if (existsSync(dbPath)) {
+    try {
+      const { DatabaseSync } = await import('node:sqlite');
+      const db = new DatabaseSync(dbPath, { readOnly: true });
+      try {
+        const failure = lastBackupFailure(db);
+        if (failure) report('warn', `The last backup failed (${failure.at})`, failure.message);
+      } finally {
+        db.close();
+      }
+    } catch {
+      // the database check above says what is wrong with it
+    }
   }
 }
 

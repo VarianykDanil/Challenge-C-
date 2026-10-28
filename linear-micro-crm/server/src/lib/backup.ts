@@ -47,13 +47,30 @@ import type { BackupStatus } from '@lm/shared';
 import type { Db } from '../db/connection.ts';
 import { DEFAULT_DB_PATH } from '../db/seed.ts';
 import { findPortHolder, processCommand } from './boot.ts';
-import { addDays, mondayOf } from './dates.ts';
+import { BACKUP_FILE_RE, ROTATION, londonParts, planRotation, type RotationPlan } from './rotation.ts';
+import { checkAppKey, encryptedData, storedFingerprint } from './appKey.ts';
+import {
+  FILES_PARTIAL_RE,
+  FILES_SNAPSHOT_RE,
+  filesSnapshotName,
+  restoreFiles,
+  snapshotFiles,
+  type DataFolders,
+  type FilesRestoreResult,
+  type SnapshotResult,
+} from './backupFiles.ts';
+import { currentAppSecret, readSecretFile, secretFingerprint, shortFingerprint } from './crypto.ts';
+import { extractArchive, isArchiveFile, writeOffsiteCopy, type OffsiteConfig, type OffsiteResult } from './offsite.ts';
+import { RESTORE_WARNING_META, describeLosses, noLosses, paymentLosses, restoreWarningRecord, type PaymentLosses } from './restoreCheck.ts';
+import { keyLeftOutOfBackups } from './recoverySheet.ts';
+
+export { BACKUP_FILE_RE, londonParts, planRotation, type RotationPlan };
 
 export const BACKUP_RULES = {
-  /** Keep the newest file of each of this many days, today included. */
-  dailyDays: 30,
+  /** Keep the newest file of each of this many days, today included… */
+  dailyDays: ROTATION.dailyDays,
   /** …plus the newest file of each of this many ISO weeks before those days. */
-  weeklyWeeks: 8,
+  weeklyWeeks: ROTATION.weeklyWeeks,
   /** The start-up check runs this long after boot… */
   bootDelayMs: 10 * 60_000,
   /** …and backs up when the last backup is at least this old. */
@@ -70,8 +87,6 @@ export const BACKUP_RULES = {
   partialMaxAgeHours: 1,
 } as const;
 
-/** `linear-2026-10-19-0200.sqlite`: date and HHmm in Europe/London wall-clock time. */
-export const BACKUP_FILE_RE = /^linear-(\d{4}-(?:0[1-9]|1[0-2])-(?:0[1-9]|[12]\d|3[01]))-([01]\d|2[0-3])([0-5]\d)\.sqlite$/;
 /** The copy of the app secret (the two-step and PIN key) kept in the backup folder. */
 export const SECRET_COPY_NAME = 'app-secret';
 /** A backup's staging file (`.linear-…-HHmm.sqlite.<pid>.partial`, plus SQLite's -wal/-shm/-journal next to it). */
@@ -123,25 +138,18 @@ export function backupScheduleOn(): boolean {
   return configuredSchedule ?? backupsEnabled();
 }
 
-// ── names and clocks ─────────────────────────────────────────────────────────
+let configuredOffsite: OffsiteConfig | null = null;
 
-const LONDON = new Intl.DateTimeFormat('en-GB', {
-  timeZone: 'Europe/London',
-  year: 'numeric',
-  month: '2-digit',
-  day: '2-digit',
-  hour: '2-digit',
-  minute: '2-digit',
-  second: '2-digit',
-  hourCycle: 'h23',
-});
-
-/** Europe/London wall-clock parts of an instant (independent of the process TZ). */
-export function londonParts(at: Date): { date: string; hour: number; minute: number; second: number } {
-  const p: Record<string, string> = {};
-  for (const part of LONDON.formatToParts(at)) p[part.type] = part.value;
-  return { date: `${p.year}-${p.month}-${p.day}`, hour: Number(p.hour) % 24, minute: Number(p.minute), second: Number(p.second) };
+/** The off-site settings this server runs with (index.ts), for the status Settings shows. */
+export function configureOffsite(c: OffsiteConfig | null): void {
+  configuredOffsite = c;
 }
+
+export function currentOffsite(): OffsiteConfig | null {
+  return configuredOffsite;
+}
+
+// ── names and clocks ─────────────────────────────────────────────────────────
 
 const pad2 = (n: number) => String(n).padStart(2, '0');
 
@@ -255,42 +263,6 @@ export function needsNightlyBackup(lastAt: string | null, now: Date = new Date()
 
 // ── rotation ─────────────────────────────────────────────────────────────────
 
-export interface RotationPlan {
-  keep: string[];
-  remove: string[];
-}
-
-/**
- * Which backup files to keep on `today` (London date): the newest file of each of the last 30 days, plus the
- * newest file of each of the 8 ISO weeks before those days. The newest file overall is always kept, and names that
- * are not backups are left out of both lists (never removed).
- */
-export function planRotation(names: readonly string[], today: string): RotationPlan {
-  const windowStart = addDays(today, -(BACKUP_RULES.dailyDays - 1));
-  const lastWeek = mondayOf(addDays(windowStart, -1));
-  const firstWeek = addDays(lastWeek, -7 * (BACKUP_RULES.weeklyWeeks - 1));
-  const backups = names.filter((n) => BACKUP_FILE_RE.test(n)).sort().reverse();
-  const seen = new Set<string>();
-  const keep: string[] = [];
-  const remove: string[] = [];
-  backups.forEach((name, i) => {
-    const date = BACKUP_FILE_RE.exec(name)![1]!;
-    let bucket: string | null;
-    if (date >= windowStart) bucket = `day:${date}`;
-    else {
-      const monday = mondayOf(date);
-      bucket = monday >= firstWeek ? `week:${monday}` : null;
-    }
-    if (i === 0 || (bucket !== null && !seen.has(bucket))) {
-      if (bucket) seen.add(bucket);
-      keep.push(name);
-    } else {
-      remove.push(name);
-    }
-  });
-  return { keep, remove };
-}
-
 /**
  * Apply `planRotation` to the folder. Returns what was kept and removed. A file written in the last 24 hours is never
  * deleted, even when a newer one replaces it for that day: after a mistake at 10:50, a panicked `npm run backup` at
@@ -305,11 +277,12 @@ export function rotate(dir: string, now: Date = new Date()): RotationPlan {
   } catch {
     return { keep: [], remove: [] };
   }
+  const olderThan = (file: string, hours: number) => now.getTime() - statSync(file).mtimeMs >= hours * HOUR_MS;
   for (const name of names) {
-    if (!PARTIAL_FILE_RE.test(name)) continue;
+    if (!PARTIAL_FILE_RE.test(name) && !FILES_PARTIAL_RE.test(name)) continue;
     const file = path.join(dir, name);
     try {
-      if (now.getTime() - statSync(file).mtimeMs >= BACKUP_RULES.partialMaxAgeHours * HOUR_MS) unlinkSync(file);
+      if (olderThan(file, BACKUP_RULES.partialMaxAgeHours)) rmSync(file, { recursive: true, force: true });
     } catch {
       // already gone
     }
@@ -320,12 +293,23 @@ export function rotate(dir: string, now: Date = new Date()): RotationPlan {
   for (const name of plan.remove) {
     const file = path.join(dir, name);
     try {
-      if (now.getTime() - statSync(file).mtimeMs < BACKUP_RULES.graceHours * HOUR_MS) {
+      if (!olderThan(file, BACKUP_RULES.graceHours)) {
         keep.push(name);
         continue;
       }
       unlinkSync(file);
+      // the uploaded-files snapshot goes with its database file
+      rmSync(path.join(dir, filesSnapshotName(name)), { recursive: true, force: true });
       removed.push(name);
+    } catch {
+      // already gone
+    }
+  }
+  // a files snapshot whose database file is gone (deleted by hand) goes too, once it is past the grace period
+  for (const name of names) {
+    if (!FILES_SNAPSHOT_RE.test(name) || names.includes(name.replace(/\.files$/, '.sqlite'))) continue;
+    try {
+      if (olderThan(path.join(dir, name), BACKUP_RULES.graceHours)) rmSync(path.join(dir, name), { recursive: true, force: true });
     } catch {
       // already gone
     }
@@ -344,6 +328,12 @@ export interface BackupOptions {
   now?: Date;
   /** Run `rotate` afterwards (default true). */
   rotate?: boolean;
+  /** The uploaded-files folders to snapshot beside the database file (null or left out: none). */
+  files?: { folders: DataFolders; includeVideos: boolean } | null;
+  /** Write the encrypted off-site copy afterwards (LM_OFFSITE_DIR). */
+  offsite?: OffsiteConfig | null;
+  /** The release, written into the off-site copy's manifest. */
+  version?: string;
 }
 
 export interface BackupResult {
@@ -352,25 +342,74 @@ export interface BackupResult {
   bytes: number;
   ms: number;
   at: string;
-  /** What happened to the app-secret copy. */
-  secret: 'copied' | 'unchanged' | 'none';
+  /** What happened to the app-secret copy (`copySecret`). */
+  secret: SecretCopyOutcome;
   /** Old backups removed by rotation. */
   removed: string[];
   /** Backups in the folder afterwards. */
   count: number;
+  /** The uploaded-files snapshot, when one was asked for. */
+  files: SnapshotResult | null;
+  /** The off-site copy, when off-site copies are on and it worked… */
+  offsite: OffsiteResult | null;
+  /** …or why it did not (the local backup is still good). */
+  offsiteError: string | null;
 }
 
-/** Copy the app-secret into the backup folder (mode 0600) when it is missing there or different. */
-export function copySecret(secretFile: string | null | undefined, dir: string): BackupResult['secret'] {
-  if (!secretFile || !existsSync(secretFile)) return 'none';
-  const src = readFileSync(secretFile);
-  const dest = path.join(dir, SECRET_COPY_NAME);
-  if (existsSync(dest) && readFileSync(dest).equals(src)) return 'unchanged';
+/**
+ * What happened to the key copy in the backups folder:
+ *  - none: there is no key file to copy (LM_APP_SECRET is used, or no key was made yet);
+ *  - copied / unchanged: `app-secret` holds the key in use;
+ *  - kept-both: `app-secret` holds a DIFFERENT key. It is never overwritten (older backups may need it, and it may be
+ *    the only copy left); the key in use is saved beside it as `app-secret-<fingerprint>`;
+ *  - left-out / removed: the owner has confirmed a recovery sheet for this key, so backups no longer carry it: a stolen
+ *    backups folder then holds no key. `removed`: a copy of this key that was still there was deleted. Copies of other
+ *    keys are kept.
+ */
+export type SecretCopyOutcome = 'copied' | 'unchanged' | 'none' | 'kept-both' | 'left-out' | 'removed';
+
+/** `app-secret-3f2a91bc07de`: where a key goes when `app-secret` already holds a different one. */
+export function secretCopyNameFor(fingerprint: string): string {
+  return `${SECRET_COPY_NAME}-${fingerprint.slice(0, 12)}`;
+}
+
+function writePrivate(dest: string, content: Buffer): void {
   const tmp = `${dest}.${process.pid}.tmp`;
-  writeFileSync(tmp, src, { mode: 0o600 });
-  chmodSync(tmp, 0o600); // umask-proof
+  writeFileSync(tmp, '', { mode: 0o600 });
+  chmodSync(tmp, 0o600); // umask-proof, before the key is in it
+  writeFileSync(tmp, content);
   renameSync(tmp, dest);
-  return 'copied';
+}
+
+/**
+ * Keeps the key copy in the backups folder (mode 0600). `leaveOut`: the owner confirmed a recovery sheet for this key,
+ * so it is not copied and a copy of it is removed. A copy of a different key is never overwritten or removed.
+ */
+export function copySecret(secretFile: string | null | undefined, dir: string, opts: { leaveOut?: boolean } = {}): SecretCopyOutcome {
+  const secret = secretFile ? readSecretFile(secretFile) : null;
+  if (!secretFile || !secret) return 'none';
+  const src = readFileSync(secretFile);
+  const fingerprint = secretFingerprint(secret);
+  const dest = path.join(dir, SECRET_COPY_NAME);
+  const beside = path.join(dir, secretCopyNameFor(fingerprint));
+  const holdsThisKey = (file: string) => readSecretFile(file) === secret;
+  if (opts.leaveOut) {
+    let removed = false;
+    for (const file of [dest, beside]) {
+      if (existsSync(file) && holdsThisKey(file)) {
+        unlinkSync(file);
+        removed = true;
+      }
+    }
+    return removed ? 'removed' : 'left-out';
+  }
+  if (!existsSync(dest)) {
+    writePrivate(dest, src);
+    return 'copied';
+  }
+  if (holdsThisKey(dest)) return 'unchanged';
+  if (!existsSync(beside) || !holdsThisKey(beside)) writePrivate(beside, src);
+  return 'kept-both';
 }
 
 function removeDbFiles(file: string): void {
@@ -391,7 +430,12 @@ export async function whenBackupIdle(db: DatabaseSync): Promise<void> {
 export function backupNow(db: DatabaseSync, opts: BackupOptions): Promise<BackupResult> {
   const running = inFlight.get(db);
   if (running) return running;
-  const job = runBackup(db, opts).finally(() => inFlight.delete(db));
+  const job = runBackup(db, opts)
+    .catch((err: unknown) => {
+      recordBackupFailure(db, err);
+      throw err;
+    })
+    .finally(() => inFlight.delete(db));
   inFlight.set(db, job);
   return job;
 }
@@ -426,22 +470,107 @@ async function runBackup(db: DatabaseSync, opts: BackupOptions): Promise<BackupR
     } finally {
       copy.close();
     }
+    if (process.platform !== 'win32') chmodSync(partial, 0o600); // everyone's data: private to this user
     renameSync(partial, target);
   } catch (err) {
     removeDbFiles(partial);
     throw err;
   }
   const bytes = statSync(target).size;
-  const secret = copySecret(opts.secretFile, dir);
+  const files = opts.files ? snapshotFiles(opts.files.folders, dir, file, { includeVideos: opts.files.includeVideos }) : null;
+  const secret = copySecret(opts.secretFile, dir, { leaveOut: keyLeftOutOfBackups(db, opts.secretFile) });
   const iso = at.toISOString();
   recordBackup(db, iso, file);
   const removed = opts.rotate === false ? [] : rotate(dir, at).remove;
-  return { file, path: target, bytes, ms: Math.round(performance.now() - started), at: iso, secret, removed, count: listBackups(dir).length };
+  let offsite: OffsiteResult | null = null;
+  let offsiteError: string | null = null;
+  if (opts.offsite) {
+    try {
+      offsite = await writeOffsiteCopy(db, opts.offsite, {
+        backupPath: target,
+        folders: opts.files?.folders ?? null,
+        secret: currentAppSecret()?.secret ?? null,
+        version: opts.version,
+        now: at,
+      });
+    } catch (err) {
+      // the local backup is good; the failure is recorded (meta) and shown in Settings and the Needs-attention bell
+      offsiteError = err instanceof Error ? err.message : String(err);
+    }
+  }
+  return {
+    file,
+    path: target,
+    bytes,
+    ms: Math.round(performance.now() - started),
+    at: iso,
+    secret,
+    removed,
+    count: listBackups(dir).length,
+    files,
+    offsite,
+    offsiteError,
+  };
+}
+
+/**
+ * A backup that is checked before anything risky (npm run latest, before the new version changes the database): made
+ * with backupNow (uploaded files included), then opened again read-only and compared with the live database
+ * (integrity_check, the core tables, the same number of people, gauge entries and pay runs). Throws a plain message
+ * when the backup cannot be made or does not match; the caller then changes nothing.
+ */
+export async function backupAndVerify(dbPath: string, opts: Omit<BackupOptions, 'rotate' | 'offsite'>): Promise<{ result: BackupResult; summary: DbSummary }> {
+  const db = new DatabaseSync(dbPath);
+  try {
+    db.exec('PRAGMA busy_timeout = 5000');
+    const result = await backupNow(db, { ...opts, offsite: null });
+    const check = inspectDatabase(result.path);
+    if (!check.ok || !check.summary) throw new Error(`The backup failed its check: ${check.problems.join(' ')}`);
+    const live = summariseDb(db);
+    const same = live.users === check.summary.users && live.gauges === check.summary.gauges && live.payrollRuns === check.summary.payrollRuns;
+    if (!same) throw new Error('The backup does not hold the same people, gauges and pay runs as the database. Nothing was changed: try again.');
+    return { result, summary: check.summary };
+  } finally {
+    db.close();
+  }
+}
+
+export const BACKUP_FAILURE_META = { at: 'last_backup_error_at', message: 'last_backup_error' } as const;
+
+/** Records a failed backup in meta (shown until a later backup succeeds); never throws. */
+export function recordBackupFailure(db: DatabaseSync, err: unknown, at: Date = new Date()): void {
+  try {
+    const upsert = db.prepare(`INSERT INTO meta (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value`);
+    upsert.run(BACKUP_FAILURE_META.at, at.toISOString());
+    upsert.run(BACKUP_FAILURE_META.message, (err instanceof Error ? err.message : String(err)).slice(0, 500));
+  } catch {
+    // the database itself is the problem: the log has the error
+  }
+}
+
+/** The last backup failure, when it is newer than the last successful backup; null otherwise. */
+export function lastBackupFailure(db: DatabaseSync): { at: string; message: string } | null {
+  try {
+    const rows = db
+      .prepare(`SELECT key, value FROM meta WHERE key IN (?, ?, 'last_backup_at')`)
+      .all(BACKUP_FAILURE_META.at, BACKUP_FAILURE_META.message) as Array<{ key: string; value: string }>;
+    const m = Object.fromEntries(rows.map((r) => [r.key, r.value]));
+    const failedAt = m[BACKUP_FAILURE_META.at];
+    if (!failedAt) return null;
+    const okAt = m.last_backup_at;
+    if (okAt && Date.parse(okAt) >= Date.parse(failedAt)) return null;
+    return { at: failedAt, message: m[BACKUP_FAILURE_META.message] ?? 'failed' };
+  } catch {
+    return null;
+  }
 }
 
 export interface ScheduleOptions {
   dir: string;
   secretFile?: string | null;
+  files?: BackupOptions['files'];
+  offsite?: OffsiteConfig | null;
+  version?: string;
   hour?: number;
   log?: (line: string) => void;
   error?: (line: string, err: unknown) => void;
@@ -465,11 +594,14 @@ export function scheduleBackups(db: Db, opts: ScheduleOptions): () => void {
   const attempt = async (why: string, needed: (lastAt: string | null) => boolean) => {
     try {
       if (!needed(backupStatus(db, opts.dir).lastAt)) return;
-      const r = await backupNow(db, { dir: opts.dir, secretFile: opts.secretFile });
+      const r = await backupNow(db, { dir: opts.dir, secretFile: opts.secretFile, files: opts.files, offsite: opts.offsite, version: opts.version });
       log(
-        `Backed up the database (${why}) to ${r.path} (${formatBytes(r.bytes)}, ${r.ms} ms); ` +
-          `${r.count} backup${r.count === 1 ? '' : 's'} kept${r.removed.length ? `, ${r.removed.length} old one${r.removed.length === 1 ? '' : 's'} removed` : ''}.`,
+        `Backed up the database (${why}) to ${r.path} (${formatBytes(r.bytes)}, ${r.ms} ms)` +
+          `${r.files ? ` with ${r.files.files} uploaded file${r.files.files === 1 ? '' : 's'}` : ''}; ` +
+          `${r.count} backup${r.count === 1 ? '' : 's'} kept${r.removed.length ? `, ${r.removed.length} old one${r.removed.length === 1 ? '' : 's'} removed` : ''}.` +
+          `${r.offsite ? ` Off-site copy: ${r.offsite.path} (${formatBytes(r.offsite.bytes)}).` : ''}`,
       );
+      if (r.offsiteError) error(`Off-site copy failed (${why}); the local backup is fine and the next backup tries again.`, new Error(r.offsiteError));
     } catch (err) {
       error(`Backup failed (${why}); the next check tries again.`, err);
     }
@@ -663,22 +795,34 @@ export function databaseInUse(file: string): string | null {
 export interface RestoreOptions {
   /** The live database file to replace. */
   dbPath: string;
-  /** The backup to put in its place. */
+  /** The backup to put in its place: a `.sqlite` backup, or an off-site `.lhbk` copy (then `passphrase` is asked). */
   candidate: string;
   /**
    * The port Linear Hub listens on: restore refuses while anything answers there. A hint only: the real guard is
    * `databaseInUse`, which catches a server on any port or address.
    */
   port: number;
-  /** Asked once the comparison is printed; false cancels. */
-  confirm: (question: string) => Promise<boolean>;
+  /**
+   * Asked once the comparison is printed; false cancels. `typed`: the word the person must type (asked when the
+   * restore would make Linear Hub forget payments).
+   */
+  confirm: (question: string, opts?: { typed?: string }) => Promise<boolean>;
+  /** The passphrase of an off-site copy (asked only for one). */
+  passphrase?: () => Promise<string | null>;
   log?: (line: string) => void;
   /** Extra line for the "server is running" refusal (e.g. the background-service hint). */
   runningHint?: string;
-  /** The live app-secret file (default `<db dir>/app-secret`); null skips the key check (LM_APP_SECRET is set). */
+  /** The live app-secret file (default `<db dir>/app-secret`); null when LM_APP_SECRET is used (`envSecret`). */
   secretFile?: string | null;
+  /** LM_APP_SECRET, when the server takes the key from it. */
+  envSecret?: string | null;
+  /** Where the uploaded files go back to (default: the folders the server uses for this database). */
+  folders?: DataFolders;
   now?: Date;
 }
+
+/** The word typed to restore a backup that would make Linear Hub forget payments. */
+export const RESTORE_TYPED_WORD = 'RESTORE';
 
 export type RestoreOutcome =
   | { status: 'refused'; reason: string }
@@ -690,12 +834,26 @@ export type RestoreOutcome =
       previous: string | null;
       moved: string[];
       /**
-       * installed: the backup folder's app-secret was put in place because there was none; differs: left alone;
-       * missing: there is no key next to the database nor in the backup's folder, so two-step secrets cannot be read
-       * and peppered PINs never match (`restoreKeyNotes` says so).
+       * The app key after the restore:
+       *  - same: the key next to the database fits the backup (or nothing tells which key it needs and the copies agree);
+       *  - installed: there was none, and the backup's own key was put in place;
+       *  - replaced: the key there did not fit; it was kept as `<key file>.before-restore-<time>` and the backup's key
+       *    put in place;
+       *  - differs: the key there does not fit (or cannot be checked and differs from the backup's copy) and no copy
+       *    that fits was found: Linear Hub will not start until it is put back (npm run key:restore);
+       *  - missing: there is no key and no copy: same as differs;
+       *  - none: nothing to compare with (LM_APP_SECRET is used, or no copy of the key in the backup's folder).
        */
-      secret: 'installed' | 'same' | 'differs' | 'missing' | 'none';
+      secret: 'installed' | 'replaced' | 'same' | 'differs' | 'missing' | 'none';
+      /** The key file kept aside (secret 'replaced'). */
+      keptKey: string | null;
+      /** Where the key put in place came from: an off-site backup, or the backups folder (null: none was put in place). */
+      keySource: 'archive' | 'backups' | null;
       candidate: DbSummary;
+      /** The uploaded files put back from the backup's snapshot (null: the backup had none). */
+      files: FilesRestoreResult | null;
+      /** What the live database had about money that the backup does not (it was confirmed by typing). */
+      losses: PaymentLosses;
     };
 
 function describeSummary(s: DbSummary | null): string[] {
@@ -715,12 +873,66 @@ export function comparisonTable(current: DbSummary | null, candidate: DbSummary,
   return lines.join('\n');
 }
 
+/** The key files a backup may have beside it: `app-secret`, then `app-secret-<fingerprint>` copies. */
+function keyCopiesIn(dir: string): string[] {
+  let names: string[];
+  try {
+    names = readdirSync(dir);
+  } catch {
+    return [];
+  }
+  return [
+    ...names.filter((n) => n === SECRET_COPY_NAME),
+    ...names.filter((n) => /^app-secret-[0-9a-f]{12}$/.test(n)).sort(),
+  ].map((n) => path.join(dir, n));
+}
+
+interface KeyPlan {
+  outcome: 'same' | 'install' | 'differs' | 'missing' | 'none';
+  /** The copy to put in place (install). */
+  copy: string | null;
+  fingerprint: string | null;
+}
+
+/**
+ * Which key the restored database needs. When the backup can tell (it records its key's fingerprint, or holds locked
+ * values to test), the live key and every copy beside the backup are tried; otherwise only `app-secret` is compared,
+ * as before.
+ */
+function planKey(staging: string, live: string | null, copies: string[]): KeyPlan {
+  const db = new DatabaseSync(staging, { readOnly: true });
+  try {
+    const data = encryptedData(db);
+    const verifiable = Boolean(storedFingerprint(db)) || data.samples.length > 0;
+    if (verifiable) {
+      const fits = (secret: string | null) => {
+        if (!secret) return false;
+        return checkAppKey(db, secret).status === 'ok';
+      };
+      if (fits(live)) return { outcome: 'same', copy: null, fingerprint: secretFingerprint(live!) };
+      for (const copy of copies) {
+        const secret = readSecretFile(copy);
+        if (fits(secret)) return { outcome: 'install', copy, fingerprint: secretFingerprint(secret!) };
+      }
+      return { outcome: live ? 'differs' : 'missing', copy: null, fingerprint: null };
+    }
+    const saved = copies.find((c) => path.basename(c) === SECRET_COPY_NAME) ?? null;
+    if (!saved) return { outcome: live ? 'none' : 'missing', copy: null, fingerprint: null };
+    if (!live) return { outcome: 'install', copy: saved, fingerprint: null };
+    return { outcome: readSecretFile(saved) === live ? 'same' : 'differs', copy: null, fingerprint: null };
+  } finally {
+    db.close();
+  }
+}
+
 /**
  * Replace the live database with a backup. Never runs while the live database is open in another process (any port,
  * any address: `databaseInUse`) or while something answers on the port. The candidate is copied
  * to a private staging file next to the database (so the backup itself is never changed and the final swap is an
- * atomic rename on one disk), checked read-only, compared with the current database and confirmed; then the current
- * database and its -wal/-shm files move to `<db>.before-restore-<time>` and the staging copy takes its name.
+ * atomic rename on one disk), checked read-only, compared with the current database (including the payments it would
+ * forget) and confirmed; then the current database and its -wal/-shm files move to `<db>.before-restore-<time>`, the
+ * staging copy takes its name, the key that fits is put in place and the backup's uploaded files are put back.
+ * An off-site copy (.lhbk) is first decrypted with its passphrase into a private folder next to the database.
  */
 export async function restoreDatabase(opts: RestoreOptions): Promise<RestoreOutcome> {
   const log = opts.log ?? ((line: string) => console.log(line));
@@ -739,16 +951,38 @@ export async function restoreDatabase(opts: RestoreOptions): Promise<RestoreOutc
   if (busy) return { status: 'refused', reason: busy };
   if (!existsSync(candidate) || !statSync(candidate).isFile()) return { status: 'refused', reason: `No backup file at ${candidate}` };
   if (candidate === dbPath) return { status: 'refused', reason: 'That is the live database itself: pick a file from the backups folder.' };
-  if (!isSqliteFile(candidate)) return { status: 'refused', reason: `${candidate} is not a SQLite database file.` };
+  const archive = isArchiveFile(candidate);
+  if (!archive && !isSqliteFile(candidate)) return { status: 'refused', reason: `${candidate} is not a SQLite database file or an off-site backup (.lhbk).` };
 
   const now = opts.now ?? new Date();
   const stamp = londonStamp(now);
   mkdirSync(path.dirname(dbPath), { recursive: true });
   const staging = `${dbPath}.restoring-${stamp}`;
+  const unpacked = `${dbPath}.restoring-${stamp}.d`;
   removeDbFiles(staging);
+  rmSync(unpacked, { recursive: true, force: true });
   try {
-    copyFileSync(candidate, staging);
-    if (existsSync(`${candidate}-wal`)) copyFileSync(`${candidate}-wal`, `${staging}-wal`);
+    let source = candidate;
+    let filesSnapshot: string | null = path.join(path.dirname(candidate), filesSnapshotName(path.basename(candidate)));
+    let keyCopies = keyCopiesIn(path.dirname(candidate));
+    if (archive) {
+      const passphrase = (await opts.passphrase?.()) ?? null;
+      if (!passphrase) return { status: 'refused', reason: 'An off-site backup needs its passphrase (set LM_BACKUP_PASSPHRASE_FILE, or run this in a terminal to type it).' };
+      mkdirSync(unpacked, { recursive: true, mode: 0o700 });
+      try {
+        await extractArchive(candidate, passphrase, unpacked);
+      } catch (err) {
+        return { status: 'refused', reason: `The backup was not restored. ${err instanceof Error ? err.message : String(err)}` };
+      }
+      source = path.join(unpacked, 'linear.sqlite');
+      if (!existsSync(source)) return { status: 'refused', reason: 'The off-site backup holds no database.' };
+      filesSnapshot = path.join(unpacked, 'files');
+      keyCopies = keyCopiesIn(unpacked);
+    }
+    if (!filesSnapshot || !existsSync(filesSnapshot)) filesSnapshot = null;
+
+    copyFileSync(source, staging);
+    if (existsSync(`${source}-wal`)) copyFileSync(`${source}-wal`, `${staging}-wal`);
     if (isWalFile(staging)) {
       // A raw copy of a live (WAL-mode) database: fold its WAL in and make the staging copy a single file.
       const w = new DatabaseSync(staging);
@@ -763,13 +997,49 @@ export async function restoreDatabase(opts: RestoreOptions): Promise<RestoreOutc
 
     const hasCurrent = existsSync(dbPath);
     const current = hasCurrent ? summariseLive(dbPath) : null;
+    const losses = hasCurrent ? paymentLosses(dbPath, staging) : noLosses();
+    const secretFile = opts.secretFile === undefined ? path.join(path.dirname(dbPath), SECRET_COPY_NAME) : opts.secretFile;
+    const liveSecret = opts.envSecret || (secretFile ? readSecretFile(secretFile) : null);
+    const key = planKey(staging, liveSecret, keyCopies);
+
     log(`Restore ${candidate}`);
     log(`   into ${dbPath}\n`);
     log(comparisonTable(current, check.summary, hasCurrent));
+    if (filesSnapshot) log(`\nUploaded files: the backup's statement PDFs and signature image${existsSync(path.join(filesSnapshot, 'media')) ? ' and learning videos' : ''} are put back too.`);
+    if (key.outcome === 'install') {
+      log(
+        opts.envSecret
+          ? '\nApp key: LM_APP_SECRET does not open this backup, but a copy of its own key was found. After the restore, set LM_APP_SECRET to that key (or unset it and use the key file).'
+          : `\nApp key: the backup's own key${key.fingerprint ? ` (fingerprint ${shortFingerprint(key.fingerprint)})` : ''} is put in place${liveSecret ? '; the key there now is kept beside it' : ''}.`,
+      );
+    } else if (key.outcome === 'differs' || key.outcome === 'missing') {
+      log(
+        '\nApp key: no key that opens this backup was found here. After the restore Linear Hub will not start until you put it back: ' +
+          'npm run key:restore (type the key from your recovery sheet).',
+      );
+    }
+    const lossLines = describeLosses(losses);
+    if (lossLines.length) log(`\n${lossLines.join('\n')}`);
     log('');
-    if (!(await opts.confirm('Replace the current database with this backup?'))) return { status: 'cancelled' };
+    const confirmed = lossLines.length
+      ? await opts.confirm(`To restore anyway, type ${RESTORE_TYPED_WORD}.`, { typed: RESTORE_TYPED_WORD })
+      : await opts.confirm('Replace the current database with this backup?');
+    if (!confirmed) return { status: 'cancelled' };
     const busyNow = await running();
     if (busyNow) return { status: 'refused', reason: busyNow };
+
+    if (losses.total || losses.unknown) {
+      // the restored database remembers what it lost (or that nobody could tell), so the office is warned in the app as well
+      const w = new DatabaseSync(staging);
+      try {
+        w.prepare(`INSERT INTO meta (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value`).run(
+          RESTORE_WARNING_META,
+          restoreWarningRecord(losses, path.basename(candidate), now),
+        );
+      } finally {
+        w.close();
+      }
+    }
 
     const previous = `${dbPath}.before-restore-${stamp}`;
     const moved: string[] = [];
@@ -780,24 +1050,27 @@ export async function restoreDatabase(opts: RestoreOptions): Promise<RestoreOutc
     }
     renameSync(staging, dbPath);
 
-    const secretFile = opts.secretFile === undefined ? path.join(path.dirname(dbPath), SECRET_COPY_NAME) : opts.secretFile;
-    const savedSecret = path.join(path.dirname(candidate), SECRET_COPY_NAME);
-    let secret: 'installed' | 'same' | 'differs' | 'missing' | 'none' = 'none';
-    if (secretFile && existsSync(savedSecret)) {
-      if (!existsSync(secretFile)) {
-        copyFileSync(savedSecret, secretFile);
-        chmodSync(secretFile, 0o600);
-        secret = 'installed';
-      } else {
-        secret = readFileSync(savedSecret).equals(readFileSync(secretFile)) ? 'same' : 'differs';
+    let secret: Extract<RestoreOutcome, { status: 'restored' }>['secret'] = key.outcome === 'install' ? 'installed' : key.outcome;
+    let keptKey: string | null = null;
+    if (key.outcome === 'install' && key.copy && secretFile && !opts.envSecret) {
+      if (existsSync(secretFile)) {
+        keptKey = `${secretFile}.before-restore-${stamp}`;
+        renameSync(secretFile, keptKey); // never deleted: it may be the only copy of another key
+        secret = 'replaced';
       }
-    } else if (secretFile && !existsSync(secretFile)) {
-      secret = 'missing';
+      copyFileSync(key.copy, secretFile);
+      chmodSync(secretFile, 0o600);
+    } else if (key.outcome === 'install') {
+      secret = 'differs';
     }
-    return { status: 'restored', dbPath, previous: moved.includes(previous) ? previous : null, moved, secret, candidate: check.summary };
+    const folders = opts.folders ?? foldersOutsideBackup(dbPath);
+    const files = filesSnapshot ? restoreFiles(filesSnapshot, folders, stamp) : null;
+    const keySource = secret === 'installed' || secret === 'replaced' ? (archive ? 'archive' : 'backups') : null;
+    return { status: 'restored', dbPath, previous: moved.includes(previous) ? previous : null, moved, secret, keptKey, keySource, candidate: check.summary, files, losses };
   } finally {
     // after the swap the staging name no longer exists; on a refusal or cancel this deletes the private copy
     removeDbFiles(staging);
+    rmSync(unpacked, { recursive: true, force: true });
   }
 }
 
@@ -812,14 +1085,23 @@ const people = (n: number): string => `${n} ${n === 1 ? 'person' : 'people'}`;
 export function restoreKeyNotes(
   secret: Extract<RestoreOutcome, { status: 'restored' }>['secret'],
   candidate: Pick<DbSummary, 'twoStepUsers' | 'pinUsers'>,
+  keptKey: string | null = null,
+  keySource: 'archive' | 'backups' | null = 'backups',
 ): string[] {
+  const from = keySource === 'archive' ? 'the off-site backup' : 'the backups folder';
   const { pinUsers, twoStepUsers } = candidate;
   const pinReset =
     `If no copy of the key is left, reset those PINs: npm run pin:reset -- <email> on this computer for an administrator, ` +
     'then Team › person › Edit profile › Reset PIN for everyone else.';
   const twoStepReset = 'People with two-step sign-in can use a recovery code, and an administrator resets it (Team › Edit › Reset two-step verification).';
   if (secret === 'installed') {
-    return ['Put the app secret from the backups folder in place (there was none), so two-step codes and sign-in PINs keep working.'];
+    return [`Put the app key from ${from} in place (there was none), so two-step codes and sign-in PINs keep working.`];
+  }
+  if (secret === 'replaced') {
+    return [
+      `The app key next to the database did not open this backup, so the backup's own key (from ${from}) was put in place${keptKey ? ` and the old one kept as ${keptKey}` : ''}. ` +
+        'Make a new recovery sheet with  npm run recovery-sheet  once Linear Hub is running: the sheet you have is for the other key.',
+    ];
   }
   if (secret === 'differs') {
     if (!pinUsers && !twoStepUsers) {
@@ -835,7 +1117,8 @@ export function restoreKeyNotes(
     return [
       'Warning: the app secret in the backups folder (the key for two-step sign-in and PINs) differs from the one next to the ' +
         `database, which was left as it is. If this backup was made under the backups folder's key, ${hurt.join(' and ')}: ` +
-        'before starting, replace the app-secret next to the database with the copy from the backups folder.' +
+        'before starting, replace the app-secret next to the database with the copy from the backups folder ' +
+        '(npm run key:restore -- --file <that copy> checks it and does it), or type the key from your recovery sheet: npm run key:restore.' +
         (pinUsers ? ` ${pinReset}` : ''),
     ];
   }
@@ -846,8 +1129,8 @@ export function restoreKeyNotes(
     ].filter(Boolean);
     return [
       'Warning: there is no app secret (app-secret, the key for two-step sign-in and PINs) next to the database or in the ' +
-        `backup's folder, so ${hurt.join(' and ')}. Put the app-secret you kept with your backups next to the database ` +
-        'before starting.' +
+        `backup's folder, so ${hurt.join(' and ')}. Before starting, put the key back: npm run key:restore (type it from your ` +
+        'recovery sheet), or npm run key:restore -- --file <the app-secret you kept>.' +
         (pinUsers ? ` ${pinReset}` : '') +
         (twoStepUsers ? ` ${twoStepReset}` : ''),
     ];
@@ -884,27 +1167,54 @@ export function foldersOutsideBackup(dbPath: string, env: NodeJS.ProcessEnv = pr
   };
 }
 
-/** The line `npm run backup` ends with. */
-export function backupFolderNote(f: FoldersOutsideBackup, secretInFolder: boolean, envSecret = false): string {
-  return (
-    `Copy ${f.media} (learning videos), ${f.statements} (client statement PDFs) and ${f.uploads} (the signature image) ` +
-    `yourself too: the backups hold the database${secretInFolder ? ' and the app secret' : ''} only.` +
-    (envSecret && !secretInFolder ? ' LM_APP_SECRET is not in them: keep it in your password manager.' : '')
-  );
+/** What `npm run backup` says the backup holds and what it leaves out. */
+export function backupContentsNote(
+  f: FoldersOutsideBackup,
+  r: Pick<BackupResult, 'files' | 'secret'>,
+  opts: { includeVideos: boolean; envSecret: boolean },
+): string {
+  const parts = ['the database'];
+  if (r.files) {
+    parts.push(
+      `${r.files.files} uploaded file${r.files.files === 1 ? '' : 's'} (client statement PDFs and the signature image${opts.includeVideos ? ', learning videos' : ''})`,
+    );
+  }
+  const keyIn = r.secret === 'copied' || r.secret === 'unchanged' || r.secret === 'kept-both';
+  if (keyIn) parts.push('the app key');
+  const lines = [`This backup holds ${parts.length === 1 ? parts[0] : `${parts.slice(0, -1).join(', ')} and ${parts.at(-1)}`}.`];
+  if (!r.files) lines.push(`Copy ${f.statements} (client statement PDFs) and ${f.uploads} (the signature image) yourself too.`);
+  if (!opts.includeVideos) lines.push(`Learning videos (${f.media}) are not in it: copy that folder yourself, or set LM_BACKUP_VIDEOS=1 to include them.`);
+  if (r.secret === 'left-out' || r.secret === 'removed') lines.push('The app key is not in the local backups: it is on your recovery sheet.');
+  else if (!keyIn && opts.envSecret) lines.push('LM_APP_SECRET is not in them: keep it on your recovery sheet.');
+  return lines.join(' ');
 }
 
 /**
- * What restore says about those folders once the database is back: they were left as they are, and videos uploaded
+ * What restore says about the uploaded-files folders once the database is back: what came back from the backup's
+ * snapshot (or, for a backup from before snapshots, that the folders were left as they are), and that videos uploaded
  * after the backup are now files without a row (said only when the media folder holds videos).
  */
-export function restoreFolderNotes(f: FoldersOutsideBackup, exists: (p: string) => boolean = existsSync): string[] {
+export function restoreFolderNotes(
+  f: FoldersOutsideBackup,
+  files: FilesRestoreResult | null = null,
+  exists: (p: string) => boolean = existsSync,
+): string[] {
   const videos = path.join(f.media, 'videos');
-  return [
-    `Learning videos (${f.media}), client statement PDFs (${f.statements}) and the signature image (${f.uploads}) ` +
-      'are not in the backups and were left as they are: if they are missing on this computer, copy those folders back ' +
-      'from your own copy.',
-    ...(exists(videos)
-      ? [`Videos uploaded after this backup stay in ${videos} with no row in the restored database: delete them if you do not need them.`]
-      : []),
-  ];
+  const lines: string[] = [];
+  if (files) {
+    lines.push(
+      `Uploaded files: ${files.restored} put back from the backup, ${files.unchanged} already the same` +
+        `${files.setAside ? `, ${files.setAside} that differed kept beside them as .before-restore files` : ''}. ` +
+        'Files added after the backup were left as they are.',
+    );
+    if (!files.parts.includes('media')) lines.push(`Learning videos (${f.media}) are not in this backup and were left as they are.`);
+  } else {
+    lines.push(
+      `Learning videos (${f.media}), client statement PDFs (${f.statements}) and the signature image (${f.uploads}) ` +
+        'are not in this backup and were left as they are: if they are missing on this computer, copy those folders back ' +
+        'from your own copy.',
+    );
+  }
+  if (exists(videos)) lines.push(`Videos uploaded after this backup stay in ${videos} with no row in the restored database: delete them if you do not need them.`);
+  return lines;
 }

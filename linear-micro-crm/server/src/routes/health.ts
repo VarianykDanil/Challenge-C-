@@ -8,6 +8,11 @@ import { backupScheduleOn, backupStatus, currentBackupDir } from '../lib/backup.
 /** The admin-only backup status, plus whether this server runs the nightly schedule (false with LM_BACKUP=0). */
 type HealthBackup = BackupStatus & { enabled?: boolean };
 
+/** The release in package.json (also written into off-site backups). */
+export function appVersion(): string {
+  return readVersion();
+}
+
 function readVersion(): string {
   try {
     const pkg = JSON.parse(readFileSync(path.resolve(import.meta.dirname, '../../package.json'), 'utf8')) as { version?: string };

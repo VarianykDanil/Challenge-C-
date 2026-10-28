@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { Check, Copy, DatabaseBackup, Monitor, Moon, RefreshCw, ShieldCheck, Sun, TriangleAlert } from 'lucide-react';
 import { BRAND, POSITION_LABELS, ROLE_LABELS } from '@lm/shared';
@@ -9,6 +9,7 @@ import { useHealth, type HealthInfo } from '@/api/hooks';
 import { useCurrentUser } from '@/auth/AuthProvider';
 import { ErrorBoundary, UserStatusBadge, errorMessage } from '@/features/common';
 import { PinSettings } from '@/features/settings/PinSettings';
+import { KeySafetySection } from '@/features/system/KeySafetySection';
 // Release 1.3 slots: Settings → Invoices and Company (P2), Pay (P1), Integrations (P3), Learning videos (P5),
 // Recruitment's question bank (P7). Each renders a whole card, or nothing.
 import { CompanySettingsSection } from '@/features/invoices/CompanySettingsSection';
@@ -172,7 +173,6 @@ const ICLOUD_LINE = 'Copy this folder to iCloud or Drive — a backup on the sam
 /** `backup` from GET /health; `enabled` is false when the server runs with LM_BACKUP=0 (no nightly schedule). */
 type BackupInfo = NonNullable<HealthInfo['backup']> & { enabled?: boolean };
 
-const cmd = (text: string) => <code className="rounded bg-surface-2 px-1 py-0.5 font-mono text-xs text-fg">{text}</code>;
 
 function hoursSince(iso: string | null | undefined): number {
   const t = iso ? Date.parse(iso) : Number.NaN;
@@ -185,12 +185,17 @@ function hoursSince(iso: string | null | undefined): number {
  */
 function BackupsCard() {
   const q = useQuery({ queryKey: ['settings', 'backups'], queryFn: () => api<HealthInfo>('/health'), staleTime: 60_000 });
+  const cardRef = useRef<HTMLDivElement>(null);
+  // /settings#backups (the Needs-attention bell's system-health items) scrolls here once the card is on the page
+  useEffect(() => {
+    if (window.location.hash === '#backups') cardRef.current?.scrollIntoView({ block: 'start' });
+  }, []);
   const [copied, setCopied] = useState(false);
   const b = q.data?.backup as BackupInfo | undefined;
   const age = hoursSince(b?.lastAt);
   // a fresh install has no backup for its first minutes: only warn once it has been running for 36 h without one
   const stale = !!b && (b.lastAt ? age > BACKUP_STALE_HOURS : hoursSince(q.data?.seededAt) > BACKUP_STALE_HOURS);
-  // started with LM_BACKUP=0: nothing runs by itself, so promise nothing and point at npm run backup instead
+  // started with LM_BACKUP=0: nothing runs by itself, so promise nothing (the docs say how to switch it back on)
   const off = b?.enabled === false;
   const canCopy = typeof navigator !== 'undefined' && !!navigator.clipboard && typeof window !== 'undefined' && window.isSecureContext;
 
@@ -206,10 +211,11 @@ function BackupsCard() {
   };
 
   return (
+    <div id="backups" ref={cardRef} className="scroll-mt-20">
     <Card data-testid="backups-card">
       <CardHeader
         title="Backups"
-        description={off ? 'Automatic backups are off on this server.' : 'A copy of the database every night while Linear Hub runs.'}
+        description={off ? 'Automatic backups are off on this server.' : 'A copy of the database and the uploaded files every night while Linear Hub runs.'}
         icon={<DatabaseBackup aria-hidden />}
         actions={
           off ? <Badge tone="warning" dot>Off</Badge> : b && !stale && b.lastAt ? <Badge tone="success" dot>Up to date</Badge> : undefined
@@ -241,19 +247,19 @@ function BackupsCard() {
               <div className="min-w-0">
                 <p className="font-medium text-warning">
                   {off
-                    ? 'Automatic backups are off (LM_BACKUP=0)'
+                    ? 'Automatic backups are off'
                     : b.lastAt
                       ? `No backup for ${age >= 48 ? `${Math.floor(age / 24)} days` : `${Math.round(age)} hours`}`
                       : 'No backup yet'}
                 </p>
                 {off ? (
                   <p className="mt-1 text-muted">
-                    This server makes no nightly copies{b.lastAt ? `; the last one was made ${formatRelative(b.lastAt)}` : ''}. On the laptop run{' '}
-                    {cmd('npm run backup')}, or start Linear Hub again without {cmd('LM_BACKUP=0')}.
+                    This server makes no nightly copies{b.lastAt ? `; the last one was made ${formatRelative(b.lastAt)}` : ''}. Ask Noryn to
+                    switch them back on, or to make one now.
                   </p>
                 ) : (
                   <p className="mt-1 text-muted">
-                    Backups only run while Linear Hub is running. Leave it running overnight, or on the laptop run {cmd('npm run backup')}.
+                    Backups only run while Linear Hub is running. Leave the server computer on overnight, or ask Noryn to make one now.
                   </p>
                 )}
                 {stale && <p className="mt-1 text-muted">{ICLOUD_LINE}</p>}
@@ -271,7 +277,7 @@ function BackupsCard() {
                     <span className="text-muted"> · {formatDateTime(b.lastAt)}</span>
                   </>
                 ) : off ? (
-                  'None yet — run npm run backup on the laptop'
+                  'None yet — ask Noryn to make one'
                 ) : (
                   'None yet — the first runs 10 minutes after the server starts'
                 )}
@@ -303,11 +309,14 @@ function BackupsCard() {
 
           {!stale && <p className="mt-3 text-xs text-muted">{ICLOUD_LINE}</p>}
           <p className="mt-2 text-xs text-muted">
-            To go back to a backup, stop the server and run{' '}
-            <code className="rounded bg-surface-2 px-1 py-0.5 font-mono text-fg">npm run restore -- &lt;file&gt;</code> on the laptop.
+            To go back to a backup, ask Noryn. Linear Hub keeps today's data aside first, and checks for payments the backup does not have.
           </p>
         </>
       )}
+      <ErrorBoundary name="key-safety" fallback={null}>
+        <KeySafetySection />
+      </ErrorBoundary>
     </Card>
+    </div>
   );
 }

@@ -180,7 +180,9 @@ test('admin: payroll:to-pay counts exactly the runs GET /finance/payroll?status=
   }
 });
 
-test('every role: at most 12 statements to build the feed; LM_SMART=0 → empty and disabled', async () => {
+// The system-health provider (admins only: backups, off-site copies, the app key on paper, server errors) reads its
+// meta values in one statement, so an administrator's feed may take 13; every other role keeps the 12 of before.
+test('every role: at most 12 statements to build the feed (13 for administrators); LM_SMART=0 → empty and disabled', async () => {
   const srv = await startTestServer({ seed: true });
   try {
     const now = attentionNow();
@@ -188,7 +190,7 @@ test('every role: at most 12 statements to build the feed; LM_SMART=0 → empty 
       const id = (srv.db.prepare(`SELECT id FROM users WHERE email = ?`).get(email) as { id: number }).id;
       const me: UserWithTeam = { ...getUser(srv.db, id)!, twoFactorEnabled: false };
       const { result, statements } = countStatements(srv.db, () => buildAttentionFeed(srv.db, me, now));
-      assert.ok(statements <= 12, `${me.role}: ${statements} statements`);
+      assert.ok(statements <= (me.role === 'admin' ? 13 : 12), `${me.role}: ${statements} statements`);
       // Release 1.3: each package's provider (P2 invoices, P3 statements, P6 client posts) takes at most one statement,
       // so the 1.1 budget holds with all of them merged (the admin used 13 when two of them took two).
       for (const p of ATTENTION_PROVIDERS) {

@@ -7,9 +7,15 @@ import { createSchema, isSeeded } from './db/schema.ts';
 import { materialisePayrollRuns, payrollRunsLogLine, rollForwardEventStatuses } from './db/maintenance.ts';
 import { DEFAULT_DB_PATH, seed } from './db/seed.ts';
 import { findPortHolder, installExitDiagnostics, listeningUrl, networkUrls, portBusyMessage } from './lib/boot.ts';
-import { backupDirFor, backupHour, backupsEnabled, configureBackupDir, scheduleBackups, whenBackupIdle } from './lib/backup.ts';
+import { backupDirFor, backupHour, backupsEnabled, configureBackupDir, configureOffsite, foldersOutsideBackup, scheduleBackups, whenBackupIdle } from './lib/backup.ts';
+import { backupVideos } from './lib/backupFiles.ts';
+import { configureSystemHealth } from './lib/attention/system.ts';
+import { configureErrorLog, logServerError } from './lib/errorLog.ts';
+import { offsiteConfig, offsiteProblem } from './lib/offsite.ts';
 import { clientBuildStatus, staleBuildMessage } from './lib/buildStatus.ts';
-import { announceAppSecret, appSecretFile, configureAppSecret } from './lib/crypto.ts';
+import { KEY_REFUSAL_EXIT_CODE, appKeyRefusal, checkCurrentAppKey, recordFingerprint } from './lib/appKey.ts';
+import { announceAppSecret, appKeyFingerprint, appSecretFile, configureAppSecret, setKeyCreation } from './lib/crypto.ts';
+import { warnIfUnsupportedNode } from './lib/nodeSupport.ts';
 import { businessClockPinned, businessNow } from './lib/dates.ts';
 import { purgeExpiredChallenges, reencryptLegacySecrets } from './lib/twofactor.ts';
 import { purgeAuditLog } from './lib/audit.ts';
@@ -18,17 +24,36 @@ import { startInvoiceJobs } from './lib/invoices.ts';
 import { startStatementJob } from './lib/statements/job.ts';
 import { startPaymentsJob } from './lib/payments/job.ts';
 import { purgeExpiredSessions } from './middleware/auth.ts';
+import { appVersion } from './routes/health.ts';
 
 const dbPath = process.env.DB_PATH ? path.resolve(process.env.DB_PATH) : DEFAULT_DB_PATH;
-// The encryption key for two-step secrets: LM_APP_SECRET, else a generated key kept next to the database
-// (server/data/app-secret by default; LM_APP_SECRET_FILE relocates it).
-configureAppSecret(process.env.LM_APP_SECRET_FILE ? path.resolve(process.env.LM_APP_SECRET_FILE) : path.join(path.dirname(dbPath), 'app-secret'));
+// The app key (two-step secrets, bank details, payment connections, PIN pepper): LM_APP_SECRET, else a generated key
+// kept next to the database (server/data/app-secret by default; LM_APP_SECRET_FILE relocates it).
+const keyFile = process.env.LM_APP_SECRET_FILE ? path.resolve(process.env.LM_APP_SECRET_FILE) : path.join(path.dirname(dbPath), 'app-secret');
+configureAppSecret(keyFile);
 if (businessClockPinned()) {
   console.warn(`LM_BUSINESS_NOW is set: "today" for events, gauges and pay is ${businessNow().toString()}, not the real date. Unset it for real use.`);
 }
+warnIfUnsupportedNode();
+// Server errors also go to <data dir>/logs/errors.log (rotated), and the admins' Needs-attention bell counts them.
+configureErrorLog(path.dirname(dbPath));
 const db = openDb(dbPath);
+// The key and the database must belong together (lib/appKey.ts). Checked before anything reads or makes a key: a
+// missing or different key for a database with locked data stops the start with the recovery steps.
+const keyCheck = checkCurrentAppKey(db);
+if (keyCheck.status === 'missing' || keyCheck.status === 'mismatch') {
+  console.error(appKeyRefusal(keyCheck, { dbPath, keyFile: process.env.LM_APP_SECRET ? null : keyFile, backupDir: backupDirFor(dbPath) }));
+  db.close();
+  process.exit(KEY_REFUSAL_EXIT_CODE);
+}
+// Only a database with nothing locked yet may get a new key.
+setKeyCreation(keyCheck.status === 'create');
 const upgraded = createSchema(db, { demoSteps: true }); // the server's start: the demo-account steps may run (UpgradeOptions)
 if (upgraded.length) console.log(`Upgraded schema: added ${upgraded.join(', ')}`);
+const keyFingerprint = appKeyFingerprint(); // makes the key here on a brand-new database
+setKeyCreation(false);
+if (keyCheck.status === 'create' || keyCheck.record) recordFingerprint(db, keyFingerprint);
+if (keyCheck.note) console.log(keyCheck.note);
 announceAppSecret();
 const rekeyed = reencryptLegacySecrets(db);
 if (rekeyed) console.log(`Re-encrypted ${rekeyed} two-step secret(s) written under the old development key`);
@@ -61,7 +86,7 @@ const guarded = (fn: () => void) => () => {
   try {
     fn();
   } catch (err) {
-    console.error('Maintenance failed', err);
+    logServerError('Maintenance failed', err);
   }
 };
 /** Release 1.2 (U3): audit entries older than two years (lib/audit.ts): at start-up and daily. */
@@ -87,13 +112,31 @@ guarded(() => void startPaymentsJob(db))();
 // Backups (p10): dated copies of the database in <data dir>/backups (LM_BACKUP_DIR relocates it): 10 minutes after
 // start-up when the last one is over 24 h old, and nightly from LM_BACKUP_HOUR (default 02:00 London) when none is
 // dated today, so a laptop asleep at 02:00 catches up when it wakes. LM_BACKUP=0 turns the schedule off.
+// Each backup carries the uploaded files (statement PDFs, the signature image; learning videos with
+// LM_BACKUP_VIDEOS=1) and, with LM_OFFSITE_DIR, an encrypted off-site copy (lib/offsite.ts).
 const backupDir = backupDirFor(dbPath);
+const offsite = offsiteConfig();
 configureBackupDir(backupDir, { scheduled: backupsEnabled() });
+configureOffsite(offsite);
+configureSystemHealth({ dataDir: path.dirname(dbPath), offsite });
 if (backupsEnabled()) {
-  scheduleBackups(db, { dir: backupDir, secretFile: process.env.LM_APP_SECRET ? null : appSecretFile() });
+  scheduleBackups(db, {
+    dir: backupDir,
+    secretFile: process.env.LM_APP_SECRET ? null : appSecretFile(),
+    files: { folders: foldersOutsideBackup(dbPath), includeVideos: backupVideos() },
+    offsite,
+    version: appVersion(),
+    error: (line, err) => logServerError(line, err),
+  });
   console.log(`Backups: nightly from ${String(backupHour()).padStart(2, '0')}:00 (London) into ${backupDir}; npm run backup makes one now.`);
 } else {
   console.log(`Automatic backups are off (LM_BACKUP=0). npm run backup still makes one into ${backupDir}.`);
+}
+if (offsite) {
+  const problem = offsiteProblem(offsite);
+  console.log(problem ? `▲ Off-site copies are switched on but cannot run: ${problem}` : `Off-site copies (encrypted) go to ${offsite.dir} after each backup.`);
+} else {
+  console.log('Off-site copies are off: the backups stay on this computer (set LM_OFFSITE_DIR, docs/DEPLOY.md).');
 }
 
 const isProduction = process.env.NODE_ENV === 'production';
