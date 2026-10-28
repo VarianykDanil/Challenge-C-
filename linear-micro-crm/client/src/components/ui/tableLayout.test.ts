@@ -56,15 +56,15 @@ test('cards are used below 640 px, the width of most phones held upright', () =>
 
 test('a long list shows the first cards and a "Show all" button on a phone, so the page stays short', () => {
   assert.equal(PHONE_CARD_LIMIT, 10);
-  assert.deepEqual(cardsShown({ total: 48, limit: PHONE_CARD_LIMIT, expanded: false, selectedIndex: -1, selectable: false }), { shown: 10, hidden: 38 });
-  assert.deepEqual(cardsShown({ total: 48, limit: PHONE_CARD_LIMIT, expanded: true, selectedIndex: -1, selectable: false }), { shown: 48, hidden: 0 });
+  assert.deepEqual(cardsShown({ total: 48, limit: PHONE_CARD_LIMIT, expanded: false, selectedIndex: -1 }), { shown: 10, hidden: 38 });
+  assert.deepEqual(cardsShown({ total: 48, limit: PHONE_CARD_LIMIT, expanded: true, selectedIndex: -1 }), { shown: 48, hidden: 0 });
   // a short list, or one with a couple over the limit, is shown whole (a "Show 1 more" button is not worth a tap)
-  assert.deepEqual(cardsShown({ total: 7, limit: 10, expanded: false, selectedIndex: -1, selectable: false }), { shown: 7, hidden: 0 });
-  assert.deepEqual(cardsShown({ total: 12, limit: 10, expanded: false, selectedIndex: -1, selectable: false }), { shown: 12, hidden: 0 });
+  assert.deepEqual(cardsShown({ total: 7, limit: 10, expanded: false, selectedIndex: -1 }), { shown: 7, hidden: 0 });
+  assert.deepEqual(cardsShown({ total: 12, limit: 10, expanded: false, selectedIndex: -1 }), { shown: 12, hidden: 0 });
   // the open row is never hidden
-  assert.deepEqual(cardsShown({ total: 48, limit: 10, expanded: false, selectedIndex: 30, selectable: false }), { shown: 31, hidden: 17 });
-  // a list with a select-all box shows everything: nothing out of sight can be ticked
-  assert.deepEqual(cardsShown({ total: 48, limit: 10, expanded: false, selectedIndex: -1, selectable: true }), { shown: 48, hidden: 0 });
+  assert.deepEqual(cardsShown({ total: 48, limit: 10, expanded: false, selectedIndex: 30 }), { shown: 31, hidden: 17 });
   // no limit
-  assert.deepEqual(cardsShown({ total: 48, limit: null, expanded: false, selectedIndex: -1, selectable: false }), { shown: 48, hidden: 0 });
+  assert.deepEqual(cardsShown({ total: 48, limit: null, expanded: false, selectedIndex: -1 }), { shown: 48, hidden: 0 });
+  // (a list with a select-all box folds too: DataTable shows every card as soon as the box is used, so nothing ticked
+  // is out of sight)
 });

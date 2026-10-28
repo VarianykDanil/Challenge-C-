@@ -348,13 +348,14 @@ function CardRows<T>({ columns, rows, rowKey, onRowClick, loading, loadingRows, 
   const toolbarLead = layout.lead.filter((c) => typeof c.header !== 'string');
   const showSort = choices.length > 0 && rows.length > 1;
   const selectedIndex = selectedKey == null ? -1 : rows.findIndex((r) => rowKey(r) === selectedKey);
-  const { shown, hidden } = cardsShown({ total: rows.length, limit, expanded, selectedIndex, selectable: toolbarLead.length > 0 });
+  const { shown, hidden } = cardsShown({ total: rows.length, limit, expanded, selectedIndex });
   return (
     <>
       {(showSort || toolbarLead.length > 0) && !loading && rows.length > 0 && (
         <div className="flex flex-wrap items-center gap-x-3 gap-y-2 border-b border-border px-4 py-2">
           {toolbarLead.map((c) => (
-            <span key={c.key} className="inline-flex items-center gap-1 text-sm text-muted">
+            // using a select-all box shows every card first, so nothing ticked is out of sight
+            <span key={c.key} className="inline-flex items-center gap-1 text-sm text-muted" onClickCapture={() => setExpanded(true)}>
               {c.header}
               {c.cardLabel && <span aria-hidden>{c.cardLabel}</span>}
             </span>

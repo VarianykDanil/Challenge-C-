@@ -112,12 +112,12 @@ const PHONE_CARD_SLACK = 3;
 
 /**
  * How many cards a phone shows: the first `limit`, then a "Show all" button, so a page of long lists stays short.
- * The open (selected) row is never hidden, and a list with a select-all box shows everything, so nothing out of sight
- * can be ticked. `limit` null: every card.
+ * The open (selected) row is never hidden. (DataTable shows every card as soon as a select-all box is used, so nothing
+ * ticked is out of sight.) `limit` null: every card.
  */
-export function cardsShown(o: { total: number; limit: number | null; expanded: boolean; selectedIndex: number; selectable: boolean }): { shown: number; hidden: number } {
+export function cardsShown(o: { total: number; limit: number | null; expanded: boolean; selectedIndex: number }): { shown: number; hidden: number } {
   const { total, limit } = o;
-  if (limit === null || o.expanded || o.selectable || total <= limit + PHONE_CARD_SLACK) return { shown: total, hidden: 0 };
+  if (limit === null || o.expanded || total <= limit + PHONE_CARD_SLACK) return { shown: total, hidden: 0 };
   const shown = Math.min(total, Math.max(limit, o.selectedIndex + 1));
   return { shown, hidden: total - shown };
 }
