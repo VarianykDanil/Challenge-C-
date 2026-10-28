@@ -11,7 +11,7 @@ import { readSecuritySettings } from '../lib/pin.ts';
 import { punctualityFor, ratiosOf, salesPerDay, summaryRows, totalsFor, trendFor } from '../lib/metrics.ts';
 import { redactEntry, redactUser } from '../lib/scope.ts';
 import { clearTwoFactor } from '../lib/twofactor.ts';
-import { hexColor, idParam, isoDate, optionalIdQuery, optionalString, parseRange } from '../lib/validate.ts';
+import { hexColor, idParam, isoDate, optionalIdQuery, optionalString, parseRange, parsePatch } from '../lib/validate.ts';
 import { currentUser, destroyUserSessions, requireRole } from '../middleware/auth.ts';
 
 const ROLES = ['admin', 'leader', 'recruiter', 'rep'] as const;
@@ -195,7 +195,7 @@ export function usersRouter(db: Db): Router {
     const id = idParam(req);
     const existing = getStaffUser(db, id);
     if (!existing) throw notFound('User');
-    const patch = patchBody.parse(req.body);
+    const patch = parsePatch(patchBody, req.body);
     if (patch.lastName === '' && existing.lastName.trim() !== '') {
       throw badRequest('Enter their last name', [{ path: 'lastName', message: 'Enter their last name' }]);
     }

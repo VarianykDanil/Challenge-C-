@@ -122,9 +122,12 @@ test('a database file keeps its media next to it; unfinished uploads older than 
     const fresh = path.join(dir, 'fresh.upload');
     const kept = path.join(dir, 'kept.mp4');
     for (const f of [old, fresh, kept]) writeFileSync(f, 'x');
+    // every file time is set on the test's own clock, not left to when the file was written
     const twoDaysAgo = (Date.now() - 2 * 86_400_000) / 1000;
+    const justNow = Date.now() / 1000;
     utimesSync(old, twoDaysAgo, twoDaysAgo);
     utimesSync(kept, twoDaysAgo, twoDaysAgo);
+    utimesSync(fresh, justNow, justNow);
     assert.equal(removeStaleUploads(dir), 1);
     assert.equal(existsSync(old), false);
     assert.equal(existsSync(fresh), true, 'an upload still arriving stays');

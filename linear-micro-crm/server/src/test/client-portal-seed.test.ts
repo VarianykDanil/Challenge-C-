@@ -12,7 +12,7 @@ import { columnsOf } from '../db/extensions/types.ts';
 import { CAMPAIGN_BRIEFS, seedClientDemo } from '../db/extensions/client.ts';
 import { createSchema } from '../db/schema.ts';
 import { seed } from '../db/seed.ts';
-import { setBusinessClock } from '../lib/dates.ts';
+import { nowISO, setBusinessClock } from '../lib/dates.ts';
 import { addClientUser, startTestServer, type Json } from './helpers.ts';
 
 // ───────────────────────────── the PIN rule ─────────────────────────────
@@ -94,7 +94,7 @@ test('demo seed: Hannah signs in without a PIN, her portal shows the demo posts,
       const bad = db
         .prepare(`SELECT COUNT(*) AS n FROM announcement_reads r JOIN announcements a ON a.id = r.announcement_id JOIN users u ON u.id = r.user_id
                   WHERE a.id = ? AND (r.read_at < a.created_at OR r.read_at > ? OR u.role = 'client' OR u.status <> 'active')`)
-        .get(a.id, new Date().toISOString()) as { n: number };
+        .get(a.id, nowISO()) as { n: number }; // the seed writes business-clock times
       assert.equal(Number(bad.n), 0, `${a.title}: every read after the post, before now, by active staff`);
     }
 
@@ -126,7 +126,7 @@ test('demo seed: Hannah signs in without a PIN, her portal shows the demo posts,
     }
     // Every demo timestamp is in the past of the seed's clock
     const latest = (db.prepare(`SELECT MAX(created_at) AS m FROM client_posts`).get() as { m: string }).m;
-    assert.ok(latest <= new Date().toISOString());
+    assert.ok(latest <= nowISO());
 
     // Once the demo account is edited it is an ordinary client: a PIN is required
     const hannahId = Number((db.prepare(`SELECT id FROM users WHERE employee_id = 'CL-0001'`).get() as { id: number }).id);
@@ -151,7 +151,7 @@ function coreDb(): { db: Db; today: string; nowIso: string } {
   createSchema(db);
   const today = '2026-10-21';
   seed(db, today, { extensionSeeds: false });
-  return { db, today, nowIso: new Date().toISOString() };
+  return { db, today, nowIso: nowISO() };
 }
 
 function ctxOf(db: Db, today: string, nowIso: string) {

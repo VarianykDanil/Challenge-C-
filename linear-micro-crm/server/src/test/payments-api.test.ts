@@ -16,7 +16,7 @@ import { generateKeyPairSync, type KeyObject } from 'node:crypto';
 import { PAYMENT_LIVE_CONFIRMATION, paydayForWeek } from '@lm/shared';
 import { all, get, run, type Db } from '../db/connection.ts';
 import { encrypt } from '../lib/crypto.ts';
-import { addDays, businessNow, mondayOf, setBusinessClock } from '../lib/dates.ts';
+import { addDays, businessNow, mondayOf, setBusinessClock, todayISO } from '../lib/dates.ts';
 import { paymentUuid } from '../lib/payments/apiCommon.ts';
 import type { PaymentProviderAdapter, ProviderBatch, ProviderConnection, ProviderContext, ProviderItem } from '../lib/payments/provider.ts';
 import { ProviderConfigError } from '../lib/payments/provider.ts';
@@ -784,7 +784,8 @@ describe('through Linear Hub: connect, test, live, approve with a code, checked,
       tlFake.script({ payoutSlow: 3 });
       const userId = srv.fixture!.users.rep;
       setBank(srv.db, userId, '00000016');
-      const runId = addRun(srv.db, { userId, weekStart: addDays(weekStart, -7), gross: 26 });
+      // a week already over on the clock set above, whatever LM_BUSINESS_NOW said when the fixture was built
+      const runId = addRun(srv.db, { userId, weekStart: addDays(mondayOf(todayISO()), -14), gross: 26 });
       const draft = (await admin.post('/payments/batches', { connectionId: id, runIds: [runId] })).json;
       const approved = await admin.post(`/payments/batches/${draft.id}/approve`, { code: code() });
       assert.equal(approved.json.items[0].status, 'queued', JSON.stringify(approved.json));

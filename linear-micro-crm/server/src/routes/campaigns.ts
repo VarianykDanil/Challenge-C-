@@ -5,7 +5,7 @@ import { all, run, type Db } from '../db/connection.ts';
 import { CAMPAIGN_SELECT, Where, getCampaign, mapCampaign } from '../db/queries.ts';
 import { campaignBrief } from '../lib/clientPortal.ts';
 import { conflict, notFound } from '../lib/errors.ts';
-import { hexColor, idParam, isoDate, moneyAmount, moneyRate } from '../lib/validate.ts';
+import { hexColor, idParam, isoDate, moneyAmount, moneyRate, parsePatch } from '../lib/validate.ts';
 import { currentUser, requireRole } from '../middleware/auth.ts';
 import { todayISO } from '../lib/dates.ts';
 import { recordCampaignRateChange } from '../lib/payRule.ts';
@@ -89,7 +89,7 @@ export function campaignsRouter(db: Db): Router {
     const id = idParam(req);
     const existing = getCampaign(db, id);
     if (!existing) throw notFound('Campaign');
-    const patch = campaignBody.partial().parse(req.body);
+    const patch = parsePatch(campaignBody, req.body);
     const brief = briefBody.parse(req.body ?? {});
     if (patch.code && patch.code.toLowerCase() !== existing.code.toLowerCase()) {
       if (all(db, `SELECT 1 FROM campaigns WHERE lower(code) = lower(?) AND id <> ?`, [patch.code, id]).length) throw conflict(`Campaign code ${patch.code} already exists`);

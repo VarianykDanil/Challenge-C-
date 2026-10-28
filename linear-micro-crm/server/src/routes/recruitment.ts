@@ -6,7 +6,7 @@ import { Where, getCandidate, getInterview, getUser, listCandidates, listIntervi
 import { addDays, businessNow, eachMonday, isISODate, mondayOf, nowISO, todayISO } from '../lib/dates.ts';
 import { badRequest, conflict, notFound } from '../lib/errors.ts';
 import { logInterviewBooked, logInterviewChanges } from '../lib/recruitmentPlus/store.ts';
-import { idParam, isoTimestamp, optionalIdQuery, optionalString, parseRange } from '../lib/validate.ts';
+import { idParam, isoTimestamp, optionalIdQuery, optionalString, parseRange, parsePatch } from '../lib/validate.ts';
 import { currentUser, requireRole } from '../middleware/auth.ts';
 import { defaultPayPlanId, nextEmployeeId, pickAvatarColor } from './users.ts';
 
@@ -184,7 +184,7 @@ export function recruitmentRouter(db: Db): Router {
     const existing = getCandidate(db, id);
     if (!existing) throw notFound('Candidate');
     if (req.body && typeof req.body === 'object' && 'stage' in req.body) throw badRequest('Use POST /recruitment/candidates/:id/stage to change the stage');
-    const patch = candidateBody.partial().parse(req.body);
+    const patch = parsePatch(candidateBody, req.body);
     assertDateOfBirth(patch.dateOfBirth);
     if (patch.ownerId && !getUser(db, patch.ownerId)) throw badRequest('Unknown ownerId');
     if (patch.referredById && !getUser(db, patch.referredById)) throw badRequest('Unknown referredById');
@@ -298,7 +298,7 @@ export function recruitmentRouter(db: Db): Router {
     const id = idParam(req);
     const existing = getInterview(db, id);
     if (!existing) throw notFound('Interview');
-    const patch = interviewBody.partial().parse(req.body);
+    const patch = parsePatch(interviewBody, req.body);
     // Release 1.3 (P7): an interview's history (bookings, interviewers, its sheet) belongs to its candidate, so it never
     // moves to another one.
     if (patch.candidateId !== undefined && patch.candidateId !== existing.candidateId) throw badRequest('An interview stays with its candidate. Book a new interview for the other candidate');

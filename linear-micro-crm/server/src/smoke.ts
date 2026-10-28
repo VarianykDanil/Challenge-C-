@@ -4,12 +4,12 @@
  */
 import { once } from 'node:events';
 import { existsSync, mkdtempSync, readFileSync, rmSync, statSync } from 'node:fs';
-import http from 'node:http';
 import type { AddressInfo } from 'node:net';
 import os from 'node:os';
 import path from 'node:path';
 import { round2 } from '@lm/shared';
 import { contentSecurityPolicy, createApp } from './app.ts';
+import { missingAddressesMessage, missingLocalAddresses, requestVia } from './test/requestVia.ts';
 import { all, get, openDb, run } from './db/connection.ts';
 import { bumpDataVersion } from './lib/cache.ts';
 import { materialisePayrollRuns } from './db/maintenance.ts';
@@ -34,29 +34,6 @@ function contrastWithWhite(hex: string): number {
 }
 
 type Json = any; // eslint-disable-line @typescript-eslint/no-explicit-any
-
-/**
- * An HTTP request bound to a given local (source) address — the limiters key on the TCP peer, so "another device"
- * is a connection whose *source* is 127.0.0.2, not one that merely targets a different loopback address.
- */
-function requestVia(localAddress: string, method: string, url: string, headers: Record<string, string>, body?: string): Promise<{ status: number; headers: Headers; text: string }> {
-  return new Promise((resolve, reject) => {
-    const u = new URL(url);
-    const req = http.request({ host: u.hostname, port: Number(u.port), path: u.pathname + u.search, method, headers, localAddress }, (res) => {
-      let data = '';
-      res.setEncoding('utf8');
-      res.on('data', (chunk: string) => (data += chunk));
-      res.on('end', () => {
-        const h = new Headers();
-        for (const [k, v] of Object.entries(res.headers)) for (const x of Array.isArray(v) ? v : v === undefined ? [] : [v]) h.append(k, x);
-        resolve({ status: res.statusCode ?? 0, headers: h, text: data });
-      });
-    });
-    req.on('error', reject);
-    if (body !== undefined) req.write(body);
-    req.end();
-  });
-}
 
 class Client {
   private cookie = '';
@@ -1926,6 +1903,13 @@ async function main(): Promise<void> {
   const failed = results.filter((r) => !r.pass).length;
   console.log(`\n${results.length - failed}/${results.length} checks passed${failed ? `, ${failed} FAILED` : ''}`);
   process.exit(failed ? 1 : 0);
+}
+
+// Before any check: the extra loopback addresses the smoke test sends from as other devices (a Mac has only 127.0.0.1).
+const missingAddresses = await missingLocalAddresses(['127.0.0.2', '127.0.0.3']);
+if (missingAddresses.length) {
+  console.error(missingAddressesMessage(missingAddresses));
+  process.exit(1);
 }
 
 main().catch((err) => {

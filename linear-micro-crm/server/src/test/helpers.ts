@@ -42,7 +42,7 @@ import { seed as seedDemo, type SeedOptions } from '../db/seed.ts';
 import { bumpDataVersion, clearResponseCache } from '../lib/cache.ts';
 import { clientPayPlanId, nextClientAccessCode } from '../lib/client.ts';
 import { configureAppSecret, decrypt, encrypt } from '../lib/crypto.ts';
-import { addDays, mondayOf, todayISO } from '../lib/dates.ts';
+import { addDays, mondayOf, setBusinessClock, todayISO } from '../lib/dates.ts';
 import { isDemoSignInAccount } from '../lib/demoTeams.ts';
 import { hashPin, savePinHash } from '../lib/pin.ts';
 import { generateSecret, totp } from '../lib/totp.ts';
@@ -105,6 +105,19 @@ export class TestClient {
   /** Release 1.2 (e.g. PUT /pitches/:campaignCode, PUT /auth/security-settings). */
   put = (url: string, body?: unknown) => this.req('PUT', url, body);
   del = (url: string) => this.req('DELETE', url);
+}
+
+/**
+ * A fixed business day for tests whose answer would otherwise depend on the real date: the demo seed's content (its
+ * pipeline, change log and dates of birth come out differently from day to day) and dates written out in full in a
+ * test. Wednesday 21 Oct 2026, 15:00 in London. Call pinBusinessClock() at the top of the test file, before anything
+ * reads the clock. The business clock keeps ticking from there; sign-in, sessions and two-step codes stay on the real
+ * clock, as they do in the app.
+ */
+export const FIXED_BUSINESS_NOW = '2026-10-21T15:00:00';
+
+export function pinBusinessClock(at: string = FIXED_BUSINESS_NOW): void {
+  setBusinessClock(new Date(at)); // local time: the server test script runs with TZ=Europe/London
 }
 
 /** The four demo accounts of the full seed (`seed: true`). */

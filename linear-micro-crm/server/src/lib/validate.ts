@@ -4,6 +4,103 @@ import { EVENT_MAX_TARGET_SALES, GAUGE_MAX_PER_DAY, MONEY_MAX } from '@lm/shared
 import { badRequest } from './errors.ts';
 import { diffDays, isISODate } from './dates.ts';
 
+/**
+ * A field's own message for when it is missing, as in `z.string(missing('Paste the link'))`. A value of the wrong type
+ * still gets the plain default message.
+ */
+export function missing(message: string) {
+  return { error: (issue: { input?: unknown }) => (issue.input === undefined ? message : undefined) };
+}
+
+/**
+ * The fields a PATCH sends, checked by `schema` with every field optional. Only the keys the body really has come
+ * back: zod fills in a field's default even when the field is optional, so `schema.partial().parse(body)` on its own
+ * would turn `{ firstName }` into `{ firstName, status: 'active', teamId: null, … }` and overwrite what is saved.
+ */
+export function parsePatch<T extends z.ZodObject>(schema: T, body: unknown): Partial<z.output<T>> {
+  const parsed = schema.partial().parse(body) as Record<string, unknown>;
+  const sent = body !== null && typeof body === 'object' ? body : {};
+  return Object.fromEntries(Object.entries(parsed).filter(([key]) => Object.hasOwn(sent, key))) as Partial<z.output<T>>;
+}
+
+const TYPE_WORDS: Record<string, string> = {
+  string: 'text',
+  number: 'a number',
+  int: 'a whole number',
+  boolean: 'true or false',
+  array: 'a list',
+  tuple: 'a list',
+  object: 'a set of fields',
+  date: 'a date',
+};
+
+type Issue = {
+  code?: string;
+  input?: unknown;
+  expected?: string;
+  origin?: string;
+  minimum?: number | bigint;
+  maximum?: number | bigint;
+  inclusive?: boolean;
+  exact?: boolean;
+  format?: string;
+  values?: readonly unknown[];
+  keys?: readonly string[];
+  divisor?: number | bigint;
+};
+
+/**
+ * zod's own messages in plain words, for the problems a schema gives no message of its own (createApp switches this
+ * on with z.config). Anything not listed here keeps zod's wording.
+ */
+export function plainMessage(issue: Issue): string | undefined {
+  const isText = issue.origin === 'string';
+  const isList = issue.origin === 'array' || issue.origin === 'set';
+  const isNumber = issue.origin === 'number' || issue.origin === 'int' || issue.origin === 'bigint';
+  switch (issue.code) {
+    case 'invalid_type':
+      if (issue.input === undefined) return 'Required';
+      return issue.expected && TYPE_WORDS[issue.expected] ? `Expected ${TYPE_WORDS[issue.expected]}` : undefined;
+    case 'too_small': {
+      const n = Number(issue.minimum);
+      if (isText) return issue.exact ? `Use exactly ${n} characters` : n <= 1 ? 'Required' : `Use at least ${n} characters`;
+      if (isList) return issue.exact ? `Exactly ${n}` : n <= 1 ? 'Add at least one' : `Add at least ${n}`;
+      if (isNumber) return issue.inclusive === false ? `Must be more than ${n}` : `Must be ${n} or more`;
+      return undefined;
+    }
+    case 'too_big': {
+      const n = Number(issue.maximum);
+      if (isText) return issue.exact ? `Use exactly ${n} characters` : `Use at most ${n} characters`;
+      if (isList) return issue.exact ? `Exactly ${n}` : `At most ${n}`;
+      if (isNumber) return issue.inclusive === false ? `Must be less than ${n}` : `Must be ${n} or less`;
+      return undefined;
+    }
+    case 'invalid_format':
+      return issue.format === 'email' ? 'Enter a valid email address' : 'Not in the expected format';
+    case 'invalid_value': {
+      // An empty choice ('' or null) is not listed: it is said in words.
+      const values = issue.values ?? [];
+      const named = values.filter((v) => v !== '' && v !== null && v !== undefined).map(String);
+      const orEmpty = named.length < values.length;
+      if (values.length > 0 && named.length === 0) return 'Leave this empty';
+      if (named.length === 0 || values.length > 8) return 'Not one of the choices';
+      return `Choose one of: ${named.join(', ')}${orEmpty ? ' (or leave it empty)' : ''}`;
+    }
+    case 'not_multiple_of':
+      return `Must be a multiple of ${issue.divisor}`;
+    case 'unrecognized_keys':
+      return `Not expected here: ${(issue.keys ?? []).join(', ')}`;
+    case 'invalid_union':
+    case 'invalid_key':
+    case 'invalid_element':
+      return 'Not a valid value';
+    case 'custom':
+      return 'Not valid';
+    default:
+      return undefined;
+  }
+}
+
 export const isoDate = z
   .string()
   .regex(/^\d{4}-\d{2}-\d{2}$/, 'Expected a date formatted YYYY-MM-DD')

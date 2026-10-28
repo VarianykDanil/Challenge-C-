@@ -76,11 +76,13 @@ test('a rep checks in with one tap: 201 with the business time and the grace rul
 });
 
 test('late: a live tap long after the start reads "N min late" with the existing grace rule', async () => {
-  // The all-day fixture event started at 00:00, so 15:00 is 900 minutes late.
+  // The all-day fixture event started at 00:00. Lateness is real time elapsed, so 15:00 is 900 minutes late on most
+  // days but 840 on the Sunday the clocks go forward and 960 when they go back: work it out from the clock.
+  const elapsed = (new Date(`${TODAY}T15:00:00`).getTime() - new Date(`${TODAY}T00:00:00`).getTime()) / 60_000;
   const r = await repA2.post('/checkins', { eventId: fx().events.todayA });
   assert.equal(r.status, 201);
   assert.equal(r.json.onTime, false);
-  assert.ok(r.json.minutesLate >= 900);
+  assert.ok(r.json.minutesLate >= elapsed && r.json.minutesLate <= elapsed + 5, `${r.json.minutesLate} minutes late, expected about ${elapsed}`);
   assert.equal(r.json.source, 'button', 'a live tap without a source is a button tap');
 });
 

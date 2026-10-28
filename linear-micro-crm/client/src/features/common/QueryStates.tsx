@@ -2,6 +2,7 @@
 import { AlertTriangle, RefreshCw } from 'lucide-react';
 import { Button, Card, Skeleton } from '@/components/ui';
 import { ApiError } from '@/api/client';
+import { summariseProblems } from '@/lib/problemList';
 
 /** Every validation detail as a "field: message" line (zod `{ path, message }` objects or plain strings). */
 export function errorDetails(err: unknown): string[] {
@@ -22,8 +23,7 @@ export function errorMessage(err: unknown, fallback = 'Something went wrong', ma
   if (err instanceof ApiError) {
     const details = errorDetails(err);
     if (details.length) {
-      const shown = details.slice(0, maxDetails);
-      const more = details.length - shown.length;
+      const { shown, more } = summariseProblems(details, maxDetails);
       return `${err.message}: ${shown.join('; ')}${more > 0 ? ` (+${more} more)` : ''}`;
     }
     return err.message;

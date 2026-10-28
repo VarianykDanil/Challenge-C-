@@ -74,7 +74,7 @@ import { bumpDataVersion } from '../lib/cache.ts';
 import { nowISO } from '../lib/dates.ts';
 import { HttpError, badRequest, conflict, forbidden, notFound, tooManyRequests } from '../lib/errors.ts';
 import { FailureLimiter } from '../lib/limiter.ts';
-import { idParam } from '../lib/validate.ts';
+import { idParam, missing } from '../lib/validate.ts';
 import {
   diskSpaceAt,
   formatByteSize,
@@ -138,16 +138,16 @@ const bool = (v: unknown) => v === 1 || v === true || v === '1';
 /** Whole seconds of a length, or null. */
 const durationSchema = z.number().finite().int('Give the length in whole seconds').min(1).max(VIDEO_LIMITS.durationMaxS);
 
-const titleSchema = z.string({ required_error: 'Give the video a title' }).trim().min(1, 'Give the video a title').max(VIDEO_LIMITS.titleMax);
+const titleSchema = z.string(missing('Give the video a title')).trim().min(1, 'Give the video a title').max(VIDEO_LIMITS.titleMax);
 const descriptionSchema = z.string().trim().max(VIDEO_LIMITS.descriptionMax);
-const topicSchema = z.enum(VIDEO_TOPICS as [VideoTopic, ...VideoTopic[]], { errorMap: () => ({ message: 'Pick a topic' }) });
-const audienceSchema = z.enum(VIDEO_AUDIENCES as [VideoAudience, ...VideoAudience[]], { errorMap: () => ({ message: 'Pick who it is for' }) });
+const topicSchema = z.enum(VIDEO_TOPICS as [VideoTopic, ...VideoTopic[]], { error: 'Pick a topic' });
+const audienceSchema = z.enum(VIDEO_AUDIENCES as [VideoAudience, ...VideoAudience[]], { error: 'Pick who it is for' });
 
 const linkSchema = z.object({
   title: titleSchema,
   description: descriptionSchema.default(''),
   topic: topicSchema,
-  url: z.string({ required_error: 'Paste the link' }).trim().min(1, 'Paste the link').max(VIDEO_LIMITS.urlMax),
+  url: z.string(missing('Paste the link')).trim().min(1, 'Paste the link').max(VIDEO_LIMITS.urlMax),
   required: z.boolean().default(false),
   audience: audienceSchema.default('everyone'),
   durationS: durationSchema.nullable().optional(),
@@ -194,14 +194,14 @@ const JPEG_DATA_URL = 'data:image/jpeg;base64,';
 const posterSchema = z
   .object({
     image: z
-      .string({ required_error: 'Send the still' })
+      .string(missing('Send the still'))
       .max(VIDEO_LIMITS.posterDataUrlMaxChars, 'The still is too big: up to 600 KB')
       .refine((v) => v.startsWith(JPEG_DATA_URL) && /^[A-Za-z0-9+/]+={0,2}$/.test(v.slice(JPEG_DATA_URL.length)), 'Send the still as a JPEG data URL'),
     durationS: z.number().finite().positive().max(VIDEO_LIMITS.durationMaxS).optional(),
   })
   .strict();
 
-const settingsSchema = z.object({ leadersCanAdd: z.boolean({ required_error: 'Say whether leaders may add videos' }) }).strict();
+const settingsSchema = z.object({ leadersCanAdd: z.boolean(missing('Say whether leaders may add videos')) }).strict();
 
 interface Person {
   id: number;
