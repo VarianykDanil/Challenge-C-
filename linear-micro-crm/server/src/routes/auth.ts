@@ -23,7 +23,7 @@ import {
   verifySecondFactor,
 } from '../lib/twofactor.ts';
 import { isSecureRequest } from '../lib/secureRequest.ts';
-import { consumeSetupCode, issueSetupCode, needsSetupCode, requireSetupCodeAtNextSignIn } from '../lib/setupCodes.ts';
+import { consumeHeldSetupCode, consumeSetupCode, holdSetupCode, issueSetupCode, needsSetupCode, requireSetupCodeAtNextSignIn } from '../lib/setupCodes.ts';
 import { assertStepUp, isTrialMode, trialStatus } from '../lib/trial.ts';
 import { idParam } from '../lib/validate.ts';
 import {
@@ -233,6 +233,11 @@ export function authRouter(db: Db): Router {
     throw status === 401 ? unauthorized(WRONG_CODE) : badRequest(WRONG_CODE);
   }
 
+  const wrongSetupCode = () => {
+    const details: LoginSetupCodeDetails = { requiresSetupCode: true, reason: 'wrong' };
+    return new HttpError(401, ACCESS_MESSAGES.setupCodeWrong, details);
+  };
+
   router.post('/login', async (req, res) => {
     const { email, employeeId, pin, setupCode } = loginSchema.parse(req.body);
     const keys = loginKeys(req, email);
@@ -275,24 +280,28 @@ export function authRouter(db: Db): Router {
     }
     // An account that has not finished setting up (no two-step yet, or an admin reset its PIN) signs in only with its
     // one-time setup code: the email and employee ID alone never start an account. A one-tap demo account (trial mode)
-    // is exempt. A missing or wrong code counts against the login limiter, like a wrong PIN.
+    // is exempt. A missing or wrong code counts against the login limiter, like a wrong PIN. With two-step on the code
+    // is used up only once the two-step code is right too (/login/2fa), so an abandoned sign-in leaves it needed.
     const twoFactorOn = isTwoFactorEnabled(db, user.id);
-    if (needsSetupCode(db, user.id, { twoFactorEnabled: twoFactorOn, demoSignIn: isDemoSignInAccount(db, user) })) {
+    const codeNeeded = needsSetupCode(db, user.id, { twoFactorEnabled: twoFactorOn, demoSignIn: isDemoSignInAccount(db, user) });
+    if (codeNeeded) {
       recordLoginFailure(keys, now);
       if (!setupCode) {
         const challenge: LoginSetupCodeChallenge = { requiresSetupCode: true };
         return res.json(challenge);
       }
-      if (!consumeSetupCode(db, user.id, setupCode)) {
-        const details: LoginSetupCodeDetails = { requiresSetupCode: true, reason: 'wrong' };
-        throw new HttpError(401, ACCESS_MESSAGES.setupCodeWrong, details);
-      }
     }
     if (twoFactorOn) {
       // Step one of two: no cookie yet, and the login counters keep running until the code is right.
-      const challenge: TwoFactorChallenge = { requiresTwoFactor: true, challengeToken: createChallenge(db, user.id), method: 'totp' };
+      const token = createChallenge(db, user.id);
+      if (codeNeeded && !holdSetupCode(db, user.id, setupCode, token)) {
+        deleteChallenge(db, token);
+        throw wrongSetupCode();
+      }
+      const challenge: TwoFactorChallenge = { requiresTwoFactor: true, challengeToken: token, method: 'totp' };
       return res.json(challenge);
     }
+    if (codeNeeded && !consumeSetupCode(db, user.id, setupCode)) throw wrongSetupCode();
     clearLoginFailures(keys); // a successful sign-in resets the counters
     signIn(req, res, user, false);
   });
@@ -313,6 +322,13 @@ export function authRouter(db: Db): Router {
       recordLoginFailure(keys, now); // a wrong code counts against the login limiter too
       recordChallengeAttempt(db, challenge.token);
     });
+    // the setup code step one held for this challenge (after an admin PIN reset) is used up now; none held, or it was
+    // replaced or expired meanwhile: start again
+    if (needsSetupCode(db, user.id, { twoFactorEnabled: true, demoSignIn: isDemoSignInAccount(db, user) }) && !consumeHeldSetupCode(db, user.id, challenge.token)) {
+      deleteChallenge(db, challenge.token);
+      recordLoginFailure(keys, now);
+      throw wrongSetupCode();
+    }
     deleteChallenge(db, challenge.token);
     clearLoginFailures(keys);
     signIn(req, res, user, true);

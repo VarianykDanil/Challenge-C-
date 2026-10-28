@@ -5,6 +5,8 @@
  *    when it stops working and when it was used. A person's codes go with them.
  *  - users.setup_code_required: 1 after an admin reset of the person's PIN — their next sign-in needs a setup code
  *    even with two-step on. Cleared when a code is used.
+ *  - setup_codes.held_by: the two-step sign-in challenge a right code waits on; the code is used up only when that
+ *    challenge's two-step code is right too (lib/setupCodes.ts holdSetupCode).
  *
  * One-off upgrades of an existing database, each guarded by its own `ext:access:*` flag and run inside a transaction:
  *  - `sessions-hashed`: every stored session token is replaced by its SHA-256 hash (lib/sessionKey.ts), so the cookie
@@ -35,7 +37,8 @@ CREATE TABLE IF NOT EXISTS setup_codes (
   created_at TEXT NOT NULL,
   created_by INTEGER REFERENCES users(id) ON DELETE SET NULL,
   expires_at TEXT NOT NULL,
-  used_at TEXT
+  used_at TEXT,
+  held_by TEXT
 );
 CREATE INDEX IF NOT EXISTS idx_setup_codes_user ON setup_codes(user_id);
 `;
@@ -60,8 +63,12 @@ export const extension: DbExtension = {
   sql: SQL,
   upgrade(db) {
     const changed: string[] = [];
-    const col = addColumnIfMissing(db, 'users', 'setup_code_required', 'INTEGER NOT NULL DEFAULT 0');
-    if (col) changed.push(col);
+    for (const col of [
+      addColumnIfMissing(db, 'users', 'setup_code_required', 'INTEGER NOT NULL DEFAULT 0'),
+      addColumnIfMissing(db, 'setup_codes', 'held_by', 'TEXT'),
+    ]) {
+      if (col) changed.push(col);
+    }
 
     if (!metaFlag(db, SESSIONS_HASHED_FLAG)) {
       const n = transaction(db, () => {

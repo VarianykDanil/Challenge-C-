@@ -73,6 +73,35 @@ export function consumeSetupCode(db: Db, userId: number, typed: unknown, now: Da
   return true;
 }
 
+/**
+ * Two-step is on: a right `typed` code waits on the sign-in's two-step challenge (`challengeToken`) instead of being
+ * used now, so a sign-in abandoned at the two-step step leaves the code (and the "needs a code" mark) in place. False
+ * for a wrong, used or expired code. A later sign-in with the same code moves it to its own challenge.
+ */
+export function holdSetupCode(db: Db, userId: number, typed: unknown, challengeToken: string, now: Date = new Date()): boolean {
+  const normalised = normaliseSetupCode(typed);
+  if (!normalised) return false;
+  return (
+    run(db, `UPDATE setup_codes SET held_by = ? WHERE user_id = ? AND code_hash = ? AND used_at IS NULL AND expires_at > ?`, [
+      challengeToken, userId, hashSetupCode(normalised), now.toISOString(),
+    ]).changes === 1
+  );
+}
+
+/**
+ * The two-step code for `challengeToken` was right: uses up the code held for it and clears the "next sign-in needs a
+ * code" mark. False when no unused, unexpired code waits on that challenge (replaced by a new one, expired, or held
+ * by a later sign-in).
+ */
+export function consumeHeldSetupCode(db: Db, userId: number, challengeToken: string, now: Date = new Date()): boolean {
+  const used = run(db, `UPDATE setup_codes SET used_at = ? WHERE user_id = ? AND held_by = ? AND used_at IS NULL AND expires_at > ?`, [
+    now.toISOString(), userId, challengeToken, now.toISOString(),
+  ]).changes;
+  if (used !== 1) return false;
+  run(db, `UPDATE users SET setup_code_required = 0 WHERE id = ? AND setup_code_required <> 0`, [userId]);
+  return true;
+}
+
 /** After an admin PIN reset: the next sign-in needs a setup code even though two-step is on. */
 export function requireSetupCodeAtNextSignIn(db: Db, userId: number): void {
   run(db, `UPDATE users SET setup_code_required = 1 WHERE id = ?`, [userId]);

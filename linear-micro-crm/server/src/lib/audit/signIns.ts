@@ -148,6 +148,9 @@ export function twoFactorSignInFailed(_db: Db, done: AuditDone, state: TwoFactor
   const account = state?.account ?? null;
   if (!account) return [];
   if (done.status === 429) return [filed(account, `Sign-in refused: too many attempts${retryText(done)}`, { reason: 'too_many_attempts' })];
+  if (done.status === 401 && detailsOf(done).requiresSetupCode === true) {
+    return [filed(account, 'Failed sign-in: wrong, used or expired setup code', { reason: 'wrong_setup_code' })];
+  }
   if (done.status === 401) return [filed(account, 'Failed sign-in: wrong two-step code', { reason: 'wrong_code' })];
   if (done.status === 410) {
     return errorOf(done) === SIGN_IN_MESSAGES.tooManyCodes

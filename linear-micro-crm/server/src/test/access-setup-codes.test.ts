@@ -148,6 +148,54 @@ test('an admin PIN reset hands out a setup code, and the next sign-in needs it e
   assert.equal(plain.json.requiresTwoFactor, true);
 });
 
+test('after a PIN reset the setup code is used up only once the two-step step succeeds (an abandoned sign-in leaves it needed)', async () => {
+  srv = await startTestServer();
+  const rep = await srv.login('rep');
+  assert.equal((await rep.post('/auth/pin', { pin: '4917' })).status, 204);
+  const admin = await srv.login('admin');
+  const reset = await admin.post(`/auth/pin/reset/${fx().users.rep}`, { code: adminCode() });
+  assert.equal(reset.status, 200, JSON.stringify(reset.json));
+  const creds = FIXTURE_ACCOUNTS.rep;
+  const setupCode = reset.json.setupCode as string;
+  // the right setup code, then the sign-in stops at the two-step step
+  const abandoned = await srv.anon().post('/auth/login', { ...creds, setupCode });
+  assert.equal(abandoned.json.requiresTwoFactor, true);
+  // someone with only the phone still cannot get in and choose the PIN
+  assert.deepEqual((await srv.anon().post('/auth/login', creds)).json, { requiresSetupCode: true }, 'the code is still needed');
+  // a wrong two-step code does not use it up either
+  const wrong = await srv.anon().post('/auth/login/2fa', { challengeToken: abandoned.json.challengeToken, code: '000000' });
+  assert.equal(wrong.status, 401);
+  assert.equal(get<{ r: number }>(db(), `SELECT setup_code_required AS r FROM users WHERE id = ?`, [fx().users.rep])!.r, 1);
+  // the same code with the right two-step code signs in, and only then is it used
+  const anon = srv.anon();
+  const again = await anon.post('/auth/login', { ...creds, setupCode });
+  assert.equal(again.json.requiresTwoFactor, true, JSON.stringify(again.json));
+  const done = await anon.post('/auth/login/2fa', { challengeToken: again.json.challengeToken, code: currentCode(db(), fx().users.rep) });
+  assert.equal(done.status, 200, JSON.stringify(done.json));
+  assert.equal(done.json.user.hasPin, false, 'the old PIN is gone: they can choose a new one');
+  assert.equal(get<{ r: number }>(db(), `SELECT setup_code_required AS r FROM users WHERE id = ?`, [fx().users.rep])!.r, 0);
+  assert.equal(get<{ n: number }>(db(), `SELECT COUNT(*) AS n FROM setup_codes WHERE user_id = ? AND used_at IS NOT NULL`, [fx().users.rep])!.n, 1);
+});
+
+test('a setup code held by a sign-in stops working when an administrator gives a new one before the two-step step', async () => {
+  srv = await startTestServer();
+  const rep = await srv.login('rep');
+  assert.equal((await rep.post('/auth/pin', { pin: '4917' })).status, 204);
+  const admin = await srv.login('admin');
+  const reset = await admin.post(`/auth/pin/reset/${fx().users.rep}`, { code: adminCode() });
+  const creds = FIXTURE_ACCOUNTS.rep;
+  const anon = srv.anon();
+  const step1 = await anon.post('/auth/login', { ...creds, setupCode: reset.json.setupCode });
+  assert.equal(step1.json.requiresTwoFactor, true);
+  // a new code replaces the old one (say the admin thought it was lost)
+  issueSetupCode(db(), fx().users.rep, { createdBy: fx().users.admin, reason: 'reissue' });
+  const late = await anon.post('/auth/login/2fa', { challengeToken: step1.json.challengeToken, code: currentCode(db(), fx().users.rep) });
+  assert.equal(late.status, 401, JSON.stringify(late.json));
+  assert.equal(late.json.error, ACCESS_MESSAGES.setupCodeWrong);
+  assert.equal(late.json.details?.requiresSetupCode, true);
+  assert.equal(get<{ r: number }>(db(), `SELECT setup_code_required AS r FROM users WHERE id = ?`, [fx().users.rep])!.r, 1);
+});
+
 test('existing accounts with two-step on are unaffected; one without gets a code from an admin (Team or the server command)', async () => {
   srv = await startTestServer();
   const rep = await srv.login('rep'); // the helper sets up two-step: the usual sign-in, no setup code
