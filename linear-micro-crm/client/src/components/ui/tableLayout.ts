@@ -104,3 +104,20 @@ export function sortChoices<T>(columns: Column<T>[]): SortChoice[] {
   }
   return out;
 }
+
+/** On a phone a long list shows this many cards first, then "Show all" (a card is several lines tall). */
+export const PHONE_CARD_LIMIT = 10;
+/** A list at most this many cards over the limit is shown whole: "Show 2 more" is not worth a tap. */
+const PHONE_CARD_SLACK = 3;
+
+/**
+ * How many cards a phone shows: the first `limit`, then a "Show all" button, so a page of long lists stays short.
+ * The open (selected) row is never hidden, and a list with a select-all box shows everything, so nothing out of sight
+ * can be ticked. `limit` null: every card.
+ */
+export function cardsShown(o: { total: number; limit: number | null; expanded: boolean; selectedIndex: number; selectable: boolean }): { shown: number; hidden: number } {
+  const { total, limit } = o;
+  if (limit === null || o.expanded || o.selectable || total <= limit + PHONE_CARD_SLACK) return { shown: total, hidden: 0 };
+  const shown = Math.min(total, Math.max(limit, o.selectedIndex + 1));
+  return { shown, hidden: total - shown };
+}

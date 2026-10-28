@@ -1,8 +1,8 @@
-import { Fragment, useEffect, useMemo, useRef, useState, type ReactNode, type SyntheticEvent } from 'react';
+import { Fragment, useEffect, useId, useMemo, useRef, useState, type ReactNode, type SyntheticEvent } from 'react';
 import { ArrowDown, ArrowUp, ChevronsUpDown, Inbox } from 'lucide-react';
 import clsx from 'clsx';
 import { useMediaQuery } from '@/lib/useMediaQuery';
-import { CARD_BREAKPOINT_PX, cardLayout, sortChoices, type CardLayout, type Column } from './tableLayout';
+import { CARD_BREAKPOINT_PX, PHONE_CARD_LIMIT, cardLayout, cardsShown, sortChoices, type CardLayout, type Column } from './tableLayout';
 
 export type { CardRole, Column } from './tableLayout';
 
@@ -41,6 +41,8 @@ export interface DataTableProps<T> {
    * without sideways scrolling (columns choose their place with `card`); 'scroll' keeps the table and its swipe hint.
    */
   phone?: 'cards' | 'scroll';
+  /** Cards: how many a phone shows before "Show all" (default PHONE_CARD_LIMIT; null shows every card). */
+  phoneRows?: number | null;
 }
 
 /** Descendants that own their own interaction — a click or key inside them must not activate the row. */
@@ -72,7 +74,7 @@ function compare(a: string | number | null, b: string | number | null): number {
 export function DataTable<T>({
   columns, rows, rowKey, onRowClick, emptyMessage = 'Nothing to show', empty, loading, loadingRows = 5, dense,
   initialSort, sort: sortProp, onSortChange, footer, className, stickyHeader = true, maxHeight, selectedKey, rowClassName, caption, bare,
-  phone = 'cards',
+  phone = 'cards', phoneRows = PHONE_CARD_LIMIT,
 }: DataTableProps<T>) {
   const narrow = useMediaQuery(`(max-width: ${CARD_BREAKPOINT_PX - 0.02}px)`);
   const asCards = narrow && phone === 'cards';
@@ -140,6 +142,7 @@ export function DataTable<T>({
           caption={caption}
           sort={sort}
           onSort={setSort}
+          limit={phoneRows}
         />
         {isEmpty && <EmptyRows empty={empty} emptyMessage={emptyMessage} />}
         {footer && !isEmpty && (
@@ -324,6 +327,7 @@ interface CardRowsProps<T> {
   caption?: string;
   sort: { key: string; dir: 'asc' | 'desc' } | null;
   onSort: (sort: { key: string; dir: 'asc' | 'desc' } | null) => void;
+  limit: number | null;
 }
 
 /** A field's label in the card: its card label, else the column header (plain text or the header's own element). */
@@ -335,12 +339,16 @@ function FieldLabel<T>({ c }: { c: Column<T> }) {
  * The phone layout: one card per row (title and the key figure first, then every other column as a labelled field,
  * then the row's buttons) and a "Sort by" list in place of the column headers. Nothing scrolls sideways.
  */
-function CardRows<T>({ columns, rows, rowKey, onRowClick, loading, loadingRows, selectedKey, rowClassName, caption, sort, onSort }: CardRowsProps<T>) {
+function CardRows<T>({ columns, rows, rowKey, onRowClick, loading, loadingRows, selectedKey, rowClassName, caption, sort, onSort, limit }: CardRowsProps<T>) {
   const layout: CardLayout<T> = useMemo(() => cardLayout(columns), [columns]);
+  const baseId = useId();
+  const [expanded, setExpanded] = useState(false);
   const choices = useMemo(() => sortChoices(columns), [columns]);
   // a column header that is itself a control (the "select all" box) stays reachable above the cards
   const toolbarLead = layout.lead.filter((c) => typeof c.header !== 'string');
   const showSort = choices.length > 0 && rows.length > 1;
+  const selectedIndex = selectedKey == null ? -1 : rows.findIndex((r) => rowKey(r) === selectedKey);
+  const { shown, hidden } = cardsShown({ total: rows.length, limit, expanded, selectedIndex, selectable: toolbarLead.length > 0 });
   return (
     <>
       {(showSort || toolbarLead.length > 0) && !loading && rows.length > 0 && (
@@ -378,32 +386,41 @@ function CardRows<T>({ columns, rows, rowKey, onRowClick, loading, loadingRows, 
             </li>
           ))}
         {!loading &&
-          rows.map((r) => {
+          rows.slice(0, shown).map((r, i) => {
             const key = rowKey(r);
             const selected = selectedKey != null && selectedKey === key;
+            const id = `${baseId}-${i}`;
+            // A tap anywhere on the card opens it. For the keyboard and screen readers the card stays a list item (so
+            // links and buttons inside it stay reachable) and gets a real "Open …" button, named from its title, out of
+            // sight; the card shows the focus ring while that button has focus.
             return (
               <li
                 key={key}
                 onClick={onRowClick ? (e) => { if (isRowActivation(e)) onRowClick(r); } : undefined}
-                onKeyDown={onRowClick ? (e) => {
-                  if (e.key !== 'Enter' && e.key !== ' ') return;
-                  if (!isRowActivation(e)) return;
-                  e.preventDefault();
-                  onRowClick(r);
-                } : undefined}
-                tabIndex={onRowClick ? 0 : undefined}
-                aria-selected={selected || undefined}
                 data-card-row=""
+                data-selected={selected || undefined}
                 className={clsx(
                   'px-4 py-3 transition-colors duration-100',
-                  onRowClick && 'focus-ring-inset cursor-pointer outline-none active:bg-surface-2/70',
+                  onRowClick && 'cursor-pointer active:bg-surface-2/70 has-[[data-card-open]:focus-visible]:ring-2 has-[[data-card-open]:focus-visible]:ring-inset has-[[data-card-open]:focus-visible]:ring-primary',
                   selected && 'bg-primary-soft/60',
                   rowClassName?.(r),
                 )}
               >
+                {onRowClick && (
+                  <button
+                    type="button"
+                    data-card-open=""
+                    className="sr-only"
+                    aria-labelledby={`${id}-open ${id}-title`}
+                    aria-current={selected ? 'true' : undefined}
+                    onClick={() => onRowClick(r)}
+                  >
+                    <span id={`${id}-open`} hidden>Open</span>
+                  </button>
+                )}
                 <div className="flex items-start gap-3">
                   {layout.lead.map((c) => <div key={c.key} className="-my-1 shrink-0">{c.render(r)}</div>)}
-                  <div className="min-w-0 flex-1 space-y-0.5 text-sm font-medium text-fg [overflow-wrap:anywhere]">
+                  <div id={`${id}-title`} className="min-w-0 flex-1 space-y-0.5 text-sm font-medium text-fg [overflow-wrap:anywhere]">
                     {layout.title.map((c) => <div key={c.key}>{c.render(r)}</div>)}
                   </div>
                   {layout.aside.length > 0 && (
@@ -442,6 +459,18 @@ function CardRows<T>({ columns, rows, rowKey, onRowClick, loading, loadingRows, 
             );
           })}
       </ul>
+      {!loading && hidden > 0 && (
+        <div className="border-t border-border px-4 py-2">
+          <button
+            type="button"
+            className="focus-ring h-11 w-full rounded-lg text-sm font-semibold text-primary hover:bg-primary-soft/60"
+            onClick={() => setExpanded(true)}
+            data-cards-show-all=""
+          >
+            Show all {rows.length}
+          </button>
+        </div>
+      )}
     </>
   );
 }

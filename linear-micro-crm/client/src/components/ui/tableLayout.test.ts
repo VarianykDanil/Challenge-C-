@@ -1,7 +1,7 @@
 // How DataTable lays a row out as a card on a phone (tableLayout.ts). Run by `npm test`.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { CARD_BREAKPOINT_PX, cardLayout, sortChoices, type Column } from './tableLayout.ts';
+import { CARD_BREAKPOINT_PX, PHONE_CARD_LIMIT, cardLayout, cardsShown, sortChoices, type Column } from './tableLayout.ts';
 
 interface Run { week: string; name: string; gross: number; due: string; status: string }
 const col = (key: string, o: Partial<Column<Run>> = {}): Column<Run> => ({ key, header: key[0]!.toUpperCase() + key.slice(1), render: () => key, ...o });
@@ -52,4 +52,19 @@ test('sorting on a phone: one choice per sortable column and direction, labelled
 
 test('cards are used below 640 px, the width of most phones held upright', () => {
   assert.equal(CARD_BREAKPOINT_PX, 640);
+});
+
+test('a long list shows the first cards and a "Show all" button on a phone, so the page stays short', () => {
+  assert.equal(PHONE_CARD_LIMIT, 10);
+  assert.deepEqual(cardsShown({ total: 48, limit: PHONE_CARD_LIMIT, expanded: false, selectedIndex: -1, selectable: false }), { shown: 10, hidden: 38 });
+  assert.deepEqual(cardsShown({ total: 48, limit: PHONE_CARD_LIMIT, expanded: true, selectedIndex: -1, selectable: false }), { shown: 48, hidden: 0 });
+  // a short list, or one with a couple over the limit, is shown whole (a "Show 1 more" button is not worth a tap)
+  assert.deepEqual(cardsShown({ total: 7, limit: 10, expanded: false, selectedIndex: -1, selectable: false }), { shown: 7, hidden: 0 });
+  assert.deepEqual(cardsShown({ total: 12, limit: 10, expanded: false, selectedIndex: -1, selectable: false }), { shown: 12, hidden: 0 });
+  // the open row is never hidden
+  assert.deepEqual(cardsShown({ total: 48, limit: 10, expanded: false, selectedIndex: 30, selectable: false }), { shown: 31, hidden: 17 });
+  // a list with a select-all box shows everything: nothing out of sight can be ticked
+  assert.deepEqual(cardsShown({ total: 48, limit: 10, expanded: false, selectedIndex: -1, selectable: true }), { shown: 48, hidden: 0 });
+  // no limit
+  assert.deepEqual(cardsShown({ total: 48, limit: null, expanded: false, selectedIndex: -1, selectable: false }), { shown: 48, hidden: 0 });
 });
