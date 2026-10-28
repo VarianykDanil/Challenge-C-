@@ -59,6 +59,18 @@ describe('app shell', () => {
     assert.equal((await fetch(base + '/api/nope')).status, 404, 'API paths never get the shell');
   });
 
+  test('a bundle that does not exist is a 404, never the page (the service worker must not keep a page as code)', async () => {
+    const ok = await fetch(base + '/assets/app-abc123.js');
+    assert.equal(ok.status, 200);
+    assert.match(ok.headers.get('cache-control') ?? '', /immutable/);
+    for (const url of ['/assets/Gauges-gone99.js', '/assets/index-old.css', '/assets/']) {
+      const r = await fetch(base + url);
+      assert.equal(r.status, 404, url);
+      assert.doesNotMatch(r.headers.get('content-type') ?? '', /text\/html/, url);
+      assert.notEqual(await r.text(), html, url);
+    }
+  });
+
   test('the service worker is never cached by the browser, so a new release is picked up at once', async () => {
     const r = await fetch(base + '/sw.js');
     assert.equal(r.status, 200);

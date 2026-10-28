@@ -262,6 +262,11 @@ export function createApp(db: Db, opts: AppOptions = {}): Express {
     const indexHtml = path.join(staticDir, 'index.html');
     // Vite's hashed bundles never change under one name: cache them for a year, immutable.
     app.use('/assets', express.static(path.join(opts.staticDir, 'assets'), { immutable: true, maxAge: '1y', index: false }));
+    // A bundle that is not there (an old release's name) is a plain 404, never the page below: a page answered as code
+    // breaks the app, and the service worker would keep it.
+    app.use('/assets', (_req, res) => {
+      res.status(404).type('text/plain').set('Cache-Control', 'no-store').send('Not found');
+    });
     // The shell (index.html), the service worker and the manifest must always be revalidated: the shell would pin
     // bundle names that no longer exist, and a cached service worker would hold phones on the old release.
     app.use(
