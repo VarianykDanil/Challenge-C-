@@ -113,9 +113,16 @@ test('the demo looks paid up: no week was left unpaid, and the only pending run 
       assert.equal(r.weekStart, lastWeek, `only last week's runs wait (found w/c ${r.weekStart})`);
       assert.equal(r.dueDate, paydayForWeek(lastWeek));
     }
-    // Jordan (the demo rep) has nothing overdue
-    const overdue = all(db, `SELECT 1 FROM payroll_runs p JOIN users u ON u.id = p.user_id WHERE u.employee_id = 'LM-0010' AND p.status IN ('pending', 'failed') AND p.due_date < ?`, [today]);
-    assert.equal(overdue.length, 0);
+    // Jordan (the demo rep) has no week overdue from before last week. Last week's own pay waits for him to accept its
+    // invoice (invoices-demo-seed.test.ts keeps it open over the weekend), so it shows as due only on Saturday and
+    // Sunday, once its Friday payday has passed.
+    const overdue = all<{ weekStart: string }>(
+      db,
+      `SELECT p.week_start AS weekStart FROM payroll_runs p JOIN users u ON u.id = p.user_id WHERE u.employee_id = 'LM-0010' AND p.status IN ('pending', 'failed') AND p.due_date < ?`,
+      [today],
+    );
+    assert.deepEqual(overdue.filter((r) => r.weekStart !== lastWeek), [], 'nothing older than last week');
+    if (paydayForWeek(lastWeek) >= today) assert.equal(overdue.length, 0, 'nothing overdue before last week’s payday');
   } finally {
     db.close();
   }
