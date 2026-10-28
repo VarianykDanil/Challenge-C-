@@ -1,5 +1,5 @@
 // The dashboard's "Today" card (TodayShift.tsx): who gets it and which events it shows. Pure, tested in
-// todayShift.test.ts.
+// todayShiftRules.test.ts.
 import type { Role, SalesEventWithMeta } from '@lm/shared';
 
 /** Reps and leaders with a team: the people who check in and log gauges at their team's events. */

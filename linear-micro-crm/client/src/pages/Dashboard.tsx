@@ -14,7 +14,7 @@ import { ProgressCard } from '@/features/learning/ProgressCard';
 import { TodayTallyLink } from '@/features/gauges/TallyLinks';
 import { TodayShift } from '@/features/dashboard/TodayShift';
 import { PhoneFold } from '@/features/dashboard/PhoneFold';
-import { showsTodayCard } from '@/features/dashboard/todayShift';
+import { showsTodayCard } from '@/features/dashboard/todayShiftRules';
 import { LazyAttentionCard, LazyWeekInReview, LazyWeekPayStrip } from '@/features/smart';
 import { COPY, greetingFor, motivationForDate } from '@/content/copy';
 import { formatDate, formatDateShort, formatRangeLabel } from '@/lib/format';

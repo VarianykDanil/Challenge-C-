@@ -1,8 +1,8 @@
-// Which events the dashboard's "Today" card shows at the top (todayShift.ts). Run by `npm test`.
+// Which events the dashboard's "Today" card shows at the top (todayShiftRules.ts). Run by `npm test`.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import type { SalesEventWithMeta } from '@lm/shared';
-import { showsTodayCard, todaysShifts } from './todayShift.ts';
+import { showsTodayCard, todaysShifts } from './todayShiftRules.ts';
 
 const ev = (id: number, o: Partial<SalesEventWithMeta> = {}): SalesEventWithMeta =>
   ({ id, date: '2026-10-27', teamId: 2, status: 'live', startTime: '10:00', endTime: '18:00', name: `Event ${id}`, ...o }) as unknown as SalesEventWithMeta;

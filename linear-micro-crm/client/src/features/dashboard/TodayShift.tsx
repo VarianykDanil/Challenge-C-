@@ -12,7 +12,7 @@ import { useLoggableEvents } from '@/features/gauges/loggableEvents';
 import { todayISO } from '@/lib/dates';
 import { formatTime } from '@/lib/format';
 import { actionHref } from '@/lib/useActionParam';
-import { todaysShifts } from './todayShift';
+import { todaysShifts } from './todayShiftRules';
 
 export function TodayShift({ onLog }: { onLog: () => void }) {
   const me = useCurrentUser();
