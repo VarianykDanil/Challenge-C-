@@ -1,6 +1,7 @@
 // Owned by the Frontend Developer.
 import type { ApiError as ApiErrorBody, PinSetupRequiredError, TwoFactorSetupRequiredError } from '@lm/shared';
 import { isSessionEndedDetails, noteSessionEnded } from './sessionEnd';
+import { RequestTimeout, fetchWithin, isGatewayFailure, requestTimeoutMs } from './requestRules';
 
 export class ApiError extends Error {
   status: number;
@@ -13,16 +14,24 @@ export class ApiError extends Error {
 }
 
 /**
- * The request never got an HTTP answer: no signal, the hotspot dropped, or the server is not running (fetch threw a
- * TypeError). Every HTTP error response is still an ApiError, exactly as before. (Signal-proof logging, p7.)
+ * Why a request counts as "can't reach Linear Hub" (api/requestRules.ts): no answer at all (fetch threw), no first
+ * answer in time, or a proxy's 502/503/504 page because the app behind it is stopped or restarting.
+ */
+export type NetworkFailure = 'unreachable' | 'timeout' | 'gateway';
+
+/**
+ * The app never answered: no signal, the hotspot dropped, the server is not running, no answer in time, or a proxy
+ * said the app is down. Every answer from the app itself is still an ApiError. (Signal-proof logging, p7.)
  */
 export class NetworkError extends Error {
-  /** The TypeError fetch threw. */
+  /** What fetch threw, the time-out, or the proxy's status. */
   readonly original: unknown;
-  constructor(original?: unknown) {
+  readonly reason: NetworkFailure;
+  constructor(original?: unknown, reason: NetworkFailure = 'unreachable') {
     super("Can't reach Linear Hub — check the hotspot or Wi-Fi and try again.");
     this.name = 'NetworkError';
     this.original = original;
+    this.reason = reason;
   }
 }
 
@@ -40,8 +49,8 @@ if (typeof window !== 'undefined') {
 }
 
 /**
- * Window event, `detail: { online }`: false when a request could not reach the server, true whenever any HTTP
- * response arrives (whatever its status). The offline banner and the gauge outbox listen to it.
+ * Window event, `detail: { online }`: false when a request could not reach the app (a NetworkError), true whenever the
+ * app answers (whatever the status). The offline banner and the gauge outbox listen to it.
  */
 export const NETWORK_EVENT = 'lm:network';
 export interface NetworkEventDetail { online: boolean }
@@ -62,35 +71,50 @@ export interface ApiResponse<T> {
   headers: Headers;
 }
 
-export type ApiInit = RequestInit & { json?: unknown };
+export type ApiInit = RequestInit & {
+  json?: unknown;
+  /** Wait at most this long for the first answer (null: no limit). Default: reads 15 s, saves no limit. */
+  timeoutMs?: number | null;
+};
 
 /** Like `api()`, but keeps the response status and headers alongside the parsed body. */
 export async function apiRaw<T>(path: string, init: ApiInit = {}): Promise<ApiResponse<T>> {
-  const { json, headers, ...rest } = init;
+  const { json, headers, timeoutMs, ...rest } = init;
   let res: Response;
   try {
-    res = await fetch(`/api${path}`, {
-      credentials: 'include',
-      headers: { ...(json !== undefined ? { 'Content-Type': 'application/json' } : {}), ...(headers ?? {}) },
-      body: json !== undefined ? JSON.stringify(json) : rest.body,
-      ...rest,
-    });
+    res = await fetchWithin(
+      (input, req) => fetch(input, req),
+      `/api${path}`,
+      {
+        credentials: 'include',
+        headers: { ...(json !== undefined ? { 'Content-Type': 'application/json' } : {}), ...(headers ?? {}) },
+        body: json !== undefined ? JSON.stringify(json) : rest.body,
+        ...rest,
+      },
+      requestTimeoutMs(rest.method, timeoutMs),
+    );
   } catch (e) {
     // fetch rejects with a TypeError only when no HTTP answer came back. An abort (TanStack Query cancelling a query)
     // is a DOMException and passes through untouched.
-    if (e instanceof TypeError) {
+    if (e instanceof TypeError || e instanceof RequestTimeout) {
       announceNetwork(false);
-      throw new NetworkError(e);
+      throw new NetworkError(e, e instanceof RequestTimeout ? 'timeout' : 'unreachable');
     }
     throw e;
   }
-  announceNetwork(true);
   if (res.status === 204) {
+    announceNetwork(true);
     // Drain the (empty) body: an unread fetch body is reported by Chromium as an aborted request in DevTools.
     await res.text().catch(() => undefined);
     return { data: undefined as T, status: res.status, headers: res.headers };
   }
   const body = await res.json().catch(() => null);
+  // A proxy's 502/503/504 page (the app behind it is stopped or restarting) is no answer from the app.
+  if (isGatewayFailure(res.status, body)) {
+    announceNetwork(false);
+    throw new NetworkError(res.status, 'gateway');
+  }
+  announceNetwork(true);
   if (!res.ok) {
     // Release 1.4 (package S): the request that found the session past its hours-from-sign-in limit says so (any path,
     // /auth/me included); the sign-in page shows the sentence (api/sessionEnd.ts).
