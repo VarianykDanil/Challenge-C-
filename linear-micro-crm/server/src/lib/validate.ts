@@ -78,8 +78,13 @@ export function plainMessage(issue: Issue): string | undefined {
     case 'invalid_format':
       return issue.format === 'email' ? 'Enter a valid email address' : 'Not in the expected format';
     case 'invalid_value': {
+      // An empty choice ('' or null) is not listed: it is said in words.
       const values = issue.values ?? [];
-      return values.length > 0 && values.length <= 8 ? `Choose one of: ${values.map(String).join(', ')}` : 'Not one of the choices';
+      const named = values.filter((v) => v !== '' && v !== null && v !== undefined).map(String);
+      const orEmpty = named.length < values.length;
+      if (values.length > 0 && named.length === 0) return 'Leave this empty';
+      if (named.length === 0 || values.length > 8) return 'Not one of the choices';
+      return `Choose one of: ${named.join(', ')}${orEmpty ? ' (or leave it empty)' : ''}`;
     }
     case 'not_multiple_of':
       return `Must be a multiple of ${issue.divisor}`;

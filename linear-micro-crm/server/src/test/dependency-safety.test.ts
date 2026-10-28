@@ -10,6 +10,9 @@ import assert from 'node:assert/strict';
 import { createRequire } from 'node:module';
 import http from 'node:http';
 import zlib from 'node:zlib';
+import { z } from 'zod';
+import { plainMessage } from '../lib/validate.ts';
+import { summariseProblems } from '../../../client/src/lib/problemList.ts';
 import { startTestServer, type TestClient, type TestServer } from './helpers.ts';
 
 const require = createRequire(import.meta.url);
@@ -76,6 +79,18 @@ test('a refused request lists at most 20 problems, then says how many more there
   assert.deepEqual(details[20], { path: '', message: 'And 180 more problems' });
 });
 
+test("the app's one-line message counts every problem, not only the 20 listed", async () => {
+  const r = await admin.put('/recruitment/questions/order', { interviewType: 'final', ids: Array.from({ length: 200 }, () => 'x') });
+  // the lines as the app shows them (client errorDetails): "path: message", or the message alone
+  const lines = (r.json.details as { path: string; message: string }[]).map((d) => (d.path ? `${d.path}: ${d.message}` : d.message));
+  const { shown, more } = summariseProblems(lines, 3);
+  assert.deepEqual(shown, ['ids.0: Expected a number', 'ids.1: Expected a number', 'ids.2: Expected a number']);
+  assert.equal(more, 197, '200 problems, 3 shown');
+  assert.deepEqual(summariseProblems(['a: Required', 'b: Required'], 3), { shown: ['a: Required', 'b: Required'], more: 0 });
+  assert.deepEqual(summariseProblems(['a', 'b', 'c', 'd', 'e'], 3), { shown: ['a', 'b', 'c'], more: 2 });
+  assert.deepEqual(summariseProblems(['a', 'b', 'And 1 more problem'], 3), { shown: ['a', 'b'], more: 1 });
+});
+
 test("zod's own messages are plain words; a schema's own message still wins", async () => {
   const campaignId = srv.fixture!.campaignId;
   const cases: [string, unknown, { path: string; message: string }[]][] = [
@@ -94,6 +109,13 @@ test("zod's own messages are plain words; a schema's own message still wins", as
   const missing = await admin.post('/events', {});
   assert.equal(missing.status, 400);
   assert.ok((missing.json.details as { path: string; message: string }[]).some((d) => d.path === 'campaignId' && d.message === 'Required'), JSON.stringify(missing.json));
+});
+
+test('a choice that may be left empty says so, instead of listing an empty value', () => {
+  const message = (schema: z.ZodType, value: unknown) => schema.safeParse(value, { error: plainMessage }).error?.issues[0]?.message;
+  assert.equal(message(z.literal(''), 'x'), 'Leave this empty');
+  assert.equal(message(z.enum(['', 'charity', 'energy']), 'x'), 'Choose one of: charity, energy (or leave it empty)');
+  assert.equal(message(z.enum(['charity', 'energy']), 'x'), 'Choose one of: charity, energy');
 });
 
 /** A raw request: Node's fetch cannot send a body longer than its compressed JSON. */
