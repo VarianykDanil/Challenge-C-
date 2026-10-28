@@ -22,6 +22,7 @@ import { affectedPayUsers, assertWeekUnpaidFor, syncPayrollRun } from '../db/mai
 import { GAUGE_SELECT, USER_SELECT, getEvent, mapGauge, type GaugeRow } from '../db/queries.ts';
 import { mondayOf, nowISO, todayISO } from '../lib/dates.ts';
 import { HttpError, badRequest, notFound } from '../lib/errors.ts';
+import { noteGaugeWrite } from '../lib/payDays.ts';
 import { assertCanWriteGauge, redactEntry } from '../lib/scope.ts';
 import { assertCheckInNotLocked, stampCheckInAuthor } from '../lib/shiftCheckIns.ts';
 import { isoDate } from '../lib/validate.ts';
@@ -175,6 +176,8 @@ export function bulkGaugesRouter(db: Db): Router {
       }
       // The week's unpaid runs follow the gauges, in the same transaction (syncPayrollForEntry's rule, once per
       // affected person instead of once per row: the team's leaders are affected by every row).
+      // MON-1: a leader or the office logging for someone confirms the day
+      noteGaugeWrite(db, me, valid.map(({ target }) => ({ userId: target.id, date: body.date })));
       const affected = new Map<number, PayUser>();
       for (const { target } of valid) for (const u of affectedPayUsers(db, { userId: target.id, eventId: event.id })) affected.set(u.id, u);
       const monday = mondayOf(body.date);

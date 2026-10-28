@@ -31,6 +31,7 @@ import { createWiseProvider } from '../lib/payments/wise.ts';
 import { nextUnpaidWeek } from '../lib/payRule.ts';
 import { startTrueLayerFake, startWiseFake, type TrueLayerFake, type WiseFake } from './paymentApiFakes.ts';
 import { addEvent, addGauge, currentCode, startTestServer, type Json, type TestClient, type TestServer } from './helpers.ts';
+import { recordSandboxRun } from './moneyTestUtils.ts';
 
 const ec = generateKeyPairSync('ec', { namedCurve: 'secp521r1' });
 const EC_PEM = ec.privateKey.export({ type: 'sec1', format: 'pem' }).toString();
@@ -126,6 +127,7 @@ describe('API providers: mode switches, resends after a timeout, Wise cancel', (
     const id = made.json.id as number;
     assert.equal((await admin.post(`/payments/connections/${id}/test`)).json.ok, true);
     if (live) {
+      recordSandboxRun(db, id, fx.users.admin);
       assert.equal((await admin.patch(`/payments/connections/${id}`, { mode: 'live', confirm: PAYMENT_LIVE_CONFIRMATION })).status, 200);
       assert.equal((await admin.post(`/payments/connections/${id}/test`)).json.ok, true);
     }
@@ -214,7 +216,8 @@ describe('API providers: mode switches, resends after a timeout, Wise cancel', (
     // the rep changes their bank details and the admin confirms them
     const put = await rep.put('/me/bank-details', { holderName: 'Person Test', sortCode: '000000', accountNumber: '00000099', code: repCode() });
     assert.equal(put.status, 200, JSON.stringify(put.json));
-    assert.equal((await admin.post(`/users/${fx.users.rep}/bank-details/confirm`)).status, 200);
+    // an administrator's confirmation takes a fresh two-step code
+    assert.equal((await admin.post(`/users/${fx.users.rep}/bank-details/confirm`, { code: code() })).status, 200);
     const checked = await admin.post(`/payments/batches/${draft.id}/refresh`);
     assert.equal(checked.status, 200, JSON.stringify(checked.json));
     assert.equal(checked.json.items[0].status, 'processing', JSON.stringify(checked.json.items[0]));
@@ -236,6 +239,7 @@ describe('API providers: mode switches, resends after a timeout, Wise cancel', (
     const made = await admin.post('/payments/connections', { provider: 'wise', secrets: { apiToken: wiseFake.token } });
     const id = made.json.id as number;
     assert.equal((await admin.post(`/payments/connections/${id}/test`)).json.ok, true);
+    recordSandboxRun(db, id, fx.users.admin);
     assert.equal((await admin.patch(`/payments/connections/${id}`, { mode: 'live', confirm: PAYMENT_LIVE_CONFIRMATION })).status, 200);
     assert.equal((await admin.post(`/payments/connections/${id}/test`)).json.ok, true);
     setBank(db, fx.users.rep, '00000066');
@@ -283,6 +287,7 @@ describe('fake provider: connections, cancelling what was never sent, bank file 
     const t = await admin.post(`/payments/connections/${id}/test`);
     assert.equal(t.json.connection.balancePence, 1_000_000);
     assert.ok(t.json.connection.lastCheckedAt);
+    recordSandboxRun(db, id, fx.users.admin);
     const live = await admin.patch(`/payments/connections/${id}`, { mode: 'live', confirm: PAYMENT_LIVE_CONFIRMATION });
     assert.equal(live.status, 200);
     assert.equal(live.json.status, 'not_connected');
@@ -303,6 +308,7 @@ describe('fake provider: connections, cancelling what was never sent, bank file 
     const made = await admin.post('/payments/connections', { provider: 'fake', name: 'Fake' });
     const id = made.json.id as number;
     await admin.post(`/payments/connections/${id}/test`);
+    recordSandboxRun(db, id, fx.users.admin);
     await admin.patch(`/payments/connections/${id}`, { mode: 'live', confirm: PAYMENT_LIVE_CONFIRMATION });
     await admin.post(`/payments/connections/${id}/test`);
     setBank(db, fx.users.rep, '00000031');
@@ -327,6 +333,7 @@ describe('fake provider: connections, cancelling what was never sent, bank file 
     const made = await admin.post('/payments/connections', { provider: 'fake', name: 'Fake' });
     const id = made.json.id as number;
     await admin.post(`/payments/connections/${id}/test`);
+    recordSandboxRun(db, id, fx.users.admin);
     await admin.patch(`/payments/connections/${id}`, { mode: 'live', confirm: PAYMENT_LIVE_CONFIRMATION });
     await admin.post(`/payments/connections/${id}/test`);
     setBank(db, fx.users.rep, '00000033');
@@ -354,6 +361,7 @@ describe('fake provider: connections, cancelling what was never sent, bank file 
   test('PAYUI-8: a bank file item shows the paid date chosen in Mark as paid', async () => {
     registerPaymentProvider(createFakeProvider({ kind: 'file' }));
     const made = await admin.post('/payments/connections', { provider: 'fake', name: 'File' });
+    assert.equal((await admin.patch(`/payments/connections/${made.json.id}`, { mode: 'live', confirm: PAYMENT_LIVE_CONFIRMATION })).status, 200);
     setBank(db, fx.users.rep, '00000032');
     const runId = addRun(db, { userId: fx.users.rep, weekStart, gross: 25 });
     const draft = (await admin.post('/payments/batches', { connectionId: made.json.id, runIds: [runId] })).json;
@@ -374,6 +382,7 @@ describe('fake provider: connections, cancelling what was never sent, bank file 
     const r = get<{ id: number; gross: number }>(db, `SELECT id, gross FROM payroll_runs WHERE user_id = ? AND week_start = ?`, [fx.users.rep, monday])!;
     setBank(db, fx.users.rep, '00000044', 'Remy Rep');
     const conn = (await admin.post('/payments/connections', { provider: 'bank_file', settings: { format: 'starling' } })).json;
+    assert.equal((await admin.patch(`/payments/connections/${conn.id}`, { mode: 'live', confirm: PAYMENT_LIVE_CONFIRMATION })).status, 200);
     const draft = await admin.post('/payments/batches', { connectionId: conn.id, runIds: [r.id] });
     assert.equal(draft.status, 201, JSON.stringify(draft.json));
     const ap = await admin.post(`/payments/batches/${draft.json.id}/approve`, { code: code() });
@@ -414,6 +423,7 @@ describe('fake provider: connections, cancelling what was never sent, bank file 
     const r = get<{ id: number; gross: number }>(db, `SELECT id, gross FROM payroll_runs WHERE user_id = ? AND week_start = ?`, [fx.users.rep, monday])!;
     setBank(db, fx.users.rep, '00000045', 'Remy Rep');
     const conn = (await admin.post('/payments/connections', { provider: 'bank_file', settings: { format: 'starling' } })).json;
+    assert.equal((await admin.patch(`/payments/connections/${conn.id}`, { mode: 'live', confirm: PAYMENT_LIVE_CONFIRMATION })).status, 200);
     const draft = (await admin.post('/payments/batches', { connectionId: conn.id, runIds: [r.id] })).json;
     await admin.post(`/payments/batches/${draft.id}/approve`, { code: code() });
     assert.equal((await admin.patch(`/gauges/${g}`, { sales: 6, taps: 6, closes: 6, presentations: 10, table: 21 })).status, 200);

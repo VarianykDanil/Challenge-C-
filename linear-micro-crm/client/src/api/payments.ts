@@ -3,8 +3,9 @@
 // paid or failed), the dashboard and the Needs-attention feed.
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import type {
-  BankDetailsInput, BankDetailsView, PaymentBatch, PaymentBatchInput, PaymentBatchSummary, PaymentConnection, PaymentConnectionInput,
-  PaymentConnectionPatch, PaymentConnectionTestResult, PaymentMarkPaidInput, PaymentProviderView,
+  BankDetailsConfirmInput, BankDetailsInput, BankDetailsReportInput, BankDetailsView, PaymentBatch, PaymentBatchInput, PaymentBatchSummary,
+  PaymentCancelInput, PaymentConnection, PaymentConnectionInput, PaymentConnectionPatch, PaymentConnectionTestResult, PaymentMarkPaidInput,
+  PaymentProviderView, PaymentsSettings, PaymentsSettingsInput, PaymentTestFile, PaymentTestFileInput, PaymentTestFileResultInput,
 } from '@lm/shared';
 import { api } from './client';
 
@@ -15,6 +16,7 @@ export const paymentKeys = {
   batches: ['payments', 'batches'] as const,
   batch: (id: number) => ['payments', 'batches', id] as const,
   bank: (userId: number | 'me') => ['bank-details', userId] as const,
+  settings: ['payments', 'settings'] as const,
 };
 
 function invalidatePayments(qc: ReturnType<typeof useQueryClient>) {
@@ -90,8 +92,40 @@ function batchAction<T>(path: string, method = 'POST') {
 
 export const useApproveBatch = batchAction<{ code: string }>('approve');
 export const useRefreshBatch = batchAction<Record<string, never>>('refresh');
-export const useCancelBatch = batchAction<Record<string, never>>('cancel');
+/** After a bank file's download: `{ confirm: 'NOT UPLOADED', code }` (the file is then void). */
+export const useCancelBatch = batchAction<PaymentCancelInput>('cancel');
 export const useMarkBatchPaid = batchAction<PaymentMarkPaidInput>('mark-paid');
+
+// ── Settings → Payments: two approvals, the 1p test file ──
+
+export function usePaymentsSettings({ enabled = true }: { enabled?: boolean } = {}) {
+  return useQuery({ queryKey: paymentKeys.settings, queryFn: () => api<PaymentsSettings>('/payments/settings'), enabled });
+}
+
+export function useSavePaymentsSettings() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (input: PaymentsSettingsInput) => api<PaymentsSettings>('/payments/settings', { method: 'PUT', json: input }),
+    onSuccess: (v) => qc.setQueryData(paymentKeys.settings, v),
+  });
+}
+
+/** "Make a 1p test file": the file comes back in the answer (never stored); the page saves it. */
+export function useMakeTestFile() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, input }: { id: number; input: PaymentTestFileInput }) => api<PaymentTestFile>(`/payments/connections/${id}/test-file`, { method: 'POST', json: input }),
+    onSettled: () => void qc.invalidateQueries({ queryKey: paymentKeys.connections }),
+  });
+}
+
+export function useTestFileResult() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, result }: { id: number; result: PaymentTestFileResultInput['result'] }) => api<PaymentConnection>(`/payments/connections/${id}/test-file-result`, { method: 'POST', json: { result } }),
+    onSettled: () => void qc.invalidateQueries({ queryKey: paymentKeys.connections }),
+  });
+}
 
 /** The bank file (admin): a plain link (the session cookie goes with it). */
 export function paymentFileUrl(id: number): string {
@@ -124,14 +158,29 @@ export function useSaveBankDetails(userId: number | null) {
  * Review fix (cross:X-2): sends the `changedAt` of the details on screen, so the server confirms exactly those; if the
  * person changed them again meanwhile it answers 409 and the card reloads to show the new ones.
  */
-export function useConfirmBankDetails(userId: number) {
+export function useConfirmBankDetails(userId: number | null) {
   const qc = useQueryClient();
+  const key = paymentKeys.bank(userId ?? 'me');
   return useMutation({
-    mutationFn: (changedAt: string) => api<BankDetailsView>(`/users/${userId}/bank-details/confirm`, { method: 'POST', json: { changedAt } }),
+    // an administrator always sends a fresh code; the person ("Yes, these are mine") when they have two-step on
+    mutationFn: (input: BankDetailsConfirmInput) =>
+      api<BankDetailsView>(userId ? `/users/${userId}/bank-details/confirm` : '/me/bank-details/confirm', { method: 'POST', json: input }),
     onSuccess: (v) => {
-      qc.setQueryData(paymentKeys.bank(userId), v);
+      qc.setQueryData(key, v);
       void qc.invalidateQueries({ queryKey: ['dashboard'] });
     },
-    onError: () => void qc.invalidateQueries({ queryKey: paymentKeys.bank(userId) }),
+    onError: () => void qc.invalidateQueries({ queryKey: key }),
+  });
+}
+
+/** "These are not my details" (own account only): payments to them stop until new ones are typed in. */
+export function useReportBankDetails() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (input: BankDetailsReportInput) => api<BankDetailsView>('/me/bank-details/report', { method: 'POST', json: input }),
+    onSuccess: (v) => {
+      qc.setQueryData(paymentKeys.bank('me'), v);
+      void qc.invalidateQueries({ queryKey: ['dashboard'] });
+    },
   });
 }

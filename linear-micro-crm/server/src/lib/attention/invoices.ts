@@ -7,14 +7,16 @@
  *    office's answer to their dispute when it kept the invoice as it was (for 7 days). Always severity 'info': they
  *    sit in the bell and the top box but never pop up as a toast, which covered the open invoice's own buttons
  *    (Accept invoice, Send to the office) on phones and offered "Open My pay" on My pay itself;
- *  - admin: each disputed invoice ("Harry Donnelly says something's wrong"), and — on the day before and the day of the
- *    deadline — how many of the next payday's invoices are still waiting to be accepted.
+ *  - admin: each disputed invoice ("Harry Donnelly says something's wrong"), — on the day before and the day of the
+ *    deadline — how many of the next payday's invoices are still waiting to be accepted, and (MON-7) each VAT number
+ *    waiting for the office to check it ("Check Remy Rep's VAT number"; no VAT is added until an administrator who is
+ *    not the person, and did not type it in, confirms it). Not shown to the administrator the number belongs to.
  *
  * Read-only (the feed is cached; the invoices job writes the statuses): an issued invoice past its deadline counts as
  * deemed accepted here too. One grouped query per caller (the person's own invoices; the admin's disputes and the
  * waiting count share one UNION ALL), so the feed's 12-statement budget holds with every 1.3 provider merged.
  */
-import { effectiveInvoiceStatus, invoiceDeadlineText, isInvoicedRole, type AttentionItem } from '@lm/shared';
+import { effectiveInvoiceStatus, formatVatNumber, invoiceDeadlineText, isInvoicedRole, type AttentionItem } from '@lm/shared';
 import { all } from '../../db/connection.ts';
 import { addDays, formatWeek, toBusinessISO } from '../dates.ts';
 import type { AttentionProvider } from './types.ts';
@@ -41,9 +43,13 @@ interface OwnRow {
   previousTotal: number | null;
 }
 
-/** One row per disputed invoice (kind 'dispute'), then one row with the waiting count (kind 'waiting'). */
+/**
+ * One row per disputed invoice (kind 'dispute'), one row with the waiting count (kind 'waiting'), and one row per VAT
+ * number waiting for the office (kind 'vat': id = the person, number = the VAT number, disputedAt = when it was typed
+ * in, reason = who typed it in, n = 1 when the viewer typed it in themselves).
+ */
 interface OfficeRow {
-  kind: 'dispute' | 'waiting';
+  kind: 'dispute' | 'waiting' | 'vat';
   id: number | null;
   number: string | null;
   version: number | null;
@@ -122,8 +128,13 @@ export const provider: AttentionProvider = {
          SELECT 'waiting', NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, COUNT(*), MIN(i.deem_at)
          FROM invoices i JOIN payroll_runs p ON p.id = i.payroll_run_id
          WHERE i.status = 'issued' AND p.status IN ('pending', 'failed') AND i.deem_at > ? AND i.deem_at <= ?
+         UNION ALL
+         SELECT 'vat', u.id, u.vat_number, NULL, NULL, NULL, u.vat_changed_at, TRIM(c.first_name || ' ' || c.last_name),
+                TRIM(u.first_name || ' ' || u.last_name), CASE WHEN u.vat_changed_by = ? THEN 1 ELSE 0 END, NULL
+         FROM users u LEFT JOIN users c ON c.id = u.vat_changed_by
+         WHERE u.vat_number IS NOT NULL AND u.vat_confirmed_at IS NULL AND u.status <> 'left' AND u.role <> 'client' AND u.id <> ?
          ORDER BY 1, 7`,
-        [local, `${addDays(local.slice(0, 10), 1)}T23:59:59`],
+        [local, `${addDays(local.slice(0, 10), 1)}T23:59:59`, me.id, me.id],
       );
       for (const d of rows) {
         if (d.kind !== 'dispute') continue;
@@ -136,6 +147,24 @@ export const provider: AttentionProvider = {
           href: '/finance?tab=company#disputes',
           actionLabel: 'Review the dispute',
           at: d.disputedAt!,
+        });
+      }
+      for (const v of rows) {
+        if (v.kind !== 'vat') continue;
+        const first = (v.userName ?? '').split(' ')[0] || 'them';
+        const vat = formatVatNumber(v.number ?? '');
+        const typed = !v.reason
+          ? `VAT number ${vat} is on ${first}'s invoice details.`
+          : v.reason === v.userName ? `${first} typed in VAT number ${vat}.` : `${v.reason} typed in VAT number ${vat} for ${first}.`;
+        items.push({
+          key: `invoices:vat:${v.id}:${v.disputedAt ?? 'before'}`,
+          kind: 'invoices',
+          severity: 'warning',
+          title: `Check ${v.userName}'s VAT number`,
+          body: `${typed} Check it on HMRC's "Check a UK VAT number" service, then confirm it on ${first}'s page. No VAT is added to their pay until then.${v.n ? ' You typed it in, so another administrator confirms it.' : ''}`,
+          href: `/team/${v.id}#invoice-details`,
+          actionLabel: 'Check the VAT number',
+          at: v.disputedAt ?? now.nowISO,
         });
       }
       const waiting = rows.find((r) => r.kind === 'waiting');

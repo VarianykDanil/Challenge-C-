@@ -30,6 +30,11 @@
  *    its provider (NULL: never sent, so it can be cancelled here without asking anyone). No foreign key to payroll_runs or users: an unpaid run may be removed and made again by the pay
  *    rules, and payment history outlives both.
  *
+ * Bank_accounts.reported_at / reported_note (the person said the details someone else typed
+ * in are not theirs: held, every administrator told) and person_seen_at (when the person last said yes to, or reported,
+ * a change someone else made). confirmed_by_admin_at / confirmed_by now hold ANY confirmation — by an administrator or,
+ * for details someone else typed in, by the person — and never the one who made the change (lib/payments/bankDetails.ts).
+ * The upgrade holds again, once, details a 1.4.0 administrator typed in and "confirmed" alone.
  * Demo seed (fresh databases only): obviously fake bank details (sort code 00-00-00, account number 0000 + the
  * person's id) for the field people and recruiters — every ninth person has none (to show "skipped: no bank details"),
  * and one changed theirs yesterday and waits for the admin's check (the Needs-attention item). No connection and no
@@ -39,7 +44,9 @@
  */
 import type { Db } from '../connection.ts';
 import { encrypt } from '../../lib/crypto.ts';
-import { addColumnIfMissing, type DbExtension, type SeedContext } from './types.ts';
+import { recordSystemEvent } from '../../lib/audit/events.ts';
+import { keepTwoApprovalsDefault } from '../../lib/payments/settings.ts';
+import { addColumnIfMissing, columnsOf, metaFlag, setMetaFlag, type DbExtension, type SeedContext } from './types.ts';
 
 const SQL = `
 CREATE TABLE IF NOT EXISTS bank_accounts (
@@ -52,7 +59,10 @@ CREATE TABLE IF NOT EXISTS bank_accounts (
   changed_at TEXT NOT NULL,
   changed_by INTEGER REFERENCES users(id) ON DELETE SET NULL,
   confirmed_by_admin_at TEXT,
-  confirmed_by INTEGER REFERENCES users(id) ON DELETE SET NULL
+  confirmed_by INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  reported_at TEXT,
+  reported_note TEXT,
+  person_seen_at TEXT
 );
 
 CREATE TABLE IF NOT EXISTS payment_connections (
@@ -70,7 +80,11 @@ CREATE TABLE IF NOT EXISTS payment_connections (
   created_by INTEGER REFERENCES users(id) ON DELETE SET NULL,
   live_confirmed_at TEXT,
   live_confirmed_by INTEGER REFERENCES users(id) ON DELETE SET NULL,
-  disconnected_at TEXT
+  disconnected_at TEXT,
+  test_file_at TEXT,
+  test_file_by INTEGER,
+  test_file_result TEXT,
+  details_changed_at TEXT
 );
 
 CREATE TABLE IF NOT EXISTS payment_batches (
@@ -93,7 +107,14 @@ CREATE TABLE IF NOT EXISTS payment_batches (
   last_error TEXT,
   updated_at TEXT NOT NULL,
   cancelled_at TEXT,
-  cancelled_by INTEGER REFERENCES users(id) ON DELETE SET NULL
+  cancelled_by INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  downloaded_at TEXT,
+  downloaded_by INTEGER,
+  voided_at TEXT,
+  voided_by INTEGER,
+  void_reason TEXT,
+  first_approved_at TEXT,
+  first_approved_by INTEGER
 );
 CREATE INDEX IF NOT EXISTS idx_payment_batches_status ON payment_batches(status, created_at);
 
@@ -115,7 +136,9 @@ CREATE TABLE IF NOT EXISTS payment_items (
   note TEXT,
   live INTEGER NOT NULL DEFAULT 1 CHECK (live IN (0, 1)),
   payee_enc TEXT,
-  attempted_at TEXT
+  attempted_at TEXT,
+  freed_confirmed_at TEXT,
+  freed_by INTEGER
 );
 CREATE INDEX IF NOT EXISTS idx_payment_items_batch ON payment_items(batch_id);
 CREATE INDEX IF NOT EXISTS idx_payment_items_user_week ON payment_items(user_id, week_start);
@@ -153,6 +176,48 @@ function seedDemoBankDetails(db: Db, ctx: SeedContext): void {
   });
 }
 
+/**
+ * MON-3, once: in 1.4.0 details an administrator typed in for someone counted as confirmed by that same administrator
+ * (and an administrator's own change by themself). Nobody confirms their own change now, so those are held again until
+ * the person or another administrator confirms them; the person is told. Recorded as one automatic audit row.
+ */
+function reholdSelfConfirmed(db: Db): number {
+  if (metaFlag(db, 'ext:payments:bank-rehold')) return 0;
+  const n = Number(db.prepare(
+    `UPDATE bank_accounts SET confirmed_by_admin_at = NULL, confirmed_by = NULL
+     WHERE confirmed_by IS NOT NULL AND changed_by IS NOT NULL AND confirmed_by = changed_by`,
+  ).run().changes);
+  setMetaFlag(db, 'ext:payments:bank-rehold');
+  if (n > 0) {
+    recordSystemEvent(db, {
+      name: 'payments.bank_rehold',
+      summary: `Bank details of ${n} ${n === 1 ? 'person' : 'people'} that one administrator typed in and confirmed alone now wait for the person or another administrator to confirm them`,
+      entity: 'bank_account',
+      after: { people: n },
+    });
+  }
+  return n;
+}
+
+/**
+ * MON-2, once: in 1.4.0 a bank file's download was only written to the audit trail. Its first download there becomes
+ * the batch's downloaded_at, so a file downloaded then cancelled before this release still counts as sent (a new file
+ * for those weeks within 7 days is refused until someone confirms the old one was not uploaded).
+ */
+function backfillDownloads(db: Db): number {
+  if (metaFlag(db, 'ext:payments:downloads')) return 0;
+  if (!columnsOf(db, 'audit_log').length) return 0;
+  const n = Number(db.prepare(
+    `UPDATE payment_batches SET
+       downloaded_at = (SELECT MIN(a.at) FROM audit_log a WHERE a.action = 'GET /payments/batches/:id/file' AND a.entity = 'payment_batch' AND a.entity_id = payment_batches.id),
+       downloaded_by = (SELECT a.user_id FROM audit_log a WHERE a.action = 'GET /payments/batches/:id/file' AND a.entity = 'payment_batch' AND a.entity_id = payment_batches.id ORDER BY a.at LIMIT 1)
+     WHERE downloaded_at IS NULL AND mode = 'live'
+       AND EXISTS (SELECT 1 FROM audit_log a WHERE a.action = 'GET /payments/batches/:id/file' AND a.entity = 'payment_batch' AND a.entity_id = payment_batches.id)`,
+  ).run().changes);
+  setMetaFlag(db, 'ext:payments:downloads');
+  return n;
+}
+
 export const extension: DbExtension = {
   name: 'payments',
   sql: SQL,
@@ -161,6 +226,35 @@ export const extension: DbExtension = {
     // before the review fixes gains those two columns here
     const payee = addColumnIfMissing(db, 'payment_items', 'payee_enc', 'TEXT');
     const attempted = addColumnIfMissing(db, 'payment_items', 'attempted_at', 'TEXT');
+    // MON-3: "these are not my details", and when the person last saw a change someone else made (the table is
+    // always there after `sql`; a partial database handed to upgrade() alone is left as it is)
+    const hasBank = columnsOf(db, 'bank_accounts').length > 0;
+    const added = hasBank
+      ? [
+          addColumnIfMissing(db, 'bank_accounts', 'reported_at', 'TEXT'),
+          addColumnIfMissing(db, 'bank_accounts', 'reported_note', 'TEXT'),
+          addColumnIfMissing(db, 'bank_accounts', 'person_seen_at', 'TEXT'),
+        ]
+      : [];
+    const reheld = hasBank && reholdSelfConfirmed(db) > 0 ? 'bank_accounts.rehold' : null;
+    // the 1p test file (MON-6), downloads and void files (MON-2), two approvals (MONEY-MISSED-2)
+    const more: (string | null)[] = [];
+    if (columnsOf(db, 'payment_connections').length) {
+      more.push(addColumnIfMissing(db, 'payment_connections', 'test_file_at', 'TEXT'));
+      more.push(addColumnIfMissing(db, 'payment_connections', 'test_file_by', 'INTEGER'));
+      more.push(addColumnIfMissing(db, 'payment_connections', 'test_file_result', 'TEXT'));
+      // MON-5: when an API connection's details last changed (a sandbox payment before then does not unlock live)
+      more.push(addColumnIfMissing(db, 'payment_connections', 'details_changed_at', 'TEXT'));
+    }
+    const hasBatches = columnsOf(db, 'payment_batches').includes('connection_id');
+    if (hasBatches) {
+      for (const [c, t] of [['downloaded_at', 'TEXT'], ['downloaded_by', 'INTEGER'], ['voided_at', 'TEXT'], ['voided_by', 'INTEGER'], ['void_reason', 'TEXT'], ['first_approved_at', 'TEXT'], ['first_approved_by', 'INTEGER']] as const) {
+        more.push(addColumnIfMissing(db, 'payment_batches', c, t));
+      }
+      more.push(addColumnIfMissing(db, 'payment_items', 'freed_confirmed_at', 'TEXT'));
+      more.push(addColumnIfMissing(db, 'payment_items', 'freed_by', 'INTEGER'));
+      if (backfillDownloads(db) > 0) more.push('payment_batches.downloaded_at');
+    }
     // items of payments approved before the column existed may have reached their provider: count them as sent
     if (attempted) {
       db.prepare(
@@ -168,7 +262,11 @@ export const extension: DbExtension = {
          WHERE attempted_at IS NULL AND batch_id IN (SELECT id FROM payment_batches WHERE approved_at IS NOT NULL)`,
       ).run();
     }
-    return [payee, attempted].filter((c): c is string => c !== null);
+    // MONEY-MISSED-2: with two or more administrators using two-step, the "two approvals" default is stored, so it
+    // never switches itself off later (an administrator leaving)
+    const users = columnsOf(db, 'users');
+    if (users.includes('totp_enabled_at') && users.includes('status') && keepTwoApprovalsDefault(db)) more.push('meta.ext:payments:two_approvals');
+    return [payee, attempted, ...added, reheld, ...more].filter((c): c is string => c !== null);
   },
   seed(db, ctx) {
     seedDemoBankDetails(db, ctx);

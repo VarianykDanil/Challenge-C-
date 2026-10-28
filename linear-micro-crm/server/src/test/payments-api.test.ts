@@ -26,6 +26,7 @@ import { createTrueLayerProvider, TRUELAYER_REPEAT_HOURS, TRUELAYER_URLS } from 
 import { createWiseProvider, WISE_LIVE_URL, WISE_SANDBOX_URL } from '../lib/payments/wise.ts';
 import { startRevolutFake, startTrueLayerFake, startWiseFake, type RevolutFake, type TrueLayerFake, type WiseFake } from './paymentApiFakes.ts';
 import { currentCode, startTestServer, type Json, type TestClient, type TestServer } from './helpers.ts';
+import { recordSandboxRun } from './moneyTestUtils.ts';
 
 // ───────────────────────────── helpers ─────────────────────────────
 
@@ -349,7 +350,9 @@ describe('Wise Business adapter (sandbox fake)', () => {
     assert.equal(wise.info.abilities.paysFromApp, false);
     assert.equal(wise.info.abilities.needsBankApproval, true);
     assert.equal(wise.info.abilities.confirmsAutomatically, true);
-    assert.match(wise.info.abilities.limits, /does not let an API token pay/);
+    // changed wording: Linear Hub creates the transfers and Matt funds them in Wise (it never said "pays" honestly)
+    assert.match(wise.info.abilities.limits, /does not let an API token fund a transfer/);
+    assert.match(wise.info.abilities.limits, /go back to Runs to pay/);
     assert.deepEqual(wise.configFields.map((f) => f.name), ['apiToken', 'profileId']);
     const bad = configError(() => wise.validateConfig({ settings: { profileId: 'abc' }, secrets: { apiToken: 'x'.repeat(30) } }));
     assert.ok(bad.some((e) => e.path === 'profileId'));
@@ -628,6 +631,8 @@ describe('through Linear Hub: connect, test, live, approve with a code, checked,
     assert.equal(made.json.mode, 'test');
     const t = await admin.post(`/payments/connections/${made.json.id}/test`);
     assert.equal(t.json.ok, true, JSON.stringify(t.json));
+    // the sandbox answered a test payment first (the guided first run; its own tests are in money-payments.test.ts)
+    recordSandboxRun(srv.db, made.json.id);
     const live = await admin.patch(`/payments/connections/${made.json.id}`, { mode: 'live', confirm: PAYMENT_LIVE_CONFIRMATION });
     assert.equal(live.status, 200, JSON.stringify(live.json));
     if (Object.keys(liveSecrets).length) assert.equal((await admin.patch(`/payments/connections/${made.json.id}`, { secrets: liveSecrets })).status, 200);
@@ -664,7 +669,7 @@ describe('through Linear Hub: connect, test, live, approve with a code, checked,
     }
     const wise = r.json.find((x: Json) => x.id === 'wise');
     assert.equal(wise.abilities.paysFromApp, false);
-    assert.match(wise.approveNote, /pay the transfers there/);
+    assert.match(wise.approveNote, /fund them in Wise/); // "fund", and what comes back
     assert.equal(r.json.find((x: Json) => x.id === 'revolut').configFields.find((f: Json) => f.name === 'authCode').requiredUnless, 'refreshToken');
   });
 

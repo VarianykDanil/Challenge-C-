@@ -180,10 +180,14 @@ test('admin: payroll:to-pay counts exactly the runs GET /finance/payroll?status=
   }
 });
 
-// The system-health provider (admins only: backups, off-site copies, the app key on paper, server errors) reads its
-// meta values in one statement, and the trial-mode item (lib/attention/trial.ts, admins only) takes one cached statement,
-// so an administrator's feed may take 14; every other role keeps the 12 of before.
-test('every role: at most 12 statements to build the feed (14 for administrators: system health and trial mode); LM_SMART=0 → empty and disabled', async () => {
+// The budget is 13 for every role. A leader's feed now also asks, in the payments provider's one statement, for
+// the days their team logged with no booking or check-in (MON-1) and for their own bank details changed by someone
+// else (MON-3); the leader's feed was already at 12. Administrators get two providers of their own on top: system
+// health (backups, off-site copies, the app key on paper, server errors: its meta values in one statement) and the
+// trial-mode item (lib/attention/trial.ts, one cached statement), so an administrator's feed may take 14 (the admin's
+// core feed takes one fewer than a leader's).
+// Every provider still takes at most one statement.
+test('every role: at most 13 statements to build the feed (14 for administrators: system health and trial mode); LM_SMART=0 → empty and disabled', async () => {
   const srv = await startTestServer({ seed: true });
   try {
     const now = attentionNow();
@@ -192,7 +196,7 @@ test('every role: at most 12 statements to build the feed (14 for administrators
       const me: UserWithTeam = { ...getUser(srv.db, id)!, twoFactorEnabled: false };
       const { result, statements } = countStatements(srv.db, () => buildAttentionFeed(srv.db, me, now));
       // admins: one more for system health and one more for the trial-mode item (both admins only)
-      assert.ok(statements <= (me.role === 'admin' ? 14 : 12), `${me.role}: ${statements} statements`);
+      assert.ok(statements <= (me.role === 'admin' ? 14 : 13), `${me.role}: ${statements} statements`);
       // Release 1.3: each package's provider (P2 invoices, P3 statements, P6 client posts) takes at most one statement,
       // so the 1.1 budget holds with all of them merged (the admin used 13 when two of them took two).
       for (const p of ATTENTION_PROVIDERS) {

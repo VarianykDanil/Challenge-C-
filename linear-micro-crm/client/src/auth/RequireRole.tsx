@@ -23,6 +23,8 @@ export const CAMPAIGN_PAGE_ROLES: Role[] = STAFF_ROLES_ALL;
 export const CLIENT_ROLES: Role[] = ['client'];
 /** Release 1.4: /finance/pay, /finance/pay/batches/:id (F payments). */
 export const PAYMENT_ROLES: Role[] = ['admin'];
+/** Pay → Days to confirm (MON-1): leaders for their team, administrators for everyone. */
+export const PAY_DAY_ROLES: Role[] = ['admin', 'leader'];
 
 export function RequireRole({ roles, children }: { roles: Role[]; children: ReactNode }) {
   const { user } = useAuth();

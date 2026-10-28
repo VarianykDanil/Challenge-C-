@@ -87,7 +87,7 @@ export function fromWiseStatus(status: unknown): Pick<ProviderItemResult, 'statu
     case 'outgoing_payment_sent':
       return { status: 'paid', failureReason: null };
     case 'cancelled':
-      return { status: 'failed', failureReason: 'This transfer was cancelled in Wise before it was paid (it was not paid in Wise in time, or someone cancelled it there). The week is back on Runs to pay.' };
+      return { status: 'failed', failureReason: 'This transfer was cancelled in Wise before it was paid (it was not funded in Wise in time, or someone cancelled it there). The week is back on Runs to pay.' };
     case 'funds_refunded':
       return { status: 'failed', failureReason: 'Wise refunded it: the money went back to your Wise account. Check the person’s bank details, then pay this week again.' };
     case 'charged_back':
@@ -170,7 +170,7 @@ export function createWiseProvider(opts: WiseOptions = {}): PaymentProviderAdapt
       try {
         const p = await session(conn, ctx).profile();
         const where = conn.mode === 'live' ? 'Wise Business (live: real money)' : 'Wise sandbox (test money)';
-        return { ok: true, message: `Connected to your ${where}: business profile “${profileName(p)}” (${p.id}). Linear Hub creates the transfers; you pay them in Wise.`, balancePence: null };
+        return { ok: true, message: `Connected to your ${where}: business profile “${profileName(p)}” (${p.id}). Linear Hub creates the transfers; you fund them in Wise (transfers you do not fund go back to Runs to pay).`, balancePence: null };
       } catch (err) {
         if (err instanceof ProviderError) return { ok: false, message: err.message };
         throw err;

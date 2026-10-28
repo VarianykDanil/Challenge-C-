@@ -21,6 +21,7 @@ import { totp } from '../lib/totp.ts';
 import { resetCodeFailures } from '../lib/twofactor.ts';
 import { isWriteLimited } from '../middleware/writeLimit.ts';
 import { currentCode, enrolTwoFactor, startTestServer, type Json, type TestClient, type TestServer } from './helpers.ts';
+import { recordSandboxRun } from './moneyTestUtils.ts';
 
 // ───────────────────────────── helpers ─────────────────────────────
 
@@ -86,16 +87,24 @@ async function setup(): Promise<void> {
   weeks = { w3: addDays(monday, -21), w4: addDays(monday, -28), w5: addDays(monday, -35), current: monday };
 }
 
-/** A fake API connection (switched to live when asked) and the admin's two-step verification on. */
+/**
+ * A fake API connection (switched to live when asked) and the admin's two-step verification on. A file connection
+ * starts in test mode like every other one, so it is switched to live unless `live: false` (these tests are about
+ * real files). Going live needs a sandbox payment first: recorded straight into the tables (moneyTestUtils.ts).
+ */
 async function fakeConnection(opts: { live?: boolean; kind?: 'api' | 'file' } = {}): Promise<number> {
   fake = createFakeProvider({ kind: opts.kind ?? 'api' });
   registerPaymentProvider(fake);
   const made = await admin.post('/payments/connections', { provider: 'fake', name: 'Fake', settings: { label: 'x' }, secrets: { token: 'tok-SECRET-123456' } });
   assert.equal(made.status, 201, JSON.stringify(made.json));
   const id = made.json.id as number;
+  if (opts.kind === 'file' && opts.live !== false) {
+    assert.equal((await admin.patch(`/payments/connections/${id}`, { mode: 'live', confirm: PAYMENT_LIVE_CONFIRMATION })).status, 200);
+  }
   if (opts.kind !== 'file') {
     assert.equal((await admin.post(`/payments/connections/${id}/test`)).json.ok, true);
     if (opts.live) {
+      recordSandboxRun(srv.db, id, fx.users.admin);
       const live = await admin.patch(`/payments/connections/${id}`, { mode: 'live', confirm: PAYMENT_LIVE_CONFIRMATION });
       assert.equal(live.status, 200, JSON.stringify(live.json));
       assert.equal((await admin.post(`/payments/connections/${id}/test`)).json.ok, true);
@@ -128,6 +137,10 @@ describe('role scoping: payments are admin only, bank details are your own (or t
     ['POST', '/payments/batches/1/cancel'],
     ['GET', '/payments/batches/1/file'],
     ['POST', '/payments/batches/1/mark-paid'],
+    ['POST', '/payments/connections/1/test-file'],
+    ['POST', '/payments/connections/1/test-file-result'],
+    ['GET', '/payments/settings'],
+    ['PUT', '/payments/settings'],
     ['GET', '/users/2/bank-details'],
     ['PUT', '/users/2/bank-details'],
     ['POST', '/users/2/bank-details/confirm'],
@@ -255,12 +268,18 @@ describe('ways to pay and connections', () => {
     }
   });
 
-  test('a bank file connection makes real files at once; it has no test mode', async () => {
+  // changed: a bank file connection used to make real files at once. It starts in test mode now (TEST files that pay
+  // nobody) and goes live with the words typed, like every other way to pay.
+  test('a bank file connection starts in test mode; live needs the words typed, and it can go back to test', async () => {
     const made = await admin.post('/payments/connections', { provider: 'bank_file', settings: { format: 'generic' } });
     assert.equal(made.status, 201);
-    assert.equal(made.json.mode, 'live');
+    assert.equal(made.json.mode, 'test');
     assert.equal(made.json.status, 'connected');
-    assert.equal((await admin.patch(`/payments/connections/${made.json.id}`, { mode: 'test' })).status, 400);
+    assert.equal((await admin.patch(`/payments/connections/${made.json.id}`, { mode: 'live' })).status, 400);
+    assert.equal((await admin.patch(`/payments/connections/${made.json.id}`, { mode: 'live', confirm: PAYMENT_LIVE_CONFIRMATION })).json.mode, 'live');
+    const back = await admin.patch(`/payments/connections/${made.json.id}`, { mode: 'test' });
+    assert.equal(back.json.mode, 'test');
+    assert.equal(back.json.status, 'connected', 'a file has nothing to test');
     assert.equal((await admin.post('/payments/connections', { provider: 'bank_file', settings: { format: 'mt940' } })).status, 400, 'only the listed formats');
   });
 
@@ -273,6 +292,11 @@ describe('ways to pay and connections', () => {
     const lower = await admin.patch(`/payments/connections/${id}`, { mode: 'live', confirm: 'pay for real' });
     assert.equal(lower.status, 400);
     assert.match(lower.json.error, /type PAY FOR REAL exactly/);
+    // changed: a working connection test is not enough any more; the sandbox must have answered a test payment
+    const noSandbox = await admin.patch(`/payments/connections/${id}`, { mode: 'live', confirm: 'PAY FOR REAL' });
+    assert.equal(noSandbox.status, 409);
+    assert.match(noSandbox.json.error, /test payment/);
+    recordSandboxRun(srv.db, id, fx.users.admin);
     const live = await admin.patch(`/payments/connections/${id}`, { mode: 'live', confirm: 'PAY FOR REAL' });
     assert.equal(live.status, 200);
     assert.equal(live.json.mode, 'live');
@@ -334,19 +358,24 @@ describe('bank details', () => {
     assert.match(item.title, /Remy Rep changed their bank details/);
     assert.equal(item.href, `/team/${fx.users.rep}#bank-details`);
     assert.ok(!(await rep.get('/me/attention')).json.items.some((i: Json) => i.kind === 'payments'), 'only the admin sees it');
-    const ok = await admin.post(`/users/${fx.users.rep}/bank-details/confirm`);
+    // an administrator's confirmation takes a fresh two-step code
+    const ok = await admin.post(`/users/${fx.users.rep}/bank-details/confirm`, { code: currentCode(srv.db, fx.users.admin) });
     assert.equal(ok.status, 200);
     assert.equal(ok.json.details.needsConfirmation, false);
     srv.resetCache();
     assert.ok(!(await admin.get('/me/attention')).json.items.some((i: Json) => i.kind === 'payments'));
-    assert.equal((await admin.post(`/users/${fx.users.repB}/bank-details/confirm`)).status, 404, 'nothing to confirm');
+    assert.equal((await admin.post(`/users/${fx.users.repB}/bank-details/confirm`, { code: currentCode(srv.db, fx.users.admin) })).status, 404, 'nothing to confirm');
   });
 
-  test('details an admin types in for someone count as confirmed', async () => {
+  // This used to assert that details an admin types in count as confirmed by that admin — the
+  // unsafe behaviour the review found (one admin alone could redirect someone's pay). They now wait for the person or
+  // another administrator (money-bank.test.ts covers the whole flow).
+  test('details an admin types in for someone wait for the person or another administrator', async () => {
     const r = await admin.put(`/users/${fx.users.repB}/bank-details`, { holderName: 'Bo Rep', sortCode: '000000', accountNumber: '00000006', code: currentCode(srv.db, fx.users.admin) });
     assert.equal(r.status, 200, JSON.stringify(r.json));
-    assert.equal(r.json.details.needsConfirmation, false);
-    assert.match(all<{ summary: string }>(srv.db, `SELECT summary FROM audit_log WHERE entity = 'bank_account'`)[0]!.summary, /Bo Rep/);
+    assert.equal(r.json.details.needsConfirmation, true);
+    assert.equal(r.json.details.waitingFor, 'person_or_other_admin');
+    assert.match(all<{ summary: string }>(srv.db, `SELECT summary FROM audit_log WHERE entity = 'bank_account'`)[0]!.summary, /Bo Rep.*Bo or another administrator/);
   });
 
   test('with two-step verification on, a change needs a current code (a typing mistake never uses one up)', async () => {
@@ -575,6 +604,7 @@ describe('payment batches with the fake provider', () => {
     assert.equal(runStatus(srv.db, a).status, 'pending');
     const live = await admin.post('/payments/connections', { provider: 'fake', name: 'Live fake' });
     await admin.post(`/payments/connections/${live.json.id}/test`);
+    recordSandboxRun(srv.db, live.json.id, fx.users.admin);
     await admin.patch(`/payments/connections/${live.json.id}`, { mode: 'live', confirm: PAYMENT_LIVE_CONFIRMATION });
     await admin.post(`/payments/connections/${live.json.id}/test`);
     assert.equal((await admin.post('/payments/batches', { connectionId: live.json.id, runIds: [a] })).status, 201);
@@ -608,7 +638,10 @@ describe('payment batches with the fake provider', () => {
     const itemB = sent.json.items.find((i: Json) => i.payrollRunId === b).id;
     assert.equal((await admin.post(`/payments/batches/${draft.id}/mark-paid`, { paid: [itemA], failed: [itemA] })).status, 400);
     assert.equal((await admin.post(`/payments/batches/${draft.id}/mark-paid`, { paid: [itemA], paidDate: addDays(fx.today, 1) })).status, 400, 'not in the future');
-    const marked = await admin.post(`/payments/batches/${draft.id}/mark-paid`, { paid: [itemA], failed: [itemB], reason: 'Rejected by the bank: name does not match' });
+    // changed: the file was downloaded, so it counts as sent — leaving someone unpaid needs NOT PAID and a fresh code
+    const unsure = await admin.post(`/payments/batches/${draft.id}/mark-paid`, { paid: [itemA], failed: [itemB], reason: 'Rejected by the bank: name does not match' });
+    assert.equal(unsure.status, 400);
+    const marked = await admin.post(`/payments/batches/${draft.id}/mark-paid`, { paid: [itemA], failed: [itemB], reason: 'Rejected by the bank: name does not match', confirm: 'NOT PAID', code: freshCode(srv.db, fx.users.admin, adminSecret) });
     assert.equal(marked.status, 200, JSON.stringify(marked.json));
     assert.equal(marked.json.status, 'partly_failed');
     assert.match(runStatus(srv.db, a).status, /^(paid|late)$/);

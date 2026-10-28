@@ -14,6 +14,7 @@ import type { TrialStatus } from './types/access.ts';
 import type { AnnouncementSource } from './types/client.ts';
 import type { InvoiceSummary } from './types/invoices.ts';
 import type { PayrollRunPayment } from './types/payments.ts';
+import type { PayrollRunChecks } from './types/pay.ts';
 import type { PaidAs } from './types/pay.ts';
 import type { SessionInfo } from './types/pin.ts';
 import type { EventBookingSummary } from './types/venues.ts';
@@ -333,6 +334,11 @@ export interface PayrollRunWithUser extends PayrollRun {
    * failed with the reason). Absent otherwise.
    */
   payment?: PayrollRunPayment;
+  /**
+   * On an unpaid run, for admins only — days waiting for a leader's confirmation and pay resting
+   * on subs no client statement has confirmed. Absent otherwise.
+   */
+  checks?: PayrollRunChecks;
 }
 
 export type ExpenseCategory =

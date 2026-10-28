@@ -8,7 +8,7 @@
  */
 import { after, afterEach, before, beforeEach, describe, test } from 'node:test';
 import assert from 'node:assert/strict';
-import { BANK_FILE_FORMAT_IDS, defaultPaymentReference, paydayForWeek } from '@lm/shared';
+import { BANK_FILE_FORMAT_IDS, defaultPaymentReference, PAYMENT_LIVE_CONFIRMATION, paydayForWeek } from '@lm/shared';
 import { all, get, run, type Db } from '../db/connection.ts';
 import { encrypt } from '../lib/crypto.ts';
 import { addDays, businessNow, mondayOf } from '../lib/dates.ts';
@@ -66,9 +66,11 @@ async function teardown(): Promise<void> {
   await srv.close();
 }
 
-async function fileConnection(format: string): Promise<number> {
+/** A bank file connection. It starts in test mode (TEST files); these tests are about real files, so it goes live. */
+async function fileConnection(format: string, live = true): Promise<number> {
   const made = await admin.post('/payments/connections', { provider: 'bank_file', settings: { format } });
   assert.equal(made.status, 201, JSON.stringify(made.json));
+  if (live) assert.equal((await admin.patch(`/payments/connections/${made.json.id}`, { mode: 'live', confirm: PAYMENT_LIVE_CONFIRMATION })).status, 200);
   return made.json.id as number;
 }
 
@@ -106,7 +108,7 @@ describe('bank payment file: the way to pay and its formats', () => {
     assert.equal(file.abilities.paysFromApp, false, 'you upload the file');
     assert.equal(file.abilities.confirmsAutomatically, false, 'you mark it paid');
     assert.equal(file.abilities.needsBankApproval, true);
-    assert.equal(file.abilities.testMode, false);
+    assert.equal(file.abilities.testMode, true, 'changed: a bank file starts with TEST files');
     assert.equal(file.abilities.anyUkBank, true, 'works with any UK business bank');
     assert.match(file.abilities.fees, /No fees from Linear Hub/);
     assert.equal(paymentProvider('bank_file')?.ready, true);
@@ -118,10 +120,10 @@ describe('bank payment file: the way to pay and its formats', () => {
     assert.ok(missing.json.details.some((d: Json) => d.path === 'format'));
     const wrong = await admin.post('/payments/connections', { provider: 'bank_file', settings: { format: 'natwest' } });
     assert.equal(wrong.status, 400, 'only the formats we could check against the bank');
-    const id = await fileConnection('starling');
+    const id = await fileConnection('starling', false);
     const c = (await admin.get('/payments/connections')).json.find((x: Json) => x.id === id);
     assert.equal(c.status, 'connected');
-    assert.equal(c.mode, 'live');
+    assert.equal(c.mode, 'test', 'changed: every connection starts in test mode');
     assert.deepEqual(c.settings, { format: 'starling' });
     assert.deepEqual(c.secretsSet, [], 'nothing secret is stored for a bank file');
     const changed = await admin.patch(`/payments/connections/${id}`, { settings: { format: 'revolut' } });

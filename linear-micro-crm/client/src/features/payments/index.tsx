@@ -4,8 +4,8 @@
 import { Suspense, lazy } from 'react';
 import { Link } from 'react-router-dom';
 import { Send } from 'lucide-react';
-import type { PaymentBatchStatus, PaymentItemStatus, PaymentMode, PayrollRunPayment } from '@lm/shared';
-import { PAYMENT_BATCH_STATUS_LABELS, PAYMENT_ITEM_STATUS_LABELS } from '@lm/shared';
+import type { PaymentBatchStatus, PaymentItemStatus, PaymentMode, PayrollRunChecks, PayrollRunPayment } from '@lm/shared';
+import { PAYMENT_BATCH_STATUS_LABELS, PAYMENT_ITEM_STATUS_LABELS, payMoney } from '@lm/shared';
 import { Badge, Card, Skeleton } from '@/components/ui';
 
 const Section = lazy(() => import('./PaymentsSettingsSection'));
@@ -81,5 +81,29 @@ export function PayFromHubLink({ runIds }: { runIds: number[] }) {
       <Send className="h-4 w-4" aria-hidden />
       {runIds.length ? `Pay ${runIds.length} from Linear Hub` : 'Pay from Linear Hub'}
     </Link>
+  );
+}
+
+/**
+ * Runs to pay (admin): what to check before paying this run (MON-1, MONEY-MISSED-3) — days waiting for a leader (not in
+ * this pay) and pay resting on subs no client statement confirmed. Nothing here stops the payment.
+ */
+export function RunChecksBadges({ checks }: { checks: PayrollRunChecks | undefined }) {
+  if (!checks) return null;
+  return (
+    <>
+      {checks.daysWaiting > 0 && (
+        <Link to="/pay/days" onClick={(e) => e.stopPropagation()} className="focus-ring inline-flex rounded-full max-sm:min-h-10 pointer-coarse:min-h-10" data-run-days-waiting={checks.daysWaiting}>
+          <Badge tone="warning" title="Logged with no booking or check-in: not in this pay until a leader confirms them">
+            {checks.daysWaiting} {checks.daysWaiting === 1 ? 'day' : 'days'} to confirm
+          </Badge>
+        </Link>
+      )}
+      {checks.unconfirmed && (
+        <Badge tone="warning" title={`${checks.unconfirmed.subs} logged ${checks.unconfirmed.subs === 1 ? 'sub' : 'subs'} no client statement has confirmed${checks.unconfirmed.neverConfirmed.length ? ` (${checks.unconfirmed.neverConfirmed.join(', ')} sends no statements)` : ''}`} data-run-unconfirmed="">
+          {payMoney(checks.unconfirmed.amount)} on unconfirmed subs
+        </Badge>
+      )}
+    </>
   );
 }

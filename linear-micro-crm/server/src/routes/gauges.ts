@@ -8,6 +8,7 @@ import { businessNow, mondayOf, normaliseCheckIn, nowHHMM, nowISO, toBusinessISO
 import { badRequest, conflict, forbidden, notFound } from '../lib/errors.ts';
 import { GAUGE_FROM, summaryRows, type SummaryGroup } from '../lib/metrics.ts';
 import { assertCanWriteGauge, canManageTeam, isAdmin, redactEntry } from '../lib/scope.ts';
+import { noteGaugeWrite } from '../lib/payDays.ts';
 import { assertCheckInNotLocked, stampCheckInAuthor } from '../lib/shiftCheckIns.ts';
 import { gaugeCount, idParam, isoDate, isoTimestamp, limitQuery, offsetQuery, optionalIdQuery, parseRange, parsePatch } from '../lib/validate.ts';
 import { currentUser } from '../middleware/auth.ts';
@@ -164,6 +165,7 @@ export function gaugesRouter(db: Db): Router {
           [body.stops, body.table, body.presentations, body.closes, body.taps, body.sales, checkedInAt, notes, now, existing.id],
         );
         stampCheckInAuthor(db, existing.id, existing.checkedInAt, me.id); // who set the check-in time (review 1.2 S3)
+        noteGaugeWrite(db, me, [key]); // MON-1: a leader or the office logging for someone confirms the day
         syncPayrollForEntry(db, key, today); // the week's unpaid run follows the gauges, in the same transaction
       });
       return res.status(200).json(getGauge(db, existing.id));
@@ -178,6 +180,7 @@ export function gaugesRouter(db: Db): Router {
         [body.eventId, body.userId, body.date, body.stops, body.table, body.presentations, body.closes, body.taps, body.sales, checkedInAt, body.notes ?? null, now, snap.payout, snap.commission],
       );
       stampCheckInAuthor(db, r.lastInsertRowid, undefined, me.id);
+      noteGaugeWrite(db, me, [key]); // MON-1
       syncPayrollForEntry(db, key, today);
       return r.lastInsertRowid;
     });
@@ -229,6 +232,7 @@ export function gaugesRouter(db: Db): Router {
       // who set the check-in time (review 1.2 S3): moving the entry to another event or day keeps the time's author;
       // re-pointing it at another person makes the time the mover's
       stampCheckInAuthor(db, id, next.userId !== existing.userId ? undefined : existing.checkedInAt, me.id);
+      noteGaugeWrite(db, me, [{ userId: next.userId, date: next.date }]); // MON-1
       syncPayrollForEntry(db, { userId: existing.userId, eventId: existing.eventId, date: existing.date }, today);
       if (moved) syncPayrollForEntry(db, { userId: next.userId, eventId: next.eventId, date: next.date }, today);
     });

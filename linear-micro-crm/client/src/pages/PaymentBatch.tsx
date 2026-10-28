@@ -5,14 +5,22 @@
 //    "Check now" asks the provider at once); for a bank file, Download the file and Mark as paid (untick the ones the
 //    bank rejected, with a reason). Lazy (App.tsx).
 // Package A: for an API provider the page says what the provider still needs from Matt (its `approveNote` on the
-// Approve card, its `waitingNote` while payments are on their way): Wise only creates the transfers, Matt pays them in
+// Approve card, its `waitingNote` while payments are on their way): Wise only creates the transfers, Matt funds them in
 // Wise, so its Approve button says "create the transfers" rather than "pay".
+// Before approving, "Check before paying" lists days waiting for a leader (not in this pay), pay resting on subs no client
+// statement confirmed, and bonuses or adjustments added in the last 7 days and by whom. With "Two people approve each
+// payment" on, a live payment needs a second administrator. A downloaded bank file counts as sent: cancelling it, or
+// marking someone not paid, needs NOT UPLOADED / NOT PAID typed and a fresh code, and a cancelled one is void.
 import { useEffect, useId, useState, type FormEvent } from 'react';
 import { Link, useParams } from 'react-router-dom';
-import { ArrowLeft, Download, Info, RefreshCw, ShieldCheck, TriangleAlert, X } from 'lucide-react';
-import { approvalOutcome, formatPence, payDayLabel, payWeekLabel, type PaymentBatch, type PaymentItem, type PaymentProviderView } from '@lm/shared';
+import { useQueryClient } from '@tanstack/react-query';
+import { ArrowLeft, ClipboardCheck, Download, Info, RefreshCw, ShieldCheck, TriangleAlert, X } from 'lucide-react';
+import {
+  FILE_NOT_PAID_CONFIRMATION, FILE_NOT_UPLOADED_CONFIRMATION, approvalOutcome, formatPence, isTypedConfirmation, payDayLabel, payMoney, payWeekLabel,
+  poundsToPence, type PaymentBatch, type PaymentItem, type PaymentProviderView,
+} from '@lm/shared';
 import { ApiError } from '@/api/client';
-import { paymentFileUrl, useApproveBatch, useCancelBatch, useMarkBatchPaid, usePaymentBatch, usePaymentProviders, useRefreshBatch } from '@/api/payments';
+import { paymentFileUrl, paymentKeys, useApproveBatch, useCancelBatch, useMarkBatchPaid, usePaymentBatch, usePaymentProviders, useRefreshBatch } from '@/api/payments';
 import { useCurrentUser } from '@/auth/AuthProvider';
 import { Badge, Button, Card, CardHeader, Field, Input, KpiTile, PageHeader, Skeleton, useToast } from '@/components/ui';
 import { ConfirmDialog, ErrorState, apiMessage, errorMessage } from '@/features/common';
@@ -83,10 +91,17 @@ export function PaymentBatchPage() {
 }
 
 function BatchBody({ b, provider, providerName, available }: { b: PaymentBatch; provider?: PaymentProviderView; providerName: string; available: boolean }) {
+  const uid = useId();
   const toast = useToast();
+  const qc = useQueryClient();
   const refresh = useRefreshBatch();
   const cancel = useCancelBatch();
   const [confirmCancel, setConfirmCancel] = useState(false);
+  // MON-2: after a download, cancelling (or making a freed 1.4.0 file void) needs NOT UPLOADED typed and a fresh code
+  const [typed, setTyped] = useState('');
+  const [cancelCode, setCancelCode] = useState('');
+  const needsTyped = !!b.actions.cancelNeedsConfirmation || !!b.actions.voidable;
+  const typedOk = !needsTyped || (isTypedConfirmation(typed, FILE_NOT_UPLOADED_CONFIRMATION) && cancelCode.replace(/\s+/g, '').length === 6);
   const draft = b.status === 'draft';
   // (a bank file is in test mode only for the test bank file, which pays nobody either)
   const test = b.mode === 'test';
@@ -118,6 +133,28 @@ function BatchBody({ b, provider, providerName, available }: { b: PaymentBatch; 
         </Card>
       )}
 
+      {b.voidedAt ? (
+        <Card tone="warning" data-file-void="">
+          <p className="flex items-start gap-2 text-sm text-fg"><TriangleAlert className="mt-0.5 h-4 w-4 shrink-0 text-warning" aria-hidden />
+            <span>Void: {b.voidedByName ?? 'an administrator'} confirmed on {payDayLabel(b.voidedAt.slice(0, 10))} that this file was not uploaded to the bank{b.voidReason ? ` (${b.voidReason.replace(/\.$/, '')})` : ''}. Do not upload it: its weeks can be paid again.</span>
+          </p>
+        </Card>
+      ) : b.kind === 'file' && b.mode === 'live' && b.downloadedAt ? (
+        <Card tone="info" data-file-downloaded="">
+          <p className="flex items-start gap-2 text-sm text-fg"><Info className="mt-0.5 h-4 w-4 shrink-0 text-info" aria-hidden />
+            <span>
+              Downloaded {formatDateTime(b.downloadedAt)}{b.downloadedByName ? ` by ${b.downloadedByName}` : ''}, so its people count as sent.
+              {b.actions.voidable
+                ? ' Its weeks were freed without saying the file was not uploaded, so a new file for them is refused for 7 days. If you did not upload it, confirm that now.'
+                : ' If you did not upload it to your bank, cancel it with the words NOT UPLOADED and your code: the file becomes void.'}
+            </span>
+          </p>
+          {b.actions.voidable && <Button size="sm" variant="outline" className="mt-3 h-10" onClick={() => setConfirmCancel(true)}>Confirm it was not uploaded</Button>}
+        </Card>
+      ) : null}
+
+      {draft && <ChecksCard b={b} />}
+
       {draft && <ApproveCard b={b} provider={provider} providerName={providerName} available={available} />}
 
       {!draft && b.kind === 'api' && b.mode === 'live' && sentSome && provider?.waitingNote && (
@@ -133,8 +170,14 @@ function BatchBody({ b, provider, providerName, available }: { b: PaymentBatch; 
           <CardHeader title={draft ? 'Who is paid' : 'Payments'} description={draft ? 'Check the names, accounts and amounts.' : b.kind === 'api' && b.waitingCount ? 'This page updates by itself while payments are on their way.' : undefined} className="mb-0" />
           <div className="flex flex-wrap gap-2">
             {b.actions.download && (
-              <a href={paymentFileUrl(b.id)} className="focus-ring inline-flex h-10 items-center gap-1.5 rounded-lg bg-primary px-4 text-sm font-medium text-primary-fg shadow-card hover:bg-primary-hover sm:h-8 sm:px-3" download>
-                <Download className="h-4 w-4" aria-hidden /> Download the bank file
+              <a
+                href={paymentFileUrl(b.id)}
+                className="focus-ring inline-flex h-10 items-center gap-1.5 rounded-lg bg-primary px-4 text-sm font-medium text-primary-fg shadow-card hover:bg-primary-hover sm:h-8 sm:px-3"
+                download
+                // the download is recorded (MON-2): show it once the server has it
+                onClick={() => window.setTimeout(() => void qc.invalidateQueries({ queryKey: paymentKeys.batch(b.id) }), 1500)}
+              >
+                <Download className="h-4 w-4" aria-hidden /> {b.mode === 'test' ? 'Download the TEST file' : 'Download the bank file'}
               </a>
             )}
             {b.actions.refresh && (
@@ -182,15 +225,22 @@ function BatchBody({ b, provider, providerName, available }: { b: PaymentBatch; 
       <ConfirmDialog
         open={confirmCancel}
         onClose={() => setConfirmCancel(false)}
-        title={draft ? `Cancel draft payment #${b.id}?` : `Cancel what is left of payment #${b.id}?`}
-        description={draft ? 'Nothing has been sent. The runs stay on Runs to pay.' : b.kind === 'file' ? 'Only do this if you did not upload the file to your bank (or the bank did not pay them). Those runs stay unpaid on Runs to pay.' : `Linear Hub asks ${b.connectionName} to stop the payments it has not paid yet. Any it is already paying stay on their way.`}
-        confirmLabel={draft ? 'Cancel draft' : 'Cancel them'}
+        title={b.actions.voidable ? `Make bank file #${b.id} void?` : draft ? `Cancel draft payment #${b.id}?` : `Cancel what is left of payment #${b.id}?`}
+        description={draft ? 'Nothing has been sent. The runs stay on Runs to pay.' : needsTyped
+          ? `This file was downloaded, so it may already be at your bank. Only go on if you did NOT upload it. Its weeks go back to Runs to pay and the file is void: never upload it afterwards.`
+          : b.kind === 'file' ? 'Only do this if you did not upload the file to your bank (or the bank did not pay them). Those runs stay unpaid on Runs to pay.' : `Linear Hub asks ${b.connectionName} to stop the payments it has not paid yet. Any it is already paying stay on their way.`}
+        confirmLabel={needsTyped ? 'Make it void' : draft ? 'Cancel draft' : 'Cancel them'}
         tone="danger"
         loading={cancel.isPending}
-        onConfirm={() => cancel.mutate({ id: b.id }, {
+        onConfirm={() => {
+          if (!typedOk) return toast.error(`Type ${FILE_NOT_UPLOADED_CONFIRMATION} and your code`, 'Both are needed once a bank file has been downloaded.');
+          cancel.mutate({ id: b.id, body: needsTyped ? { confirm: typed.trim(), code: cancelCode.replace(/\s+/g, '') } : {} }, {
           onSuccess: (next) => {
             setConfirmCancel(false);
+            setTyped('');
+            setCancelCode('');
             if (draft) return toast.success('Draft cancelled', 'The runs stay on Runs to pay.');
+            if (next.voidedAt) return toast.success('The file is void', 'Its weeks are back on Runs to pay. Do not upload it.');
             // review fix: say what actually stopped, and what is still on its way
             const was = new Set(b.items.filter((i) => i.status === 'queued' || i.status === 'submitted' || i.status === 'processing').map((i) => i.id));
             const stopped = next.items.filter((i) => was.has(i.id) && (i.status === 'cancelled' || i.status === 'failed')).length;
@@ -201,8 +251,20 @@ function BatchBody({ b, provider, providerName, available }: { b: PaymentBatch; 
               : 'Those weeks stay on Runs to pay.');
           },
           onError: (e) => toast.error('Could not cancel', errorMessage(e)),
-        })}
-      />
+          });
+        }}
+      >
+        {needsTyped && (
+          <div className="space-y-3">
+            <Field label={`Type ${FILE_NOT_UPLOADED_CONFIRMATION} to confirm`} htmlFor={`${uid}-typed`}>
+              <Input id={`${uid}-typed`} value={typed} onChange={(e) => setTyped(e.target.value)} autoComplete="off" className="font-mono" />
+            </Field>
+            <Field label="Code from your authenticator app" htmlFor={`${uid}-ccode`}>
+              <Input id={`${uid}-ccode`} value={cancelCode} onChange={(e) => setCancelCode(e.target.value)} inputMode="numeric" autoComplete="one-time-code" maxLength={7} placeholder="123456" className="font-mono" />
+            </Field>
+          </div>
+        )}
+      </ConfirmDialog>
     </div>
   );
 }
@@ -232,8 +294,20 @@ function ItemList({ items, draft, kind, mode }: { items: PaymentItem[]; draft: b
               {kind === 'file' && i.providerRef ? <> · reference <span className="font-mono">{i.providerRef}</span></> : null}
               {paidText(i, kind, mode)}
             </span>
+            {i.checks && (i.checks.daysWaiting > 0 || i.checks.unconfirmed) && (
+              <span className="mt-0.5 flex flex-wrap gap-1.5" data-item-checks="">
+                {i.checks.daysWaiting > 0 && <Badge tone="warning" size="sm">{formatNumber(i.checks.daysWaiting)} {i.checks.daysWaiting === 1 ? 'day' : 'days'} waiting for a leader</Badge>}
+                {i.checks.unconfirmed && <Badge tone="warning" size="sm">{payMoney(i.checks.unconfirmed.amount)} on {formatNumber(i.checks.unconfirmed.subs)} unconfirmed {i.checks.unconfirmed.subs === 1 ? 'sub' : 'subs'}</Badge>}
+              </span>
+            )}
             {i.failureReason && <span className="block text-xs text-danger">{i.failureReason}</span>}
             {i.note && <span className="block text-xs text-warning">{i.note}</span>}
+            {/* MON-2: this week was in an earlier downloaded file that was let go; check the bank did not pay that one */}
+            {i.earlierFile && (
+              <span className="block text-xs text-warning" data-earlier-file={i.earlierFile.batchId}>
+                Also in bank file <Link to={`/finance/pay/batches/${i.earlierFile.batchId}`} className="underline underline-offset-2">payment #{i.earlierFile.batchId}</Link>, downloaded {payDayLabel(i.earlierFile.downloadedAt.slice(0, 10))}{i.earlierFile.downloadedByName ? ` by ${i.earlierFile.downloadedByName}` : ''}{i.earlierFile.voidedAt ? ' and marked as not uploaded' : ' and then let go'}. Check your bank did not pay it{i.earlierFile.copies > 1 ? ` (${i.earlierFile.copies} earlier files)` : ''}: this file's reference ends in {i.earlierFile.copies + 1} so your bank can tell them apart.
+              </span>
+            )}
           </span>
           <span className="flex items-center gap-3 sm:justify-end">
             {!draft && <PaymentItemStatusBadge status={i.status} kind={kind} mode={mode} />}
@@ -262,6 +336,10 @@ function ApproveCard({ b, provider, providerName, available }: { b: PaymentBatch
     approve.mutate({ id: b.id, body: { code: code.replace(/\s+/g, '') } }, {
       onSuccess: (next) => {
         setCode('');
+        if (next.status === 'draft' && next.firstApprovedAt) {
+          toast.success('First approval given', 'Nothing is sent yet: a different administrator gives the second approval.');
+          return;
+        }
         // review fixes (UI-2, SD-3, money:3): say what really happened, from the statuses that came back — a refused
         // item is not "sent", one not confirmed yet may still have reached the provider, a test file is never uploaded
         const out = approvalOutcome(next, { providerName, createsOnly, success: `${whoText(next)}, ${formatPence(next.totalPence)}.` });
@@ -269,7 +347,10 @@ function ApproveCard({ b, provider, providerName, available }: { b: PaymentBatch
       },
     });
   };
-  const label = b.kind === 'file' ? (b.mode === 'test' ? 'Approve and make the test file' : 'Approve and make the bank file') : b.mode === 'test' ? `Approve test payment of ${formatPence(b.totalPence)}` : createsOnly ? `Approve and create the transfers (${formatPence(b.totalPence)})` : `Approve and pay ${formatPence(b.totalPence)}`;
+  // MONEY-MISSED-2: the first of two approvals sends nothing
+  const two = b.approvalsNeeded === 2;
+  const first = two && !b.firstApprovedAt;
+  const label = first ? 'Give the first approval (of two)' : b.kind === 'file' ? (b.mode === 'test' ? 'Approve and make the test file' : 'Approve and make the bank file') : b.mode === 'test' ? `Approve test payment of ${formatPence(b.totalPence)}` : createsOnly ? `Approve and create the transfers (${formatPence(b.totalPence)})` : `Approve and pay ${formatPence(b.totalPence)}`;
   return (
     <Card tone={b.mode === 'live' && b.kind === 'api' ? 'warning' : 'default'}>
       <CardHeader
@@ -278,7 +359,7 @@ function ApproveCard({ b, provider, providerName, available }: { b: PaymentBatch
         description={b.kind === 'file'
           // review fix (money:3): the test bank file is for looking at only
           ? b.mode === 'test'
-            ? `Test mode: Linear Hub makes a test file for ${whoText(b)} (${formatPence(b.totalPence)}), for looking at only. Do not upload it to your bank: nobody is paid.`
+            ? `Test mode: Linear Hub makes a test file for ${whoText(b)} (${formatPence(b.totalPence)}), for looking at only. Every line has sort code 00-00-00 and account 00000000, so it pays nobody, even if it is uploaded.`
             : `Linear Hub makes the file for ${whoText(b)} (${formatPence(b.totalPence)}). Nothing moves until you upload it to your bank and approve it there.`
           : b.mode === 'test'
             ? `Test mode: ${sandboxName(b.provider, providerName)} gets the payments and nobody is paid. The runs stay on Runs to pay.`
@@ -286,6 +367,17 @@ function ApproveCard({ b, provider, providerName, available }: { b: PaymentBatch
               ? `${providerName} gets transfers for ${whoText(b)} (${formatPence(b.totalPence)}) when you approve.${approveNote}`
               : `${providerName} pays ${whoText(b)}, ${formatPence(b.totalPence)} in all, as soon as you approve. This cannot be undone from Linear Hub.`}
       />
+      {two && (
+        <p className="mb-3 flex items-start gap-2 rounded-lg bg-surface-2 px-3 py-2 text-sm text-fg" data-two-approvals="">
+          <ShieldCheck className="mt-0.5 h-4 w-4 shrink-0 text-primary" aria-hidden />
+          <span>
+            Two people approve each payment (Settings → Payments).{' '}
+            {b.firstApprovedAt
+              ? `First approval by ${b.firstApprovedByName ?? 'an administrator'}, ${formatDateTime(b.firstApprovedAt)}. A different administrator approves it now; nothing is sent until then.`
+              : 'Your approval is the first: nothing is sent until a different administrator approves it too.'}
+          </span>
+        </p>
+      )}
       {!available ? (
         <p className="flex items-start gap-2 rounded-lg bg-surface-2 px-3 py-2 text-sm text-muted">
           <TriangleAlert className="mt-0.5 h-4 w-4 shrink-0" aria-hidden />
@@ -297,8 +389,9 @@ function ApproveCard({ b, provider, providerName, available }: { b: PaymentBatch
           <Link to="/settings" className="focus-ring inline-flex h-10 shrink-0 items-center justify-center rounded-lg bg-primary px-4 text-sm font-medium text-primary-fg shadow-card hover:bg-primary-hover">Open Settings → Security</Link>
         </p>
       ) : !b.actions.approve ? (
-        // review fix (UI-7): the server's reason (e.g. made in test mode, but the connection is live now)
-        <p className="text-sm text-muted" data-approve-blocked="">{b.actions.approveBlocked ?? 'Test the connection first (Settings → Payments).'}</p>
+        // review fix (UI-7): the server's reason (e.g. made in test mode, but the connection is live now); MONEY-MISSED-2:
+        // or the signed-in admin gave the first approval
+        <p className="text-sm text-muted" data-approve-blocked="">{b.actions.approveBlocked ?? b.actions.approveWaitsFor ?? 'Test the connection first (Settings → Payments).'}</p>
       ) : (
         <form onSubmit={submit} className="flex flex-col gap-3 sm:flex-row sm:items-end" noValidate>
           {/* review fix: the server's message once (errorMessage would repeat it with its field detail) */}
@@ -322,12 +415,20 @@ function MarkPaidCard({ b }: { b: PaymentBatch }) {
   const [paid, setPaid] = useState<ReadonlySet<number>>(() => new Set(waiting.map((i) => i.id)));
   const [reason, setReason] = useState('');
   const [date, setDate] = useState(todayISO());
+  const [typed, setTyped] = useState('');
+  const [code, setCode] = useState('');
   useEffect(() => setPaid(new Set(waiting.map((i) => i.id))), [b.id, waiting.length]); // eslint-disable-line react-hooks/exhaustive-deps
   const failed = waiting.filter((i) => !paid.has(i.id));
   const test = b.mode === 'test';
+  // MON-2: the file was downloaded, so leaving anyone unpaid needs NOT PAID typed and a fresh code
+  const needsTyped = !!b.actions.markNotPaidNeedsConfirmation && failed.length > 0;
   const submit = (e: FormEvent) => {
     e.preventDefault();
-    mark.mutate({ id: b.id, body: { paid: [...paid], failed: failed.map((i) => i.id), reason: reason.trim() || undefined, paidDate: date } }, {
+    if (needsTyped && (!isTypedConfirmation(typed, FILE_NOT_PAID_CONFIRMATION) || code.replace(/\s+/g, '').length !== 6)) {
+      toast.error(`Type ${FILE_NOT_PAID_CONFIRMATION} and your code`, 'The file was downloaded, so the people you untick count as sent until you confirm the bank did not pay them.');
+      return;
+    }
+    mark.mutate({ id: b.id, body: { paid: [...paid], failed: failed.map((i) => i.id), reason: reason.trim() || undefined, paidDate: date, ...(needsTyped ? { confirm: typed.trim(), code: code.replace(/\s+/g, '') } : {}) } }, {
       // review fix (SD-4): a test file paid nobody, whatever is ticked
       onSuccess: () => toast.success('Marked', test
         ? 'Test: nobody was paid; the weeks stay on Runs to pay.'
@@ -364,11 +465,73 @@ function MarkPaidCard({ b }: { b: PaymentBatch }) {
               <Input id={`${uid}-reason`} value={reason} onChange={(e) => setReason(e.target.value)} maxLength={300} placeholder="e.g. Rejected: the name does not match the account" />
             </Field>
           )}
+          {needsTyped && (
+            <>
+              <Field label={`Type ${FILE_NOT_PAID_CONFIRMATION}: the bank did not pay the people you unticked`} htmlFor={`${uid}-typed`}>
+                <Input id={`${uid}-typed`} value={typed} onChange={(e) => setTyped(e.target.value)} autoComplete="off" className="font-mono" />
+              </Field>
+              <Field label="Code from your authenticator app" htmlFor={`${uid}-code`}>
+                <Input id={`${uid}-code`} value={code} onChange={(e) => setCode(e.target.value)} inputMode="numeric" autoComplete="one-time-code" maxLength={7} placeholder="123456" className="font-mono" />
+              </Field>
+            </>
+          )}
         </div>
         <Button type="submit" className="h-10" loading={mark.isPending} disabled={!waiting.length}>
           {failed.length ? `Mark ${formatNumber(paid.size)} paid, ${formatNumber(failed.length)} not paid` : `Mark ${formatNumber(paid.size)} paid`}
         </Button>
       </form>
+    </Card>
+  );
+}
+
+/**
+ * Check before paying (MON-1, MONEY-MISSED-2, MONEY-MISSED-3): what the office should look at before approving — days
+ * waiting for a leader (not in this pay), pay resting on subs no client statement confirmed, and bonuses or adjustments
+ * added in the last 7 days to these weeks, with who added them ("You added this").
+ */
+function ChecksCard({ b }: { b: PaymentBatch }) {
+  const me = useCurrentUser();
+  const changes = b.recentChanges ?? [];
+  const days = b.daysWaiting ?? 0;
+  const unconfirmed = b.unconfirmedPence ?? 0;
+  if (!changes.length && !days && !unconfirmed) return null;
+  return (
+    <Card data-batch-checks="">
+      <CardHeader title="Check before paying" icon={<ClipboardCheck aria-hidden />} description="Nothing here stops the payment. It is what is worth a second look." />
+      <ul className="space-y-3 text-sm">
+        {days > 0 && (
+          <li className="text-fg">
+            <span className="font-medium">{formatNumber(days)} {days === 1 ? 'day' : 'days'} waiting for a leader.</span>{' '}
+            <span className="text-muted">Logged with no booking or check-in, so not in this pay. A leader confirms them in <Link to="/pay/days" className="text-primary hover:underline">Days to confirm</Link>; they are paid with a later payment.</span>
+          </li>
+        )}
+        {unconfirmed > 0 && (
+          <li className="text-fg">
+            <span className="font-medium">{formatPence(unconfirmed)} rests on {formatNumber(b.unconfirmedSubs ?? 0)} {b.unconfirmedSubs === 1 ? 'sub' : 'subs'} no client statement has confirmed.</span>{' '}
+            <span className="text-muted">The rep logged them; the client has not confirmed them yet (or sends no statements). The people concerned are marked below.</span>
+          </li>
+        )}
+        {changes.length > 0 && (
+          <li>
+            <p className="font-medium text-fg">Bonuses and adjustments added in the last 7 days</p>
+            <ul className="mt-1 divide-y divide-border rounded-lg border border-border">
+              {changes.map((c) => (
+                <li key={c.adjustmentId} className="flex flex-col gap-0.5 px-3 py-2 sm:flex-row sm:items-center sm:justify-between sm:gap-3">
+                  <span className="min-w-0">
+                    <span className="text-fg">{c.userName}</span>
+                    <span className="text-muted"> · {payWeekLabel(c.weekStart)} · {c.kind === 'bonus' ? 'bonus' : 'adjustment'}{c.note ? `: ${c.note}` : ''}</span>
+                    <span className="block text-xs text-muted">
+                      Added {formatDateTime(c.createdAt)} by {c.createdBy === me.id ? 'you' : c.createdByName ?? 'someone'}
+                      {c.createdBy === me.id && <Badge tone="warning" size="sm" className="ml-1.5">You added this</Badge>}
+                    </span>
+                  </span>
+                  <span className={`shrink-0 font-semibold tabular-nums ${c.amount < 0 ? 'text-danger' : 'text-fg'}`}>{formatPence(poundsToPence(c.amount))}</span>
+                </li>
+              ))}
+            </ul>
+          </li>
+        )}
+      </ul>
     </Card>
   );
 }

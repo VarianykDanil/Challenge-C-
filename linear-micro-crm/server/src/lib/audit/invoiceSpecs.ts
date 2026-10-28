@@ -8,9 +8,10 @@
  * recorded as a file name, never its bytes. Automatic steps (invoices issued, reissued, deemed accepted) are recorded
  * by lib/invoices.ts with recordSystemEvent.
  */
-import { auditChangeText, auditDiff, auditMoney, auditWeekLabel, SELF_BILLING_AGREEMENT_VERSION } from '@lm/shared';
+import { auditChangeText, auditDiff, auditMoney, auditWeekLabel, formatVatNumber, SELF_BILLING_AGREEMENT_VERSION } from '@lm/shared';
 import { get, type Db } from '../../db/connection.ts';
-import { payrollSnapshot, type AuditCall, type AuditDone, type AuditRouteSpec } from '../auditSpecs.ts';
+import { payrollSnapshot, type AuditCall, type AuditDone, type AuditDraft, type AuditRouteSpec } from '../auditSpecs.ts';
+import { WRONG_PAYMENT_CODE_MESSAGE } from '../payments/code.ts';
 
 type Snap = Record<string, unknown>;
 
@@ -104,11 +105,53 @@ function profileRoute(pattern: string, self: boolean): AuditRouteSpec<Snap | nul
       const after = id ? profileSnapshot(db, id) : null;
       if (before && after && !auditDiff(before, after).length) return [];
       const fields = changedProfileFields(before ?? null, after) || 'nothing';
-      const summary = self ? `Updated their invoice details: ${fields}` : `Updated invoice details for ${str(after?.name, 'someone')}: ${fields}`;
+      // a new VAT number adds no VAT until the office confirms it (POST …/vat/confirm)
+      const waits = after?.vatNumber && after.vatNumber !== before?.vatNumber ? ' (the VAT number waits for the office to check it)' : '';
+      const summary = self ? `Updated their invoice details: ${fields}${waits}` : `Updated invoice details for ${str(after?.name, 'someone')}: ${fields}${waits}`;
       return [{ entity: 'user', entityId: id, summary, before: before ?? null, after }];
     },
   };
 }
+
+/** A person's VAT number and its confirmation (MON-7). */
+function vatSnapshot(db: Db, userId: number): Snap | null {
+  return soft(() => get<Snap>(
+    db,
+    `SELECT id, TRIM(first_name || ' ' || last_name) AS name, vat_number AS vatNumber, vat_changed_at AS vatChangedAt,
+            vat_changed_by AS vatChangedBy, vat_confirmed_at AS vatConfirmedAt, vat_confirmed_by AS vatConfirmedBy FROM users WHERE id = ?`,
+    [userId],
+  ) ?? null, null);
+}
+
+/** MON-7: an administrator confirmed someone's VAT number (checked with HMRC); a wrong code is recorded too. */
+const vatConfirm: AuditRouteSpec<Snap | null> = {
+  method: 'POST',
+  pattern: '/invoices/profile/:userId/vat/confirm',
+  before: (db, call) => {
+    const id = toId(call.params.userId);
+    return id ? vatSnapshot(db, id) : null;
+  },
+  after(db, done, before) {
+    const id = toId(done.params.userId);
+    const after = id ? vatSnapshot(db, id) : null;
+    if (!after?.vatConfirmedAt || before?.vatConfirmedAt) return [];
+    return [{
+      entity: 'user',
+      entityId: id,
+      summary: `Confirmed ${str(after.name, 'someone')}'s VAT number ${formatVatNumber(str(after.vatNumber))} (checked with HMRC): VAT at 20% is added to their invoices from now on`,
+      before: before ?? null,
+      after,
+    }];
+  },
+  failed(_db, done): AuditDraft[] {
+    if (!done.me) return [];
+    const id = toId(done.params.userId);
+    const error = isRecord(done.response) ? str(done.response.error) : '';
+    if (done.status === 429) return [{ entity: 'user', entityId: id, summary: 'Two-step code refused while confirming a VAT number: too many attempts', kind: 'sign_in', after: { reason: 'too_many_attempts' } }];
+    if (done.status === 400 && error === WRONG_PAYMENT_CODE_MESSAGE) return [{ entity: 'user', entityId: id, summary: 'Wrong two-step code while confirming a VAT number', kind: 'sign_in', after: { reason: 'wrong_code' } }];
+    return [];
+  },
+};
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 export const AUDIT_SPECS: readonly AuditRouteSpec<any>[] = [
@@ -124,6 +167,7 @@ export const AUDIT_SPECS: readonly AuditRouteSpec<any>[] = [
   },
   profileRoute('/invoices/profile', true),
   profileRoute('/invoices/profile/:userId', false),
+  vatConfirm,
   {
     method: 'PUT',
     pattern: '/invoices/company',

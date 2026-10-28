@@ -19,10 +19,36 @@ test('each API provider: how to connect (steps outside Linear Hub included), wha
       assert.doesNotMatch(text, /\b(payslip|TODO)\b/i);
     }
   }
-  // the bank file says what to do itself (download, upload, mark paid): none of these
+  // the bank file says what to do itself (download, upload, mark paid); its connect steps (CLM-3, MON-6)
+  // say it starts in test mode, the 1p test file comes before the first real run, and which layouts are documented
   const file = paymentProviderInfo('bank_file')!;
-  assert.equal(file.connectSteps, undefined);
+  const steps = file.connectSteps!.join(' ');
+  assert.match(steps, /test mode/);
+  assert.match(steps, /TEST/);
+  assert.match(steps, /1p test file/);
+  assert.match(steps, /PAY FOR REAL/);
+  assert.match(steps, /own published guide/);
+  // a test file can pay nobody because it carries no real bank details (not just because it says TEST)
+  assert.match(steps, /00-00-00/);
+  assert.match(file.summary, /no real bank details/);
   assert.equal(file.waitingNote, undefined);
+});
+
+test('CLAIMS-MISSED-3: Wise says plainly that Linear Hub creates the transfers, you fund them, unfunded ones come back', () => {
+  const p = paymentProviderInfo('wise')!;
+  for (const text of [p.summary, p.abilities.limits, p.approveNote!, p.waitingNote!]) {
+    assert.match(text, /fund/i, text);
+  }
+  assert.match(p.summary, /creates the transfers/);
+  assert.match(p.summary, /back to Runs to pay/);
+  assert.match(p.waitingNote!, /back to Runs to pay/);
+  assert.match(p.approveNote!, /creates the transfers/);
+  // MON-5 / CLM-1: every API provider says the sandbox payment comes first and the first live run is small
+  for (const id of ['revolut', 'wise', 'truelayer']) {
+    const q = paymentProviderInfo(id)!;
+    assert.match(q.connectSteps!.join(' '), /test payment through the sandbox first/, id);
+    assert.match(q.liveNote!, /first live run small/, id);
+  }
 });
 
 test('Revolut: pays from Linear Hub; a certificate and Enable access happen in Revolut, the code works for 2 minutes', () => {
@@ -43,11 +69,12 @@ test('Wise: Linear Hub creates the transfers; Matt pays (funds) them in Wise —
   assert.equal(p.abilities.paysFromApp, false, 'a personal token cannot fund transfers for a UK business');
   assert.equal(p.abilities.needsBankApproval, true);
   assert.equal(p.abilities.checksBalance, false);
-  assert.match(p.summary, /pay \(fund\) them in Wise/);
-  assert.match(p.abilities.limits, /does not let an API token pay/);
-  assert.match(p.approveNote ?? '', /Nobody is paid until you open Wise and pay/);
-  assert.match(p.waitingNote!, /open Wise and pay/i);
-  assert.match(p.waitingNote!, /cancels/i, 'Wise cancels transfers not paid in time');
+  // "fund" everywhere, and what happens to transfers nobody funds
+  assert.match(p.summary, /you fund them in Wise/);
+  assert.match(p.abilities.limits, /does not let an API token fund/);
+  assert.match(p.approveNote ?? '', /nobody is paid until you fund them in Wise/);
+  assert.match(p.waitingNote!, /open Wise and fund/i);
+  assert.match(p.waitingNote!, /cancelled by Wise/i, 'Wise cancels transfers not funded in time');
   const lines = Object.fromEntries(abilityChecklist(p.abilities).map((l) => [l.key, l.ok]));
   assert.equal(lines.paysFromApp, false);
   assert.equal(lines.needsBankApproval, true);

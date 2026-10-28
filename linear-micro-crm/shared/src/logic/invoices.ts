@@ -301,14 +301,33 @@ export function normaliseUtr(value: string | null | undefined): string | null {
   return /^\d{10}$/.test(digits) ? digits : null;
 }
 
-/** A UK VAT number, stored as "GB123456789" (9 digits, or 12 for a branch). Null when it is not one. */
+/**
+ * A UK VAT number, stored as "GB999999973" (9 digits, or 12 for a branch). Null when it is not one: the wrong shape, or
+ * the check digits do not add up (isValidVatCheckDigits).
+ */
 export function normaliseVatNumber(value: string | null | undefined): string | null {
   const compact = (value ?? '').toUpperCase().replace(/[\s.-]/g, '');
   const m = /^(?:GB)?(\d{9}|\d{12})$/.exec(compact);
-  return m ? `GB${m[1]}` : null;
+  if (!m || !isValidVatCheckDigits(m[1]!.slice(0, 9))) return null;
+  return `GB${m[1]}`;
 }
 
-/** "GB123456789" → "GB 123 4567 89" (as HMRC prints it). */
+/**
+ * HMRC's check digits for the 9 digits of a UK VAT number (a branch's 3 extra digits are not checked): the first seven
+ * digits times 8, 7, 6, 5, 4, 3 and 2, plus the last two digits as a number, is a multiple of 97 (the older "mod 97"
+ * numbers), or is 42 more than one (the "9755" numbers issued from 100 000 000). This catches a typing slip or a
+ * made-up number; it does not say the number is registered: the office checks that on HMRC's "Check a UK VAT number"
+ * service before it confirms the number.
+ */
+export function isValidVatCheckDigits(nine: string): boolean {
+  if (!/^\d{9}$/.test(nine) || /^0{7}/.test(nine)) return false;
+  const weights = [8, 7, 6, 5, 4, 3, 2];
+  const sum = weights.reduce((s, w, i) => s + w * Number(nine[i]), 0) + Number(nine.slice(7));
+  const rest = sum % 97;
+  return rest === 0 || (rest === 42 && Number(nine.slice(0, 3)) >= 100);
+}
+
+/** "GB999999973" → "GB 999 9999 73" (as HMRC prints it). */
 export function formatVatNumber(vat: string): string {
   const m = /^GB(\d{3})(\d{4})(\d{2})(\d{3})?$/.exec(vat);
   return m ? `GB ${m[1]} ${m[2]} ${m[3]}${m[4] ? ` ${m[4]}` : ''}` : vat;

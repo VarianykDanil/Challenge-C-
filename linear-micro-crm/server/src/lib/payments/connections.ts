@@ -3,18 +3,22 @@
  *
  *  - Settings (non-secret) are stored as JSON; secrets as ONE encrypted JSON blob (lib/crypto.ts). No API answer, audit
  *    row, log line or error message ever carries a secret: a connection answers only the NAMES of the secrets stored.
- *  - An API connection starts in test mode and 'not_connected'; a successful test makes it 'connected'. A bank file
- *    connection makes real files from the start (mode 'live', 'connected'): nothing moves until Matt uploads a file
- *    to his bank and approves it there.
- *  - Switching an API connection to live needs a connected test first and the words PAYMENT_LIVE_CONFIRMATION typed.
- *    Changing its details puts it back to 'not_connected' (test it again).
+ *  - Every connection starts in test mode. An API connection starts 'not_connected'; a successful test makes it
+ *    'connected'. A bank file connection starts in test mode too ('connected': there is nothing to
+ *    test): its files say TEST in their name and every reference, pay nobody and mark no week paid.
+ *  - Switching to live needs the words PAYMENT_LIVE_CONFIRMATION typed. An API connection also needs a connected test
+ *    first and (MON-5) a test-mode payment through it that the provider's sandbox answered: the guided
+ *    first run, so the first real check of a provider is its sandbox, not live money. Changing an API connection's
+ *    details puts it back to 'not_connected' (test it again).
+ *  - "Make a 1p test file" — one £0.01 payment to an account the admin types, in the bank file's
+ *    layout, to check the bank takes it before the first real run; the admin then records whether it did.
  *  - Review fixes: the mode cannot change while a payment through the connection is on its way (its items would go to
  *    the other service: a test payment paid with real money, or a live one "paid" in the sandbox); and a change of mode
  *    or details forgets the last test and its balance (they belonged to the old ones).
  *  - Disconnecting wipes the secrets and keeps the history (batches keep pointing at it). Not while a payment through
  *    it is still on its way; its drafts are cancelled.
  */
-import { isLiveConfirmation, PAYMENT_LIVE_CONFIRMATION, type PaymentConnection, type PaymentConnectionInput, type PaymentConnectionPatch, type PaymentConnectionTestResult, type PaymentMode, type UserWithTeam } from '@lm/shared';
+import { isLiveConfirmation, PAYMENT_LIVE_CONFIRMATION, validateBankDetails, type PaymentConnection, type PaymentConnectionInput, type PaymentConnectionPatch, type PaymentConnectionTestResult, type PaymentMode, type PaymentTestFile, type UserWithTeam } from '@lm/shared';
 import { all, get, run, type Db } from '../../db/connection.ts';
 import { decrypt, encrypt } from '../crypto.ts';
 import { nowISO, todayISO } from '../dates.ts';
@@ -41,13 +45,16 @@ export interface ConnectionRow {
   liveConfirmedAt: string | null;
   liveConfirmedBy: number | null;
   disconnectedAt: string | null;
+  testFileAt: string | null;
+  testFileResult: 'accepted' | 'refused' | null;
 }
 
 const CONNECTION_SELECT = `
   SELECT c.id, c.provider, c.name, c.mode, c.settings_json AS settingsJson, c.secrets_enc AS secretsEnc, c.status,
          c.last_checked_at AS lastCheckedAt, c.last_error AS lastError, c.balance_pence AS balancePence, c.created_at AS createdAt,
          c.created_by AS createdBy, TRIM(u.first_name || ' ' || u.last_name) AS createdByName, c.live_confirmed_at AS liveConfirmedAt,
-         c.live_confirmed_by AS liveConfirmedBy, c.disconnected_at AS disconnectedAt
+         c.live_confirmed_by AS liveConfirmedBy, c.disconnected_at AS disconnectedAt, c.test_file_at AS testFileAt,
+         c.test_file_result AS testFileResult
   FROM payment_connections c LEFT JOIN users u ON u.id = c.created_by`;
 
 export const CONNECTION_NAME_MAX = 80;
@@ -77,8 +84,29 @@ export function connectionRow(db: Db, id: number): ConnectionRow | undefined {
   return get<ConnectionRow>(db, `${CONNECTION_SELECT} WHERE c.id = ?`, [id]);
 }
 
+/**
+ * MON-5: the guided first run of each connection — when a test-mode payment through it first got an answer from the
+ * sandbox (an item with the provider's reference), and when its first live payment was approved. One grouped read.
+ * Only a sandbox payment made since the connection's details last changed counts (details_changed_at): an answer to
+ * other keys says nothing about these.
+ */
+function firstRuns(db: Db, ids: readonly number[]): Map<number, { sandboxPaymentAt: string | null; livePaymentAt: string | null }> {
+  if (!ids.length) return new Map();
+  const rows = all<{ id: number; sandbox: string | null; live: string | null }>(
+    db,
+    `SELECT b.connection_id AS id,
+            MIN(CASE WHEN b.mode = 'test' AND b.approved_at IS NOT NULL AND (c.details_changed_at IS NULL OR b.approved_at >= c.details_changed_at)
+                      AND EXISTS (SELECT 1 FROM payment_items i WHERE i.batch_id = b.id AND i.provider_ref IS NOT NULL) THEN b.approved_at END) AS sandbox,
+            MIN(CASE WHEN b.mode = 'live' AND b.approved_at IS NOT NULL THEN b.approved_at END) AS live
+     FROM payment_batches b JOIN payment_connections c ON c.id = b.connection_id
+     WHERE b.connection_id IN (${ids.map(() => '?').join(', ')}) GROUP BY b.connection_id`,
+    [...ids],
+  );
+  return new Map(rows.map((r) => [Number(r.id), { sandboxPaymentAt: r.sandbox ?? null, livePaymentAt: r.live ?? null }]));
+}
+
 /** What the API answers: never a secret, only the names of the ones stored. */
-export function toConnection(r: ConnectionRow): PaymentConnection {
+export function toConnection(r: ConnectionRow, firstRun?: { sandboxPaymentAt: string | null; livePaymentAt: string | null }): PaymentConnection {
   return {
     id: r.id,
     provider: r.provider,
@@ -96,18 +124,23 @@ export function toConnection(r: ConnectionRow): PaymentConnection {
     liveConfirmedAt: r.liveConfirmedAt,
     liveConfirmedBy: r.liveConfirmedBy,
     disconnectedAt: r.disconnectedAt,
+    testFileAt: r.testFileAt ?? null,
+    testFileResult: r.testFileResult ?? null,
+    firstRun: firstRun ?? { sandboxPaymentAt: null, livePaymentAt: null },
   };
 }
 
 export function getConnection(db: Db, id: number): PaymentConnection {
   const r = connectionRow(db, id);
   if (!r) throw notFound('Payment connection');
-  return toConnection(r);
+  return toConnection(r, firstRuns(db, [id]).get(id));
 }
 
 /** Every connection, the active ones first (newest first), then the disconnected ones. */
 export function listConnections(db: Db): PaymentConnection[] {
-  return all<ConnectionRow>(db, `${CONNECTION_SELECT} ORDER BY (c.disconnected_at IS NOT NULL), c.id DESC`).map(toConnection);
+  const rows = all<ConnectionRow>(db, `${CONNECTION_SELECT} ORDER BY (c.disconnected_at IS NOT NULL), c.id DESC`);
+  const runs = firstRuns(db, rows.map((r) => r.id));
+  return rows.map((r) => toConnection(r, runs.get(r.id)));
 }
 
 /** The adapter for a stored connection (409 when the provider is no longer known). */
@@ -182,13 +215,12 @@ export function createConnection(db: Db, me: UserWithTeam, input: PaymentConnect
   const name = cleanName(input.name, adapter.info.name);
   const config = validated(adapter, { settings: stringMap(input.settings, 'settings'), secrets: stringMap(input.secrets, 'secrets') });
   const file = adapter.info.kind === 'file';
-  // a bank file has no test mode (nothing moves until Matt uploads it) — except a test-only one, which never pays anyone
-  const live = file && !adapter.info.testOnly;
+  // every connection starts in test mode (CLM-3: a bank file too); a file has nothing to test
   const id = run(
     db,
     `INSERT INTO payment_connections (provider, name, mode, settings_json, secrets_enc, status, created_at, created_by)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-    [provider, name, live ? 'live' : 'test', JSON.stringify(config.settings), encryptSecrets(config.secrets), file ? 'connected' : 'not_connected', nowISO(), me.id],
+     VALUES (?, ?, 'test', ?, ?, ?, ?, ?)`,
+    [provider, name, JSON.stringify(config.settings), encryptSecrets(config.secrets), file ? 'connected' : 'not_connected', nowISO(), me.id],
   ).lastInsertRowid;
   return getConnection(db, id);
 }
@@ -217,14 +249,18 @@ export function updateConnection(db: Db, me: UserWithTeam, id: number, patch: Pa
     if (changed) {
       sets.push('settings_json = ?', 'secrets_enc = ?');
       params.push(JSON.stringify(next.settings), encryptSecrets(next.secrets));
-      // new details need a new test before an API connection pays anyone; the old test's balance was theirs
-      if (adapter.info.kind === 'api') sets.push(`status = 'not_connected'`, 'last_error = NULL', 'balance_pence = NULL', 'last_checked_at = NULL');
+      // new details need a new test before an API connection pays anyone; the old test's balance was theirs, and so
+      // was any sandbox payment (MON-5: going live needs one made with these details)
+      if (adapter.info.kind === 'api') {
+        sets.push(`status = 'not_connected'`, 'last_error = NULL', 'balance_pence = NULL', 'last_checked_at = NULL', 'details_changed_at = ?');
+        params.push(nowISO());
+      }
     }
   }
   if (p.mode !== undefined && p.mode !== r.mode) {
     if (p.mode !== 'live' && p.mode !== 'test') throw badRequest('Mode is test or live');
     if (adapter.info.testOnly) throw badRequest('The test providers never pay anyone: they have no live mode.');
-    if (adapter.info.kind === 'file') throw badRequest('A bank file has no test mode: nothing is paid until you upload the file to your bank and approve it there.');
+    const file = adapter.info.kind === 'file';
     // a payment on its way finishes in the mode it was made in (drafts are refused at approval instead)
     const waiting = get<{ id: number }>(
       db,
@@ -240,13 +276,18 @@ export function updateConnection(db: Db, me: UserWithTeam, id: number, patch: Pa
         throw badRequest(`To pay real money, type ${PAYMENT_LIVE_CONFIRMATION} exactly`, [{ path: 'confirm', message: `Type ${PAYMENT_LIVE_CONFIRMATION} exactly` }]);
       }
       const statusAfter = sets.some((s) => s.startsWith('status')) ? 'not_connected' : r.status;
-      if (statusAfter !== 'connected') throw conflict('Test the connection first: switch to live once a test in test mode has worked.');
+      if (!file && statusAfter !== 'connected') throw conflict('Test the connection first: switch to live once a test in test mode has worked.');
+      // MON-5: the provider's sandbox must have answered a test payment first (the guided first run)
+      if (!file && !firstRuns(db, [id]).get(id)?.sandboxPaymentAt) {
+        throw conflict(`Make a test payment through the ${r.name} sandbox first: pay one person in test mode (Pay people → this connection) and wait for the sandbox to answer. Then switch to live.`);
+      }
       sets.push(`mode = 'live'`, 'live_confirmed_at = ?', 'live_confirmed_by = ?');
       params.push(nowISO(), me.id);
-      // the provider's live service needs its own test (and has its own balance)
-      sets.push(`status = 'not_connected'`, 'balance_pence = NULL', 'last_checked_at = NULL');
+      // the provider's live service needs its own test (and has its own balance); a file has nothing to test
+      if (!file) sets.push(`status = 'not_connected'`, 'balance_pence = NULL', 'last_checked_at = NULL');
     } else {
-      sets.push(`mode = 'test'`, `status = 'not_connected'`, 'balance_pence = NULL', 'last_checked_at = NULL');
+      sets.push(`mode = 'test'`);
+      if (!file) sets.push(`status = 'not_connected'`, 'balance_pence = NULL', 'last_checked_at = NULL');
     }
   }
   if (sets.length) run(db, `UPDATE payment_connections SET ${[...new Set(sets)].join(', ')} WHERE id = ?`, [...params, id]);
@@ -289,4 +330,39 @@ export async function testConnection(db: Db, id: number, ctx: ProviderContext = 
     ok ? 'connected' : 'error', at, ok ? null : message, balancePence, id,
   ]);
   return { ok, message, balancePence, checkedAt: at, connection: getConnection(db, id) };
+}
+
+// ───────────────────────────── MON-6: the 1p test file ─────────────────────────────
+
+/**
+ * One £0.01 payment to the account the admin typed, in the bank file connection's layout (whatever its mode: this is
+ * a real file, to upload to the bank before the first real run). The account number is in the file only: never
+ * stored, logged or audited. Records when it was made (the result is asked for next). 409 for an API connection.
+ */
+export function makeTestFile(db: Db, me: UserWithTeam, id: number, input: { holderName?: unknown; sortCode?: unknown; accountNumber?: unknown }, checkCode: () => void = () => {}): PaymentTestFile & { last4: string } {
+  const r = activeRow(db, id);
+  const adapter = adapterFor(r.provider);
+  if (adapter.info.kind !== 'file' || !adapter.testFile) throw conflict('A 1p test file is for a bank file connection: an API connection is checked with a test payment in its sandbox.');
+  const checked = validateBankDetails({ holderName: input.holderName, sortCode: input.sortCode, accountNumber: input.accountNumber });
+  if (!checked.ok) throw badRequest(checked.errors[0]!.message, checked.errors);
+  // the form first, so a typing mistake never uses up a two-step code
+  checkCode();
+  let file: PaymentTestFile;
+  try {
+    file = adapter.testFile(providerConnection(r), checked.value, todayISO());
+  } catch (err) {
+    if (err instanceof ProviderConfigError) throw badRequest(err.message, err.fields);
+    throw err;
+  }
+  run(db, `UPDATE payment_connections SET test_file_at = ?, test_file_by = ?, test_file_result = NULL WHERE id = ?`, [nowISO(), me.id, id]);
+  return { ...file, last4: checked.value.accountNumber.slice(-4) };
+}
+
+/** What the bank did with the 1p test file. */
+export function setTestFileResult(db: Db, id: number, result: unknown): PaymentConnection {
+  const r = activeRow(db, id);
+  if (result !== 'accepted' && result !== 'refused') throw badRequest('Say whether the bank took the file: accepted or refused');
+  if (!r.testFileAt) throw conflict('Make the 1p test file first.');
+  run(db, `UPDATE payment_connections SET test_file_result = ? WHERE id = ?`, [result, id]);
+  return getConnection(db, id);
 }

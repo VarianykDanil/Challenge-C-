@@ -185,7 +185,7 @@ test('approvalOutcome (review fixes UI-2, SD-3, money:3): the message after Appr
   assert.deepEqual(none, { tone: 'warning', title: 'Payment approved', body: 'Approved, but Wise Business has not confirmed them yet: Linear Hub tries again every 5 minutes.' });
   assert.doesNotMatch(none.body, /could not be reached/);
   // every item sent: the provider's own next step, test mode, or who and how much
-  assert.deepEqual(approvalOutcome(api(['processing', 'cancelled']), o), { tone: 'success', title: 'Payment approved', body: 'Now open Wise Business and pay the transfers there.' });
+  assert.deepEqual(approvalOutcome(api(['processing', 'cancelled']), o), { tone: 'success', title: 'Payment approved', body: 'Linear Hub created the transfers. Now open Wise Business and fund them: transfers you do not fund go back to Runs to pay.' });
   assert.equal(approvalOutcome(api(['processing'], 'test'), o).body, 'Test mode: nobody is paid.');
   assert.equal(approvalOutcome(api(['paid']), { ...o, createsOnly: false }).body, '2 people, £600.00.');
   // a bank file: live says upload it; the test bank file says never upload it
@@ -193,5 +193,13 @@ test('approvalOutcome (review fixes UI-2, SD-3, money:3): the message after Appr
   assert.deepEqual(approvalOutcome(file('live'), o), { tone: 'success', title: 'Bank file ready', body: 'Download it, upload it to your bank and approve it there. Then mark it paid here.' });
   const testFile = approvalOutcome(file('test'), o);
   assert.equal(testFile.title, 'Test bank file ready');
-  assert.equal(testFile.body, 'For looking at only: do not upload it to your bank. Nobody is paid.');
+  assert.equal(testFile.body, 'For looking at only. Every line has sort code 00-00-00 and account 00000000, so it pays nobody, even if it is uploaded.');
+});
+
+test('defaultPaymentReference: a later copy of a person-week (a new file after a void one) says which copy', () => {
+  assert.equal(defaultPaymentReference('2026-10-05', 'Remy Rep'), 'LINEAR 05OCT RR');
+  assert.equal(defaultPaymentReference('2026-10-05', 'Remy Rep', 1), 'LINEAR 05OCT RR');
+  assert.equal(defaultPaymentReference('2026-10-05', 'Remy Rep', 2), 'LINEAR 05OCT RR 2');
+  assert.equal(defaultPaymentReference('2026-10-05', 'Remy Rep', 12), 'LINEAR 05OCT RR 12');
+  for (const n of [2, 9, 10, 99]) assert.ok(defaultPaymentReference('2026-10-05', 'Remy Rep', n).length <= 18, String(n));
 });

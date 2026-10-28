@@ -12,7 +12,7 @@
  *   PUT  /events/:id/roster                 Edit bookings (release 1.3.1 fix)
  *   PUT  /recruitment/interviews/:id/answers   the interview sheet's autosave (release 1.3.1 fix)
  *   POST /client-accounts/:id/reset-2fa         an admin resets a client account's two-step verification (release 1.4)
- *   POST, PATCH, DELETE /payments/*   every payments write (release 1.4, F)
+ *   POST, PUT, PATCH, DELETE /payments/*   every payments write (release 1.4, F)
  *   PUT  /me/bank-details, /users/:id/bank-details   bank details changes (release 1.4, F)
  * The next one inside the minute is refused with 429 and a plain sentence (WRITE_LIMIT_MESSAGE, `Retry-After: 60`);
  * a refused request does not count. Reads, other writes and signed-out requests pass straight through (a signed-out
@@ -79,6 +79,8 @@ export const WRITE_LIMITED_ROUTES: readonly { method: 'POST' | 'PUT' | 'PATCH' |
   { method: 'POST', path: '/payments' },
   { method: 'PATCH', path: '/payments' },
   { method: 'DELETE', path: '/payments' },
+  { method: 'PUT', path: '/payments' },
+  { method: 'POST', path: '/me/bank-details' },
   { method: 'PUT', path: '/me/bank-details' },
   { method: 'PUT', path: /^\/users\/[^/]+\/bank-details$/ },
 ];

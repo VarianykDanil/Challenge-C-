@@ -1,7 +1,7 @@
 // Release 1.2 — U5 office-tools hooks — OWNED BY U5 (laid down by r2-foundation). Endpoints: server/src/routes/search.ts
 // and server/src/routes/payExport.ts.
 import { useQuery } from '@tanstack/react-query';
-import { SEARCH_MIN_LENGTH, normaliseSearchQuery, type PayExportFormat, type SearchResponse } from '@lm/shared';
+import { SEARCH_MIN_LENGTH, normaliseSearchQuery, type PayExportPeople, type SearchResponse } from '@lm/shared';
 import { api, qs } from './client';
 
 export const searchKeys = {
@@ -20,7 +20,7 @@ export function useSearch(q: string, { enabled = true }: { enabled?: boolean } =
   });
 }
 
-/** The download URL of GET /finance/payroll/export (admin): use as an <a href download> or window.location. */
-export function payExportUrl(weekStart: string, format: PayExportFormat): string {
-  return `/api/finance/payroll/export${qs({ weekStart, format })}`;
+/** The download URL of GET /finance/payroll/export (admin): the payroll spreadsheet of one week, for `people`. */
+export function payExportUrl(weekStart: string, people: PayExportPeople = 'all'): string {
+  return `/api/finance/payroll/export${qs({ weekStart, ...(people === 'all' ? {} : { people }) })}`;
 }

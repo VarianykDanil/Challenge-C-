@@ -30,7 +30,8 @@ export interface SearchResponse {
   results: SearchResult[];
 }
 
-export type PayExportFormat = 'xero' | 'sage';
+/** `format=` of GET /finance/payroll/export: 'csv'; 'xero' and 'sage' from older links give the same file. */
+export type PayExportFormat = 'csv' | 'xero' | 'sage';
 
 /**
  * Which runs of the week GET /finance/payroll/export includes (`runs=` query): 'unpaid' (default) — pending runs and
@@ -38,17 +39,29 @@ export type PayExportFormat = 'xero' | 'sage';
  */
 export type PayExportScope = 'unpaid' | 'all';
 
-/** One exported line (the CSV columns, in this order). Money is GBP gross. */
+/** Whose runs (`people=`): everyone (default), the self-employed self-billed field people, or the office staff. */
+export type PayExportPeople = 'all' | 'self_billed' | 'office';
+
+/** One exported line (the CSV columns, in this order). Money is GBP. */
 export interface PayExportRow {
   employeeName: string;
   employeeId: string;
+  /** "Self-employed (self-billed)" or "Office staff". */
+  worker: string;
   periodStart: string;
   periodEnd: string;
-  gross: number;
   base: number;
   commission: number;
   bonus: number;
   overrides: number;
   deductions: number;
+  /** Corrections from earlier weeks included in the gross. */
+  adjustments: number;
+  gross: number;
+  /** VAT on the self-billed invoice (0 when none is charged). */
+  vat: number;
+  /** gross + VAT: what the person is paid. */
+  totalToPay: number;
+  invoiceNumber: string;
   reference: string;
 }

@@ -31,18 +31,36 @@
  *    (409) while Linear Hub does not know whether the provider made an item (sent, but no reference back yet).
  *  - A run in a payment on its way is frozen (db/maintenance.ts IN_PAYMENT_FROM); a payment that fails or is cancelled
  *    frees it and brings it up to date (lib/payRule.ts syncPersonWeek).
+ * Checks before paying and safer payments:
+ *  - MON-2: a live bank file counts as sent from its first download (downloaded_at). Freeing its people after that —
+ *    Cancel the rest, or Mark as paid with anyone not paid — needs the typed words (FILE_NOT_UPLOADED_CONFIRMATION /
+ *    FILE_NOT_PAID_CONFIRMATION) and a fresh two-step code; the items keep freed_confirmed_at and a cancelled file is
+ *    void (voided_at, shown on the page and in the audit trail). A new live payment for a person-week that was in a
+ *    file downloaded in the last FILE_REPEAT_DAYS days and freed WITHOUT that confirmation (1.4.0 data) is refused
+ *    ('recent_file') until someone confirms the old file was not uploaded (the same cancel, on that payment).
+ *  - MONEY-MISSED-2: with "Two people approve each payment" on (lib/payments/settings.ts), a live payment needs a first
+ *    approval and then a second by a different administrator, each with their own fresh code; nothing is sent until
+ *    the second. The page lists bonuses and adjustments added in the last 7 days to its weeks, and who added them.
+ *  - MON-1 / MONEY-MISSED-3: each person carries the checks of their run (days waiting for a leader, pay resting on
+ *    subs no client statement confirmed), with totals for the payment (lib/payChecks.ts).
  */
 import { randomUUID } from 'node:crypto';
 import {
+  FILE_NOT_PAID_CONFIRMATION,
+  amountToPayPence,
+  FILE_NOT_UPLOADED_CONFIRMATION,
+  FILE_REPEAT_DAYS,
   batchStatusFromItems,
   defaultPaymentReference,
   formatPence,
+  isTypedConfirmation,
   invoiceDeadlineText,
   isInvoicePayable,
   payDayLabel,
   payWeekLabel,
   payrollStatusFor,
   poundsToPence,
+  type BankDetails,
   type PaymentBatch,
   type PaymentBatchInput,
   type PaymentBatchStatus,
@@ -54,6 +72,8 @@ import {
   type PaymentSkip,
   type PayrollRunPayment,
   type PayrollRunWithUser,
+  type PaymentCancelInput,
+  type PaymentRecentChange,
   type UserWithTeam,
 } from '@lm/shared';
 import { all, get, placeholders, run, transaction, type Db } from '../../db/connection.ts';
@@ -65,8 +85,9 @@ import { bumpDataVersion } from '../cache.ts';
 import { decrypt, encrypt } from '../crypto.ts';
 import { addDays, businessNow, isISODate, nowISO, todayISO } from '../dates.ts';
 import { HttpError, badRequest, conflict, notFound } from '../errors.ts';
-import { withInvoiceSummaries } from '../invoices.ts';
+import { invoiceVatByRun, withInvoiceSummaries } from '../invoices.ts';
 import { markPayrollRunPaid } from '../markPaid.ts';
+import { payrollChecksFor } from '../payChecks.ts';
 import { syncPersonWeek } from '../payRule.ts';
 import { decryptedBankDetails, maskedBankDetails, needsConfirmation } from './bankDetails.ts';
 import { assertFreshCode } from './code.ts';
@@ -74,6 +95,7 @@ import { adapterFor, connectionRow, providerConnection, providerContext, type Co
 import { redactSecrets } from './http.ts';
 import { ProviderError, type PaymentProviderAdapter, type ProviderItem, type ProviderItemResult } from './provider.ts';
 import { notReadyError } from './stubs.ts';
+import { adminsWithTwoStep, paymentsSettings } from './settings.ts';
 import { TRUELAYER_REPEAT_HOURS } from './truelayer.ts';
 
 /** At most this many runs in one batch. */
@@ -107,6 +129,15 @@ interface BatchRow {
   failedCount: number;
   waitingCount: number;
   queuedCount: number;
+  downloadedAt: string | null;
+  downloadedByName: string | null;
+  voidedAt: string | null;
+  voidedByName: string | null;
+  voidReason: string | null;
+  firstApprovedAt: string | null;
+  firstApprovedBy: number | null;
+  firstApprovedByName: string | null;
+  freedUnconfirmed: number;
 }
 
 const BATCH_SELECT = `
@@ -117,13 +148,21 @@ const BATCH_SELECT = `
          b.skipped_json AS skippedJson, (b.file_enc IS NOT NULL) AS hasFile, b.last_error AS lastError, b.updated_at AS updatedAt,
          b.cancelled_at AS cancelledAt,
          COALESCE(s.paid, 0) AS paidCount, COALESCE(s.failed, 0) AS failedCount, COALESCE(s.waiting, 0) AS waitingCount,
-         COALESCE(s.queued, 0) AS queuedCount
+         COALESCE(s.queued, 0) AS queuedCount,
+         b.downloaded_at AS downloadedAt, TRIM(du.first_name || ' ' || du.last_name) AS downloadedByName,
+         b.voided_at AS voidedAt, TRIM(vu.first_name || ' ' || vu.last_name) AS voidedByName, b.void_reason AS voidReason,
+         b.first_approved_at AS firstApprovedAt, b.first_approved_by AS firstApprovedBy, TRIM(fa.first_name || ' ' || fa.last_name) AS firstApprovedByName,
+         COALESCE(s.freedUnconfirmed, 0) AS freedUnconfirmed
   FROM payment_batches b
   JOIN payment_connections c ON c.id = b.connection_id
   LEFT JOIN users cu ON cu.id = b.created_by
   LEFT JOIN users au ON au.id = b.approved_by
+  LEFT JOIN users du ON du.id = b.downloaded_by
+  LEFT JOIN users vu ON vu.id = b.voided_by
+  LEFT JOIN users fa ON fa.id = b.first_approved_by
   LEFT JOIN (SELECT batch_id, SUM(status = 'paid') AS paid, SUM(status = 'failed') AS failed,
-                    SUM(status IN ('queued', 'submitted', 'processing')) AS waiting, SUM(status = 'queued') AS queued
+                    SUM(status IN ('queued', 'submitted', 'processing')) AS waiting, SUM(status = 'queued') AS queued,
+                    SUM(status IN ('cancelled', 'failed') AND provider_ref IS NOT NULL AND freed_confirmed_at IS NULL) AS freedUnconfirmed
              FROM payment_items GROUP BY batch_id) s ON s.batch_id = b.id`;
 
 interface ItemRow {
@@ -226,11 +265,14 @@ function payeeFor(i: ItemRow, b: Pick<BatchRow, 'approvedAt'>, bank: ReturnType<
   return { sortCode: d.sortCode, accountNumber: d.accountNumber };
 }
 
-/** One item as the adapter sees it (the payee the item was approved with; empty when Linear Hub has none). */
-function providerItem(b: Pick<BatchRow, 'idempotencyKey'>, i: ItemRow, payee: { sortCode: string; accountNumber: string } | null): ProviderItem {
+/**
+ * One item as the adapter sees it (the payee the item was approved with; empty when Linear Hub has none). `copy` 2 and
+ * up: the person-week was in an earlier downloaded live bank file (MON-2), so the reference says which copy this is.
+ */
+function providerItem(b: Pick<BatchRow, 'idempotencyKey'>, i: ItemRow, payee: { sortCode: string; accountNumber: string } | null, copy = 1): ProviderItem {
   return {
     id: i.id, payrollRunId: i.payrollRunId, userId: i.userId, amountPence: i.amountPence, currency: 'GBP', payeeName: i.payeeName,
-    sortCode: payee?.sortCode ?? '', accountNumber: payee?.accountNumber ?? '', reference: defaultPaymentReference(i.weekStart, i.payeeName),
+    sortCode: payee?.sortCode ?? '', accountNumber: payee?.accountNumber ?? '', reference: defaultPaymentReference(i.weekStart, i.payeeName, copy),
     weekStart: i.weekStart, idempotencyKey: `${b.idempotencyKey}:${i.id}`, providerRef: i.providerRef,
   };
 }
@@ -313,6 +355,14 @@ function toSummary(b: BatchRow): PaymentBatchSummary {
     waitingCount: Number(b.waitingCount),
     queuedCount: Number(b.queuedCount),
     lastError: b.lastError,
+    downloadedAt: b.downloadedAt,
+    downloadedByName: b.downloadedByName || null,
+    voidedAt: b.voidedAt,
+    voidedByName: b.voidedByName || null,
+    voidReason: b.voidReason,
+    firstApprovedAt: b.firstApprovedAt,
+    firstApprovedBy: b.firstApprovedBy,
+    firstApprovedByName: b.firstApprovedByName || null,
   };
 }
 
@@ -340,10 +390,39 @@ export function listBatches(db: Db, limit = 50): PaymentBatchSummary[] {
   return all<BatchRow>(db, `${BATCH_SELECT} ORDER BY b.id DESC LIMIT ${n}`).map(toSummary);
 }
 
-export function batchDetail(db: Db, id: number): PaymentBatch {
+/** Two approvals are on, but no second administrator could give one. */
+const TWO_APPROVALS_STUCK_MESSAGE = 'Two people approve each payment, but no other administrator uses two-step verification. Add one, or turn the setting off in Settings → Payments.';
+
+/** How many approvals a payment needs: 2 for a live payment while "Two people approve each payment" is on. */
+function approvalsNeeded(db: Db, b: Pick<BatchRow, 'mode' | 'firstApprovedAt'>): 1 | 2 {
+  if (b.mode !== 'live') return 1;
+  return b.firstApprovedAt || paymentsSettings(db).twoApprovals ? 2 : 1;
+}
+
+/** MONEY-MISSED-2: bonuses and adjustments added in the last 7 days to the weeks in this payment, newest first. */
+function recentChanges(db: Db, rows: readonly ItemRow[]): PaymentRecentChange[] {
+  const pairs = [...new Map(rows.map((r) => [`${r.userId}|${r.weekStart}`, r])).values()];
+  if (!pairs.length) return [];
+  const since = new Date(Date.parse(nowISO()) - 7 * 86_400_000).toISOString();
+  return all<PaymentRecentChange & { amount: number }>(
+    db,
+    `SELECT a.id AS adjustmentId, a.user_id AS userId, TRIM(u.first_name || ' ' || u.last_name) AS userName, a.target_week_start AS weekStart,
+            a.kind, a.amount, a.note, a.created_at AS createdAt, a.created_by AS createdBy,
+            CASE WHEN cb.id IS NULL THEN NULL ELSE TRIM(cb.first_name || ' ' || cb.last_name) END AS createdByName
+     FROM pay_adjustments a JOIN users u ON u.id = a.user_id LEFT JOIN users cb ON cb.id = a.created_by
+     WHERE a.created_at >= ? AND (${pairs.map(() => '(a.user_id = ? AND a.target_week_start = ?)').join(' OR ')})
+     ORDER BY a.created_at DESC, a.id DESC`,
+    [since, ...pairs.flatMap((p) => [p.userId, p.weekStart])],
+  ).map((r) => ({ ...r, amount: Number(r.amount), note: r.note ?? '' }));
+}
+
+/**
+ * The payment as its page shows it. `viewer` (the signed-in admin) decides whether they may give the next approval
+ * (MONEY-MISSED-2: not the one who gave the first).
+ */
+export function batchDetail(db: Db, id: number, viewer?: Pick<UserWithTeam, 'id'>): PaymentBatch {
   const b = requireBatch(db, id);
   const rows = itemRows(db, id);
-  const items = rows.map((r) => toItem(r, b.approvedAt));
   const adapter = (() => {
     try {
       return adapterFor(b.provider);
@@ -362,31 +441,76 @@ export function batchDetail(db: Db, id: number): PaymentBatch {
   const plan = cancelPlan(waitingRows);
   const cancelApi = plan.local.length === waitingRows.length || (!plan.unsure.length && !!adapter?.cancel && reachable);
   const cancel = b.status === 'draft' || (approved && waiting && (kind === 'file' || cancelApi));
-  const approve = b.status === 'draft' && !!adapter?.ready && connected;
+  // MONEY-MISSED-2: the second approval is someone else's
+  const needed = approvalsNeeded(db, b);
+  let approveWaitsFor: string | null = null;
+  if (b.status === 'draft' && needed === 2) {
+    const admins = adminsWithTwoStep(db);
+    if (b.firstApprovedAt && viewer && b.firstApprovedBy === viewer.id) {
+      approveWaitsFor = `You gave the first approval on ${payDayLabel(b.firstApprovedAt.slice(0, 10))}: a different administrator gives the second, with their own code.${admins < 2 ? ' No other administrator uses two-step verification yet: add one, or cancel this payment and turn the setting off.' : ''}`;
+    } else if (!b.firstApprovedAt && admins < 2) {
+      // nobody could give the second approval: say so before anyone gives a first one that can never be completed
+      approveWaitsFor = TWO_APPROVALS_STUCK_MESSAGE;
+    }
+  }
+  const approve = b.status === 'draft' && !!adapter?.ready && connected && approveWaitsFor === null;
   // review fixes UI-7 / UI-9: why, when the button is missing (only when there is something to say)
-  const approveBlocked = b.status === 'draft' && !approve ? approveBlockedReason(b, conn) : null;
+  const approveBlocked = b.status === 'draft' && !approve && !approveWaitsFor ? approveBlockedReason(b, conn) : null;
   const unsureBlocks = !cancel && approved && kind === 'api' && plan.unsure.length > 0;
   const cancelBlocked = unsureBlocks
     ? unsureReason({ what: plan.unsure.length === 1 ? 'made it' : 'made them', providerName: conn?.name ?? 'the provider', provider: b.provider, canCancel: !!adapter?.cancel, mode: b.mode })
     : null;
   // review fix (SD-1): Cancel the rest is shown greyed out only when Check now can bring it back
   const cancelWaits = unsureBlocks && !!adapter?.cancel;
+  // MON-2: a live file counts as sent from its first download
+  const downloaded = kind === 'file' && b.mode === 'live' && b.downloadedAt !== null;
+  const voidable = downloaded && !b.voidedAt && !waiting && Number(b.freedUnconfirmed) > 0;
+  // MON-1 / MONEY-MISSED-3: what to check about each person before paying (their run as it stands)
+  const checks = payrollChecksFor(db, rows.filter((r) => r.status !== 'cancelled').map((r) => ({ id: r.payrollRunId, userId: r.userId, weekStart: r.weekStart, weekEnd: addDays(r.weekStart, 6) })));
+  // MON-2: an earlier downloaded file that held the same person-week (named on the page)
+  const earlier = kind === 'file' && b.mode === 'live' ? earlierFiles(db, id) : null;
+  const items = rows.map((r) => {
+    const item: PaymentItem = toItem(r, b.approvedAt);
+    const c = r.status !== 'cancelled' ? checks.get(r.payrollRunId) : undefined;
+    if (c) item.checks = c;
+    const e = earlier?.get(r.id);
+    if (e) item.earlierFile = e;
+    return item;
+  });
+  const counted = items.filter((i) => i.checks);
   return {
     ...toSummary(b),
+    approvalsNeeded: needed,
     items,
     skipped: parseSkipped(b.skippedJson),
     kind,
+    recentChanges: recentChanges(db, rows.filter((r) => r.status !== 'cancelled')),
+    unconfirmedPence: counted.reduce((sum, i) => sum + Math.round((i.checks?.unconfirmed?.amount ?? 0) * 100), 0),
+    unconfirmedSubs: counted.reduce((sum, i) => sum + (i.checks?.unconfirmed?.subs ?? 0), 0),
+    daysWaiting: counted.reduce((sum, i) => sum + (i.checks?.daysWaiting ?? 0), 0),
     actions: {
       approve,
       cancel,
       refresh: approved && kind === 'api' && waiting && !!adapter?.ready && reachable,
-      download: kind === 'file' && Boolean(b.hasFile) && b.status !== 'cancelled',
+      download: kind === 'file' && Boolean(b.hasFile) && b.status !== 'cancelled' && !b.voidedAt,
       markPaid: kind === 'file' && approved && items.some((i) => i.status === 'submitted' || i.status === 'processing'),
       ...(approveBlocked ? { approveBlocked } : {}),
       ...(cancelBlocked ? { cancelBlocked } : {}),
       ...(cancelWaits ? { cancelWaits } : {}),
+      ...(downloaded && cancel ? { cancelNeedsConfirmation: true } : {}),
+      ...(downloaded ? { markNotPaidNeedsConfirmation: true } : {}),
+      ...(voidable ? { voidable: true } : {}),
+      ...(approveWaitsFor ? { approveWaitsFor } : {}),
     },
   };
+}
+
+/**
+ * MON-2: the first download of a bank file. From then on a LIVE file's people count as sent; a test file's download is
+ * only recorded (its lines carry no real bank details, so it can pay nobody).
+ */
+export function recordDownload(db: Db, me: UserWithTeam, id: number): void {
+  run(db, `UPDATE payment_batches SET downloaded_at = COALESCE(downloaded_at, ?), downloaded_by = COALESCE(downloaded_by, ?) WHERE id = ?`, [nowISO(), me.id, id]);
 }
 
 // ───────────────────────────── 1. the draft ─────────────────────────────
@@ -414,6 +538,76 @@ function livePayments(db: Db, runIds: readonly number[], userIds: readonly numbe
   );
 }
 
+interface RecentFileRow {
+  userId: number;
+  weekStart: string;
+  batchId: number;
+  downloadedAt: string;
+}
+
+/**
+ * MON-2: person-weeks that were in a LIVE bank file downloaded in the last FILE_REPEAT_DAYS days and were then freed
+ * (cancelled, or marked not paid) WITHOUT anyone confirming the file was not used (1.4.0 data): the bank may still
+ * pay them, so a new payment for them waits.
+ */
+function recentFiles(db: Db, userIds: readonly number[], exceptBatch: number | null = null): RecentFileRow[] {
+  if (!userIds.length) return [];
+  const since = new Date(Date.parse(nowISO()) - FILE_REPEAT_DAYS * 86_400_000).toISOString();
+  return all<RecentFileRow & { provider: string }>(
+    db,
+    `SELECT i.user_id AS userId, i.week_start AS weekStart, b.id AS batchId, b.downloaded_at AS downloadedAt, b.provider
+     FROM payment_items i JOIN payment_batches b ON b.id = i.batch_id
+     WHERE b.mode = 'live' AND b.downloaded_at IS NOT NULL AND b.downloaded_at >= ? AND b.id <> ?
+       AND i.provider_ref IS NOT NULL AND i.status IN ('cancelled', 'failed') AND i.freed_confirmed_at IS NULL
+       AND i.user_id IN (${placeholders(userIds.length)})`,
+    [since, exceptBatch ?? -1, ...userIds],
+  ).filter((r) => kindOf(r.provider) === 'file');
+}
+
+interface EarlierFileRow {
+  itemId: number;
+  batchId: number;
+  provider: string;
+  downloadedAt: string;
+  downloadedByName: string | null;
+  voidedAt: string | null;
+}
+
+/**
+ * MON-2: for each item of live bank file payment `batchId`, the earlier live bank files that held the same person-week,
+ * were downloaded and then let go (cancelled, or marked not paid): how many, and the latest. A new file's references
+ * then say which copy it is ("LINEAR 05OCT JL 2"), so the bank's own duplicate check can tell the files apart, and the
+ * page names the earlier file. One grouped read.
+ */
+function earlierFiles(db: Db, batchId: number): Map<number, NonNullable<PaymentItem['earlierFile']>> {
+  const rows = all<EarlierFileRow>(
+    db,
+    `SELECT cur.id AS itemId, b.id AS batchId, b.provider, b.downloaded_at AS downloadedAt,
+            TRIM(du.first_name || ' ' || du.last_name) AS downloadedByName, b.voided_at AS voidedAt
+     FROM payment_items cur
+     JOIN payment_batches nb ON nb.id = cur.batch_id
+     JOIN payment_items i ON i.user_id = cur.user_id AND i.week_start = cur.week_start AND i.batch_id < cur.batch_id
+     JOIN payment_batches b ON b.id = i.batch_id
+     LEFT JOIN users du ON du.id = b.downloaded_by
+     WHERE cur.batch_id = ? AND nb.mode = 'live' AND b.mode = 'live' AND b.provider = nb.provider AND b.downloaded_at IS NOT NULL
+       AND i.provider_ref IS NOT NULL AND i.status IN ('cancelled', 'failed')
+     ORDER BY b.id`,
+    [batchId],
+  ).filter((r) => kindOf(r.provider) === 'file');
+  const out = new Map<number, NonNullable<PaymentItem['earlierFile']>>();
+  for (const r of rows) {
+    const copies = (out.get(r.itemId)?.copies ?? 0) + 1;
+    out.set(r.itemId, { batchId: r.batchId, downloadedAt: r.downloadedAt, downloadedByName: r.downloadedByName || null, voidedAt: r.voidedAt, copies });
+  }
+  return out;
+}
+
+/** The words for a person-week held by a recent file (MON-2). */
+function recentFileReason(f: RecentFileRow): string {
+  const until = payDayLabel(addDays(f.downloadedAt.slice(0, 10), FILE_REPEAT_DAYS));
+  return `In bank file payment #${f.batchId}, downloaded on ${payDayLabel(f.downloadedAt.slice(0, 10))} and then cancelled without confirming it was not uploaded: your bank may still pay it. Open payment #${f.batchId} and confirm it was not uploaded, or wait until ${until}`;
+}
+
 interface Candidate {
   run: PayrollRunWithUser;
   amountPence: number;
@@ -427,13 +621,15 @@ interface Candidate {
  */
 function skipReason(
   r: PayrollRunWithUser,
-  ctx: { today: string; live: boolean; inPayment: LivePaymentRow[]; bank: Map<number, { needsConfirmation: boolean; changedAt: string }> },
+  ctx: { today: string; live: boolean; inPayment: LivePaymentRow[]; recent: RecentFileRow[]; bank: Map<number, Pick<BankDetails, 'needsConfirmation' | 'changedAt' | 'changedBy' | 'changedByName' | 'reportedAt'>> },
 ): Omit<PaymentSkip, 'runId' | 'userId' | 'userName' | 'weekStart' | 'amountPence'> | null {
   const first = firstName(r.userName);
   if (r.status === 'paid' || r.status === 'late') return { code: 'already_paid', reason: `Already paid${r.paidDate ? ` on ${payDayLabel(r.paidDate)}` : ''}` };
   if (ctx.live) {
     const other = ctx.inPayment.find((p) => p.runId === r.id || (p.userId === r.userId && p.weekStart === r.weekStart));
     if (other) return { code: 'in_payment', reason: `Already in payment #${other.batchId}` };
+    const file = ctx.recent.find((f) => f.userId === r.userId && f.weekStart === r.weekStart);
+    if (file) return { code: 'recent_file', reason: recentFileReason(file) };
   }
   if (!(r.weekEnd < ctx.today)) return { code: 'week_not_ended', reason: `The week ends on ${payDayLabel(r.weekEnd)}: pay it after that` };
   if (!(r.gross > 0)) return { code: 'not_positive', reason: r.gross < 0 ? `The week comes to ${formatPence(poundsToPence(r.gross))}, below £0` : 'Nothing to pay: the week comes to £0.00' };
@@ -443,7 +639,15 @@ function skipReason(
   }
   const bank = ctx.bank.get(r.userId);
   if (!bank) return { code: 'no_bank_details', reason: `No bank details yet: ask ${first} to add them in Settings → Bank details` };
-  if (bank.needsConfirmation) return { code: 'bank_details_unconfirmed', reason: `${first} changed their bank details on ${payDayLabel(bank.changedAt.slice(0, 10))}: check them with ${first}, then confirm them in Team` };
+  if (bank.needsConfirmation) {
+    const day = payDayLabel(bank.changedAt.slice(0, 10));
+    // MON-3: say who has to confirm them
+    if (bank.reportedAt) return { code: 'bank_details_unconfirmed', reason: `${first} reported their bank details as not theirs on ${payDayLabel(bank.reportedAt.slice(0, 10))}: type in the right ones with ${first} first` };
+    if (bank.changedBy !== null && bank.changedBy !== r.userId) {
+      return { code: 'bank_details_unconfirmed', reason: `${bank.changedByName ?? 'An administrator'} typed in ${first}’s bank details on ${day}: they wait until ${first} confirms them in Settings, or another administrator confirms them in Team` };
+    }
+    return { code: 'bank_details_unconfirmed', reason: `${first} changed their bank details on ${day}: check them with ${first}, then confirm them in Team` };
+  }
   return null;
 }
 
@@ -480,8 +684,9 @@ export function createDraftBatch(db: Db, me: UserWithTeam, input: PaymentBatchIn
   const byId = new Map(runs.map((r) => [r.id, r]));
   const userIds = [...new Set(runs.map((r) => r.userId))];
   const inPayment = livePayments(db, runIds, userIds);
+  const recent = live ? recentFiles(db, userIds) : [];
   const masked = maskedBankDetails(db, userIds);
-  const bank = new Map([...masked].map(([id, d]) => [id, { needsConfirmation: d.needsConfirmation, changedAt: d.changedAt }]));
+  const bank = new Map([...masked].map(([id, d]) => [id, d]));
   const skipped: PaymentSkip[] = [];
   const pay: Candidate[] = [];
   for (const id of runIds) {
@@ -490,8 +695,9 @@ export function createDraftBatch(db: Db, me: UserWithTeam, input: PaymentBatchIn
       skipped.push({ runId: id, userId: null, userName: null, weekStart: null, amountPence: null, code: 'not_found', reason: 'This pay run no longer exists' });
       continue;
     }
-    const why = skipReason(r, { today, live, inPayment, bank });
-    const amountPence = Number.isFinite(r.gross) ? poundsToPence(r.gross) : null;
+    const why = skipReason(r, { today, live, inPayment, recent, bank });
+    // the week's pay, plus VAT when the person's self-billed invoice charges VAT (MON-7)
+    const amountPence = Number.isFinite(r.gross) ? amountToPayPence(r.gross, r.invoice) : null;
     if (why) {
       skipped.push({ runId: r.id, userId: r.userId, userName: r.userName, weekStart: r.weekStart, amountPence, ...why });
       continue;
@@ -542,6 +748,7 @@ function recheck(db: Db, me: UserWithTeam, b: BatchRow, items: ItemRow[]): strin
   const runs = new Map(withInvoiceSummaries(db, listPayroll(db, `WHERE p.id IN (${placeholders(items.length)})`, items.map((i) => i.payrollRunId)), me).map((r) => [r.id, r]));
   const masked = maskedBankDetails(db, items.map((i) => i.userId));
   const others = b.mode === 'live' ? livePayments(db, items.map((i) => i.payrollRunId), items.map((i) => i.userId), b.id) : [];
+  const recent = b.mode === 'live' ? recentFiles(db, items.map((i) => i.userId), b.id) : [];
   for (const i of items) {
     const name = i.userName || i.payeeName;
     const week = payWeekLabel(i.weekStart);
@@ -551,12 +758,14 @@ function recheck(db: Db, me: UserWithTeam, b: BatchRow, items: ItemRow[]): strin
       continue;
     }
     if (r.status === 'paid' || r.status === 'late') problems.push(`${name}'s pay for ${week} was marked paid${r.paidDate ? ` on ${payDayLabel(r.paidDate)}` : ''}`);
-    else if (poundsToPence(r.gross) !== i.amountPence) problems.push(`${name}'s pay for ${week} changed: now ${formatPence(poundsToPence(r.gross))}, was ${formatPence(i.amountPence)}`);
+    else if (amountToPayPence(r.gross, r.invoice) !== i.amountPence) problems.push(`${name}'s pay for ${week} changed: now ${formatPence(amountToPayPence(r.gross, r.invoice))}, was ${formatPence(i.amountPence)}`);
     else if (r.invoice && !isInvoicePayable(r.invoice.status)) problems.push(`${name}'s invoice ${r.invoice.number} is ${r.invoice.status === 'disputed' ? 'disputed' : 'not accepted'} now`);
     const d = masked.get(i.userId);
     if (!d) problems.push(`${name}'s bank details were removed`);
     else if (d.changedAt > b.createdAt || d.needsConfirmation) problems.push(`${name}'s bank details changed after this payment was made`);
     if (others.some((o) => o.runId === i.payrollRunId || (o.userId === i.userId && o.weekStart === i.weekStart))) problems.push(`${name}'s pay for ${week} is in another payment now`);
+    const file = recent.find((f) => f.userId === i.userId && f.weekStart === i.weekStart);
+    if (file) problems.push(`${name}'s pay for ${week} was in bank file payment #${file.batchId}, which may still be paid by your bank`);
   }
   return problems;
 }
@@ -589,7 +798,18 @@ export async function approveBatch(db: Db, me: UserWithTeam, id: number, code: u
     const unique = [...new Set(problems)];
     throw new HttpError(409, `Things changed since this payment was made: ${unique.slice(0, 3).join('; ')}${unique.length > 3 ? ` (and ${unique.length - 3} more)` : ''}. Cancel it and make a new one.`, { code: 'batch_changed', problems: unique });
   }
+  // MONEY-MISSED-2: two people approve a live payment — the second must be someone else, each with their own code
+  const two = approvalsNeeded(db, b) === 2;
+  if (two && b.firstApprovedBy === me.id) throw conflict('You gave the first approval: a different administrator gives the second, with their own code.');
+  if (two && !b.firstApprovedAt && adminsWithTwoStep(db) < 2) throw conflict(TWO_APPROVALS_STUCK_MESSAGE);
   assertFreshCode(db, me, code, source, { required: true });
+  if (two && !b.firstApprovedAt) {
+    const firstAt = nowISO();
+    const n = run(db, `UPDATE payment_batches SET first_approved_at = ?, first_approved_by = ?, updated_at = ? WHERE id = ? AND status = 'draft' AND first_approved_at IS NULL`, [firstAt, me.id, firstAt, id]).changes;
+    if (!n) throw conflict('Someone gave the first approval a moment ago.');
+    bumpDataVersion();
+    return batchDetail(db, id, me);
+  }
   const at = nowISO();
   // one approval wins, even if two arrive together; the winner keeps each payee with its item
   const claimed = transaction(db, () => {
@@ -603,7 +823,7 @@ export async function approveBatch(db: Db, me: UserWithTeam, id: number, code: u
   });
   if (!claimed) throw conflict('This payment was approved a moment ago.');
   await sendQueued(db, id, me, `POST /payments/batches/:id/approve`);
-  return batchDetail(db, id);
+  return batchDetail(db, id, me);
 }
 
 const plain = (err: unknown, secrets: readonly string[]): string => {
@@ -631,6 +851,7 @@ async function sendQueued(db: Db, id: number, actor: UserWithTeam | null, action
     const queued = itemRows(db, id).filter((i) => i.status === 'queued');
     if (!queued.length) return;
     const bank = decryptedBankDetails(db, queued.map((i) => i.userId));
+    const earlier = adapter.info.kind === 'file' ? earlierFiles(db, id) : new Map<number, NonNullable<PaymentItem['earlierFile']>>();
     const send: ProviderItem[] = [];
     const held: string[] = [];
     for (const i of queued) {
@@ -640,7 +861,7 @@ async function sendQueued(db: Db, id: number, actor: UserWithTeam | null, action
         held.push(i.userName || i.payeeName);
         continue;
       }
-      send.push(providerItem(b, i, payee));
+      send.push(providerItem(b, i, payee, 1 + (earlier.get(i.id)?.copies ?? 0)));
     }
     const heldText = held.length
       ? `Linear Hub did not send ${held.join(', ')}'s payment again: it no longer has the bank details you approved it with. Check with ${conn.name} whether it was paid before you pay that week again.`
@@ -774,7 +995,7 @@ function settlePaid(db: Db, b: BatchRow, i: ItemRow, paidDate: string, actor: Us
   if (runNow.adjustedAt && b.approvedAt && runNow.adjustedAt > b.approvedAt) {
     notes.push(`The week’s figures changed while the money was on its way: ${formatPence(i.amountPence)} was paid, as approved. Put any difference on a later week as an adjustment.`);
   }
-  const nowPence = poundsToPence(runNow.gross);
+  const nowPence = amountToPayPence(runNow.gross, { vatAmount: invoiceVatByRun(db, [runNow.id]).get(runNow.id) ?? null });
   if (nowPence !== i.amountPence) notes.push(`Sent ${formatPence(i.amountPence)}; the week now comes to ${formatPence(nowPence)}. Add an adjustment for the difference on a later week.`);
   const before = payrollSnapshot(db, runNow.id);
   const date = paidDate < runNow.weekEnd ? addDays(runNow.weekEnd, 1) : paidDate;
@@ -868,7 +1089,21 @@ export async function refreshWaitingBatches(db: Db): Promise<number> {
 
 // ───────────────────────────── cancel, file, mark paid ─────────────────────────────
 
-export async function cancelBatch(db: Db, me: UserWithTeam, id: number): Promise<PaymentBatch> {
+/**
+ * MON-2: freeing the people of a live bank file after its download needs the typed words and a fresh code (400 with
+ * `confirmationNeeded` otherwise). Checked before anything changes.
+ */
+function assertFileFreedConfirmed(db: Db, me: UserWithTeam, b: BatchRow, input: { confirm?: unknown; code?: unknown } | undefined, source: string, phrase: string, what: string): void {
+  if (!isTypedConfirmation(input?.confirm, phrase)) {
+    const day = b.downloadedAt ? payDayLabel(b.downloadedAt.slice(0, 10)) : 'an earlier day';
+    throw new HttpError(400, `This bank file was downloaded on ${day}, so its people count as sent. ${what} type ${phrase} and the code from your authenticator app.`, {
+      code: 'confirmation_needed', confirmationNeeded: phrase, details: [{ path: 'confirm', message: `Type ${phrase}` }],
+    });
+  }
+  assertFreshCode(db, me, input?.code, source, { required: true });
+}
+
+export async function cancelBatch(db: Db, me: UserWithTeam, id: number, input?: PaymentCancelInput, source = 'unknown'): Promise<PaymentBatch> {
   const b = requireBatch(db, id);
   const at = nowISO();
   if (b.status === 'draft') {
@@ -876,21 +1111,33 @@ export async function cancelBatch(db: Db, me: UserWithTeam, id: number): Promise
       run(db, `UPDATE payment_items SET status = 'cancelled', updated_at = ? WHERE batch_id = ? AND status = 'queued'`, [at, id]);
       run(db, `UPDATE payment_batches SET status = 'cancelled', cancelled_at = ?, cancelled_by = ?, updated_at = ? WHERE id = ? AND status = 'draft'`, [at, me.id, at, id]);
     });
-    return batchDetail(db, id);
+    return batchDetail(db, id, me);
   }
   const items = itemRows(db, id).filter((i) => WAITING.includes(i.status));
-  if (!items.length) throw conflict('Nothing in this payment is still waiting, so there is nothing to cancel.');
   const conn = connectionRow(db, b.connectionId);
   const adapter = conn ? adapterFor(conn.provider) : null;
-  if (adapter?.info.kind === 'file') {
-    // the file was not used (or not for these people): they stay unpaid on Runs to pay
-    run(db, `UPDATE payment_items SET status = 'cancelled', updated_at = ? WHERE batch_id = ? AND status IN ('queued', 'submitted', 'processing')`, [at, id]);
-    run(db, `UPDATE payment_batches SET cancelled_at = ?, cancelled_by = ? WHERE id = ?`, [at, me.id, id]);
+  const file = (adapter?.info.kind ?? kindOf(b.provider)) === 'file';
+  const downloaded = file && b.mode === 'live' && b.downloadedAt !== null;
+  const unconfirmed = downloaded && !b.voidedAt ? Number(b.freedUnconfirmed) : 0;
+  if (!items.length && !unconfirmed) throw conflict('Nothing in this payment is still waiting, so there is nothing to cancel.');
+  if (file) {
+    // MON-2: after its download the file may be in the bank: only the admin's word (typed, with a code) frees it
+    if (downloaded) assertFileFreedConfirmed(db, me, b, input, source, FILE_NOT_UPLOADED_CONFIRMATION, 'Only if you did NOT upload it to your bank (or the bank paid none of it),');
+    transaction(db, () => {
+      // the file was not used (or not for these people): they stay unpaid on Runs to pay
+      run(db, `UPDATE payment_items SET status = 'cancelled', updated_at = ? WHERE batch_id = ? AND status IN ('queued', 'submitted', 'processing')`, [at, id]);
+      run(db, `UPDATE payment_batches SET cancelled_at = COALESCE(cancelled_at, ?), cancelled_by = COALESCE(cancelled_by, ?) WHERE id = ?`, [at, me.id, id]);
+      if (downloaded) {
+        run(db, `UPDATE payment_items SET freed_confirmed_at = ?, freed_by = ? WHERE batch_id = ? AND status IN ('cancelled', 'failed') AND freed_confirmed_at IS NULL`, [at, me.id, id]);
+        run(db, `UPDATE payment_batches SET voided_at = ?, voided_by = ?, void_reason = ? WHERE id = ?`, [at, me.id, 'Confirmed not uploaded to the bank (or not paid by it)', id]);
+      }
+    });
     for (const i of items) if (i.live) resyncFreed(db, i);
     finalise(db, id);
     bumpDataVersion();
-    return batchDetail(db, id);
+    return batchDetail(db, id, me);
   }
+  if (!items.length) throw conflict('Nothing in this payment is still waiting, so there is nothing to cancel.');
   const providerName = conn?.name ?? 'the provider';
   const plan = cancelPlan(items);
   // review fix: never "Cancelled" while the provider may have made a payment Linear Hub has no reference for
@@ -934,7 +1181,7 @@ export async function cancelBatch(db: Db, me: UserWithTeam, id: number): Promise
     busy.delete(id);
     bumpDataVersion();
   }
-  return batchDetail(db, id);
+  return batchDetail(db, id, me);
 }
 
 export interface BatchFile {
@@ -956,7 +1203,7 @@ export function batchFile(db: Db, id: number): BatchFile {
   }
 }
 
-export function markFileBatchPaid(db: Db, me: UserWithTeam, id: number, input: PaymentMarkPaidInput): PaymentBatch {
+export function markFileBatchPaid(db: Db, me: UserWithTeam, id: number, input: PaymentMarkPaidInput, source = 'unknown'): PaymentBatch {
   const b = requireBatch(db, id);
   if (kindOf(b.provider) !== 'file') throw conflict(`Linear Hub learns this from ${b.connectionName} by itself: use Check now.`);
   if (b.status === 'draft') throw conflict('Approve this payment first.');
@@ -981,13 +1228,17 @@ export function markFileBatchPaid(db: Db, me: UserWithTeam, id: number, input: P
   const reasonRaw = typeof input?.reason === 'string' ? input.reason.trim() : '';
   if (reasonRaw.length > REASON_MAX) throw badRequest(`Keep the reason under ${REASON_MAX} characters`);
   const reason = reasonRaw || 'The bank did not pay this one';
+  // MON-2: after the download, saying the bank did NOT pay someone frees their week: the typed words and a fresh code
+  const downloaded = b.mode === 'live' && b.downloadedAt !== null;
+  if (failed.length && downloaded) assertFileFreedConfirmed(db, me, b, input, source, FILE_NOT_PAID_CONFIRMATION, 'Only if your bank did NOT pay the people you unticked,');
   const action = 'POST /payments/batches/:id/mark-paid';
   // one item at a time (each step is guarded by its own conditional update; the invoice hook may hold a transaction)
   for (const x of paidIds) settlePaid(db, b, byId.get(x)!, paidDate, me, action);
   for (const x of failed) failItem(db, b, byId.get(x)!, reason, me, action);
+  if (failed.length && downloaded) run(db, `UPDATE payment_items SET freed_confirmed_at = ?, freed_by = ? WHERE id IN (${placeholders(failed.length)}) AND status = 'failed'`, [nowISO(), me.id, ...failed]);
   finalise(db, id);
   bumpDataVersion();
-  return batchDetail(db, id);
+  return batchDetail(db, id, me);
 }
 
 // ───────────────────────────── Runs to pay ─────────────────────────────

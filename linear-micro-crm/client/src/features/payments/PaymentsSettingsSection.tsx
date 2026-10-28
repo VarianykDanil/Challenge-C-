@@ -6,18 +6,27 @@
 // Package A: the Connect form starts with the provider's steps (what happens outside Linear Hub, in order); an API
 // connection is tested as soon as it is saved (Revolut's code only works for 2 minutes); Switch to live shows what
 // live needs for that provider (its own keys).
+// Every connection starts in test mode, a bank file too (its files say TEST and carry sort code 00-00-00 and account 00000000, so they pay nobody; CLM-3). A bank file has a
+// "Make a 1p test file" to check the bank takes the layout before the first real run (MON-6); an API connection shows
+// its first run: test, a sandbox payment, live (it can go live only after the sandbox answered one, MON-5), a small
+// first live run. At the top: "Two people approve each payment" (MONEY-MISSED-2), changed with a fresh code.
 import { useId, useState, type FormEvent } from 'react';
-import { Check, Plug, PlugZap, RefreshCw, TriangleAlert, Unplug, X } from 'lucide-react';
+import { Check, Circle, FileDown, Plug, PlugZap, RefreshCw, ShieldCheck, TriangleAlert, Unplug, X } from 'lucide-react';
 import {
-  PAYMENT_LIVE_CONFIRMATION, PAYMENT_MODE_LABELS, abilityChecklist, bankFileFormat, formatPence, isLiveConfirmation,
+  PAYMENT_LIVE_CONFIRMATION, PAYMENT_MODE_LABELS, abilityChecklist, bankFileFormat, formatPence, isLiveConfirmation, validateBankDetails,
   type PaymentConfigField, type PaymentConnection, type PaymentProviderView,
 } from '@lm/shared';
 import { ApiError } from '@/api/client';
-import { useCreateConnection, useDisconnectConnection, usePaymentConnections, usePaymentProviders, useTestConnection, useUpdateConnection } from '@/api/payments';
+import {
+  useCreateConnection, useDisconnectConnection, useMakeTestFile, usePaymentConnections, usePaymentProviders, usePaymentsSettings, useSavePaymentsSettings,
+  useTestConnection, useTestFileResult, useUpdateConnection,
+} from '@/api/payments';
+import { downloadTextFile } from '@/lib/files';
 import { Badge, Button, Card, CardHeader, Field, Input, Modal, Select, Skeleton, Textarea, useToast } from '@/components/ui';
 import { ConfirmDialog, ErrorState, errorMessage } from '@/features/common';
 import { formatDateTime } from '@/lib/format';
 import { useScrollToHash } from '@/lib/useScrollToHash';
+import { useCurrentUser } from '@/auth/AuthProvider';
 import { OptionPicker, bankFileFormatLabel, hasOptionLogos } from './BankFileFormats';
 import { ProviderLogo } from './ProviderLogo';
 
@@ -49,6 +58,7 @@ export default function PaymentsSettingsSection({ className }: { className?: str
         <ErrorState error={providers.error ?? connections.error} onRetry={() => { void providers.refetch(); void connections.refetch(); }} className="p-4" />
       ) : (
         <>
+          <TwoApprovals />
           <div className="grid gap-4 md:grid-cols-2">
             {(providers.data ?? []).map((p) => (
               <ProviderCard
@@ -139,6 +149,9 @@ function ConnectionRow({ provider: p, connection: c, onEdit }: { provider: Payme
   const [confirmOff, setConfirmOff] = useState(false);
   const status = STATUS[c.status];
   const api = p.kind === 'api';
+  // MON-5: an API connection goes live once its sandbox answered a test payment
+  const sandboxDone = !!c.firstRun?.sandboxPaymentAt;
+  const liveBlocked = api ? (c.status !== 'connected' ? 'Test it in test mode first' : !sandboxDone ? 'Pay one person in test mode first and wait for the sandbox to answer' : null) : null;
   const runTest = () => test.mutate(c.id, {
     onSuccess: (r) => (r.ok ? toast.success('The connection works', r.message) : toast.error('The test did not work', r.message)),
     onError: (e) => toast.error('Could not test it', errorMessage(e)),
@@ -147,21 +160,23 @@ function ConnectionRow({ provider: p, connection: c, onEdit }: { provider: Payme
     <div className="rounded-lg border border-border bg-surface-2/40 p-3" data-connection={c.id}>
       <div className="flex flex-wrap items-center gap-2">
         <span className="min-w-0 truncate text-sm font-medium text-fg">{c.name}</span>
-        {(api || p.testOnly) && <Badge tone={c.mode === 'live' ? 'danger' : 'info'} size="sm">{c.mode === 'live' ? 'Live: real money' : PAYMENT_MODE_LABELS.test}</Badge>}
+        <Badge tone={c.mode === 'live' ? 'danger' : 'info'} size="sm">{c.mode === 'live' ? (api ? 'Live: real money' : 'Live: real files') : api ? PAYMENT_MODE_LABELS.test : 'Test mode: TEST files'}</Badge>
         <Badge tone={status.tone} size="sm" dot={c.status === 'connected'}>{status.label}</Badge>
       </div>
       {!api && bankFileFormatLabel(c.settings) && <p className="mt-1 text-xs text-fg" data-connection-format={c.settings.format}>{bankFileFormatLabel(c.settings)}</p>}
       <p className="mt-1 text-xs text-muted">
-        {c.lastCheckedAt ? `Last tested ${formatDateTime(c.lastCheckedAt)}` : api ? 'Test it before you pay anyone through it.' : 'Ready to make bank files.'}
+        {c.lastCheckedAt ? `Last tested ${formatDateTime(c.lastCheckedAt)}` : api ? 'Test it before you pay anyone through it.' : c.mode === 'test' ? 'Its files say TEST and have sort code 00-00-00 and account 00000000 on every line, so they pay nobody. Switch it to live for real files.' : 'Makes real bank files.'}
         {/* review fix: only a working test's balance, named for its mode (a sandbox balance is not real money) */}
         {c.balancePence != null && c.status === 'connected' ? ` · ${api && c.mode === 'test' ? 'Sandbox balance' : 'Balance'} ${formatPence(c.balancePence)}` : ''}
       </p>
       {api && c.mode === 'live' && c.status !== 'connected' && p.liveNote && <p className="mt-1 text-xs text-muted" data-live-note="">{p.liveNote}</p>}
       {c.lastError && <p className="mt-1 text-xs text-danger">{c.lastError}</p>}
+      {api && !p.testOnly && <FirstRun c={c} />}
+      {!api && !p.testOnly && <PennyTest c={c} />}
       <div className="mt-2 flex flex-wrap gap-2">
         {api && <Button size="sm" variant="outline" className="h-10 sm:h-8" loading={test.isPending} leftIcon={<RefreshCw aria-hidden />} onClick={runTest}>Test</Button>}
-        {api && c.mode === 'test' && !p.testOnly && <Button size="sm" variant="outline" className="h-10 sm:h-8" disabled={c.status !== 'connected'} title={c.status !== 'connected' ? 'Test it in test mode first' : undefined} onClick={() => setLive(true)}>Switch to live</Button>}
-        {api && c.mode === 'live' && (
+        {c.mode === 'test' && !p.testOnly && <Button size="sm" variant="outline" className="h-10 sm:h-8" disabled={!!liveBlocked} title={liveBlocked ?? undefined} onClick={() => setLive(true)}>Switch to live</Button>}
+        {c.mode === 'live' && (
           <Button size="sm" variant="ghost" className="h-10 sm:h-8" loading={update.isPending} onClick={() => update.mutate({ id: c.id, patch: { mode: 'test' } }, { onError: (e) => toast.error('Could not switch', errorMessage(e)) })}>
             Switch to test mode
           </Button>
@@ -169,7 +184,7 @@ function ConnectionRow({ provider: p, connection: c, onEdit }: { provider: Payme
         <Button size="sm" variant="ghost" className="h-10 sm:h-8" onClick={onEdit}>Edit</Button>
         <Button size="sm" variant="ghost" className="h-10 text-danger sm:h-8" leftIcon={<Unplug aria-hidden />} onClick={() => setConfirmOff(true)}>Disconnect</Button>
       </div>
-      <LiveModal open={live} connection={c} liveNote={p.liveNote} onClose={() => setLive(false)} />
+      <LiveModal open={live} connection={c} liveNote={p.liveNote} file={!api} onClose={() => setLive(false)} />
       <ConfirmDialog
         open={confirmOff}
         onClose={() => setConfirmOff(false)}
@@ -187,7 +202,7 @@ function ConnectionRow({ provider: p, connection: c, onEdit }: { provider: Payme
   );
 }
 
-function LiveModal({ open, connection: c, liveNote, onClose }: { open: boolean; connection: PaymentConnection; liveNote?: string; onClose: () => void }) {
+function LiveModal({ open, connection: c, liveNote, file, onClose }: { open: boolean; connection: PaymentConnection; liveNote?: string; file?: boolean; onClose: () => void }) {
   const uid = useId();
   const [typed, setTyped] = useState('');
   const update = useUpdateConnection();
@@ -200,7 +215,9 @@ function LiveModal({ open, connection: c, liveNote, onClose }: { open: boolean; 
       tone="danger"
       icon={<TriangleAlert aria-hidden />}
       title={`Switch ${c.name} to live?`}
-      description="From now on, approving a payment through it moves real money from your account to the people in it."
+      description={file
+        ? 'From now on its files are real: uploading one to your bank pays the people in it. Make the 1p test file first if you have not.'
+        : 'From now on, approving a payment through it moves real money from your account to the people in it. Make the first live run small: one person.'}
       footer={(
         <>
           <Button variant="ghost" onClick={onClose}>Cancel</Button>
@@ -209,7 +226,7 @@ function LiveModal({ open, connection: c, liveNote, onClose }: { open: boolean; 
             disabled={!ready}
             loading={update.isPending}
             onClick={() => update.mutate({ id: c.id, patch: { mode: 'live', confirm: typed } }, {
-              onSuccess: () => { toast.success('Switched to live', 'Test it once more: the live service gets its own test.'); setTyped(''); onClose(); },
+              onSuccess: () => { toast.success('Switched to live', file ? 'Its next files are real bank files.' : 'Test it once more: the live service gets its own test.'); setTyped(''); onClose(); },
               onError: (e) => toast.error('Could not switch to live', errorMessage(e)),
             })}
           >
@@ -252,7 +269,7 @@ function ConnectModal({ provider: p, connection: c, onClose }: { provider: Payme
     for (const f of p.configFields) (f.secret ? secrets : settings)[f.name] = values[f.name] ?? '';
     const done = (saved: PaymentConnection) => {
       if (!testOnSave) {
-        toast.success(c ? 'Connection saved' : 'Connected', p.kind === 'api' ? 'Test it next: it starts in test mode.' : 'You can pay people through it now.');
+        toast.success(c ? 'Connection saved' : 'Connected', p.kind === 'api' ? 'Test it next: it starts in test mode.' : c ? 'Saved.' : 'It starts in test mode: its files have no real bank details, so they pay nobody. Make the 1p test file, then switch it to live.');
         onClose();
         return;
       }
@@ -278,7 +295,7 @@ function ConnectModal({ provider: p, connection: c, onClose }: { provider: Payme
       description={p.testOnly
         ? 'A test provider: it never pays anyone and has no live mode.'
         : p.kind !== 'api'
-        ? 'Linear Hub makes the file; you upload and approve it in your online banking.'
+        ? 'Linear Hub makes the file; you upload and approve it in your online banking. It starts in test mode: TEST files with no real bank details, which pay nobody.'
         // review fix (UI-3): an existing live connection is not "in test mode"
         : c?.mode === 'live'
           ? 'This connection is live: approving a payment through it moves real money. After you change its details, test it again.'
@@ -337,5 +354,182 @@ function ConfigInput({ id, field: f, value, saved, neededNow, error, onChange }:
         <Input id={id} type={f.secret ? 'password' : 'text'} value={value} onChange={(e) => onChange(e.target.value)} placeholder={f.secret && saved ? 'Saved (hidden)' : f.placeholder} autoComplete={f.secret ? 'new-password' : 'off'} spellCheck={false} invalid={!!error} />
       )}
     </Field>
+  );
+}
+
+/**
+ * MONEY-MISSED-2: "Two people approve each payment" (on by default once two administrators use two-step, then kept on).
+ * Turning it off while two or more administrators use two-step only asks: a different administrator agrees ("Agree:
+ * turn it off") or keeps it on. With one such administrator left it stays on and says so, and that one may turn it off.
+ */
+function TwoApprovals() {
+  const uid = useId();
+  const q = usePaymentsSettings();
+  const save = useSavePaymentsSettings();
+  const me = useCurrentUser();
+  const toast = useToast();
+  const [code, setCode] = useState('');
+  const [want, setWant] = useState<boolean | null>(null);
+  if (!q.data) return null;
+  const s = q.data;
+  const on = s.twoApprovals;
+  const request = on ? s.offRequest : null;
+  const mine = !!request && request.byId === me.id;
+  const needsAgreement = on && s.adminsWithTwoStep >= 2;
+  const actions: { label: string; to: boolean; variant: 'outline' | 'danger' }[] = !on
+    ? [{ label: 'Turn on', to: true, variant: 'outline' }]
+    : request
+      ? mine
+        ? [{ label: 'Keep it on', to: true, variant: 'outline' }]
+        : [{ label: 'Agree: turn it off', to: false, variant: 'danger' }, { label: 'Keep it on', to: true, variant: 'outline' }]
+      : [{ label: needsAgreement ? 'Ask to turn off' : 'Turn off', to: false, variant: 'outline' }];
+  const chosen = actions.find((a) => a.to === want) ?? null;
+  return (
+    <section className="mb-4 rounded-xl border border-border p-4" data-two-approvals-setting="">
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+        <div className="flex min-w-0 items-start gap-2">
+          <ShieldCheck className="mt-0.5 h-5 w-5 shrink-0 text-primary" aria-hidden />
+          <div className="min-w-0">
+            <h4 className="font-sans text-base font-semibold tracking-normal text-fg">Two people approve each payment <Badge tone={on ? 'success' : 'neutral'} size="sm" className="ml-1 align-middle">{on ? 'On' : 'Off'}</Badge></h4>
+            <p className="mt-0.5 text-sm text-muted">
+              A live payment needs a second approval from a different administrator, each with their own code. Nothing is sent before the second.
+              {' '}{s.adminsWithTwoStep} {s.adminsWithTwoStep === 1 ? 'administrator uses' : 'administrators use'} two-step verification.
+              {needsAgreement && !request ? ' Turning it off needs a second administrator to agree.' : ''}
+            </p>
+            {s.stuck && (
+              <p className="mt-1 text-sm text-warning" data-two-approvals-stuck="">Only one administrator uses two-step, so nobody can give a second approval and live payments wait. Add another administrator with two-step, or turn this off.</p>
+            )}
+            {request && (
+              <p className="mt-1 text-sm font-medium text-danger" data-two-approvals-request="">
+                {mine ? 'You asked' : `${request.byName ?? 'An administrator'} asked`} to turn it off on {formatDateTime(request.at)}.
+                {mine ? ' It stays on until a different administrator agrees.' : ' Then one administrator could pay people alone. Agree only if that is what you want.'}
+              </p>
+            )}
+          </div>
+        </div>
+        {want === null && (
+          <div className="flex shrink-0 flex-wrap gap-2 self-start">
+            {actions.map((a) => (
+              <Button key={a.label} size="sm" variant={a.variant} className="h-10" onClick={() => setWant(a.to)}>{a.label}</Button>
+            ))}
+          </div>
+        )}
+      </div>
+      {chosen && (
+        <form
+          className="mt-3 flex flex-col gap-2 sm:flex-row sm:items-end"
+          onSubmit={(e) => {
+            e.preventDefault();
+            save.mutate({ twoApprovals: chosen.to, code: code.replace(/\s+/g, '') }, {
+              onSuccess: (v) => {
+                toast.success(
+                  v.offRequest ? 'Asked to turn off two approvals' : v.twoApprovals ? 'Two approvals are on' : 'Two approvals turned off',
+                  v.offRequest ? 'It stays on until a different administrator agrees.' : undefined,
+                );
+                setWant(null);
+                setCode('');
+              },
+              onError: (err) => toast.error('Could not change it', errorMessage(err)),
+            });
+          }}
+        >
+          <Field label="Code from your authenticator app" htmlFor={`${uid}-code`} className="sm:w-56">
+            <Input id={`${uid}-code`} value={code} onChange={(e) => setCode(e.target.value)} inputMode="numeric" autoComplete="one-time-code" maxLength={7} placeholder="123456" className="font-mono" />
+          </Field>
+          <div className="flex gap-2">
+            <Button type="submit" size="sm" variant={chosen.variant === 'danger' ? 'danger' : 'primary'} className="h-10" loading={save.isPending} disabled={code.replace(/\s+/g, '').length !== 6}>{chosen.label}</Button>
+            <Button type="button" size="sm" variant="ghost" className="h-10" onClick={() => setWant(null)}>Cancel</Button>
+          </div>
+        </form>
+      )}
+    </section>
+  );
+}
+
+/** MON-5: the guided first run of an API connection, step by step. */
+function FirstRun({ c }: { c: PaymentConnection }) {
+  const steps: { label: string; done: boolean }[] = [
+    { label: 'Test the connection in test mode', done: c.mode === 'live' || c.status === 'connected' },
+    { label: 'Pay one person in test mode (Pay people) and wait for the sandbox to answer', done: !!c.firstRun?.sandboxPaymentAt },
+    { label: `Switch to live (type ${PAYMENT_LIVE_CONFIRMATION}) and test the live keys`, done: c.mode === 'live' },
+    { label: 'Make the first live run small: one person, then check it reached them', done: !!c.firstRun?.livePaymentAt },
+  ];
+  if (steps.every((s) => s.done)) return null;
+  return (
+    <ol className="mt-2 space-y-1 text-xs" aria-label="First run" data-first-run="">
+      {steps.map((s) => (
+        <li key={s.label} className="flex items-start gap-1.5">
+          {s.done ? <Check className="mt-0.5 h-3.5 w-3.5 shrink-0 text-success" aria-label="Done" /> : <Circle className="mt-0.5 h-3.5 w-3.5 shrink-0 text-muted" aria-label="To do" />}
+          <span className={s.done ? 'text-muted line-through decoration-1' : 'text-fg'}>{s.label}</span>
+        </li>
+      ))}
+    </ol>
+  );
+}
+
+/**
+ * MON-6: "Make a 1p test file" — one £0.01 payment to an account you choose (yours), in this connection's layout. Upload
+ * it to your bank before the first real run; then say whether the bank took it. The account number is in the file only.
+ */
+function PennyTest({ c }: { c: PaymentConnection }) {
+  const uid = useId();
+  const make = useMakeTestFile();
+  const result = useTestFileResult();
+  const toast = useToast();
+  const [open, setOpen] = useState(false);
+  const [holderName, setHolder] = useState('');
+  const [sortCode, setSort] = useState('');
+  const [accountNumber, setAccount] = useState('');
+  const [code, setCode] = useState('');
+  const local = validateBankDetails({ holderName, sortCode, accountNumber });
+  const submit = (e: FormEvent) => {
+    e.preventDefault();
+    if (!local.ok) return toast.error('Check the account details', local.errors[0]?.message);
+    make.mutate({ id: c.id, input: { ...local.value, code: code.replace(/\s+/g, '') } }, {
+      onSuccess: (f) => {
+        downloadTextFile(f.fileName, f.body, f.contentType);
+        toast.success('1p test file made', 'Upload it to your bank and approve it there; then say below whether the bank took it.');
+        setOpen(false);
+        setAccount('');
+        setCode('');
+      },
+      onError: (err) => toast.error('Could not make the file', errorMessage(err)),
+    });
+  };
+  const answer = (r: 'accepted' | 'refused') => result.mutate({ id: c.id, result: r }, { onError: (err) => toast.error('Could not save that', errorMessage(err)) });
+  return (
+    <div className="mt-2 space-y-2 rounded-lg bg-surface-2/60 p-2.5 text-xs" data-penny-test="">
+      <p className="text-fg">
+        {c.testFileResult === 'accepted'
+          ? '1p test: the bank took the file. Its layout works with your bank.'
+          : c.testFileResult === 'refused'
+            ? '1p test: the bank refused the file. Choose another layout (Edit) or ask your bank which columns it wants, then make a new test file.'
+            : c.testFileAt
+              ? `1p test file made ${formatDateTime(c.testFileAt)}. Did your bank take it?`
+              : 'Before the first real run, make a 1p test file: one payment of £0.01 to your own account, to check your bank takes this layout.'}
+      </p>
+      {c.testFileAt && !c.testFileResult && (
+        <div className="flex flex-wrap gap-2">
+          <Button size="sm" variant="outline" className="h-10 sm:h-8" loading={result.isPending && result.variables?.result === 'accepted'} onClick={() => answer('accepted')}>The bank took it</Button>
+          <Button size="sm" variant="ghost" className="h-10 sm:h-8" loading={result.isPending && result.variables?.result === 'refused'} onClick={() => answer('refused')}>The bank refused it</Button>
+        </div>
+      )}
+      {!open ? (
+        <Button size="sm" variant="ghost" className="h-10 sm:h-8" leftIcon={<FileDown aria-hidden />} onClick={() => setOpen(true)}>{c.testFileAt ? 'Make another 1p test file' : 'Make a 1p test file'}</Button>
+      ) : (
+        <form onSubmit={submit} className="space-y-2" noValidate>
+          <Field label="Name on the account" htmlFor={`${uid}-name`}><Input id={`${uid}-name`} value={holderName} onChange={(e) => setHolder(e.target.value)} autoComplete="off" maxLength={70} /></Field>
+          <div className="grid gap-2 sm:grid-cols-2">
+            <Field label="Sort code" htmlFor={`${uid}-sort`}><Input id={`${uid}-sort`} value={sortCode} onChange={(e) => setSort(e.target.value)} inputMode="numeric" autoComplete="off" maxLength={8} placeholder="12-34-56" className="font-mono" /></Field>
+            <Field label="Account number" htmlFor={`${uid}-acc`}><Input id={`${uid}-acc`} value={accountNumber} onChange={(e) => setAccount(e.target.value)} inputMode="numeric" autoComplete="off" maxLength={9} placeholder="12345678" className="font-mono" /></Field>
+          </div>
+          <Field label="Code from your authenticator app" htmlFor={`${uid}-code`} hint="The file pays 1p of real money."><Input id={`${uid}-code`} value={code} onChange={(e) => setCode(e.target.value)} inputMode="numeric" autoComplete="one-time-code" maxLength={7} placeholder="123456" className="font-mono sm:w-40" /></Field>
+          <div className="flex gap-2">
+            <Button type="submit" size="sm" className="h-10" loading={make.isPending} disabled={code.replace(/\s+/g, '').length !== 6}>Make the file</Button>
+            <Button type="button" size="sm" variant="ghost" className="h-10" onClick={() => setOpen(false)}>Cancel</Button>
+          </div>
+        </form>
+      )}
+    </div>
   );
 }

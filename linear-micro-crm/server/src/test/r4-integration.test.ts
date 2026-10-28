@@ -25,6 +25,7 @@ import { totp } from '../lib/totp.ts';
 import { resetCodeFailures } from '../lib/twofactor.ts';
 import { purgeExpiredSessions } from '../middleware/auth.ts';
 import { DEMO_ACCOUNTS, currentCode, startTestServer, type Json, type TestClient, type TestServer } from './helpers.ts';
+import { recordSandboxRun } from './moneyTestUtils.ts';
 
 const HOUR = 3_600_000;
 const MIN = 60_000;
@@ -83,8 +84,12 @@ async function connect(admin: TestClient, kind: 'api' | 'file', fakeOpts: Parame
   const id = made.json.id as number;
   if (kind === 'api') {
     assert.equal((await admin.post(`/payments/connections/${id}/test`)).json.ok, true);
+    recordSandboxRun(db(), id);
     assert.equal((await admin.patch(`/payments/connections/${id}`, { mode: 'live', confirm: PAYMENT_LIVE_CONFIRMATION })).status, 200);
     assert.equal((await admin.post(`/payments/connections/${id}/test`)).json.ok, true);
+  } else {
+    // a file connection starts in test mode too; these tests are about real files
+    assert.equal((await admin.patch(`/payments/connections/${id}`, { mode: 'live', confirm: PAYMENT_LIVE_CONFIRMATION })).status, 200);
   }
   return { id, fake };
 }
@@ -106,6 +111,10 @@ function paymentRoutes(someUserId: number): [string, string][] {
     ['POST', '/payments/batches/1/cancel'],
     ['GET', '/payments/batches/1/file'],
     ['POST', '/payments/batches/1/mark-paid'],
+    ['POST', '/payments/connections/1/test-file'],
+    ['POST', '/payments/connections/1/test-file-result'],
+    ['GET', '/payments/settings'],
+    ['PUT', '/payments/settings'],
     ['GET', '/me/bank-details'],
     ['PUT', '/me/bank-details'],
     ['GET', `/users/${someUserId}/bank-details`],

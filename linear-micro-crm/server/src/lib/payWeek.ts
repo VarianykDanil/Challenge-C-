@@ -14,6 +14,7 @@
 import {
   calculatePayroll,
   calculateWeekPay,
+  officeDaysWorked,
   PAY_DAY_RATE_DEFAULT,
   round2,
   type PayAdjustment,
@@ -28,7 +29,8 @@ import {
 import type { StatementSync } from 'node:sqlite';
 import { all, get, type Db } from '../db/connection.ts';
 import { getPayPlan } from '../db/queries.ts';
-import { addDays, diffDays, mondayOf, sundayOf, todayISO } from './dates.ts';
+import { mondayOf, sundayOf, todayISO } from './dates.ts';
+import { DAY_EVIDENCE_SQL, dayChecksOn, dayStatuses } from './payDays.ts';
 
 export const RULE_FROM_KEY = 'ext:pay:rule_from';
 export const DAY_RATE_KEY = 'ext:pay:day_rate';
@@ -172,6 +174,10 @@ export interface WeekFacts {
   monday: string;
   sunday: string;
   daysWorked: number;
+  /** MON-1: gauge days not paid as base days yet (no booking, check-in or confirmation; YYYY-MM-DD). */
+  daysWaiting: string[];
+  /** MON-1: gauge days a leader or the office marked as not worked. */
+  daysNotWorked: string[];
   sales: WeekPaySale[];
   confirmations: StoredConfirmation[];
   adjustments: PayAdjustment[];
@@ -186,14 +192,20 @@ export function loadWeekFacts(db: Db, user: PayUser, monday: string, today = tod
     campaignId: Number(r.campaignId), campaignCode: r.code, campaignName: r.name, date: r.date, logged: Number(r.logged), rate: Number(r.rate),
     awaitsStatement: Boolean(r.awaits),
   }));
-  let daysWorked = new Set(rows.map((r) => r.date)).size;
+  // MON-1: a gauge day is a base day only with evidence the person worked it (lib/payDays.ts)
+  // MON-8: nothing after the person's leaving date (their last working day) is a day worked
+  const leavingDate = getOf<{ d: string | null }>(db, `SELECT leaving_date AS d FROM users WHERE id = ?`, [user.id])?.d ?? null;
+  const days = dayStatuses(allOf<{ date: string; evidence: number; decision: string | null }>(db, DAY_EVIDENCE_SQL, [user.id, monday, sunday]), dayChecksOn(db))
+    .filter((d) => !leavingDate || d.date <= leavingDate);
+  let daysWorked = days.filter((d) => d.counted).length;
+  const daysWaiting = days.filter((d) => d.waiting).map((d) => d.date);
+  const daysNotWorked = days.filter((d) => d.decision === 'not_worked').map((d) => d.date);
   let hires: number | null = null;
   if (user.role === 'recruiter') {
-    // office based: Mon–Fri, clamped to the start date and (for the week in progress) to today
-    const first = user.startDate > monday ? user.startDate : monday;
-    const friday = addDays(monday, 4);
-    const last = friday < today ? friday : today;
-    daysWorked = Math.max(0, Math.min(5, diffDays(first, last) + 1));
+    // office based: Mon–Fri, clamped to the start date, the leaving date and (for the week in progress) to today, less
+    // the days they were away (MON-8, lib/staffDays.ts)
+    const absences = allOf<{ date: string }>(db, `SELECT date FROM staff_absences WHERE user_id = ? AND date BETWEEN ? AND ?`, [user.id, monday, sunday]).map((a) => a.date);
+    daysWorked = officeDaysWorked({ startDate: user.startDate, leavingDate, absences }, monday, today);
     hires = Number(getOf<{ n: number }>(db, RECRUITER_HIRES_SQL, [user.id, monday, sunday])!.n);
   }
   const confirmations = allOf<{ campaignId: number; confirmed: number; statementId: number | null; confirmedAt: string; code: string; name: string; rate: number }>(
@@ -203,7 +215,7 @@ export function loadWeekFacts(db: Db, user: PayUser, monday: string, today = tod
     statementId: c.statementId === null ? null : Number(c.statementId), confirmedAt: c.confirmedAt,
   }));
   const adjustments = allOf<PayAdjustment>(db, WEEK_ADJUSTMENTS_SQL, [user.id, monday]).map(mapAdjustment);
-  return { monday, sunday, daysWorked, sales, confirmations, adjustments, hires };
+  return { monday, sunday, daysWorked, daysWaiting, daysNotWorked, sales, confirmations, adjustments, hires };
 }
 
 /** One person's week, by the rule that applies to it. */
