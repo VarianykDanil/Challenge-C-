@@ -2,9 +2,10 @@
 /**
  * Runs the whole test suite (npm test) as if it were another date, once per date:
  *
- *   npm run test:dates                                   four awkward moments ahead of today (below)
+ *   npm run test:dates                                   five awkward moments ahead of today (below)
  *   npm run test:dates -- 2027-06-01T09:30 2028-01-01    the dates you name (UK local time unless you add Z)
  *   npm run test:dates -- business:2027-06-01T09:30      only the business clock moved (LM_BUSINESS_NOW)
+ *   npm run test:dates -- --list                         print the moments it would use, and run nothing
  *
  * A plain date moves the computer's clock for the tests (scripts/fake-now.mjs says what that moves and what it leaves
  * alone). A date written as business:<date> leaves the computer's clock alone and moves only the business clock, as
@@ -29,10 +30,18 @@ function onOrAfter(d, weekday) {
   return x;
 }
 
+/** The last Sunday of a month (month 0 = January). */
+function lastSunday(year, month) {
+  const x = new Date(year, month + 1, 0);
+  while (x.getDay() !== 0) x.setDate(x.getDate() - 1);
+  return x;
+}
+
 /** Moments that have broken date-dependent tests before, always ahead of today so they keep finding new ones. */
 function defaultRuns(today = new Date()) {
   const y = today.getFullYear();
   return [
+    local(lastSunday(y + 1, 2), 12, 0), // midday on the Sunday the UK clocks go forward: that day has only 23 hours
     local(new Date(y + 1, 11, 31), 23, 45), // the last minutes of a year, late at night
     local(onOrAfter(new Date(y + 2, 0, 3), 0), 23, 30), // a Sunday night in early January: last week was last year
     local(onOrAfter(new Date(y + 1, 6, 1), 1), 0, 0), // midnight starting a summer-time Monday: "00:01 today" is ahead
@@ -41,7 +50,9 @@ function defaultRuns(today = new Date()) {
 }
 
 const args = process.argv.slice(2).filter((a) => a !== '--');
-const runs = (args.length ? args : defaultRuns()).map((arg) => {
+const listOnly = args.includes('--list');
+const dates = args.filter((a) => a !== '--list');
+const runs = (dates.length ? dates : defaultRuns()).map((arg) => {
   const businessOnly = arg.startsWith('business:');
   const at = businessOnly ? arg.slice('business:'.length) : arg;
   if (Number.isNaN(new Date(at).getTime())) {
@@ -50,6 +61,11 @@ const runs = (args.length ? args : defaultRuns()).map((arg) => {
   }
   return { at, businessOnly };
 });
+
+if (listOnly) {
+  for (const { at, businessOnly } of runs) console.log(businessOnly ? `business:${at}` : at);
+  process.exit(0);
+}
 
 const npm = process.platform === 'win32' ? 'npm.cmd' : 'npm';
 const results = [];

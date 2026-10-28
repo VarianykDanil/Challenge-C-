@@ -85,13 +85,14 @@ jobs:
         if: always()
         run: npm audit || true
 
-  # The whole suite again at four awkward moments ahead (a year end at night, a Sunday night in January, midnight
-  # starting a summer-time Monday, and the business clock alone moved as LM_BUSINESS_NOW does), so a test that only
-  # passes on today's date, or only when the two clocks agree, fails now instead of on that day.
+  # The whole suite again at five awkward moments ahead (the Sunday the clocks go forward, a year end at night, a
+  # Sunday night in January, midnight starting a summer-time Monday, and the business clock alone moved as
+  # LM_BUSINESS_NOW does), so a test that only passes on today's date, or only when the two clocks agree, fails now
+  # instead of on that day. `npm run test:dates -- --list` prints them.
   dates:
     name: tests on other dates
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 40
     defaults:
       run:
         working-directory: linear-micro-crm
@@ -108,7 +109,7 @@ jobs:
           cache-dependency-path: linear-micro-crm/package-lock.json
       - name: Install
         run: npm ci --no-audit --no-fund
-      - name: npm test at four other moments
+      - name: npm test at five other moments
         run: npm run test:dates
 
   boot:
