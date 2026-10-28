@@ -4,7 +4,7 @@
  */
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { existsSync, mkdtempSync, rmSync, utimesSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdtempSync, realpathSync, rmSync, utimesSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { openDb } from '../db/connection.ts';
@@ -117,7 +117,8 @@ test('a database file keeps its media next to it; unfinished uploads older than 
   const dir = mkdtempSync(path.join(os.tmpdir(), 'lm-p5-db-'));
   const db = openDb(path.join(dir, 'linear.sqlite'));
   try {
-    assert.equal(mediaRootFor(db), path.join(dir, 'media'));
+    // the database's real folder: on a Mac the temporary folder is reached through a link (/var is /private/var)
+    assert.equal(mediaRootFor(db), path.join(realpathSync(dir), 'media'));
     const old = path.join(dir, 'old.upload');
     const fresh = path.join(dir, 'fresh.upload');
     const kept = path.join(dir, 'kept.mp4');

@@ -8,7 +8,7 @@
 import { after, before, test } from 'node:test';
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, readdirSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import net from 'node:net';
 import os from 'node:os';
 import path from 'node:path';
@@ -60,19 +60,26 @@ after(() => {
   rmSync(tmp, { recursive: true, force: true });
 });
 
+
+/** A folder's real path (its parent resolved through links), so two spellings of one folder compare equal. */
+function realFolder(p: string): string {
+  return path.join(realpathSync(path.dirname(p)), path.basename(p));
+}
+
 test('foldersOutsideBackup names the folders the server itself uses (defaults and the LM_* settings)', () => {
   const db = openDb(dbPath);
   try {
     configureAppSecret(path.join(dataDir, 'app-secret'));
     const plain = foldersOutsideBackup(dbPath, {});
     assert.deepEqual(plain, { media: path.join(dataDir, 'media'), statements: path.join(dataDir, 'statements'), uploads: path.join(dataDir, 'uploads') });
-    assert.equal(plain.media, mediaRootFor(db));
+    // the same folder, however it is spelt: on a Mac the temporary folder is reached through a link (/var is /private/var)
+    assert.equal(realFolder(plain.media), realFolder(mediaRootFor(db)));
     const saved = { s: process.env.LM_STATEMENTS_DIR, u: process.env.LM_UPLOADS_DIR };
     try {
       delete process.env.LM_STATEMENTS_DIR;
       delete process.env.LM_UPLOADS_DIR;
-      assert.equal(plain.statements, statementsDir(db));
-      assert.equal(plain.uploads, uploadsDir());
+      assert.equal(realFolder(plain.statements), realFolder(statementsDir(db)));
+      assert.equal(realFolder(plain.uploads), realFolder(uploadsDir()));
 
       const env = { LM_STATEMENTS_DIR: path.join(tmp, 'stmts'), LM_UPLOADS_DIR: 'rel/uploads', LM_APP_SECRET_FILE: path.join(tmp, 'keys', 'app-secret') };
       const moved = foldersOutsideBackup(dbPath, env);
