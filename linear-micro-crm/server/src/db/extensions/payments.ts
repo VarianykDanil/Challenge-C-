@@ -45,6 +45,7 @@
 import type { Db } from '../connection.ts';
 import { encrypt } from '../../lib/crypto.ts';
 import { recordSystemEvent } from '../../lib/audit/events.ts';
+import { keepTwoApprovalsDefault } from '../../lib/payments/settings.ts';
 import { addColumnIfMissing, columnsOf, metaFlag, setMetaFlag, type DbExtension, type SeedContext } from './types.ts';
 
 const SQL = `
@@ -258,6 +259,10 @@ export const extension: DbExtension = {
          WHERE attempted_at IS NULL AND batch_id IN (SELECT id FROM payment_batches WHERE approved_at IS NOT NULL)`,
       ).run();
     }
+    // MONEY-MISSED-2: with two or more administrators using two-step, the "two approvals" default is stored, so it
+    // never switches itself off later (an administrator leaving)
+    const users = columnsOf(db, 'users');
+    if (users.includes('totp_enabled_at') && users.includes('status') && keepTwoApprovalsDefault(db)) more.push('meta.ext:payments:two_approvals');
     return [payee, attempted, ...added, reheld, ...more].filter((c): c is string => c !== null);
   },
   seed(db, ctx) {

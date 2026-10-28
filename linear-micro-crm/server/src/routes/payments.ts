@@ -72,12 +72,13 @@ export function paymentsRouter(db: Db): Router {
     res.json(paymentsSettings(db));
   });
 
+  // turning it off with 2+ administrators using two-step only asks (202); a different administrator agrees
   router.put('/settings', (req, res) => {
     const me = currentUser(req);
     const input = body<PaymentsSettingsInput>(req.body);
     if (typeof input.twoApprovals !== 'boolean') throw badRequest('Say whether two people approve each payment (true or false)');
-    assertFreshCode(db, me, input.code, codeSource(req), { required: true });
-    res.json(savePaymentsSettings(db, me, input));
+    const done = savePaymentsSettings(db, me, input, () => assertFreshCode(db, me, input.code, codeSource(req), { required: true }));
+    res.status(done.change === 'asked' ? 202 : 200).json(done.settings);
   });
 
   // ── batches ──

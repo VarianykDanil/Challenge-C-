@@ -20,6 +20,9 @@
  *    reported them: "Your bank details were changed by Ada Admin on Tue 20 Oct" … "Confirm or report it" (danger);
  *  - MON-3, the office: details an administrator typed in for someone wait for the person or ANOTHER administrator
  *    (shown to every administrator but the one who typed them), and details a person reported as not theirs (danger).
+ *  - MONEY-MISSED-2, the office: an administrator asked to turn off "Two people approve each payment" (danger, to every
+ *    administrator but the one who asked: a different one must agree), and two approvals being on with fewer than two
+ *    administrators using two-step while a live connection exists, so live payments cannot be approved (warning).
  * One UNION ALL statement per call (the feed's budget, attention.test.ts); none for a role with nothing to see. Keys
  * carry the moment, so a new change or a new failure is new again in the bell.
  */
@@ -27,6 +30,7 @@ import { formatPence, payDayLabel, type AttentionItem } from '@lm/shared';
 import { all, placeholders } from '../../db/connection.ts';
 import { DAY_CHECK_LOOKBACK_DAYS, PAY_DAY_CHECKS_KEY } from '../payDays.ts';
 import { listPaymentProviders } from '../payments/registry.ts';
+import { TWO_APPROVALS_KEY, TWO_APPROVALS_OFF_REQUEST_KEY } from '../payments/settings.ts';
 import type { AttentionProvider } from './types.ts';
 
 /**
@@ -94,7 +98,7 @@ function daysItem(rows: readonly Row[], admin: boolean): AttentionItem[] {
 }
 
 interface Row {
-  kind: 'bank' | 'failed' | 'file' | 'conn' | 'changed' | 'days' | 'notice' | 'typed' | 'reported';
+  kind: 'bank' | 'failed' | 'file' | 'conn' | 'changed' | 'days' | 'notice' | 'typed' | 'reported' | 'twooff' | 'twostuck';
   id: number;
   name: string | null;
   at: string | null;
@@ -156,10 +160,48 @@ export const provider: AttentionProvider = {
        FROM payment_connections c WHERE c.status = 'error' AND c.disconnected_at IS NULL
        UNION ALL
        ${WAITING_DAYS('')}
+       UNION ALL
+       SELECT 'twooff', CAST(json_extract(m.value, '$.by') AS INTEGER), TRIM(u.first_name || ' ' || u.last_name), json_extract(m.value, '$.at'), NULL, NULL, NULL, NULL
+       FROM meta m LEFT JOIN users u ON u.id = json_extract(m.value, '$.by')
+       WHERE m.key = ? AND json_valid(m.value) AND json_extract(m.value, '$.by') <> ?
+         AND EXISTS (SELECT 1 FROM meta t WHERE t.key = ? AND t.value IN ('on', 'auto-on'))
+       UNION ALL
+       SELECT 'twostuck', 0, NULL, NULL, NULL, NULL, NULL, NULL
+       FROM meta t WHERE t.key = ? AND t.value IN ('on', 'auto-on')
+         AND (SELECT COUNT(*) FROM users a WHERE a.role = 'admin' AND a.status = 'active' AND a.totp_enabled_at IS NOT NULL) < 2
+         AND EXISTS (SELECT 1 FROM payment_connections c WHERE c.mode = 'live' AND c.disconnected_at IS NULL)
        ORDER BY at DESC`,
-      [me.id, me.id, me.id, since, since, ...(fileProviders.length ? fileProviders : ['-']), daysSince(now.today), now.today, PAY_DAY_CHECKS_KEY],
+      [
+        me.id, me.id, me.id, since, since, ...(fileProviders.length ? fileProviders : ['-']), daysSince(now.today), now.today, PAY_DAY_CHECKS_KEY,
+        TWO_APPROVALS_OFF_REQUEST_KEY, me.id, TWO_APPROVALS_KEY, TWO_APPROVALS_KEY,
+      ],
     );
     const items: AttentionItem[] = [...noticeItem(rows), ...daysItem(rows, true)];
+    // MONEY-MISSED-2: someone asked to turn off two approvals; a different administrator must agree (or keep it on)
+    const off = rows.find((r) => r.kind === 'twooff');
+    if (off) {
+      items.push({
+        key: `payments:two-approvals-off:${off.at ?? ''}`,
+        kind: 'payments',
+        severity: 'danger',
+        title: `${off.name ?? 'An administrator'} wants to turn off two approvals`,
+        body: 'Then one administrator could pay people alone. If you agree, turn it off in Settings → Payments with your code. If not, keep it on there.',
+        href: '/settings#payments',
+        actionLabel: 'Open Settings → Payments',
+        at: off.at ?? undefined,
+      });
+    }
+    if (rows.some((r) => r.kind === 'twostuck')) {
+      items.push({
+        key: 'payments:two-approvals-stuck',
+        kind: 'payments',
+        severity: 'warning',
+        title: 'Live payments need a second administrator',
+        body: 'Two people approve each payment, but only one administrator uses two-step verification. Add another administrator with two-step, or turn the setting off in Settings → Payments.',
+        href: '/settings#payments',
+        actionLabel: 'Open Settings → Payments',
+      });
+    }
     // MON-3: a person said the details typed in for them are not theirs
     for (const r of rows.filter((x) => x.kind === 'reported').slice(0, 3)) {
       items.push({

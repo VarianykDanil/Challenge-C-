@@ -26,6 +26,7 @@ import { Badge, Button, Card, CardHeader, Field, Input, Modal, Select, Skeleton,
 import { ConfirmDialog, ErrorState, errorMessage } from '@/features/common';
 import { formatDateTime } from '@/lib/format';
 import { useScrollToHash } from '@/lib/useScrollToHash';
+import { useCurrentUser } from '@/auth/AuthProvider';
 import { OptionPicker, bankFileFormatLabel, hasOptionLogos } from './BankFileFormats';
 import { ProviderLogo } from './ProviderLogo';
 
@@ -356,16 +357,33 @@ function ConfigInput({ id, field: f, value, saved, neededNow, error, onChange }:
   );
 }
 
-/** MONEY-MISSED-2: "Two people approve each payment" (on by default once two administrators use two-step). */
+/**
+ * MONEY-MISSED-2: "Two people approve each payment" (on by default once two administrators use two-step, then kept on).
+ * Turning it off while two or more administrators use two-step only asks: a different administrator agrees ("Agree:
+ * turn it off") or keeps it on. With one such administrator left it stays on and says so, and that one may turn it off.
+ */
 function TwoApprovals() {
   const uid = useId();
   const q = usePaymentsSettings();
   const save = useSavePaymentsSettings();
+  const me = useCurrentUser();
   const toast = useToast();
   const [code, setCode] = useState('');
-  const [open, setOpen] = useState(false);
+  const [want, setWant] = useState<boolean | null>(null);
   if (!q.data) return null;
-  const on = q.data.twoApprovals;
+  const s = q.data;
+  const on = s.twoApprovals;
+  const request = on ? s.offRequest : null;
+  const mine = !!request && request.byId === me.id;
+  const needsAgreement = on && s.adminsWithTwoStep >= 2;
+  const actions: { label: string; to: boolean; variant: 'outline' | 'danger' }[] = !on
+    ? [{ label: 'Turn on', to: true, variant: 'outline' }]
+    : request
+      ? mine
+        ? [{ label: 'Keep it on', to: true, variant: 'outline' }]
+        : [{ label: 'Agree: turn it off', to: false, variant: 'danger' }, { label: 'Keep it on', to: true, variant: 'outline' }]
+      : [{ label: needsAgreement ? 'Ask to turn off' : 'Turn off', to: false, variant: 'outline' }];
+  const chosen = actions.find((a) => a.to === want) ?? null;
   return (
     <section className="mb-4 rounded-xl border border-border p-4" data-two-approvals-setting="">
       <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
@@ -375,20 +393,42 @@ function TwoApprovals() {
             <h4 className="font-sans text-base font-semibold tracking-normal text-fg">Two people approve each payment <Badge tone={on ? 'success' : 'neutral'} size="sm" className="ml-1 align-middle">{on ? 'On' : 'Off'}</Badge></h4>
             <p className="mt-0.5 text-sm text-muted">
               A live payment needs a second approval from a different administrator, each with their own code. Nothing is sent before the second.
-              {' '}{q.data.adminsWithTwoStep} {q.data.adminsWithTwoStep === 1 ? 'administrator uses' : 'administrators use'} two-step verification{q.data.explicit ? '.' : ' (on by default from two).'}
-              {on && q.data.adminsWithTwoStep < 2 ? ' With only one, nobody can give the second approval: add another administrator or turn this off.' : ''}
+              {' '}{s.adminsWithTwoStep} {s.adminsWithTwoStep === 1 ? 'administrator uses' : 'administrators use'} two-step verification.
+              {needsAgreement && !request ? ' Turning it off needs a second administrator to agree.' : ''}
             </p>
+            {s.stuck && (
+              <p className="mt-1 text-sm text-warning" data-two-approvals-stuck="">Only one administrator uses two-step, so nobody can give a second approval and live payments wait. Add another administrator with two-step, or turn this off.</p>
+            )}
+            {request && (
+              <p className="mt-1 text-sm font-medium text-danger" data-two-approvals-request="">
+                {mine ? 'You asked' : `${request.byName ?? 'An administrator'} asked`} to turn it off on {formatDateTime(request.at)}.
+                {mine ? ' It stays on until a different administrator agrees.' : ' Then one administrator could pay people alone. Agree only if that is what you want.'}
+              </p>
+            )}
           </div>
         </div>
-        {!open && <Button size="sm" variant="outline" className="h-10 shrink-0 self-start" onClick={() => setOpen(true)}>{on ? 'Turn off' : 'Turn on'}</Button>}
+        {want === null && (
+          <div className="flex shrink-0 flex-wrap gap-2 self-start">
+            {actions.map((a) => (
+              <Button key={a.label} size="sm" variant={a.variant} className="h-10" onClick={() => setWant(a.to)}>{a.label}</Button>
+            ))}
+          </div>
+        )}
       </div>
-      {open && (
+      {chosen && (
         <form
           className="mt-3 flex flex-col gap-2 sm:flex-row sm:items-end"
           onSubmit={(e) => {
             e.preventDefault();
-            save.mutate({ twoApprovals: !on, code: code.replace(/\s+/g, '') }, {
-              onSuccess: (v) => { toast.success(v.twoApprovals ? 'Two approvals turned on' : 'Two approvals turned off'); setOpen(false); setCode(''); },
+            save.mutate({ twoApprovals: chosen.to, code: code.replace(/\s+/g, '') }, {
+              onSuccess: (v) => {
+                toast.success(
+                  v.offRequest ? 'Asked to turn off two approvals' : v.twoApprovals ? 'Two approvals are on' : 'Two approvals turned off',
+                  v.offRequest ? 'It stays on until a different administrator agrees.' : undefined,
+                );
+                setWant(null);
+                setCode('');
+              },
               onError: (err) => toast.error('Could not change it', errorMessage(err)),
             });
           }}
@@ -397,8 +437,8 @@ function TwoApprovals() {
             <Input id={`${uid}-code`} value={code} onChange={(e) => setCode(e.target.value)} inputMode="numeric" autoComplete="one-time-code" maxLength={7} placeholder="123456" className="font-mono" />
           </Field>
           <div className="flex gap-2">
-            <Button type="submit" size="sm" className="h-10" loading={save.isPending} disabled={code.replace(/\s+/g, '').length !== 6}>{on ? 'Turn off' : 'Turn on'}</Button>
-            <Button type="button" size="sm" variant="ghost" className="h-10" onClick={() => setOpen(false)}>Cancel</Button>
+            <Button type="submit" size="sm" variant={chosen.variant === 'danger' ? 'danger' : 'primary'} className="h-10" loading={save.isPending} disabled={code.replace(/\s+/g, '').length !== 6}>{chosen.label}</Button>
+            <Button type="button" size="sm" variant="ghost" className="h-10" onClick={() => setWant(null)}>Cancel</Button>
           </div>
         </form>
       )}

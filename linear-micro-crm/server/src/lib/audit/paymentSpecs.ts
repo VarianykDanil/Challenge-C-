@@ -8,10 +8,11 @@
  * same rows whether the admin's request or the 5-minute job settled them); these specs write the batch's own row.
  * A wrong two-step code on a payment approval or a bank details change is recorded (kind sign_in) like one at sign-in.
  */
-import { formatPence, maskAccountNumber, maskSortCode, PAYMENT_MODE_LABELS, type PaymentMode } from '@lm/shared';
+import { formatPence, maskAccountNumber, maskSortCode, payDayLabel, PAYMENT_MODE_LABELS, type PaymentMode } from '@lm/shared';
 import { get, type Db } from '../../db/connection.ts';
 import type { AuditCall, AuditDone, AuditDraft, AuditRouteSpec } from '../auditSpecs.ts';
 import { WRONG_PAYMENT_CODE_MESSAGE } from '../payments/code.ts';
+import { adminsWithTwoStep } from '../payments/settings.ts';
 
 type Snap = Record<string, unknown>;
 
@@ -244,18 +245,40 @@ const batchMarkPaid: AuditRouteSpec<Snap | null> = {
 
 const settingsSnap = (db: Db): Snap => {
   const v = get<{ value: string }>(db, `SELECT value FROM meta WHERE key = 'ext:payments:two_approvals'`)?.value ?? null;
-  return { twoApprovals: v };
+  const raw = get<{ value: string }>(db, `SELECT value FROM meta WHERE key = 'ext:payments:two_approvals_off_request'`)?.value ?? null;
+  let offRequest: { by: number; at: string } | null = null;
+  try {
+    offRequest = raw ? (JSON.parse(raw) as { by: number; at: string }) : null;
+  } catch {
+    offRequest = null;
+  }
+  // 'auto-on' (the default, kept on) reads as on
+  return { twoApprovals: v === 'auto-on' ? 'on' : v, offRequest };
 };
 
-/** MONEY-MISSED-2: "Two people approve each payment" turned on or off. */
+const TWO_APPROVALS = '“Two people approve each payment”';
+
+/**
+ * MONEY-MISSED-2: "Two people approve each payment" turned on or off, a request to turn it off (it waits for a
+ * different administrator), the agreement, or a request cancelled by keeping it on.
+ */
 const paymentsSettingsPut: AuditRouteSpec<Snap> = {
   method: 'PUT',
   pattern: '/payments/settings',
   before: (db) => settingsSnap(db),
-  after(db, done, before) {
+  after(db, _done, before) {
     const after = settingsSnap(db);
-    if (before && before.twoApprovals === after.twoApprovals) return [];
-    return [{ entity: 'settings', entityId: null, summary: `Turned ${after.twoApprovals === 'on' ? 'on' : 'off'} “Two people approve each payment”`, before, after }];
+    const req = before?.offRequest as { by: number; at: string } | null | undefined;
+    let summary: string | null = null;
+    if (!req && after.offRequest) summary = `Asked to turn off ${TWO_APPROVALS}: a different administrator must agree`;
+    else if (before?.twoApprovals !== 'off' && after.twoApprovals === 'off') {
+      summary = req
+        ? `Turned off ${TWO_APPROVALS}, agreeing with ${personName(db, req.by)}, who asked on ${payDayLabel(req.at.slice(0, 10))}`
+        : `Turned off ${TWO_APPROVALS}${adminsWithTwoStep(db) < 2 ? ' (the only administrator who uses two-step)' : ''}`;
+    } else if (req && !after.offRequest) summary = `Kept ${TWO_APPROVALS} on: the request to turn it off is cancelled`;
+    else if (before?.twoApprovals !== 'on' && after.twoApprovals === 'on') summary = `Turned on ${TWO_APPROVALS}`;
+    if (!summary) return [];
+    return [{ entity: 'settings', entityId: null, summary, before, after }];
   },
   failed: wrongCode('changing the payment approvals', 'settings', () => null),
 };

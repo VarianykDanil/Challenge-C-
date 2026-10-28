@@ -215,10 +215,17 @@ export interface PaymentTestFileResultInput {
  */
 export interface PaymentsSettings {
   twoApprovals: boolean;
-  /** false: the default is in use (on with 2+ administrators with two-step). */
+  /** false: the default is in use (on once 2+ administrators use two-step, and then kept on). */
   explicit: boolean;
   /** Active administrators with two-step verification on (who can approve). */
   adminsWithTwoStep: number;
+  /**
+   * An administrator asked to turn two approvals off; it stays on until a DIFFERENT administrator agrees (PUT
+   * twoApprovals false with their own code) or someone keeps it on (PUT true). Null when nobody asked.
+   */
+  offRequest: { byId: number; byName: string | null; at: string } | null;
+  /** On, but fewer than two administrators use two-step: live payments wait until one is added, or it is turned off. */
+  stuck: boolean;
 }
 
 export interface PaymentsSettingsInput {

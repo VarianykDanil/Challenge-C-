@@ -332,19 +332,104 @@ describe('MONEY-MISSED-2: Two people approve each payment', () => {
     assert.match(audit[1]!.summary, /Approved payment/);
   });
 
-  test('test mode needs one approval; turning the setting off needs a fresh code and is recorded', async () => {
+  test('test mode needs one approval; only administrators see or change the setting, with a fresh code', async () => {
     const id = (await admin.post('/payments/connections', { provider: 'fake' })).json.id as number;
     await admin.post(`/payments/connections/${id}/test`);
     const runA = addRun(srv.db, fx.users.rep, week, 120.5);
     const d = (await admin.post('/payments/batches', { connectionId: id, runIds: [runA] })).json;
     assert.equal(d.approvalsNeeded, 1, 'test mode pays nobody');
     assert.equal((await admin.put('/payments/settings', { twoApprovals: false })).status, 400, 'a fresh code is needed');
+    for (const who of [leader, rep, client]) {
+      assert.equal((await who.get('/payments/settings')).status, 403);
+      assert.equal((await who.put('/payments/settings', { twoApprovals: false })).status, 403);
+    }
+  });
+
+  // changed: turning it off used to take one administrator's code. The person the second approval checks could switch
+  // it off alone (the review's probe P2), so with two or more administrators who use two-step, a different one agrees.
+  test('the review probe: the administrator it checks cannot turn it off alone; a different administrator must agree', async () => {
+    const conn = await liveFake();
+    const asked = await admin.put('/payments/settings', { twoApprovals: false, code: code() });
+    assert.equal(asked.status, 202, JSON.stringify(asked.json));
+    assert.equal(asked.json.twoApprovals, true, 'still on');
+    assert.equal(asked.json.offRequest.byName, 'Ada Admin');
+    assert.ok(asked.json.offRequest.at);
+    const again = await admin.put('/payments/settings', { twoApprovals: false, code: code() });
+    assert.equal(again.status, 409);
+    assert.match(again.json.error, /different administrator/);
+    // the other administrator is told straight away (danger); the one who asked is not asked to agree with themself
+    const feed = (await admin2.get('/me/attention')).json as { items?: Json[] } | Json[];
+    const item = (Array.isArray(feed) ? feed : feed.items!).find((i) => String(i.key).startsWith('payments:two-approvals-off:'));
+    assert.ok(item, 'the other administrator is told');
+    assert.equal(item.severity, 'danger');
+    assert.match(String(item.title), /Ada Admin wants to turn off two approvals/);
+    const own = (await admin.get('/me/attention')).json as { items?: Json[] } | Json[];
+    assert.ok(!(Array.isArray(own) ? own : own.items!).some((i) => String(i.key).startsWith('payments:two-approvals-off:')));
+    // while it waits, a live payment still needs two people
+    const runA = addRun(srv.db, fx.users.rep, week, 120.5);
+    const draft = (await admin.post('/payments/batches', { connectionId: conn, runIds: [runA] })).json;
+    assert.equal(draft.approvalsNeeded, 2);
+    const first = await admin.post(`/payments/batches/${draft.id}/approve`, { code: code() });
+    assert.equal(first.json.status, 'draft', 'nothing sent on one approval');
+    assert.equal(fake.calls.submit, 0);
+    // a different administrator agrees, with their own code: off
+    const agreed = await admin2.put('/payments/settings', { twoApprovals: false, code: code(admin2Id) });
+    assert.equal(agreed.status, 200, JSON.stringify(agreed.json));
+    assert.equal(agreed.json.twoApprovals, false);
+    assert.equal(agreed.json.offRequest, null);
+    const trail = all<{ summary: string }>(srv.db, `SELECT summary FROM audit_log WHERE action = 'PUT /payments/settings' ORDER BY id`).map((r) => r.summary);
+    assert.equal(trail.length, 2, JSON.stringify(trail));
+    assert.match(trail[0]!, /^Asked to turn off “Two people approve each payment”: a different administrator must agree$/);
+    assert.match(trail[1]!, /^Turned off “Two people approve each payment”, agreeing with Ada Admin, who asked on /);
+  });
+
+  test('keeping it on cancels a request to turn it off', async () => {
+    assert.equal((await admin.put('/payments/settings', { twoApprovals: false, code: code() })).status, 202);
+    const kept = await admin2.put('/payments/settings', { twoApprovals: true, code: code(admin2Id) });
+    assert.equal(kept.status, 200, JSON.stringify(kept.json));
+    assert.equal(kept.json.twoApprovals, true);
+    assert.equal(kept.json.offRequest, null);
+    const feed = (await admin2.get('/me/attention')).json as { items?: Json[] } | Json[];
+    assert.ok(!(Array.isArray(feed) ? feed : feed.items!).some((i) => String(i.key).startsWith('payments:two-approvals-off:')));
+    assert.match(all<{ summary: string }>(srv.db, `SELECT summary FROM audit_log WHERE action = 'PUT /payments/settings' ORDER BY id DESC`)[0]!.summary, /Kept “Two people approve each payment” on/);
+  });
+
+  test('P2b: an administrator leaving never switches it off; with one left it stays on, says so, and only then one may turn it off', async () => {
+    const conn = await liveFake();
+    assert.equal((await admin.get('/payments/settings')).json.twoApprovals, true);
+    run(srv.db, `UPDATE users SET status = 'left' WHERE id = ?`, [admin2Id]);
+    srv.resetCache();
+    const s = (await admin.get('/payments/settings')).json;
+    assert.equal(s.twoApprovals, true, 'still on: it never switches itself off');
+    assert.equal(s.adminsWithTwoStep, 1);
+    assert.equal(s.stuck, true);
+    // a live payment cannot get its second approval: the page says why, and no first approval is taken
+    const runA = addRun(srv.db, fx.users.rep, week, 120.5);
+    const draft = (await admin.post('/payments/batches', { connectionId: conn, runIds: [runA] })).json;
+    assert.equal(draft.actions.approve, false);
+    assert.match(String(draft.actions.approveWaitsFor), /no other administrator uses two-step/);
+    const refused = await admin.post(`/payments/batches/${draft.id}/approve`, { code: code() });
+    assert.equal(refused.status, 409);
+    assert.match(refused.json.error, /no other administrator uses two-step/);
+    const feed = (await admin.get('/me/attention')).json as { items?: Json[] } | Json[];
+    assert.ok((Array.isArray(feed) ? feed : feed.items!).some((i) => i.key === 'payments:two-approvals-stuck'), 'the office is told');
+    // the only administrator with two-step may now turn it off with their code (recorded), and pay alone
     const off = await admin.put('/payments/settings', { twoApprovals: false, code: code() });
     assert.equal(off.status, 200, JSON.stringify(off.json));
     assert.equal(off.json.twoApprovals, false);
-    assert.equal(off.json.explicit, true);
-    assert.ok(all(srv.db, `SELECT 1 FROM audit_log WHERE action = 'PUT /payments/settings' AND summary LIKE '%off%'`).length === 1);
-    for (const who of [leader, rep, client]) assert.equal((await who.get('/payments/settings')).status, 403);
+    assert.match(all<{ summary: string }>(srv.db, `SELECT summary FROM audit_log WHERE action = 'PUT /payments/settings' ORDER BY id DESC`)[0]!.summary, /^Turned off “Two people approve each payment” \(the only administrator who uses two-step\)$/);
+    const paid = await admin.post(`/payments/batches/${draft.id}/approve`, { code: code() });
+    assert.equal(paid.status, 200, JSON.stringify(paid.json));
+    assert.notEqual(paid.json.status, 'draft');
+  });
+
+  test('upgrading: with two administrators who use two-step, the default is kept on from the first start', async () => {
+    run(srv.db, `DELETE FROM meta WHERE key = 'ext:payments:two_approvals'`);
+    createSchema(srv.db);
+    assert.ok(get(srv.db, `SELECT 1 FROM meta WHERE key = 'ext:payments:two_approvals'`), 'stored');
+    run(srv.db, `UPDATE users SET status = 'left' WHERE id = ?`, [admin2Id]);
+    srv.resetCache();
+    assert.equal((await admin.get('/payments/settings')).json.twoApprovals, true);
   });
 
   test('the approval screen lists bonuses and adjustments added in the last 7 days and who added them', async () => {

@@ -387,6 +387,9 @@ export function listBatches(db: Db, limit = 50): PaymentBatchSummary[] {
   return all<BatchRow>(db, `${BATCH_SELECT} ORDER BY b.id DESC LIMIT ${n}`).map(toSummary);
 }
 
+/** Two approvals are on, but no second administrator could give one. */
+const TWO_APPROVALS_STUCK_MESSAGE = 'Two people approve each payment, but no other administrator uses two-step verification. Add one, or turn the setting off in Settings → Payments.';
+
 /** How many approvals a payment needs: 2 for a live payment while "Two people approve each payment" is on. */
 function approvalsNeeded(db: Db, b: Pick<BatchRow, 'mode' | 'firstApprovedAt'>): 1 | 2 {
   if (b.mode !== 'live') return 1;
@@ -438,9 +441,14 @@ export function batchDetail(db: Db, id: number, viewer?: Pick<UserWithTeam, 'id'
   // MONEY-MISSED-2: the second approval is someone else's
   const needed = approvalsNeeded(db, b);
   let approveWaitsFor: string | null = null;
-  if (b.status === 'draft' && needed === 2 && b.firstApprovedAt) {
-    if (viewer && b.firstApprovedBy === viewer.id) approveWaitsFor = `You gave the first approval${b.firstApprovedAt ? ` on ${payDayLabel(b.firstApprovedAt.slice(0, 10))}` : ''}: a different administrator gives the second, with their own code.`;
-    else if (adminsWithTwoStep(db) < 2) approveWaitsFor = 'Two people approve each payment, but no other administrator uses two-step verification. Add one, or turn the setting off in Settings → Payments.';
+  if (b.status === 'draft' && needed === 2) {
+    const admins = adminsWithTwoStep(db);
+    if (b.firstApprovedAt && viewer && b.firstApprovedBy === viewer.id) {
+      approveWaitsFor = `You gave the first approval on ${payDayLabel(b.firstApprovedAt.slice(0, 10))}: a different administrator gives the second, with their own code.${admins < 2 ? ' No other administrator uses two-step verification yet: add one, or cancel this payment and turn the setting off.' : ''}`;
+    } else if (!b.firstApprovedAt && admins < 2) {
+      // nobody could give the second approval: say so before anyone gives a first one that can never be completed
+      approveWaitsFor = TWO_APPROVALS_STUCK_MESSAGE;
+    }
   }
   const approve = b.status === 'draft' && !!adapter?.ready && connected && approveWaitsFor === null;
   // review fixes UI-7 / UI-9: why, when the button is missing (only when there is something to say)
@@ -747,6 +755,7 @@ export async function approveBatch(db: Db, me: UserWithTeam, id: number, code: u
   // MONEY-MISSED-2: two people approve a live payment — the second must be someone else, each with their own code
   const two = approvalsNeeded(db, b) === 2;
   if (two && b.firstApprovedBy === me.id) throw conflict('You gave the first approval: a different administrator gives the second, with their own code.');
+  if (two && !b.firstApprovedAt && adminsWithTwoStep(db) < 2) throw conflict(TWO_APPROVALS_STUCK_MESSAGE);
   assertFreshCode(db, me, code, source, { required: true });
   if (two && !b.firstApprovedAt) {
     const firstAt = nowISO();
