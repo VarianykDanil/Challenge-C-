@@ -12,7 +12,22 @@ end.
 
 ---
 
-## 1. What to buy, in Linear MCR's name
+## 1. First the agreement, then what to buy in Linear MCR's name
+
+**The agreement comes first.** The agreement signed for the trial covers Linear Hub on the office Mac. Going online,
+with HTTPS, is outside it (Schedule 1, Part 2, 2.1(a)): Noryn quotes it as a **fixed-price go-live package**, and both
+companies sign a **variation** under clause 26.2 before go-live day, as clause 9.3 requires. The variation:
+
+- names the server and off-site storage providers and where the server is (a server in Germany or Finland holds the
+  data outside the UK, so it is also Linear MCR's written instruction for that, Schedule 3, 3.6);
+- says who looks after the server, its updates and the off-site copies: moved into the monthly service, or kept by
+  Linear MCR, which the agreement makes responsible for them today (clauses 9.2 and 16.5);
+- replaces Schedules 3 and 4 for a server on the internet: where the data is processed, HTTPS, the firewall, Noryn's
+  SSH access, and the owner's duties for the server instead of the Mac (Schedule 4, Part 4).
+
+Buying the accounts in Linear MCR's name keeps their providers Linear MCR's own (Schedule 3, 3.4). A provider Noryn
+engaged itself would be a new sub-processor, with 30 days' notice first (Schedule 3, 3.2). Nothing goes on the internet
+until the variation is signed.
 
 Buy each of these **in Linear MCR's name and with its card**, so the company owns its data and its address. Noryn gets
 access to look after them (an SSH key on the server), not ownership.
@@ -57,8 +72,8 @@ cannot unlock bank details on its own.
 
 ## 3. Go-live day, step by step
 
-About half a day, the owner with Noryn. Before you start: the Mac runs Linear Hub 1.5 (`npm run latest` in the Linear
-Hub folder) and the trial has gone well.
+About half a day, the owner with Noryn. Before you start: the variation for going online is signed (§1), the Mac runs
+Linear Hub 1.5 (`npm run latest` in the Linear Hub folder) and the trial has gone well.
 
 ### Step 1 — Buy the server
 
@@ -81,10 +96,22 @@ It usually works within minutes, sometimes an hour. `ping hub.linear-mcr.co.uk` 
 ### Step 3 — Order the off-site storage
 
 - **Hetzner Storage Box** (simplest): order it in a **different location** from the server. In its settings, turn on
-  **SSH support**. Write down its host (`u123456.your-storagebox.de`) and user (`u123456`). Keep its password to type
-  once in step 4.
-- **Or an S3-compatible bucket:** make a **private** bucket, and an access key that can use only that bucket. Keep the
-  endpoint, bucket name, access key ID and secret key for step 4.
+  **SSH support** and **automatic snapshots** (for example one a day). Write down its host (`u123456.your-storagebox.de`)
+  and user (`u123456`). Keep its password to type once in step 4.
+- **Or an S3-compatible bucket:** make a **private** bucket with **versioning** on (and object lock, if the provider
+  offers it), and an access key that can use only that bucket. Keep the endpoint, the bucket's **region** (for AWS,
+  the part after `s3.` in the endpoint, e.g. `eu-west-2`; the installer works it out for AWS, Hetzner and Backblaze
+  addresses and asks otherwise), the bucket name, the access key ID and the secret key for step 4.
+
+**Why snapshots or versioning.** The server's copy job never deletes anything off-site, but the login it uses could:
+someone who took over the server could delete or overwrite the copies with it. Snapshots and versions are kept by the
+storage provider, out of that login's reach.
+
+**How long copies are kept** is Linear MCR's decision, written into the variation: the copies hold personal data, so
+no longer than needed; **90 days** is a sensible start. On a bucket, a lifecycle rule deletes copies (and old versions)
+older than that. On a Storage Box, snapshots expire by themselves; the `backups` folder itself grows by one encrypted
+copy a night, so whoever looks after the server clears copies older than the retention at the monthly backup check
+(`rclone delete --min-age 90d`), always keeping the newest month whatever else happens.
 
 ### Step 4 — Run the installer (Noryn, about 20 minutes)
 
@@ -115,8 +142,11 @@ nightly off-site copy and the `linear-hub` command.
 it is written down. Keep that paper **apart from** the recovery sheet (step 7): someone who finds one should not find
 the other. The passphrase is not in the install log.
 
-For a Storage Box, it then puts the server's key on the box: type the Storage Box password once when asked (it is not
-stored).
+For a Storage Box, it first records the box's SSH host keys and shows their fingerprints: compare them with the ones
+Hetzner publishes for Storage Boxes, and stop if they differ. Then it puts the server's key on the box: type the
+Storage Box password once when asked (it is not stored). Run with `--yes` (no questions), it cannot type that
+password: it shows the server's public key instead. Add that key to the Storage Box as Hetzner's guide to Storage Box
+SSH keys describes, then run the installer again.
 
 At the end it prints the address, the health check address and the next steps. Open `https://hub.linear-mcr.co.uk`:
 the sign-in page with a padlock. (If the address does not answer yet, the DNS is not through: Caddy keeps trying by
@@ -207,8 +237,11 @@ date in the checklist below. If it fails, stop and tell Noryn: the backups are n
 - **Nightly copy:** in Healthchecks.io, add a check with a period of 1 day and a grace of 6 hours. Give its ping
   address to the installer (`bash /root/deploy/install.sh --heartbeat-url https://hc-ping.com/…`): it is pinged
   only after a good off-site copy, so a night that fails sends you an email.
-- Inside Linear Hub, administrators also see **System health** in the bell: a failed backup, a late off-site copy, a
-  disk nearly full, the key not on paper yet, server errors.
+- Inside Linear Hub, administrators also see **System health** in the bell: a failed backup, a late encrypted copy, a
+  disk nearly full, the key not on paper yet, server errors. The bell sees the encrypted copies **on the server**; a
+  nightly copy to the Storage Box or bucket that fails shows only in `sudo linear-hub status` and through this
+  heartbeat. So the heartbeat is **not optional** for go-live: the installer warns at the end of every run until it
+  has one.
 
 ### Step 10 — Phones
 
@@ -238,18 +271,22 @@ Linear Hub data folder (`server/data`): it holds personal data that now lives on
 
 Tick every line before real people use it.
 
-- [ ] **Bought in Linear MCR's name:** the server, the domain and the off-site storage.
+- [ ] **The variation for going online** is signed by both companies (§1), and the go-live package agreed.
+- [ ] **Bought in Linear MCR's name:** the server, the domain and the off-site storage (snapshots or versioning on).
 - [ ] **HTTPS:** `https://<address>` shows the padlock and `http://<address>` redirects to it.
 - [ ] **Firewall:** `sudo ufw status` shows only SSH, 80 and 443; `curl http://<server-ip>:4000` from another computer
       fails.
 - [ ] **Settings:** `sudo linear-hub doctor` reports nothing to fix.
+- [ ] **The locked-down service runs:** `systemctl is-active linear-hub caddy` says `active` twice, and
+      `sudo systemd-analyze security linear-hub` rates it "OK" or better (write the score here: ______). The
+      installer's tests run in containers without systemd, so this is the first time the hardening runs for real.
 - [ ] **Live, not trial:** `sudo linear-hub golive` said "Linear Hub is live" (or "already live"); there is no trial
       banner.
 - [ ] **Two-step for the owner** set up, recovery codes stored away from the phone.
 - [ ] **Recovery sheet** printed, confirmed in Settings › Backups, and locked away.
 - [ ] **Off-site passphrase** on paper, kept apart from the recovery sheet.
 - [ ] **Restore test passed** (`sudo linear-hub restore-test`) on: ____________
-- [ ] **Monitoring:** the uptime check and the nightly-copy heartbeat both email the owner and Noryn.
+- [ ] **Monitoring:** the uptime check and the nightly-copy heartbeat (both required) email the owner and Noryn.
 - [ ] **Payments** (if used): no test provider in the list; each connection went through test mode and a sandbox
       payment (or the 1p file) before live; the first live payment was one person and a small amount.
 - [ ] **Bank details** were added by each person and confirmed by an administrator (nobody confirms their own change;
@@ -267,12 +304,12 @@ Run on the server with `sudo`. `sudo linear-hub help` lists everything.
 | `sudo linear-hub status` | Running? Does HTTPS answer? Newest backup and off-site copy, free disk |
 | `sudo linear-hub logs` (`-f` to follow) | The service log |
 | `sudo linear-hub restart` | Stop and start Linear Hub |
-| `sudo linear-hub update` / `update v1.5.1` | Stop, back up and check the backup, update the code, start again. With a release tag it moves to that release |
+| `sudo linear-hub update` / `update v1.5.1` | Stop, back up and check the backup, update the code, start again. With a release tag it moves to that release. Either way it prints the way back (the previous release and the backup to restore) |
 | `sudo linear-hub doctor` | A full check of the settings, the key, backups and off-site copies |
 | `sudo linear-hub backup` / `backups` | A backup now / the list of backups |
 | `sudo linear-hub offsite-sync` | Copy the encrypted backups off the server now |
 | `sudo linear-hub restore-test` | Prove the newest off-site copy can be restored (every few months, and after big changes) |
-| `sudo linear-hub restore <file>` | Put a backup back (stops Linear Hub meanwhile; lists any payments it would forget and asks for RESTORE) |
+| `sudo linear-hub restore <file>` | Put a backup back (stops Linear Hub meanwhile; lists any payments it would forget and asks for RESTORE). Use a name from `backups`, or an encrypted `.lhbk` anywhere (a file the `linear` user cannot read, say under `/root`, is copied in first) |
 | `sudo linear-hub import <file.lhbk>` | Bring a database from another computer (asks its passphrase, or `--passphrase-file <file>`) |
 | `sudo linear-hub golive` | End the trial (once) |
 | `sudo linear-hub recovery-sheet` | Print the recovery sheet |
@@ -281,7 +318,8 @@ Run on the server with `sudo`. `sudo linear-hub help` lists everything.
 | `sudo linear-hub 2fa:reset <email>` / `pin:reset <email>` | Reset someone's two-step or PIN; prints the setup code they sign in with next |
 
 **Updates.** Noryn applies Linear Hub updates as part of the monthly service, with `sudo linear-hub update`; it backs
-up and checks the database before changing anything, and prints the way back. Ubuntu's security updates install
+up and checks the database before changing anything, and prints the way back: `sudo linear-hub update <previous>`,
+then `sudo linear-hub restore <the backup it just made>`. Ubuntu's security updates install
 themselves every night (the server restarts itself at about 04:30 when one needs it, and Linear Hub and Caddy start
 again by themselves). Node.js is updated by Noryn, after the tests pass on the new version:
 `sudo apt-get install --only-upgrade nodejs && sudo linear-hub restart`.
@@ -338,8 +376,17 @@ the fingerprint in Settings › Backups against the recovery sheet, and run `sud
   made only when there is no database yet; the installer never replaces a key or a passphrase.
 - **Off-site copies:** `LM_OFFSITE_DIR=/var/lib/linear-hub/offsite`. Linear Hub encrypts each copy before it is
   written there (AES-256-GCM, from the passphrase); rclone only carries the files away, with `copy` (never `sync`), so
-  nothing off-site is ever deleted by an empty folder here. The learning videos are copied with rclone's own
-  encryption under the same passphrase.
+  nothing off-site is ever deleted by an empty folder here. A copy cut off half-way (a dropped connection, the 04:30
+  restart) is shorter than the file on the server, so the next night sends it again. The learning videos are copied
+  with rclone's own encryption under the same passphrase; a video still uploading (`*.upload`) waits for the next
+  night.
+- **The off-site store's settings:** rclone's own settings file for the `linear` user. The installer makes each remote
+  afresh whenever an answer changes (a new Storage Box, user, bucket, region or folder), so a re-run really moves the
+  copies; a Storage Box's host keys are recorded for rclone, which refuses a host it does not know. The nightly copy
+  may write that settings file (rclone notes what it learns about the store there), and nothing else outside the data
+  folder.
+- **Caddy's check runs as Caddy:** the installer checks the Caddyfile as the `caddy` user, and gives the Caddy log
+  back to `caddy` if anything else made it, so Caddy can always open its log and start.
 - **A locked-down service** (`/etc/systemd/system/linear-hub.service`): runs as `linear` with no shell; may write only
   `/var/lib/linear-hub`; private `/tmp`; no access to home folders, devices, kernel settings or other processes; no
   extra privileges; restarts by itself after a crash, but not when the key is wrong (exit code 78).
@@ -396,6 +443,14 @@ over plain `http://`:
   throwaway Ubuntu 24.04 container, runs it twice more to prove it changes nothing the second time, checks the files
   and modes, `caddy validate`, starts Linear Hub as the service does, makes an encrypted backup, copies it off-site,
   passes `linear-hub restore-test` (and checks its scratch copy is stopped), brings in a trial database made by a
-  stand-in Mac with `linear-hub import`, goes live, and starts again with only the data folder writable. Containers have
-  no systemd, so the service, timer and firewall commands are checked by the dry run instead.
+  stand-in Mac with `linear-hub import`, goes live, then sets up a Storage Box over SFTP (an OpenSSH server on port 23
+  in the container) with `--yes`, adds the key by hand as the owner would, moves to a second box, user and folder,
+  copies and restore-tests there, updates to a release tag, restores a file kept under `/root`, gives a Caddy log made
+  by root back to `caddy`, and starts again with only the data folder writable. Containers have no systemd, so the
+  service, timer and firewall commands are checked by the dry run instead, and the go-live checklist runs
+  `systemd-analyze security` on the real server. S3 buckets are checked by the dry run (region, provider, no secret
+  shown), not against a real bucket.
+  Options: `LH_TEST_PREINSTALL=1` (Node and Caddy put in first, for networks that block their repositories),
+  `LH_TEST_NODE_DIR=/opt/node22` (copy Node from the test machine instead of downloading it), `LH_TEST_CA`,
+  `LH_TEST_PORT`.
 - `bash deploy/install.sh --dry-run --yes --domain … --email … --repo …` shows what a run would do on a real server.
