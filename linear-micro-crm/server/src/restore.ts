@@ -15,6 +15,7 @@
  * opens the backup is put in place (an existing different key file is kept aside); the backup's uploaded files are put
  * back.
  */
+import './serviceEnv.ts'; // first: the installed service's settings, before anything reads them
 import { existsSync } from 'node:fs';
 import path from 'node:path';
 import { createInterface } from 'node:readline/promises';

@@ -8,6 +8,7 @@
  * DB_PATH, LM_BACKUP_DIR, LM_APP_SECRET(_FILE), LM_STATEMENTS_DIR, LM_UPLOADS_DIR, LM_BACKUP_VIDEOS, LM_OFFSITE_DIR and
  * LM_BACKUP_PASSPHRASE_FILE are read the same way as the server reads them.
  */
+import './serviceEnv.ts'; // first: the installed service's settings, before anything reads them
 import { DatabaseSync } from 'node:sqlite';
 import { chmodSync, existsSync, readFileSync, writeFileSync } from 'node:fs';
 import path from 'node:path';

@@ -8,6 +8,8 @@ import { spawnSync } from 'node:child_process';
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, symlinkSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import { openDb } from '../db/connection.ts';
+import { createSchema } from '../db/schema.ts';
 import {
   SERVER_ENTRY,
   launchAgentPlist,
@@ -349,3 +351,52 @@ test('npm run latest takes the service\'s own settings for anything the terminal
   assert.equal(env.HOME, '/h');
   assert.deepEqual(withInstalledSettings({ A: '1' }, null), { A: '1' });
 });
+
+// The hand-run commands (doctor, backup, restore, key:restore, recovery-sheet) used to read only this terminal's
+// settings, so with the key handed to the service they could not find it: doctor reported it missing and the recovery
+// sheet could not be made. Without a DB_PATH of their own they now use the installed service's database and key.
+test('a command run from a plain terminal uses the installed service\'s database and key', () => {
+  if (process.platform !== 'linux' && process.platform !== 'darwin') return;
+  const home = path.join(tmp, 'home-commands');
+  const data = path.join(tmp, 'service-data');
+  mkdirSync(data, { recursive: true });
+  const dbPath = path.join(data, 'linear.sqlite');
+  const key = 'c0ffee'.repeat(10) + 'beef';
+  const db = openDb(dbPath);
+  createSchema(db);
+  db.close();
+  const env: Record<string, string> = { TZ: 'Europe/London', DB_PATH: dbPath, PORT: '4399' };
+  let environmentFile: string | null = null;
+  if (process.platform === 'linux') {
+    environmentFile = writeKeyEnvFile(home, key);
+  } else {
+    const keyFile = path.join(home, 'Library', 'Application Support', 'LinearHub', 'app-secret');
+    mkdirSync(path.dirname(keyFile), { recursive: true });
+    writeFileSync(keyFile, `${key}\n`, { mode: 0o600 });
+    env.LM_APP_SECRET_FILE = keyFile;
+  }
+  const spec: ServiceSpec = { node: process.execPath, entry: SERVER_ENTRY, workDir: serverDir, env, log: path.join(home, 'x.log'), environmentFile };
+  const file = process.platform === 'darwin' ? path.join(home, 'Library', 'LaunchAgents', 'uk.co.linear-mcr.hub.plist') : path.join(home, '.config', 'systemd', 'user', 'linear-hub.service');
+  mkdirSync(path.dirname(file), { recursive: true });
+  writeFileSync(file, process.platform === 'darwin' ? launchAgentPlist(spec) : systemdUnit(spec));
+
+  const plain = plainEnv(home);
+  const r = spawnSync(process.execPath, ['src/recoverySheet.ts'], { cwd: serverDir, encoding: 'utf8', env: plain });
+  assert.equal(r.status, 0, r.stdout + r.stderr);
+  assert.ok(r.stdout.includes(key.match(/.{4}/g)!.join(' ')), 'the sheet holds the service\'s key');
+  assert.match(r.stdout, new RegExp(`Database: ${dbPath.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}`));
+  assert.match(r.stdout + r.stderr, /using the background service's settings for .*DB_PATH/);
+
+  // a terminal that names its own database is taken at its word
+  const other = path.join(tmp, 'other-data', 'linear.sqlite');
+  const own = spawnSync(process.execPath, ['src/recoverySheet.ts'], { cwd: serverDir, encoding: 'utf8', env: { ...plain, DB_PATH: other } });
+  assert.equal(own.status, 1);
+  assert.match(own.stderr, /There is no database at .*other-data/);
+  assert.doesNotMatch(own.stdout + own.stderr, /background service's settings/);
+});
+
+function writeKeyEnvFile(home: string, key: string): string {
+  const plan = serviceSecretPlan({ LM_APP_SECRET: key }, 'linux', home)!;
+  writeServiceSecret(plan);
+  return plan.file;
+}

@@ -6,6 +6,7 @@
  * boot of the server on a temporary database and a random port (does it answer /api/health and stay up?). Exit code
  * 1 when any check fails; warnings and notes (ℹ) do not fail it.
  */
+import './serviceEnv.ts'; // first: the installed service's settings, before anything reads them
 import { spawn } from 'node:child_process';
 import { existsSync, mkdirSync, mkdtempSync, rmSync, statSync, statfsSync, unlinkSync, writeFileSync } from 'node:fs';
 import os from 'node:os';

@@ -10,6 +10,7 @@
  * so a wrong key changes nothing. A key file that is already there with a different key is never deleted: it is kept
  * as app-secret.replaced-<time>. DB_PATH and LM_APP_SECRET_FILE are read the way the server reads them.
  */
+import './serviceEnv.ts'; // first: the installed service's settings, before anything reads them
 import { existsSync, renameSync } from 'node:fs';
 import path from 'node:path';
 import { createInterface } from 'node:readline/promises';

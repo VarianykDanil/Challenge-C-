@@ -12,6 +12,7 @@
  * of the key, typed when asked (never on the command line, where it would stay in the shell history). The audit trail
  * records that a sheet was made or confirmed ("Linear Hub", from the server command), never the key.
  */
+import './serviceEnv.ts'; // first: the installed service's settings, before anything reads them
 import { spawnSync } from 'node:child_process';
 import { chmodSync, existsSync, writeFileSync } from 'node:fs';
 import path from 'node:path';

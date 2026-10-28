@@ -250,6 +250,42 @@ export function absoluteServerPaths(env: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
   return out;
 }
 
+/** One value from a private environment file written by writeServiceSecret (`NAME=value` lines). */
+function envFileValue(file: string, name: string): string | null {
+  try {
+    const line = readFileSync(file, 'utf8')
+      .split('\n')
+      .find((l) => l.startsWith(`${name}=`));
+    return line ? line.slice(name.length + 1).trim() || null : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * For the commands run by hand (doctor, backup, restore, key:restore, recovery-sheet): when this terminal does not
+ * choose a database itself (no DB_PATH), every Linear Hub setting it leaves unset is taken from the installed
+ * background service, and so is the key the service reads from its private environment file. The command then looks
+ * at the same database, folders and key as the service. A terminal with its own DB_PATH is taken at its word.
+ * Changes `env` and returns the names it took ([] when none).
+ */
+export function useServiceSettings(env: NodeJS.ProcessEnv = process.env, platform: string = process.platform, home: string = os.homedir()): string[] {
+  if (env.DB_PATH?.trim()) return [];
+  const installed = installedServiceSettings(platform, home);
+  if (!installed) return [];
+  const merged = withInstalledSettings(env, installed);
+  const took = Object.keys(merged).filter((k) => merged[k] !== env[k]);
+  Object.assign(env, absoluteServerPaths(merged));
+  if (!env.LM_APP_SECRET && !env.LM_APP_SECRET_FILE?.trim() && installed.environmentFile) {
+    const secret = envFileValue(installed.environmentFile, 'LM_APP_SECRET');
+    if (secret) {
+      env.LM_APP_SECRET = secret;
+      took.push('its app key');
+    }
+  }
+  return took;
+}
+
 export interface ServiceSpecOptions {
   env?: NodeJS.ProcessEnv;
   home?: string;
