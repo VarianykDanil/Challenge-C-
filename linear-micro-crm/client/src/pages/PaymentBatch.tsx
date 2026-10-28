@@ -302,6 +302,12 @@ function ItemList({ items, draft, kind, mode }: { items: PaymentItem[]; draft: b
             )}
             {i.failureReason && <span className="block text-xs text-danger">{i.failureReason}</span>}
             {i.note && <span className="block text-xs text-warning">{i.note}</span>}
+            {/* MON-2: this week was in an earlier downloaded file that was let go; check the bank did not pay that one */}
+            {i.earlierFile && (
+              <span className="block text-xs text-warning" data-earlier-file={i.earlierFile.batchId}>
+                Also in bank file <Link to={`/finance/pay/batches/${i.earlierFile.batchId}`} className="underline underline-offset-2">payment #{i.earlierFile.batchId}</Link>, downloaded {payDayLabel(i.earlierFile.downloadedAt.slice(0, 10))}{i.earlierFile.downloadedByName ? ` by ${i.earlierFile.downloadedByName}` : ''}{i.earlierFile.voidedAt ? ' and marked as not uploaded' : ' and then let go'}. Check your bank did not pay it{i.earlierFile.copies > 1 ? ` (${i.earlierFile.copies} earlier files)` : ''}: this file's reference ends in {i.earlierFile.copies + 1} so your bank can tell them apart.
+              </span>
+            )}
           </span>
           <span className="flex items-center gap-3 sm:justify-end">
             {!draft && <PaymentItemStatusBadge status={i.status} kind={kind} mode={mode} />}

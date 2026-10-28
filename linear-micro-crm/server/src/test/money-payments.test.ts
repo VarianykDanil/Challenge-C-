@@ -240,6 +240,34 @@ describe('MON-2: once a bank file has been downloaded, its weeks count as sent',
     assert.equal(again.json.count, 2);
   });
 
+  // review: the second file was byte-identical, so the bank's own duplicate check could not catch a mistaken NOT UPLOADED
+  test('a new file for weeks that were in a void downloaded file has new references and says which file it replaces', async () => {
+    const conn = await fileConnection(true);
+    const runA = addRun(srv.db, fx.users.rep, week, 120.5);
+    const first = await approvedFile(conn, [runA]);
+    const firstBody = String((await admin.get(`/payments/batches/${first.id}/file`)).json);
+    const ref = firstBody.trim().split('\r\n')[1]!.split(',')[3]!;
+    assert.match(ref, /^LINEAR \d\d[A-Z]{3} RR$/);
+    assert.equal((await admin.post(`/payments/batches/${first.id}/cancel`, { confirm: 'NOT UPLOADED', code: code() })).status, 200);
+    const second = await approvedFile(conn, [runA]);
+    const secondBody = String((await admin.get(`/payments/batches/${second.id}/file`)).json);
+    assert.notEqual(secondBody, firstBody);
+    assert.equal(secondBody.trim().split('\r\n')[1]!.split(',')[3], `${ref} 2`, 'the second copy says 2');
+    // downloading again makes the same file
+    assert.equal(String((await admin.get(`/payments/batches/${second.id}/file`)).json), secondBody);
+    const page = (await admin.get(`/payments/batches/${second.id}`)).json;
+    const item = (page.items as Json[])[0];
+    assert.equal(item.earlierFile.batchId, first.id);
+    assert.ok(item.earlierFile.downloadedAt);
+    assert.equal(item.earlierFile.downloadedByName, 'Ada Admin');
+    assert.ok(item.earlierFile.voidedAt, 'void');
+    assert.equal(item.earlierFile.copies, 1);
+    // a person-week that was never in another file has none
+    const runB = addRun(srv.db, fx.users.repA2, week, 80);
+    const other = await approvedFile(conn, [runB]);
+    assert.equal(((await admin.get(`/payments/batches/${other.id}`)).json.items as Json[])[0].earlierFile ?? null, null);
+  });
+
   test('a second file for the same person-weeks within 7 days is refused when the first was freed without the confirmation', async () => {
     const conn = await fileConnection(true);
     const runA = addRun(srv.db, fx.users.rep, week, 120.5);
@@ -498,5 +526,28 @@ describe('MON-5: an API connection goes live only after a sandbox payment got an
     assert.equal(conn.firstRun.livePaymentAt, null);
     const live = await admin.patch(`/payments/connections/${id}`, { mode: 'live', confirm: PAYMENT_LIVE_CONFIRMATION });
     assert.equal(live.status, 200, JSON.stringify(live.json));
+  });
+
+  test('new details after the sandbox payment need a new one: an old sandbox run does not unlock live', async () => {
+    const id = (await admin.post('/payments/connections', { provider: 'fake', secrets: { token: 'first' } })).json.id as number;
+    assert.equal((await admin.post(`/payments/connections/${id}/test`)).json.ok, true);
+    fake.script({ submitStatus: 'paid' });
+    const runA = addRun(srv.db, fx.users.rep, week, 1.5);
+    const d = (await admin.post('/payments/batches', { connectionId: id, runIds: [runA] })).json;
+    assert.equal((await admin.post(`/payments/batches/${d.id}/approve`, { code: code() })).status, 200);
+    // the details change (other keys): the old sandbox answer was for them, not these
+    assert.equal((await admin.patch(`/payments/connections/${id}`, { secrets: { token: 'second' } })).status, 200);
+    assert.equal((await admin.post(`/payments/connections/${id}/test`)).json.ok, true);
+    let conn = ((await admin.get('/payments/connections')).json as Json[]).find((c) => c.id === id);
+    assert.equal(conn.firstRun.sandboxPaymentAt, null, 'the first-run steps start again');
+    const early = await admin.patch(`/payments/connections/${id}`, { mode: 'live', confirm: PAYMENT_LIVE_CONFIRMATION });
+    assert.equal(early.status, 409, JSON.stringify(early.json));
+    // a sandbox payment with the new details unlocks it
+    const runB = addRun(srv.db, fx.users.repA2, week, 1.5);
+    const d2 = (await admin.post('/payments/batches', { connectionId: id, runIds: [runB] })).json;
+    assert.equal((await admin.post(`/payments/batches/${d2.id}/approve`, { code: code() })).status, 200);
+    conn = ((await admin.get('/payments/connections')).json as Json[]).find((c) => c.id === id);
+    assert.ok(conn.firstRun.sandboxPaymentAt);
+    assert.equal((await admin.patch(`/payments/connections/${id}`, { mode: 'live', confirm: PAYMENT_LIVE_CONFIRMATION })).status, 200);
   });
 });

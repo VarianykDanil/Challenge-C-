@@ -59,10 +59,14 @@ export function needsConfirmation(r: { changedAt: string; confirmedAt: string | 
 /** Someone other than the person made the latest change (an administrator typed them in). */
 const changedByOther = (r: Pick<BankRow, 'userId' | 'changedBy'>) => r.changedBy !== null && r.changedBy !== r.userId;
 
-/** Who must confirm details that are waiting (null: nothing waits). */
+/**
+ * Who must confirm details that are waiting (null: nothing waits). Details whose changer is unknown (their account was
+ * deleted) are treated like the person's own change: the office checks them with the person, as confirmOwnBankDetails
+ * expects.
+ */
 function waitingFor(r: BankRow): BankDetails['waitingFor'] {
   if (!needsConfirmation(r)) return null;
-  return changedByOther(r) || r.changedBy === null ? 'person_or_other_admin' : 'office';
+  return changedByOther(r) ? 'person_or_other_admin' : 'office';
 }
 
 function masked(r: BankRow): BankDetails {
@@ -156,6 +160,12 @@ export function bankDetailsView(db: Db, viewer: UserWithTeam, targetId: number):
   if (own) {
     view.canReport = changedByOther(r) && !r.reportedAt;
     view.changedBySomeoneElse = unseen;
+  }
+  // an administrator's own waiting details need ANOTHER administrator: say so when there is none
+  const target = get<{ role: string }>(db, `SELECT role FROM users WHERE id = ?`, [targetId]);
+  if (target?.role === 'admin' && needsConfirmation(r) && !r.reportedAt) {
+    const others = Number(get<{ n: number }>(db, `SELECT COUNT(*) AS n FROM users WHERE role = 'admin' AND status = 'active' AND id <> ?`, [targetId])!.n);
+    if (others === 0) view.noOtherAdmin = true;
   }
   return view;
 }

@@ -235,8 +235,17 @@ export const PAYMENT_REFERENCE_MAX = 18;
 /**
  * "LINEAR 05OCT JL": the week (its Monday) and the payee's initials, upper-case A–Z, 0–9 and spaces only (what every
  * UK bank accepts), at most 18 characters. A bank format (package P) may use its own.
+ * `copy` 2 and up: a later bank file for the same person-week after an earlier downloaded one was void
+ * ("LINEAR 05OCT JL 2"), so the bank's own duplicate check can tell the two files apart.
  */
-export function defaultPaymentReference(weekStart: string, payeeName: string): string {
+export function defaultPaymentReference(weekStart: string, payeeName: string, copy = 1): string {
+  const base = baseReference(weekStart, payeeName);
+  if (!(copy > 1)) return base;
+  const suffix = ` ${Math.floor(copy)}`;
+  return `${base.slice(0, PAYMENT_REFERENCE_MAX - suffix.length).trim()}${suffix}`;
+}
+
+function baseReference(weekStart: string, payeeName: string): string {
   const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(weekStart);
   const week = m ? `${m[3]}${MONTHS_UPPER[Number(m[2]) - 1] ?? ''}` : '';
   // the first letter of each word ("O'Neill-Smith" is one word: O)

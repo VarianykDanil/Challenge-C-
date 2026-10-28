@@ -87,15 +87,19 @@ export function connectionRow(db: Db, id: number): ConnectionRow | undefined {
 /**
  * MON-5: the guided first run of each connection — when a test-mode payment through it first got an answer from the
  * sandbox (an item with the provider's reference), and when its first live payment was approved. One grouped read.
+ * Only a sandbox payment made since the connection's details last changed counts (details_changed_at): an answer to
+ * other keys says nothing about these.
  */
 function firstRuns(db: Db, ids: readonly number[]): Map<number, { sandboxPaymentAt: string | null; livePaymentAt: string | null }> {
   if (!ids.length) return new Map();
   const rows = all<{ id: number; sandbox: string | null; live: string | null }>(
     db,
     `SELECT b.connection_id AS id,
-            MIN(CASE WHEN b.mode = 'test' AND b.approved_at IS NOT NULL AND EXISTS (SELECT 1 FROM payment_items i WHERE i.batch_id = b.id AND i.provider_ref IS NOT NULL) THEN b.approved_at END) AS sandbox,
+            MIN(CASE WHEN b.mode = 'test' AND b.approved_at IS NOT NULL AND (c.details_changed_at IS NULL OR b.approved_at >= c.details_changed_at)
+                      AND EXISTS (SELECT 1 FROM payment_items i WHERE i.batch_id = b.id AND i.provider_ref IS NOT NULL) THEN b.approved_at END) AS sandbox,
             MIN(CASE WHEN b.mode = 'live' AND b.approved_at IS NOT NULL THEN b.approved_at END) AS live
-     FROM payment_batches b WHERE b.connection_id IN (${ids.map(() => '?').join(', ')}) GROUP BY b.connection_id`,
+     FROM payment_batches b JOIN payment_connections c ON c.id = b.connection_id
+     WHERE b.connection_id IN (${ids.map(() => '?').join(', ')}) GROUP BY b.connection_id`,
     [...ids],
   );
   return new Map(rows.map((r) => [Number(r.id), { sandboxPaymentAt: r.sandbox ?? null, livePaymentAt: r.live ?? null }]));
@@ -245,8 +249,12 @@ export function updateConnection(db: Db, me: UserWithTeam, id: number, patch: Pa
     if (changed) {
       sets.push('settings_json = ?', 'secrets_enc = ?');
       params.push(JSON.stringify(next.settings), encryptSecrets(next.secrets));
-      // new details need a new test before an API connection pays anyone; the old test's balance was theirs
-      if (adapter.info.kind === 'api') sets.push(`status = 'not_connected'`, 'last_error = NULL', 'balance_pence = NULL', 'last_checked_at = NULL');
+      // new details need a new test before an API connection pays anyone; the old test's balance was theirs, and so
+      // was any sandbox payment (MON-5: going live needs one made with these details)
+      if (adapter.info.kind === 'api') {
+        sets.push(`status = 'not_connected'`, 'last_error = NULL', 'balance_pence = NULL', 'last_checked_at = NULL', 'details_changed_at = ?');
+        params.push(nowISO());
+      }
     }
   }
   if (p.mode !== undefined && p.mode !== r.mode) {

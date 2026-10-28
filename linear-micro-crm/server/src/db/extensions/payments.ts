@@ -242,6 +242,8 @@ export const extension: DbExtension = {
       more.push(addColumnIfMissing(db, 'payment_connections', 'test_file_at', 'TEXT'));
       more.push(addColumnIfMissing(db, 'payment_connections', 'test_file_by', 'INTEGER'));
       more.push(addColumnIfMissing(db, 'payment_connections', 'test_file_result', 'TEXT'));
+      // MON-5: when an API connection's details last changed (a sandbox payment before then does not unlock live)
+      more.push(addColumnIfMissing(db, 'payment_connections', 'details_changed_at', 'TEXT'));
     }
     const hasBatches = columnsOf(db, 'payment_batches').includes('connection_id');
     if (hasBatches) {

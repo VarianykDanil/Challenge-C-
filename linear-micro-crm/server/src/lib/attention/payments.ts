@@ -15,7 +15,8 @@
  * Checks before paying and safer payments:
  *  - MON-1, leaders and the office: "3 days to confirm" — gauge days people logged themselves with no booking, no
  *    check-in or nothing logged, in unpaid weeks of the last five weeks (a leader: their own team, not their own days;
- *    the office: everyone), linking to Pay → Days to confirm;
+ *    the office: everyone), linking to Pay → Days to confirm; and the person themself (rep, leader): "1 of your days
+ *    waits for your leader" (the office, for a leader), so a pay estimate that dropped says why;
  *  - MON-3, every member of staff: their own bank details were changed by someone else and they have not said yes or
  *    reported them: "Your bank details were changed by Ada Admin on Tue 20 Oct" … "Confirm or report it" (danger);
  *  - MON-3, the office: details an administrator typed in for someone wait for the person or ANOTHER administrator
@@ -37,8 +38,8 @@ import type { AttentionProvider } from './types.ts';
  * MON-1: waiting days (person, day) in the caller's scope, as one row (kind 'days'): the count and the latest entry's
  * time. `scope` narrows the people (a leader's team, without the leader).
  */
-const WAITING_DAYS = (scope: string) => `
-  SELECT 'days' AS kind, COUNT(*) AS id, NULL AS name, MAX(at) AS at, COUNT(*) AS n, NULL AS amount, NULL AS reason, NULL AS batchId FROM (
+const WAITING_DAYS = (scope: string, kind: 'days' | 'mydays' = 'days') => `
+  SELECT '${kind}' AS kind, COUNT(*) AS id, NULL AS name, MAX(at) AS at, COUNT(*) AS n, NULL AS amount, NULL AS reason, NULL AS batchId FROM (
     SELECT g.user_id, g.date, MAX(g.submitted_at) AS at
     FROM gauge_entries g JOIN users u ON u.id = g.user_id
     WHERE g.date >= ? AND g.date < ? ${scope} AND u.role <> 'client'
@@ -77,6 +78,28 @@ function noticeItem(rows: readonly Row[]): AttentionItem[] {
 
 const daysSince = (today: string) => new Date(Date.parse(`${today}T12:00:00Z`) - DAY_CHECK_LOOKBACK_DAYS * 86_400_000).toISOString().slice(0, 10);
 
+/**
+ * MON-1: the person's own days that wait (the 'mydays' row), so an estimate that dropped says why: for a rep their
+ * leader confirms them; for a leader, the office.
+ */
+function myDaysItem(rows: readonly Row[], leader: boolean): AttentionItem[] {
+  const days = rows.find((r) => r.kind === 'mydays');
+  const n = Number(days?.n ?? 0);
+  if (!days || n <= 0) return [];
+  const who = leader ? 'the office' : 'your leader';
+  return [{
+    key: `payments:mydays:${n}:${days.at ?? ''}`,
+    kind: 'pay',
+    severity: 'info',
+    title: n === 1 ? `1 of your days waits for ${who}` : `${n} of your days wait for ${who}`,
+    body: `You logged ${n === 1 ? 'it' : 'them'} with no booking or check-in (or with nothing logged), so ${n === 1 ? 'it is' : 'they are'} not paid as a base day until ${who} confirms ${n === 1 ? 'it' : 'them'}. Next time, book onto the event and check in.`,
+    href: '/finance?tab=me',
+    actionLabel: 'Open My pay',
+    at: days.at ?? undefined,
+    count: n > 1 ? n : undefined,
+  }];
+}
+
 /** MON-1: the "N days to confirm" item from the 'days' row (none when there are none). */
 function daysItem(rows: readonly Row[], admin: boolean): AttentionItem[] {
   const days = rows.find((r) => r.kind === 'days');
@@ -98,7 +121,7 @@ function daysItem(rows: readonly Row[], admin: boolean): AttentionItem[] {
 }
 
 interface Row {
-  kind: 'bank' | 'failed' | 'file' | 'conn' | 'changed' | 'days' | 'notice' | 'typed' | 'reported' | 'twooff' | 'twostuck';
+  kind: 'bank' | 'failed' | 'file' | 'conn' | 'changed' | 'days' | 'mydays' | 'notice' | 'typed' | 'reported' | 'twooff' | 'twostuck';
   id: number;
   name: string | null;
   at: string | null;
@@ -114,11 +137,19 @@ export const provider: AttentionProvider = {
   name: 'payments',
   items(db, me, now) {
     if (me.role === 'client') return [];
+    const since5 = daysSince(now.today);
     if (me.role === 'leader' && me.teamId !== null) {
-      const rows = all<Row>(db, `${WAITING_DAYS('AND u.team_id = ? AND g.user_id <> ?')} UNION ALL ${OWN_NOTICE}`, [daysSince(now.today), now.today, me.teamId, me.id, PAY_DAY_CHECKS_KEY, me.id]);
-      return [...noticeItem(rows), ...daysItem(rows, false)];
+      const rows = all<Row>(
+        db,
+        `${WAITING_DAYS('AND u.team_id = ? AND g.user_id <> ?')} UNION ALL ${WAITING_DAYS('AND g.user_id = ?', 'mydays')} UNION ALL ${OWN_NOTICE}`,
+        [since5, now.today, me.teamId, me.id, PAY_DAY_CHECKS_KEY, since5, now.today, me.id, PAY_DAY_CHECKS_KEY, me.id],
+      );
+      return [...noticeItem(rows), ...daysItem(rows, false), ...myDaysItem(rows, true)];
     }
-    if (me.role !== 'admin') return noticeItem(all<Row>(db, OWN_NOTICE, [me.id]));
+    if (me.role !== 'admin') {
+      const rows = all<Row>(db, `${WAITING_DAYS('AND g.user_id = ?', 'mydays')} UNION ALL ${OWN_NOTICE}`, [since5, now.today, me.id, PAY_DAY_CHECKS_KEY, me.id]);
+      return [...noticeItem(rows), ...myDaysItem(rows, me.role === 'leader')];
+    }
     const fileProviders = listPaymentProviders().filter((p) => p.info.kind === 'file').map((p) => p.info.id);
     const since = new Date(Date.parse(now.nowISO) - FAILED_LOOKBACK_DAYS * 86_400_000).toISOString();
     const rows = all<Row>(

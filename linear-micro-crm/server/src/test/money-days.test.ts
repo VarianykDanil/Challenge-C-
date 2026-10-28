@@ -196,6 +196,21 @@ describe('MON-1: a base day needs evidence that the person worked', () => {
     const mine = (runs.json as Json[]).find((r) => r.userId === fx.users.rep);
     assert.equal(mine.checks?.daysWaiting, 1, JSON.stringify(mine));
   });
+
+  // review: the rep's estimate dropped with no visible reason; their own bell now says why
+  test('the rep is told their own day waits, and for whom; it goes once the leader confirms it', async () => {
+    assert.equal((await post(rep, 'tue', fx.users.rep, 1)).status, 201);
+    const own = ((await rep.get('/me/attention')).json.items as Json[]).find((i) => String(i.key).startsWith('payments:mydays:'));
+    assert.ok(own, 'the rep is told');
+    assert.match(String(own.title), /^1 of your days waits for your leader$/);
+    assert.match(String(own.body), /not paid as a base day until your leader confirms it/);
+    assert.equal(own.href, '/finance?tab=me');
+    assert.equal(own.severity, 'info');
+    const ok = await leader.post('/pay/day-checks', { userId: fx.users.rep, date: addDays(lastWeek, 1), decision: 'confirmed' });
+    assert.equal(ok.status, 200, JSON.stringify(ok.json));
+    srv.resetCache();
+    assert.ok(!((await rep.get('/me/attention')).json.items as Json[]).some((i) => String(i.key).startsWith('payments:mydays:')));
+  });
 });
 
 describe('MON-1: upgrading a 1.4.0 database keeps the days it already had', () => {

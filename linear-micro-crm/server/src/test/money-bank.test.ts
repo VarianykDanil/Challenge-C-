@@ -171,6 +171,36 @@ describe('MON-3: bank details typed in by an administrator wait for the person o
     assert.equal((await admin2.post(`/users/${fx.users.admin}/bank-details/confirm`, { changedAt: own.json.details.changedAt, code: code(admin2Id) })).status, 200);
   });
 
+  test('with only one administrator, their own changed details say nobody can confirm them (payments to them are skipped)', async () => {
+    run(srv.db, `UPDATE users SET status = 'left' WHERE id = ?`, [admin2Id]);
+    srv.resetCache();
+    const own = await admin.put('/me/bank-details', { ...details('00000001', 'Ada Admin'), code: code(fx.users.admin) });
+    assert.equal(own.status, 200);
+    assert.equal(own.json.noOtherAdmin, true, 'the card says why nobody can confirm them');
+    // with a second administrator there is someone to confirm them
+    run(srv.db, `UPDATE users SET status = 'active' WHERE id = ?`, [admin2Id]);
+    srv.resetCache();
+    assert.equal((await admin.get('/me/bank-details')).json.noOtherAdmin, undefined);
+    // a rep's own change is not about this
+    const repOwn = await rep.put('/me/bank-details', { ...details('00000005'), code: code(fx.users.rep) });
+    assert.equal(repOwn.json.noOtherAdmin, undefined);
+  });
+
+  test('details whose changer was deleted wait for the office, as the label says; the person cannot confirm them', async () => {
+    const put = await rep.put('/me/bank-details', { ...details('00000005'), code: code(fx.users.rep) });
+    assert.equal(put.status, 200);
+    run(srv.db, `UPDATE bank_accounts SET changed_by = NULL WHERE user_id = ?`, [fx.users.rep]);
+    srv.resetCache();
+    const mine = (await rep.get('/me/bank-details')).json;
+    assert.equal(mine.details.waitingFor, 'office');
+    assert.equal(mine.canConfirm, false);
+    assert.equal((await rep.post('/me/bank-details/confirm', { changedAt: mine.details.changedAt, code: code(fx.users.rep) })).status, 409);
+    const asAdmin = (await admin.get(`/users/${fx.users.rep}/bank-details`)).json;
+    assert.equal(asAdmin.details.waitingFor, 'office');
+    assert.equal(asAdmin.canConfirm, true);
+    assert.equal((await admin.post(`/users/${fx.users.rep}/bank-details/confirm`, { changedAt: mine.details.changedAt, code: code(fx.users.admin) })).status, 200);
+  });
+
   test('typing in someone\'s details needs the admin\'s fresh code; reps, leaders and client accounts cannot', async () => {
     const noCode = await admin.put(`/users/${fx.users.rep}/bank-details`, details('00000007'));
     assert.equal(noCode.status, 400);

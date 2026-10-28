@@ -88,7 +88,9 @@ function Summary({ view, userId, own, first }: { view: BankDetailsView; userId: 
         ? `You said these are not your details on ${dayOf(d.reportedAt)}. Nothing is paid to them. Press Change and type in your own, or ask the office.`
         : view.changedBySomeoneElse
           ? `Your bank details were changed${by} on ${dayOf(d.changedAt)}. Confirm or report it: until you say yes (or another administrator confirms them), nothing is paid to them.`
-          : `Changed on ${dayOf(d.changedAt)}. The office checks new details with you before the next payment goes there.`;
+          : view.noOtherAdmin
+            ? `Changed on ${dayOf(d.changedAt)}. Another administrator confirms your own details, and you are the only one, so payments to you are skipped. Add a second administrator in Team, or pay yourself outside Linear Hub.`
+            : `Changed on ${dayOf(d.changedAt)}. The office checks new details with you before the next payment goes there.`;
     } else if (d.reportedAt) {
       hold = `${first} said these are not their details on ${dayOf(d.reportedAt)}. Nothing is paid to them. Type in the right ones with ${first} (Change).`;
     } else if (d.waitingFor === 'person_or_other_admin') {

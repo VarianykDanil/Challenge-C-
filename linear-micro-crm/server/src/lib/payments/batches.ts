@@ -265,11 +265,14 @@ function payeeFor(i: ItemRow, b: Pick<BatchRow, 'approvedAt'>, bank: ReturnType<
   return { sortCode: d.sortCode, accountNumber: d.accountNumber };
 }
 
-/** One item as the adapter sees it (the payee the item was approved with; empty when Linear Hub has none). */
-function providerItem(b: Pick<BatchRow, 'idempotencyKey'>, i: ItemRow, payee: { sortCode: string; accountNumber: string } | null): ProviderItem {
+/**
+ * One item as the adapter sees it (the payee the item was approved with; empty when Linear Hub has none). `copy` 2 and
+ * up: the person-week was in an earlier downloaded live bank file (MON-2), so the reference says which copy this is.
+ */
+function providerItem(b: Pick<BatchRow, 'idempotencyKey'>, i: ItemRow, payee: { sortCode: string; accountNumber: string } | null, copy = 1): ProviderItem {
   return {
     id: i.id, payrollRunId: i.payrollRunId, userId: i.userId, amountPence: i.amountPence, currency: 'GBP', payeeName: i.payeeName,
-    sortCode: payee?.sortCode ?? '', accountNumber: payee?.accountNumber ?? '', reference: defaultPaymentReference(i.weekStart, i.payeeName),
+    sortCode: payee?.sortCode ?? '', accountNumber: payee?.accountNumber ?? '', reference: defaultPaymentReference(i.weekStart, i.payeeName, copy),
     weekStart: i.weekStart, idempotencyKey: `${b.idempotencyKey}:${i.id}`, providerRef: i.providerRef,
   };
 }
@@ -464,10 +467,15 @@ export function batchDetail(db: Db, id: number, viewer?: Pick<UserWithTeam, 'id'
   const voidable = downloaded && !b.voidedAt && !waiting && Number(b.freedUnconfirmed) > 0;
   // MON-1 / MONEY-MISSED-3: what to check about each person before paying (their run as it stands)
   const checks = payrollChecksFor(db, rows.filter((r) => r.status !== 'cancelled').map((r) => ({ id: r.payrollRunId, userId: r.userId, weekStart: r.weekStart, weekEnd: addDays(r.weekStart, 6) })));
+  // MON-2: an earlier downloaded file that held the same person-week (named on the page)
+  const earlier = kind === 'file' && b.mode === 'live' ? earlierFiles(db, id) : null;
   const items = rows.map((r) => {
-    const item = toItem(r, b.approvedAt);
+    const item: PaymentItem = toItem(r, b.approvedAt);
     const c = r.status !== 'cancelled' ? checks.get(r.payrollRunId) : undefined;
-    return c ? { ...item, checks: c } : item;
+    if (c) item.checks = c;
+    const e = earlier?.get(r.id);
+    if (e) item.earlierFile = e;
+    return item;
   });
   const counted = items.filter((i) => i.checks);
   return {
@@ -554,6 +562,44 @@ function recentFiles(db: Db, userIds: readonly number[], exceptBatch: number | n
        AND i.user_id IN (${placeholders(userIds.length)})`,
     [since, exceptBatch ?? -1, ...userIds],
   ).filter((r) => kindOf(r.provider) === 'file');
+}
+
+interface EarlierFileRow {
+  itemId: number;
+  batchId: number;
+  provider: string;
+  downloadedAt: string;
+  downloadedByName: string | null;
+  voidedAt: string | null;
+}
+
+/**
+ * MON-2: for each item of live bank file payment `batchId`, the earlier live bank files that held the same person-week,
+ * were downloaded and then let go (cancelled, or marked not paid): how many, and the latest. A new file's references
+ * then say which copy it is ("LINEAR 05OCT JL 2"), so the bank's own duplicate check can tell the files apart, and the
+ * page names the earlier file. One grouped read.
+ */
+function earlierFiles(db: Db, batchId: number): Map<number, NonNullable<PaymentItem['earlierFile']>> {
+  const rows = all<EarlierFileRow>(
+    db,
+    `SELECT cur.id AS itemId, b.id AS batchId, b.provider, b.downloaded_at AS downloadedAt,
+            TRIM(du.first_name || ' ' || du.last_name) AS downloadedByName, b.voided_at AS voidedAt
+     FROM payment_items cur
+     JOIN payment_batches nb ON nb.id = cur.batch_id
+     JOIN payment_items i ON i.user_id = cur.user_id AND i.week_start = cur.week_start AND i.batch_id < cur.batch_id
+     JOIN payment_batches b ON b.id = i.batch_id
+     LEFT JOIN users du ON du.id = b.downloaded_by
+     WHERE cur.batch_id = ? AND nb.mode = 'live' AND b.mode = 'live' AND b.provider = nb.provider AND b.downloaded_at IS NOT NULL
+       AND i.provider_ref IS NOT NULL AND i.status IN ('cancelled', 'failed')
+     ORDER BY b.id`,
+    [batchId],
+  ).filter((r) => kindOf(r.provider) === 'file');
+  const out = new Map<number, NonNullable<PaymentItem['earlierFile']>>();
+  for (const r of rows) {
+    const copies = (out.get(r.itemId)?.copies ?? 0) + 1;
+    out.set(r.itemId, { batchId: r.batchId, downloadedAt: r.downloadedAt, downloadedByName: r.downloadedByName || null, voidedAt: r.voidedAt, copies });
+  }
+  return out;
 }
 
 /** The words for a person-week held by a recent file (MON-2). */
@@ -805,6 +851,7 @@ async function sendQueued(db: Db, id: number, actor: UserWithTeam | null, action
     const queued = itemRows(db, id).filter((i) => i.status === 'queued');
     if (!queued.length) return;
     const bank = decryptedBankDetails(db, queued.map((i) => i.userId));
+    const earlier = adapter.info.kind === 'file' ? earlierFiles(db, id) : new Map<number, NonNullable<PaymentItem['earlierFile']>>();
     const send: ProviderItem[] = [];
     const held: string[] = [];
     for (const i of queued) {
@@ -814,7 +861,7 @@ async function sendQueued(db: Db, id: number, actor: UserWithTeam | null, action
         held.push(i.userName || i.payeeName);
         continue;
       }
-      send.push(providerItem(b, i, payee));
+      send.push(providerItem(b, i, payee, 1 + (earlier.get(i.id)?.copies ?? 0)));
     }
     const heldText = held.length
       ? `Linear Hub did not send ${held.join(', ')}'s payment again: it no longer has the bank details you approved it with. Check with ${conn.name} whether it was paid before you pay that week again.`

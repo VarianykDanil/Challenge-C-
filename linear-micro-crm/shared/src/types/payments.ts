@@ -317,6 +317,12 @@ export interface PaymentItem {
    * pay resting on subs no client statement has confirmed. Absent when there is nothing to check.
    */
   checks?: PayrollRunChecks;
+  /**
+   * MON-2, a live bank file: the same person-week was in an earlier live bank file that was downloaded and then let go
+   * (cancelled or marked not paid): the latest such file, and how many there were. This item's reference then ends in
+   * its copy number ("LINEAR 05OCT JL 2"). Absent otherwise.
+   */
+  earlierFile?: { batchId: number; downloadedAt: string; downloadedByName: string | null; voidedAt: string | null; copies: number };
 }
 
 /** A bonus or adjustment added in the last 7 days to a week in this payment. */
@@ -524,6 +530,11 @@ export interface BankDetailsView {
    * yet: the "Your bank details were changed by … Confirm or report it" notice (own view only).
    */
   changedBySomeoneElse?: boolean;
+  /**
+   * An administrator's own details wait for another administrator, and there is no other active administrator: nobody
+   * can confirm them, so payments to them are skipped until a second administrator is added.
+   */
+  noOtherAdmin?: boolean;
 }
 
 /** POST /me/bank-details/confirm and POST /users/:id/bank-details/confirm. */
