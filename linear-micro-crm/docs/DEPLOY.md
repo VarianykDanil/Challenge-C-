@@ -205,7 +205,8 @@ sudo linear-hub golive
 It shows what goes (the demo company: its people, one-tap accounts and records) and what stays (your settings, your
 own people and everything they made), asks for the first owner's name and email if none of your own administrators
 is left, and asks you to type **GO LIVE**. It backs the database up and checks the backup before changing anything.
-If it made the first owner, it prints their **one-time setup code**.
+If it made the first owner, it prints their **one-time setup code**. It signs everyone out, so each person signs in
+again under the live rules.
 
 ### Step 7 — The owner signs in and prints the recovery sheet
 

@@ -8,8 +8,9 @@
  * Refuses while the database is open in another process (a Linear Hub on any PORT or HOST: an exclusive-lock probe),
  * or anything answers on PORT (default 4000): stop it first with npm run stop (with the PORT it runs on), or
  * npm run service:uninstall when it runs as a background service. The backup is checked (PRAGMA integrity_check and
- * the core tables) and compared with the current database. When the current database has payments approved or sent,
- * bank files, bank details changes or pay runs marked paid that the backup does not, they are listed and the restore
+ * the core tables) and compared with the current database. When the current database has payments approved, sent or
+ * paid, bank files made or downloaded, bank details changes or pay runs marked paid (on time or late) that the backup
+ * does not, they are listed and the restore
  * goes ahead only when RESTORE is typed (or, without a terminal, with --yes --forget-payments). Otherwise a typed "y"
  * or --yes is enough. The current database and its -wal/-shm files are kept as <db>.before-restore-<time>; the key that
  * opens the backup is put in place (an existing different key file is kept aside); the backup's uploaded files are put

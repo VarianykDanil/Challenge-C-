@@ -2,7 +2,7 @@
   "id": "/",
   "name": "Linear Hub",
   "short_name": "Linear Hub",
-  "description": "Field gauges, check-ins, recruitment and pay for the Linear MCR team.",
+  "description": "The Linear MCR team app.",
   "lang": "en-GB",
   "start_url": "/",
   "scope": "/",
@@ -16,6 +16,6 @@
     { "src": "/icons/icon-maskable-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
   ],
   "shortcuts": [
-    { "name": "Quick gauges", "short_name": "Quick gauges", "url": "/quick", "icons": [{ "src": "/icons/icon-192.png", "sizes": "192x192", "type": "image/png" }] }
+    { "name": "Quick log", "short_name": "Quick log", "url": "/quick", "icons": [{ "src": "/icons/icon-192.png", "sizes": "192x192", "type": "image/png" }] }
   ]
 }

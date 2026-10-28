@@ -167,7 +167,7 @@ background service's database, folders and key when the terminal sets no `DB_PAT
 | `npm run setup-code -- <email>` | 1.5: print a new one-time setup code for someone who has not finished setting up (for example the only administrator, or an account from 1.4). Says so when they need none. Works while the server runs |
 | `npm run backup` | Back the database and the uploaded files up now (fine while the server runs) into `server/data/backups/`, and (1.5) write the encrypted off-site copy when `LM_OFFSITE_DIR` is set. `-- --no-offsite` skips the off-site copy this time; `-- --new-passphrase <file>` makes an off-site passphrase file and prints it once (it never overwrites a file) |
 | `npm run backups` | List the backup files with size and age |
-| `npm run restore -- <file> [--yes]` | Put a backup back as the live database, with its uploaded files and key (stop the server first). `<file>` is a path or a file name from the backups folder, or (1.5) an encrypted off-site copy `linear-….lhbk` (it asks for the passphrase or reads `LM_BACKUP_PASSPHRASE_FILE`). It shows what changes and asks first; when the backup would forget payments, bank files, bank details changes or paid runs it lists them and needs **RESTORE** typed (without a terminal: `--yes --forget-payments`) |
+| `npm run restore -- <file> [--yes]` | Put a backup back as the live database, with its uploaded files and key (stop the server first). `<file>` is a path or a file name from the backups folder, or (1.5) an encrypted off-site copy `linear-….lhbk` (it asks for the passphrase or reads `LM_BACKUP_PASSPHRASE_FILE`). It shows what changes and asks first; when the backup would forget payments, bank files made or downloaded, bank details changes or paid runs (on time or late) it lists them and needs **RESTORE** typed (without a terminal: `--yes --forget-payments`) |
 | `npm run key:restore` | 1.5: put the app key back, typed from the recovery sheet, `-- --file <path>` or `-- --from <file>.lhbk` (an off-site copy). It checks the key against the database first, and keeps any different key file as `app-secret.replaced-<time>` |
 | `npm run recovery-sheet` | 1.5: show the recovery sheet for the app key in this terminal, on the computer that runs Linear Hub (`-- --print` sends it to the printer instead; `-- --out <file>` also saves it as a text file). The key never travels over the network |
 | `npm run recovery-sheet -- --confirm` | 1.5: type the whole key back from the paper; once it matches, backups stop keeping a copy of that key. The key is never taken on the command line |
@@ -369,7 +369,8 @@ database is open in another process … Stop it first, with the PORT it runs on"
 port ("Stop it first: npm run stop"). It checks the backup (`PRAGMA integrity_check` and the Linear Hub tables), prints
 the current and the backup's users, gauge entries, payroll runs and latest gauge date side by side, and only then asks
 (`--yes` skips the question). **Since 1.5 it also lists what Linear Hub would forget about money** (live payments
-approved, payments sent or paid, bank files made, bank details changed, pay runs marked paid since the backup) and then
+approved, payments sent or paid, bank files made or downloaded, bank details changed, pay runs marked paid on time or
+late since the backup) and then
 needs **RESTORE** typed; if it cannot compare, it says so and still asks. A restore over newer payments leaves a
 warning for administrators in the bell for 14 days: check payments with the bank. The database it replaces is kept
 next to it as `linear.sqlite.before-restore-<date-time>`, so a restore can itself be undone. The backup's files are put
@@ -448,7 +449,9 @@ npm run golive
    are never deleted.
 6. It keeps your settings (pay plans, payment connections, security, company details), your own people and their
    history, and every record made in the app since the demo was set up — a trial week spent on 1.4 included.
-7. Trial mode is off for good: no one-tap sign-ins, and the server never seeds the demo again.
+7. Trial mode is off for good: no one-tap sign-ins, and the server never seeds the demo again. **Everyone is signed
+   out**, so each person signs in again under the live rules: with two-step verification, or with a setup code until
+   they have it.
 8. When none of your own administrators is left it makes the first **owner** (LM-0001 when free) and prints their
    one-time setup code; everyone of your own who has not finished setting up is listed ("give each a setup code").
 

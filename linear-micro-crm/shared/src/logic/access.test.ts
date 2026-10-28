@@ -31,6 +31,9 @@ test('trial headline: says whether the one-tap demo sign-ins work', () => {
   assert.equal(trialHeadline(true), 'Trial mode: demo sign-ins are on');
   assert.equal(trialHeadline(false), 'Trial mode: the demo company is still here');
   assert.match(ACCESS_MESSAGES.trialBody, /^Go live before real pay or bank details go in\./);
+  // the bell speaks to every office administrator: no commands there (release check of 1.5.0)
+  assert.doesNotMatch(ACCESS_MESSAGES.trialBody, /npm|golive|sudo/);
+  assert.match(ACCESS_MESSAGES.trialBody, /Ask Noryn/);
   assert.match(ACCESS_MESSAGES.demoRefused('create an administrator'), /^Demo accounts cannot create an administrator\./);
 });
 

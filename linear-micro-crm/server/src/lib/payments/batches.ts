@@ -646,6 +646,10 @@ function skipReason(
     if (bank.changedBy !== null && bank.changedBy !== r.userId) {
       return { code: 'bank_details_unconfirmed', reason: `${bank.changedByName ?? 'An administrator'} typed in ${first}’s bank details on ${day}: they wait until ${first} confirms them in Settings, or another administrator confirms them in Team` };
     }
+    // changed_by NULL: whoever typed them in is no longer in Linear Hub (a demo account golive removed, say)
+    if (bank.changedBy === null) {
+      return { code: 'bank_details_unconfirmed', reason: `${first}’s bank details were changed on ${day} by someone no longer in Linear Hub: check them with ${first}, then confirm them in Team` };
+    }
     return { code: 'bank_details_unconfirmed', reason: `${first} changed their bank details on ${day}: check them with ${first}, then confirm them in Team` };
   }
   return null;

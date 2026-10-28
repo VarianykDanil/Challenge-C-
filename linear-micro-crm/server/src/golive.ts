@@ -103,7 +103,8 @@ if (plan.keepPeople.length) {
 } else {
   console.log('  No people of your own yet.');
 }
-console.log('Statement PDFs stay in the statements folder.\n');
+console.log('Statement PDFs stay in the statements folder.');
+console.log('Everyone is signed out, so each person signs in again: with two-step verification, or with a setup code until they have it.\n');
 
 // ── the first owner: needed when no administrator of the office's own would be left; asked for by flags otherwise ──
 let owner: GoLiveOwnerInput | undefined;
@@ -171,6 +172,7 @@ db.close();
 
 const removed = Object.values(result.removedRecords).reduce((a, b) => a + (b ?? 0), 0);
 console.log(`\nLinear Hub is live. Removed ${result.removedPeople} demo people and ${removed} demo records. The one-tap demo sign-ins are gone for good.`);
+console.log(`Everyone is signed out${result.signedOut ? ` (${result.signedOut} ${result.signedOut === 1 ? 'session' : 'sessions'} ended)` : ''}: each person signs in again.`);
 if (result.owner) {
   const o = result.owner;
   console.log(`\nThe first owner: ${o.name} (${o.email}), employee ID: ${o.employeeId}`);

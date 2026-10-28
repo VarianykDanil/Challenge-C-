@@ -160,6 +160,8 @@ test('a one-tap starter or demo account cannot hold bank details of a real perso
   const c = await srv.login({ email: 'real.person@example.test', employeeId: 'LM-0600' });
   const r = await c.put('/me/bank-details', { holderName: 'Real Person', sortCode: '040004', accountNumber: '12345678' });
   assert.ok(isDemoRefusal(r), JSON.stringify(r));
+  // release check of 1.5.0: about their own details, not "a real person's"
+  assert.match(r.json.error, /^Demo accounts cannot see or change bank details, their own included, from a one-tap sign-in\./);
 });
 
 test('a demo admin cannot create or promote an admin, reset anyone’s sign-in or hand out setup codes, even after setting up two-step', async () => {

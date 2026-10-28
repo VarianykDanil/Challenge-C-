@@ -10,7 +10,7 @@ What the owner of Linear MCR needs to know, do or decide for 1.5. Release 1.5 an
 | Area | What it means for you |
 | --- | --- |
 | **Trial mode** | A new Linear Hub holds an invented demo company so everyone can try it. Administrators see a banner until you go live. The one-tap demo accounts can only play with the demo company: never your own people, real pay, bank details, payments or settings. |
-| **Going live** | `npm run golive` (on the server, `sudo linear-hub golive`) ends the trial: it backs up first, removes the demo company, keeps your settings, your own people and everything made during the trial, and makes you the first owner with a one-time setup code. |
+| **Going live** | `npm run golive` (on the server, `sudo linear-hub golive`) ends the trial: it backs up first, removes the demo company, keeps your settings, your own people and everything made during the trial, makes you the first owner with a one-time setup code, and signs everyone out. |
 | **Setup codes** | Every new account, and every reset, gets a one-time setup code (7 days, used once). Knowing someone's email and employee ID is no longer enough to start their account. |
 | **Your own code for sensitive changes** | Making or stopping an administrator, setting one as left, changing someone's email or employee ID, resets and setup codes ask for your fresh two-step code. |
 | **Secure connections** | Bank details, payments, setup codes and resets only work on the computer that runs Linear Hub or over https. Built-in HTTPS is available, but the supported way online is the server in [DEPLOY.md](DEPLOY.md). |
@@ -50,7 +50,8 @@ Nothing here blocks the trial; each is a small change once you decide.
   the background service. From 1.5 on, `npm run latest` does both itself.
 - **What the first start of 1.5 changes:**
   - The database records the app key's fingerprint, after checking the key against the bank details already there.
-  - Sessions are stored as a hash: nobody is signed out.
+  - Sessions are stored as a hash. Nobody with two-step is signed out; a real account without two-step is signed out at
+    its next request and signs in again with a setup code (its 1.4 session was made without one).
   - A database the 1.4 demo seed built is put in **trial mode**. The 1.4 demo owner LM-0001 becomes a restricted one-tap
     demo account: it loses the sensitive actions and `npm run golive` removes it. Go live, then sign in as the owner
     golive makes (you may use the same email again). The 1.4 starter team accounts are kept as your own.
@@ -75,7 +76,8 @@ Nothing here blocks the trial; each is a small change once you decide.
    Linear Hub listens on 127.0.0.1 only, one-tap demo sign-ins are off. Reps then use Linear Hub on 4G at any venue, and
    "works with no signal" works (it needs https). The office Mac is for the trial week only.
 3. **Bring the trial database across and go live.** `sudo linear-hub import <file>.lhbk`, then `sudo linear-hub golive`:
-   read what goes and what stays, type **GO LIVE**, and keep the setup code it prints. Sign in, set up two-step
+   read what goes and what stays, type **GO LIVE**, and keep the setup code it prints. It signs everyone out: each
+   person signs in again, with two-step or, until they have it, a setup code. Sign in, set up two-step
    verification, keep the recovery codes away from your phone.
 4. **The recovery sheet.** With Noryn, over SSH: `sudo linear-hub recovery-sheet` shows the sheet; copy the key onto the
    paper (16 groups of 4), then `sudo linear-hub recovery-sheet --confirm` and type the **whole key** back from the paper.
@@ -104,7 +106,7 @@ Nothing here blocks the trial; each is a small change once you decide.
 ## What was tested, and what was not
 
 **Tested.** Each package was built test-first, reviewed independently, fixed, and then merged. On the merged release
-1.5.0: the typecheck passes; the whole test suite passes (1,693 tests: 564 shared, 1,072 server, 57 client, none
+1.5.0: the typecheck passes; the whole test suite passes (1,704 tests: 564 shared, 1,083 server, 57 client, none
 failing); the end-to-end API check passes 82 of 82 checks; and the production build passes with no warnings. Before
 merging, each package also ran its own checks:
 
@@ -118,7 +120,12 @@ merging, each package also ran its own checks:
   SFTP, moving to a new box, `linear-hub update` and `restore`, and the real services under systemd;
 - the whole test suite on five awkward dates (the Sunday the clocks go forward, New Year's Eve and others), and on a
   Mac-like network set-up;
-- the recovery sheet's confirmation (one wrong character confirms nothing) and a backup's key copy removed afterwards.
+- the recovery sheet's confirmation (one wrong character confirms nothing) and a backup's key copy removed afterwards;
+- a release check of the merged release (an upgrade from 1.4 with a trial week, going live, security, money, keys,
+  phones, the public page) found three problems, all fixed with tests before release: a restore could forget a week
+  paid late and a bank file downloaded after the backup without a warning; a session made without a setup code (a 1.4
+  session, a one-tap session) outlived the setup-code rule, and going live did not sign anyone out; and the description
+  search engines and the home-screen app show mentioned pay and gauges.
 
 **Not tested yet — so the first real run is a test:**
 

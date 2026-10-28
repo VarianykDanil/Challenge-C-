@@ -4115,8 +4115,10 @@ clocks, §18.22) and **docs** (the installer and the documents; no business rule
    audited create after the seed, minus one, and the statements that arrived after the seed. So a trial week spent on
    1.4 is kept.
 6. The first owner (when none of the office's own administrators is left, or with `--owner-email`): employee ID
-   LM-0001 when free, a setup code printed. Trial mode off; one audit row ("Went live from the server command: removed
-   the demo company (N people, M records); made … the owner"). A second run changes nothing.
+   LM-0001 when free, a setup code printed. **Everyone is signed out**: every session and half-finished two-step
+   sign-in ends, so no session made under the trial's rules (one tap, or a 1.4 session made with an email and employee
+   ID only) lives on. Trial mode off; one audit row ("Went live from the server command: removed the demo company
+   (N people, M records); made … the owner; signed everyone out"). A second run changes nothing.
 7. `npm run seed` (`lib/seedGuard.ts`) refuses a live database, a trial database with people of the office's own, or one
    in use; asks for **START AGAIN**; backs up and checks first. A missing database whose backups folder holds backups of
    one is not seeded by the server (`missingDatabaseRefusal`: check `DB_PATH`, restore, or seed on purpose).
@@ -4135,8 +4137,10 @@ clocks, §18.22) and **docs** (the installer and the documents; no business rule
 - Missing and wrong codes count against the login limiter like a wrong PIN. A wrong, used or expired code gets one
   sentence (`ACCESS_MESSAGES.setupCodeWrong`), so the answer never says which.
 - Over an insecure connection from another device a new code is made but not shown (`setupCodeWithheld`).
-
-### 18.4 The administrator's own code for sensitive actions (step-up)
+- **The session remembers it** (`sessions.via_setup_code`, 1 when the sign-in used a setup code). A session of an
+  account without two-step that is not a one-tap demo account works only with it: any other — a 1.4 session (made with
+  an email and employee ID only), or a one-tap session after the demo sign-ins were switched off (`LM_DEMO_ACCOUNTS=0`,
+  HTTPS) — is signed out at its next request (`authenticate`), so nobody sets up two-step without the code. The administrator's own code for sensitive actions (step-up)
 
 `staffEditStepUp(existing, patch)` (shared, used by `PATCH /users/:id` and the Edit profile form): a fresh two-step code
 is needed to make someone an administrator, to change an administrator's role, to set an administrator's status to
@@ -4209,8 +4213,10 @@ A new key needs a new sheet. The audit trail records making and confirming it, n
 ### 18.9 Restore (`restore.ts`, `lib/restoreCheck.ts`)
 
 Before asking, restore compares the money records of the current database and the backup **by content, not by clock**:
-live payments approved that the backup has not approved; payments sent or paid that the backup has as not sent; bank
-files made; bank details changed (the backup has the old details); pay runs marked paid. Any → typed **RESTORE**
+live payments approved that the backup has not approved; payments sent or paid that the backup has as not sent, or as
+sent while they are paid now; bank files made; live bank files downloaded that the backup has as not downloaded
+(`downloaded_at`, or for a 1.4 backup its audit trail's download: MON-2, a downloaded file counts as sent); bank details
+changed (the backup has the old details); pay runs marked paid, on time (`paid`) or after the due date (`late`). Any → typed **RESTORE**
 (`--yes` alone is not enough; without a terminal `--yes --forget-payments`), and the restored database carries
 `meta.restore_payment_warning` (System health, 14 days). When the comparison cannot be made it fails closed: it says so,
 still asks for RESTORE, and stores the warning marked `unknown`. The key that opens the backup (the key in use,

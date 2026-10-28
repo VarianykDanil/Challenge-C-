@@ -2107,7 +2107,11 @@ Secure-only routes (`middleware/accessGuards.ts SECURE_ONLY_ROUTES`): `PUT /me/b
 port, no redirect); cookies are then `Secure` and every answer carries `Strict-Transport-Security: max-age=15552000;
 includeSubDomains`.
 
-**Sessions** are stored as a SHA-256 of the cookie value; the cookie itself is unchanged.
+**Sessions** are stored as a SHA-256 of the cookie value; the cookie itself is unchanged. A session of an account
+without two-step that is not a one-tap demo account counts only when its sign-in used a setup code
+(`sessions.via_setup_code`): any other (a 1.4 session, a one-tap session after the demo sign-ins were switched off) is
+deleted at its next request, which answers `401` like a signed-out one. `npm run golive` deletes every session and
+open two-step challenge.
 
 ### System health and the app key (administrators)
 

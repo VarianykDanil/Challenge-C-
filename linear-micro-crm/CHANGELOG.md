@@ -30,8 +30,8 @@ put it online (`deploy/install.sh`), and tests that no longer depend on the date
   stays and why (by name), backs up and checks the database (with the uploaded files) first, asks for **GO LIVE**,
   removes the demo company and the records the demo seed made, keeps the settings, your own people and everything made
   during the trial (and any demo record those use, read from the database's own links), never deletes statement PDFs,
-  and makes the first owner with a one-time setup code when none of your own administrators is left. Running it again
-  changes nothing. A trial week spent on 1.4 is kept too.
+  and makes the first owner with a one-time setup code when none of your own administrators is left. It signs everyone
+  out. Running it again changes nothing. A trial week spent on 1.4 is kept too.
 - **One-time setup codes** for every new account (Team → Add person, a hire, a client invite, the owner golive makes)
   and every reset of someone's two-step verification or PIN: 12 letters and digits, shown once, valid 7 days, single
   use. An account that has not finished setting up signs in only with its code. **Give a setup code** (Team → the
@@ -114,8 +114,8 @@ put it online (`deploy/install.sh`), and tests that no longer depend on the date
   78, with the way back); it used to make a new key silently. The database records the key's fingerprint.
 - `npm run latest` stops the background service, backs up and checks the database first, and starts the service again
   with its own settings; it prints the way back.
-- Restore lists the payments, bank files, bank details changes and paid runs it would forget and asks for **RESTORE**;
-  when it cannot compare, it says so and still asks.
+- Restore lists the payments (approved, sent or paid), bank files (made or downloaded), bank details changes and paid
+  runs (on time or late) it would forget and asks for **RESTORE**; when it cannot compare, it says so and still asks.
 - `npm run service:install` hands `LM_APP_SECRET` to the service in a private file instead of refusing it, and when run
   again keeps the installed service's settings and key file (`-- --fresh` to start clean). `doctor`, `backup`,
   `restore`, `key:restore`, `recovery-sheet`, `golive`, `setup-code`, `pin:reset` and `2fa:reset` run from a plain
@@ -165,8 +165,11 @@ put it online (`deploy/install.sh`), and tests that no longer depend on the date
   sales funnel, and the "One sign-in per person" section with its sign-in instructions. In their place: "How we work"
   (training, teach-backs, coaching and planned events), the training pack's three core principles and its full
   eight-level career ladder (what you learn at each level and what it takes to move up, with no pay, incentives or
-  targets), and a "Private and secure" section. A new test (`server/src/test/public-page.test.ts`) fails if pay,
-  money amounts, the gauges, the benchmarks or the sign-in details ever come back.
+  targets), and a "Private and secure" section. The description search engines and link previews show, and the
+  home-screen app's description, now say only "the Linear MCR team app" (they said "field gauges, recruitment and
+  pay"); the home-screen shortcut is **Quick log**. A new test (`server/src/test/public-page.test.ts`) fails if pay,
+  money amounts, the gauges, the benchmarks or the sign-in details ever come back, in the page, `index.html` or the
+  manifest.
 
 ### Fixed
 
@@ -204,6 +207,18 @@ put it online (`deploy/install.sh`), and tests that no longer depend on the date
 - `npm run build`, `npm start`, `npm run latest` and the other commands now also work from the top folder of the
   repository, the folder above `linear-micro-crm`. Run there, they failed with "Could not read package.json"; now each
   one changes into `linear-micro-crm` and runs the same command, and `npm install` there installs Linear Hub.
+- Found by the release check: **a restore could forget a week paid and a bank file downloaded without a word**, so the
+  week could be paid again. A week marked paid after its due date (`late`) was not counted as paid, a bank file was
+  compared only by its name (approval names it) and never by its download, and a payment that went from sent to paid
+  after the backup was not counted. All three are listed now, for local and off-site (`.lhbk`) backups, and need
+  **RESTORE** typed.
+- The owner `npm run golive` makes gets the owner's pay plan, not the first plan in the list (the trainee plan).
+- Bank details typed in by someone no longer in Linear Hub (a demo account removed when going live) no longer read as
+  "Rita changed their bank details": the bell, the payment's skip reason and Team say they "were changed by someone no
+  longer in Linear Hub".
+- The trial item in the bell no longer gives office administrators a command: it says to ask Noryn to go live (the
+  steps stay in Settings → Trial mode). A one-tap sign-in refused one's own bank details as "a real person's"; it now
+  says bank details, their own included, are not for a one-tap sign-in.
 
 ### Security
 
@@ -211,7 +226,14 @@ put it online (`deploy/install.sh`), and tests that no longer depend on the date
   now write from an allowlist and only to the demo company.
 - **Knowing someone's email and employee ID was enough to start their account** and choose its PIN and authenticator.
   An account that has not finished setting up now needs its one-time setup code (only a SHA-256 hash is stored).
-- Sessions are stored as a SHA-256 hash of the token; existing sessions are converted in place (nobody is signed out).
+- Sessions are stored as a SHA-256 hash of the token; existing sessions are converted in place (nobody with two-step
+  is signed out).
+- **A session made without a setup code could set up two-step without one** (found by the release check on a 1.4
+  database upgraded to 1.5: a real administrator's 1.4 session, made with an email and employee ID only, set up two-step
+  and then made another administrator; one-tap sessions also outlived `npm run golive`). `npm run golive` now signs
+  everyone out, and a session of an account without two-step works only when it was made with a setup code (or is a
+  one-tap demo session during the trial): a 1.4 session, or a one-tap session after the demo sign-ins were switched
+  off, is signed out at its next request.
 - Money and secret actions are refused over plain http from another device: entering, changing, confirming or
   reporting bank details, approving a payment or downloading its file, adding or changing a payment connection (its 1p
   test file too), the two-approvals setting, confirming a VAT number, freeing the weeks of a downloaded bank file,

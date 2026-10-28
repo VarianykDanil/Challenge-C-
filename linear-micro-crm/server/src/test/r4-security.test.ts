@@ -271,7 +271,10 @@ test('the old "Require two-step for administrators" setting stays readable but n
   const admin2 = await srv!.login({ email: FIXTURE_ACCOUNTS.admin.email, employeeId: FIXTURE_ACCOUNTS.admin.employeeId });
   run(db(), `UPDATE users SET totp_enabled_at = NULL, totp_secret_enc = NULL WHERE id = ?`, [fx().users.admin]);
   srv!.resetCache();
-  assert.equal((await admin2.get('/auth/me')).json.user.twoFactorSetupRequired, true, 'admins need it with the switch off');
+  // release 1.5 check: a session made without a setup code does not outlive the account's two-step (signed out)
+  assert.equal((await admin2.get('/auth/me')).status, 401);
+  const admin3 = await srv!.login({ email: FIXTURE_ACCOUNTS.admin.email, employeeId: FIXTURE_ACCOUNTS.admin.employeeId }, undefined, { twoFactor: false });
+  assert.equal((await admin3.get('/auth/me')).json.user.twoFactorSetupRequired, true, 'admins need it with the switch off');
 });
 
 // ───────────────────────────── 14 hours from sign-in ─────────────────────────────

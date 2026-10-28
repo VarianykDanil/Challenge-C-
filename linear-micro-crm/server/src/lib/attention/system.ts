@@ -232,9 +232,9 @@ export const provider: AttentionProvider = {
     const restored = m[RESTORE_WARNING_META];
     if (restored) {
       try {
-        const w = JSON.parse(restored) as { at: string; backup: string; sent: number; approved: number; bankFiles: number; bankDetails: number; paidRuns: number; unknown?: boolean };
+        const w = JSON.parse(restored) as { at: string; backup: string; sent: number; approved: number; bankFiles: number; downloaded?: number; bankDetails: number; paidRuns: number; unknown?: boolean };
         if (now - Date.parse(w.at) < RESTORE_WARNING_DAYS * 24 * HOUR) {
-          const found = w.sent + w.approved + w.bankFiles + w.bankDetails + w.paidRuns > 0;
+          const found = w.sent + w.approved + w.bankFiles + (w.downloaded ?? 0) + w.bankDetails + w.paidRuns > 0;
           items.push({
             key: `system:restored:${w.at}`,
             kind: 'system',

@@ -11,7 +11,8 @@
  * Statement PDFs stay on disk: the database backup golive makes does not hold them, so removing them could not be
  * undone (a demo PDF nothing points at is harmless).
  * Then trial mode is off for good: no one-tap sign-ins, no demo start-up steps, and nobody signs in without their own
- * setup code and two-step verification. When no administrator of the office's own is left, the first real owner is
+ * setup code and two-step verification. Everyone is signed out (sessions and half-finished two-step sign-ins), so no
+ * session made under the trial's rules lives on. When no administrator of the office's own is left, the first real owner is
  * made (LM-0001 when free) with a one-time setup code.
  */
 import { AVATAR_PALETTE } from '../db/seed-data.ts';
@@ -72,6 +73,8 @@ export interface GoLiveResult {
   owner: { id: number; name: string; email: string; employeeId: string; setupCode: string; expiresAt: string } | null;
   /** Active people of the office who have not finished setting up (they need a setup code from an administrator). */
   notSetUp: { name: string; email: string }[];
+  /** Sessions ended: going live signs everyone out (a trial session must not outlive the trial's rules). */
+  signedOut: number;
 }
 
 const PERSON_SELECT = `SELECT id, TRIM(first_name || ' ' || last_name) AS name, email, employee_id AS employeeId, role, status FROM users`;
@@ -404,7 +407,17 @@ export function goLive(db: Db, opts: { owner?: GoLiveOwnerInput; now?: Date }): 
     let ownerId: number | null = null;
     if (makeOwner && opts.owner) {
       const o = opts.owner;
-      const plan0 = get<{ id: number }>(db, `SELECT id FROM pay_plans ORDER BY id LIMIT 1`);
+      // an owner's plan (position 'owner', e.g. "Owner (salaried)"), else the plan of an administrator going away (the
+      // demo owner's), else the first plan: never the trainee plan just because it comes first
+      const plan0 = get<{ id: number }>(
+        db,
+        `SELECT id FROM pay_plans
+         ORDER BY (position = 'owner') DESC,
+                  (id IN (SELECT pay_plan_id FROM users WHERE role = 'admin' AND id IN (SELECT value FROM json_each(?)))) DESC,
+                  id
+         LIMIT 1`,
+        [demo],
+      );
       if (!plan0) throw new Error('This database has no pay plan, so no owner can be made. Restore a backup or start again.');
       ownerId = run(
         db,
@@ -455,6 +468,12 @@ export function goLive(db: Db, opts: { owner?: GoLiveOwnerInput; now?: Date }): 
       owner = { id: ownerId, name, email, employeeId, setupCode: issued.code, expiresAt: issued.expiresAt };
     }
 
+    // everyone signs out, and half-finished two-step sign-ins start again: a session made in the trial (one tap, or a
+    // 1.4 session made with an email and employee ID only) must not outlive it, or it could set up two-step without a
+    // setup code. Each person signs in again under the live rules: two-step, or a setup code until they have it.
+    const signedOut = run(db, `DELETE FROM sessions`).changes;
+    run(db, `DELETE FROM two_factor_challenges`);
+
     // trial mode off for good: no one-tap sign-ins and no demo start-up steps ever again (seeded_at stays, so the
     // server never seeds it again)
     setTrialMode(db, false);
@@ -469,7 +488,7 @@ export function goLive(db: Db, opts: { owner?: GoLiveOwnerInput; now?: Date }): 
       entity: 'settings',
       entityId: null,
       summary: `Went live from the server command: removed the demo company (${removedPeople} people, ${records} records)` +
-        (owner ? `; made ${owner.name} the owner` : ''),
+        (owner ? `; made ${owner.name} the owner` : '') + '; signed everyone out',
       before: { trialMode: true },
       after: { trialMode: false },
     });
@@ -479,7 +498,7 @@ export function goLive(db: Db, opts: { owner?: GoLiveOwnerInput; now?: Date }): 
     )
       .filter((p) => p.id !== owner?.id && !isTwoFactorEnabled(db, p.id))
       .map(({ name, email }) => ({ name, email }));
-    return { removedPeople, removedRecords, owner, notSetUp };
+    return { removedPeople, removedRecords, owner, notSetUp, signedOut };
   });
   return result;
 }

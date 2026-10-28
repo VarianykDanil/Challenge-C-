@@ -89,6 +89,28 @@ describe('MON-3: bank details typed in by an administrator wait for the person o
     assert.match(skip.reason, /Remy confirms them|another administrator/);
   });
 
+  // Release check of 1.5.0: after golive removed the demo owner who typed someone's details in, changed_by is NULL and
+  // the bell and the payment said "Rita changed their bank details", which she never did.
+  test('details changed by someone no longer in Linear Hub say so, not that the person changed them', async () => {
+    const conn = await fileConnection();
+    const week = addDays(mondayOf(fx.today), -14);
+    const runId = addRun(srv.db, fx.users.repA2, week, 80);
+    run(srv.db, `INSERT INTO bank_accounts (user_id, holder_name, sort_code_enc, account_number_enc, last4, sort_code_last2, changed_at, changed_by)
+                 VALUES (?, 'Rita Rep', ?, ?, '0002', '00', ?, NULL)`,
+      [fx.users.repA2, encrypt('000000'), encrypt('00000002'), new Date(businessNow().getTime() - 86_400_000).toISOString()]);
+    const draft = await admin.post('/payments/batches', { connectionId: conn, runIds: [runId] });
+    assert.equal(draft.status, 400, 'nothing left to pay');
+    const skip = (draft.json.details.skipped as Json[]).find((s) => s.runId === runId);
+    assert.equal(skip?.code, 'bank_details_unconfirmed', JSON.stringify(draft.json));
+    assert.match(skip.reason, /Rita’s bank details were changed on .+ by someone no longer in Linear Hub: check them with Rita, then confirm them in Team/);
+    assert.doesNotMatch(skip.reason, /Rita changed their/);
+    srv.resetCache();
+    const items = (await admin.get('/me/attention')).json.items as Json[];
+    const item = items.find((i) => String(i.key).startsWith(`payments:bank:${fx.users.repA2}:`));
+    assert.ok(item, JSON.stringify(items.map((i) => i.key)));
+    assert.equal(item.title, 'Rita Rep’s bank details were changed by someone no longer in Linear Hub');
+  });
+
   test('the person sees a notice and confirms them in their own account (with their code)', async () => {
     const r = await admin.put(`/users/${fx.users.rep}/bank-details`, { ...details('00000007'), code: code(fx.users.admin) });
     srv.resetCache();

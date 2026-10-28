@@ -181,3 +181,155 @@ test('an unreadable live database also needs RESTORE typed (nothing tells what i
   assert.ok(losses.unknown);
   assert.match(describeLosses(losses).join('\n'), /could not compare the money records/);
 });
+
+// Release check of 1.5.0: a backup made after a bank file was approved, then the file downloaded and marked paid (the
+// run paid after its due date, so 'late'), was restored with no warning: the check counted only runs 'paid', compared
+// bank files by name (approval names them) and never by download (MON-2: a downloaded file counts as sent), and did not
+// count payments that moved from sent to paid. The week could then be paid again.
+const PASSPHRASE = 'tidy-otter-copper-maple-river';
+type Kind = 'sqlite' | 'lhbk';
+
+async function backupAs(s: ReturnType<typeof setup>, kind: Kind): Promise<string> {
+  const dir = path.dirname(s.dbPath);
+  const offsiteDir = path.join(dir, 'cloud-drive');
+  const passFile = path.join(dir, 'passphrase.txt');
+  mkdirSync(offsiteDir, { recursive: true });
+  writeFileSync(passFile, `${PASSPHRASE}\n`, { mode: 0o600 });
+  const r = await backupNow(s.db, {
+    dir: s.backups,
+    now: new Date('2026-10-19T01:00:00Z'),
+    offsite: kind === 'lhbk' ? { dir: offsiteDir, passphraseFile: passFile, includeVideos: false, kdfN: 2 ** 12 } : null,
+  });
+  if (kind === 'sqlite') return r.path;
+  assert.equal(r.offsiteError, null);
+  return r.offsite!.path;
+}
+
+/** A live bank file for one run, approved and named (the state approval leaves it in), not downloaded yet. */
+function approvedFile(db: Db, runId: number, userId: number, week: string): { batch: number; item: number } {
+  const conn = run(db, `INSERT INTO payment_connections (provider, name, mode, created_at) VALUES ('bank_file', 'Test bank file', 'live', ?)`, [now]).lastInsertRowid;
+  const batch = run(
+    db,
+    `INSERT INTO payment_batches (connection_id, provider, mode, created_at, approved_at, total_pence, count, status, file_name, idempotency_key, updated_at)
+     VALUES (?, 'bank_file', 'live', ?, ?, 8000, 1, 'submitted', 'linear-pay-week.csv', ?, ?)`,
+    [conn, now, now, `key-file-${runId}`, now],
+  ).lastInsertRowid;
+  const item = run(
+    db,
+    `INSERT INTO payment_items (batch_id, payroll_run_id, user_id, week_start, amount_pence, payee_name, account_last4, status, updated_at, live)
+     VALUES (?, ?, ?, ?, 8000, 'Test Person', '0001', 'submitted', ?, 1)`,
+    [batch, runId, userId, week, now],
+  ).lastInsertRowid;
+  return { batch, item };
+}
+
+/** Restores the backup twice: once cancelled (to read what it lists and asks), then with RESTORE typed. */
+async function restoreBoth(s: ReturnType<typeof setup>, candidate: string) {
+  const lines: string[] = [];
+  const asked: Array<{ typed?: string }> = [];
+  const cancelled = await restoreDatabase({
+    dbPath: s.dbPath,
+    candidate,
+    port: 1,
+    confirm: async (_q, o) => (asked.push(o ?? {}), false),
+    passphrase: async () => PASSPHRASE,
+    secretFile: null,
+    log: (l) => lines.push(l),
+  });
+  assert.equal(cancelled.status, 'cancelled', JSON.stringify(cancelled));
+  const done = await restoreDatabase({
+    dbPath: s.dbPath,
+    candidate,
+    port: 1,
+    confirm: async (_q, o) => o?.typed === RESTORE_TYPED_WORD,
+    passphrase: async () => PASSPHRASE,
+    secretFile: null,
+    log: () => {},
+  });
+  assert.equal(done.status, 'restored', JSON.stringify(done));
+  const db = new DatabaseSync(s.dbPath, { readOnly: true });
+  let warning: Record<string, unknown> | null;
+  try {
+    const row = db.prepare(`SELECT value FROM meta WHERE key = ?`).get(RESTORE_WARNING_META) as { value: string } | undefined;
+    warning = row ? JSON.parse(row.value) : null;
+  } finally {
+    db.close();
+  }
+  return { asked, text: lines.join('\n'), done, warning };
+}
+
+for (const kind of ['sqlite', 'lhbk'] as const) {
+  test(`${kind} backup: a week marked paid after its due date ('late') after the backup is listed, and needs RESTORE typed`, async () => {
+    const s = setup();
+    const week = '2026-10-12';
+    const runId = payRun(s.db, s.rep, week, 'pending');
+    const candidate = await backupAs(s, kind);
+    run(s.db, `UPDATE payroll_runs SET status = 'late', paid_date = '2026-10-20' WHERE id = ?`, [runId]);
+    s.db.close();
+
+    const r = await restoreBoth(s, candidate);
+    assert.deepEqual(r.asked, [{ typed: RESTORE_TYPED_WORD }], 'a plain yes is not enough');
+    assert.match(r.text, /1 pay run marked paid \(£450\.00\): Remy Rep/);
+    assert.ok(r.done.status === 'restored' && r.done.losses.paidRuns.count === 1);
+    assert.equal(r.warning?.paidRuns, 1);
+  });
+
+  test(`${kind} backup: a bank file downloaded and marked paid after the backup is listed, and needs RESTORE typed`, async () => {
+    const s = setup();
+    const week = '2026-10-12';
+    const runId = payRun(s.db, s.rep, week, 'pending');
+    const f = approvedFile(s.db, runId, s.rep, week);
+    const candidate = await backupAs(s, kind);
+    // after the backup: the file is downloaded (so it may be at the bank), then marked paid; the run was due before
+    run(s.db, `UPDATE payment_batches SET downloaded_at = ?, status = 'completed' WHERE id = ?`, ['2026-10-19T09:00:00.000Z', f.batch]);
+    run(s.db, `UPDATE payment_items SET status = 'paid', paid_at = ? WHERE id = ?`, ['2026-10-20T09:00:00.000Z', f.item]);
+    run(s.db, `UPDATE payroll_runs SET status = 'late', paid_date = '2026-10-20' WHERE id = ?`, [runId]);
+    s.db.close();
+
+    const r = await restoreBoth(s, candidate);
+    assert.deepEqual(r.asked, [{ typed: RESTORE_TYPED_WORD }], 'a plain yes is not enough');
+    assert.match(r.text, /1 bank file downloaded after the backup[^\n]*: linear-pay-week\.csv/);
+    assert.match(r.text, /1 payment to people sent to the bank or paid \(£80\.00\): Remy Rep/);
+    assert.match(r.text, /1 pay run marked paid \(£450\.00\): Remy Rep/);
+    assert.doesNotMatch(r.text, /approved after the backup/, 'the backup had the approval');
+    assert.doesNotMatch(r.text, /bank file made/, 'the backup had the file');
+    if (r.done.status !== 'restored') return;
+    assert.equal(r.done.losses.downloaded.length, 1);
+    assert.equal(r.done.losses.sent.count, 1);
+    assert.equal(r.done.losses.paidRuns.count, 1);
+    assert.equal(r.done.losses.total, 3);
+    assert.equal(r.warning?.downloaded, 1);
+    assert.equal(r.warning?.sent, 1);
+  });
+}
+
+test('a 1.4 backup (no downloaded_at column): a download after it counts, one in its audit trail does not', async () => {
+  const s = setup();
+  const week = '2026-10-12';
+  const runId = payRun(s.db, s.rep, week, 'pending');
+  const f = approvedFile(s.db, runId, s.rep, week);
+  const r = await backupNow(s.db, { dir: s.backups, now: new Date('2026-10-19T01:00:00Z') });
+  run(s.db, `UPDATE payment_batches SET downloaded_at = ? WHERE id = ?`, ['2026-10-19T09:00:00.000Z', f.batch]);
+  s.db.close();
+  const bk = new DatabaseSync(r.path);
+  try {
+    bk.exec('ALTER TABLE payment_batches DROP COLUMN downloaded_at');
+  } finally {
+    bk.close();
+  }
+  const lost = paymentLosses(s.dbPath, r.path);
+  assert.equal(lost.unknown, null);
+  assert.deepEqual(lost.downloaded.map((d) => d.fileName), ['linear-pay-week.csv']);
+  assert.equal(lost.total, 1);
+
+  // 1.4 wrote the download only to the audit trail; 1.5's upgrade turns that into downloaded_at after the restore
+  const bk2 = new DatabaseSync(r.path);
+  try {
+    bk2.prepare(`INSERT INTO audit_log (at, user_id, action, entity, entity_id, summary) VALUES (?, NULL, 'GET /payments/batches/:id/file', 'payment_batch', ?, 'Downloaded')`).run('2026-10-18T09:00:00.000Z', f.batch);
+  } finally {
+    bk2.close();
+  }
+  const kept = paymentLosses(s.dbPath, r.path);
+  assert.equal(kept.downloaded.length, 0);
+  assert.equal(kept.total, 0);
+});

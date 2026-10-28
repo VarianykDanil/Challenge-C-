@@ -224,10 +224,12 @@ test('golive after a 1.4 trial week keeps every record made in the trial and the
     assert.equal(exists(db, 'candidates', week.playedWith), false, 'a demo candidate only the demo accounts touched goes');
     // the trial announcement passes to the office's administrator (its author was the demo owner)
     assert.equal(get<{ a: number }>(db, `SELECT author_id AS a FROM announcements WHERE id = ?`, [week.notice])!.a, week.robin);
-    // the demo company's people are gone; the office's own and their sessions stay
+    // the demo company's people are gone; the office's own stay, signed out: Robin's 1.4 session (made with his email
+    // and employee ID only) must not outlive the trial, or it could set up two-step without a setup code
     assert.equal(count(db, `SELECT COUNT(*) AS n FROM users WHERE id IN (SELECT value FROM json_each(?))`, [JSON.stringify(demo)]), 0);
     assert.ok(exists(db, 'users', week.robin) && exists(db, 'users', week.casey));
-    assert.equal(count(db, `SELECT COUNT(*) AS n FROM sessions WHERE token = ?`, [sessionKey(week.robinToken)]), 1);
+    assert.equal(count(db, `SELECT COUNT(*) AS n FROM sessions WHERE token = ?`, [sessionKey(week.robinToken)]), 0);
+    assert.equal(count(db, `SELECT COUNT(*) AS n FROM sessions`), 0, 'everyone signs in again under the live rules');
     // statement files are never deleted (they are not in the database backup)
     for (const f of week.files) assert.ok(existsSync(statementFilePath(db, f)!), `${f} is still on disk`);
     assert.equal(count(db, `SELECT COUNT(*) AS n FROM statements`), 2, 'the demo statements went');

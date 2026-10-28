@@ -38,7 +38,7 @@ export interface NewSession {
  * after sign-in, whatever the activity, and its cookie's Max-Age is the same — the one-tap demo accounts too (they
  * used to keep 14 days). The cookie carries the token; the table keeps only its hash (lib/sessionKey.ts).
  */
-export function createSession(db: Db, user: DemoSignInSubject): NewSession {
+export function createSession(db: Db, user: DemoSignInSubject, opts: { viaSetupCode?: boolean } = {}): NewSession {
   const token = randomBytes(32).toString('hex');
   const now = new Date();
   const settings = readSecuritySettings(db);
@@ -46,7 +46,9 @@ export function createSession(db: Db, user: DemoSignInSubject): NewSession {
   const maxAgeMs = maxHours * 3_600_000;
   const signedInAt = now.toISOString();
   const endsAt = new Date(now.getTime() + maxAgeMs).toISOString();
-  run(db, `INSERT INTO sessions (token, user_id, created_at, expires_at, last_seen_at) VALUES (?, ?, ?, ?, ?)`, [sessionKey(token), user.id, signedInAt, endsAt, signedInAt]);
+  run(db, `INSERT INTO sessions (token, user_id, created_at, expires_at, last_seen_at, via_setup_code) VALUES (?, ?, ?, ?, ?, ?)`, [
+    sessionKey(token), user.id, signedInAt, endsAt, signedInAt, opts.viaSetupCode ? 1 : 0,
+  ]);
   // idleHours: a phone opened with no signal stops acting as this person when the inactivity sign-out would apply
   return { token, maxAgeMs, info: { signedInAt, endsAt, maxHours, idleHours: settings.sessionIdleHours } };
 }
@@ -142,11 +144,11 @@ export function authenticate(db: Db): RequestHandler {
   return (req, res, next) => {
     const token = (req.cookies as Record<string, string | undefined> | undefined)?.[SESSION_COOKIE];
     if (!token) return next();
-    const row = get<UserWithTeam & { createdAt: string; expiresAt: string; seenAt: string; totpOn: number; pinOn: number; clientCampaign: number | null }>(
+    const row = get<UserWithTeam & { createdAt: string; expiresAt: string; seenAt: string; totpOn: number; pinOn: number; clientCampaign: number | null; viaSetupCode: number }>(
       db,
       `${USER_SELECT.replace(
         'SELECT ',
-        'SELECT s.created_at AS createdAt, s.expires_at AS expiresAt, COALESCE(s.last_seen_at, s.created_at) AS seenAt, (u.totp_enabled_at IS NOT NULL) AS totpOn, (u.pin_hash IS NOT NULL) AS pinOn, u.client_campaign_id AS clientCampaign, ',
+        'SELECT s.created_at AS createdAt, s.expires_at AS expiresAt, COALESCE(s.last_seen_at, s.created_at) AS seenAt, (u.totp_enabled_at IS NOT NULL) AS totpOn, (u.pin_hash IS NOT NULL) AS pinOn, u.client_campaign_id AS clientCampaign, s.via_setup_code AS viaSetupCode, ',
       )} JOIN sessions s ON s.user_id = u.id WHERE s.token = ?`,
       [sessionKey(token)],
     );
@@ -183,8 +185,17 @@ export function authenticate(db: Db): RequestHandler {
       }
       return next(); // requireAuth answers 401
     }
+    // Release 1.5 check: an account without two-step that is not a one-tap demo account signs in only with its setup
+    // code, so its session must have been made with one. Any other (a 1.4 session, or a one-tap session after the demo
+    // sign-ins were switched off) could otherwise set up two-step without the code: it is signed out, and the person
+    // signs in again with a setup code from an administrator.
+    if (!row.totpOn && !demoSignIn && !row.viaSetupCode) {
+      destroySession(db, token);
+      clearSessionCookie(req, res);
+      return next(); // requireAuth answers 401
+    }
     if (now - seenMs >= LAST_SEEN_RESOLUTION_MS) run(db, `UPDATE sessions SET last_seen_at = ? WHERE token = ?`, [new Date(now).toISOString(), sessionKey(token)]);
-    const { createdAt, expiresAt, seenAt: _seen, totpOn, pinOn, clientCampaign, ...user } = row;
+    const { createdAt, expiresAt, seenAt: _seen, totpOn, pinOn, clientCampaign, viaSetupCode: _via, ...user } = row;
     const twoFactorEnabled = Boolean(totpOn);
     // The caller's own flags ride on req.user so /auth/me and the dashboard's `user` carry them; other users' rows never do.
     // Release 1.3 (r3-foundation): a client portal session also carries its campaign (staff sessions never do), leaves

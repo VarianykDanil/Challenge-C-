@@ -155,7 +155,8 @@ export const provider: AttentionProvider = {
     const since = new Date(Date.parse(now.nowISO) - FAILED_LOOKBACK_DAYS * 86_400_000).toISOString();
     const rows = all<Row>(
       db,
-      `SELECT 'bank' AS kind, b.user_id AS id, TRIM(u.first_name || ' ' || u.last_name) AS name, b.changed_at AS at, NULL AS n, NULL AS amount, NULL AS reason, NULL AS batchId
+      `SELECT 'bank' AS kind, b.user_id AS id, TRIM(u.first_name || ' ' || u.last_name) AS name, b.changed_at AS at, NULL AS n, NULL AS amount,
+         CASE WHEN b.changed_by IS NULL THEN 'gone' END AS reason, NULL AS batchId
        FROM bank_accounts b JOIN users u ON u.id = b.user_id
        WHERE (b.confirmed_by_admin_at IS NULL OR b.confirmed_by_admin_at < b.changed_at) AND u.status <> 'left' AND u.role <> 'client'
          AND (b.changed_by IS NULL OR b.changed_by = b.user_id) AND b.reported_at IS NULL AND b.user_id <> ?
@@ -284,7 +285,8 @@ export const provider: AttentionProvider = {
           key: `payments:bank:${r.id}:${r.at}`,
           kind: 'payments',
           severity: 'warning',
-          title: `${r.name ?? 'Someone'} changed their bank details`,
+          // reason 'gone': whoever changed them is no longer in Linear Hub (changed_by NULL), so never "X changed their…"
+          title: r.reason === 'gone' ? `${r.name ?? 'Someone'}’s bank details were changed by someone no longer in Linear Hub` : `${r.name ?? 'Someone'} changed their bank details`,
           body: 'Check them before paying: payments to the new account wait until you confirm them.',
           href: `/team/${r.id}#bank-details`,
           actionLabel: 'Check details',

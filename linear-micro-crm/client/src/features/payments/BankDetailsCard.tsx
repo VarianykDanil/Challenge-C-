@@ -97,6 +97,9 @@ function Summary({ view, userId, own, first }: { view: BankDetailsView; userId: 
       hold = view.canConfirm
         ? `${d.changedByName ?? 'An administrator'} typed these in for ${first} on ${dayOf(d.changedAt)}. Check them with ${first} (in person or by phone), then confirm. Until ${first} or you confirm them, payments to them wait.`
         : `You typed these in on ${dayOf(d.changedAt)}. They wait until ${first} confirms them in Settings, or another administrator confirms them here.`;
+    } else if (d.changedBy === null) {
+      // whoever typed them in is no longer in Linear Hub (a demo account removed when going live, say)
+      hold = `These were changed on ${dayOf(d.changedAt)} by someone no longer in Linear Hub. Check them with ${first} (in person or by phone), then confirm. Until then, payments to them wait.`;
     } else {
       hold = `${first} changed these on ${dayOf(d.changedAt)}${by}. Check them with ${first} (in person or by phone), then confirm. Until then, payments to them wait.`;
     }

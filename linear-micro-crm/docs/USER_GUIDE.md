@@ -549,7 +549,8 @@ in.
 `sudo linear-hub golive`), read what goes and what stays, type **GO LIVE**, start it again, and sign in with the email,
 employee ID and setup code it printed, then set up two-step verification. It backs everything up first. It removes the
 demo company and its one-tap accounts, and keeps your settings, the people you added and everything made during the
-trial. Whoever used a demo account during the trial adds their own account. Then give each of your people a setup code
+trial. It signs everyone out: each person signs in again, with two-step verification or, until they have it, with a
+setup code. Whoever used a demo account during the trial adds their own account. Then give each of your people a setup code
 (below). Going live is for good: the demo never comes back on that database.
 
 ### Putting Linear Hub online

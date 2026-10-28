@@ -191,8 +191,8 @@ export function authRouter(db: Db): Router {
    * Release 1.4 (package S): a new session — the admin's hours-from-sign-in limit for everyone, 14 days for the demo
    * sign-in accounts (middleware/auth.ts createSession) — its cookie with the same Max-Age, and the sign-in answer.
    */
-  const signIn = (req: Request, res: Response, user: UserWithTeam, twoFactorEnabled: boolean): void => {
-    const session = createSession(db, user);
+  const signIn = (req: Request, res: Response, user: UserWithTeam, twoFactorEnabled: boolean, viaSetupCode = false): void => {
+    const session = createSession(db, user, { viaSetupCode });
     setSessionCookie(req, res, session.token, session.maxAgeMs);
     const body: AuthResponse = { user: withFlags(user, twoFactorEnabled), session: session.info };
     if (user.role === 'admin' && isTrialMode(db)) body.trial = trialStatus(db); // the banner from the first page
@@ -303,7 +303,7 @@ export function authRouter(db: Db): Router {
     }
     if (codeNeeded && !consumeSetupCode(db, user.id, setupCode)) throw wrongSetupCode();
     clearLoginFailures(keys); // a successful sign-in resets the counters
-    signIn(req, res, user, false);
+    signIn(req, res, user, false, codeNeeded);
   });
 
   /** Step two: the challenge token from `/login` plus a current code or an unused recovery code. */
@@ -324,14 +324,15 @@ export function authRouter(db: Db): Router {
     });
     // the setup code step one held for this challenge (after an admin PIN reset) is used up now; none held, or it was
     // replaced or expired meanwhile: start again
-    if (needsSetupCode(db, user.id, { twoFactorEnabled: true, demoSignIn: isDemoSignInAccount(db, user) }) && !consumeHeldSetupCode(db, user.id, challenge.token)) {
+    const codeNeeded = needsSetupCode(db, user.id, { twoFactorEnabled: true, demoSignIn: isDemoSignInAccount(db, user) });
+    if (codeNeeded && !consumeHeldSetupCode(db, user.id, challenge.token)) {
       deleteChallenge(db, challenge.token);
       recordLoginFailure(keys, now);
       throw wrongSetupCode();
     }
     deleteChallenge(db, challenge.token);
     clearLoginFailures(keys);
-    signIn(req, res, user, true);
+    signIn(req, res, user, true, codeNeeded);
   });
 
   router.post('/logout', (req, res) => {

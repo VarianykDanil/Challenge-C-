@@ -126,7 +126,8 @@ const campaignPayUnchanged: DemoCheck = (c) => {
 };
 
 /** One's own bank details: only a demo company person's (a real person signing in one-tap never sees or changes theirs). */
-const ownBankDetails: DemoCheck = (c) => (isDemoPerson(c.db, c.me.id) ? null : 'see or change a real person’s bank details');
+const OWN_BANK_DETAILS = 'see or change bank details, their own included, from a one-tap sign-in';
+const ownBankDetails: DemoCheck = (c) => (isDemoPerson(c.db, c.me.id) ? null : OWN_BANK_DETAILS);
 
 /** Write routes ("METHOD /pattern", as the route table lists them) → what a demo account may do there. */
 export const DEMO_WRITE_RULES: Readonly<Record<string, DemoCheck>> = {
@@ -260,7 +261,7 @@ export const DEMO_WRITE_RULES: Readonly<Record<string, DemoCheck>> = {
 /** Reads a demo account may not make. */
 export const DEMO_READ_RULES: Readonly<Record<string, DemoCheck>> = {
   'GET /payments/batches/:id/file': deny('download a payment file'),
-  'GET /me/bank-details': (c) => (isDemoPerson(c.db, c.me.id) ? null : 'see or change a real person’s bank details'),
+  'GET /me/bank-details': ownBankDetails,
   'GET /users/:id/bank-details': (c) => (ownPeople(c.db, param('id')(c)).length ? 'see or change a real person’s bank details' : null),
 };
 

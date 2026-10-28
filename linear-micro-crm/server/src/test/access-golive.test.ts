@@ -107,6 +107,8 @@ test('goLive removes the demo company, keeps the office’s own people and recor
       db, `SELECT id, role, position, email, employee_id AS employeeId, first_name || ' ' || last_name AS name FROM users WHERE id = ?`, [owner.id],
     )!;
     assert.deepEqual({ ...row, id: 0 }, { id: 0, role: 'admin', position: 'owner', email: 'robin.ash@office.example', employeeId: 'LM-0001', name: 'Robin Ash' });
+    // release check of 1.5.0: the owner's pay plan is the owner's plan, not the first plan (the trainee plan)
+    assert.equal(get<{ p: string }>(db, `SELECT pp.position AS p FROM users u JOIN pay_plans pp ON pp.id = u.pay_plan_id WHERE u.id = ?`, [owner.id])?.p, 'owner');
     assert.match(owner.setupCode, /^[A-HJ-NP-Z2-9]{4}-[A-HJ-NP-Z2-9]{4}-[A-HJ-NP-Z2-9]{4}$/);
     assert.equal(get(db, `SELECT 1 FROM setup_codes WHERE code_hash = ?`, [owner.setupCode]), undefined, 'stored as a hash only');
     assert.equal(needsSetupCode(db, owner.id, { twoFactorEnabled: false, demoSignIn: false }), true);
@@ -124,7 +126,7 @@ test('goLive removes the demo company, keeps the office’s own people and recor
       db, `SELECT action, summary, user_id AS userId FROM audit_log WHERE action = 'npm run golive'`,
     )!;
     assert.equal(audit.userId, null);
-    assert.match(audit.summary, /^Went live from the server command: removed the demo company \(\d+ people, \d+ records\); made Robin Ash the owner$/);
+    assert.match(audit.summary, /^Went live from the server command: removed the demo company \(\d+ people, \d+ records\); made Robin Ash the owner; signed everyone out$/);
 
     // the start-up steps never put demo accounts back
     const users = count(db, `SELECT COUNT(*) AS n FROM users`);

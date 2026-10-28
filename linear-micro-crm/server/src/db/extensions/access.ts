@@ -7,6 +7,10 @@
  *    even with two-step on. Cleared when a code is used.
  *  - setup_codes.held_by: the two-step sign-in challenge a right code waits on; the code is used up only when that
  *    challenge's two-step code is right too (lib/setupCodes.ts holdSetupCode).
+ *  - sessions.via_setup_code: 1 when the sign-in that made the session used a setup code. A session of an account
+ *    without two-step that is not a one-tap demo account works only with it (middleware/auth.ts authenticate): a 1.4
+ *    session, or a one-tap session after the demo sign-ins were switched off, is signed out instead of letting someone
+ *    set up two-step without the code. 0 for every older session.
  *
  * One-off upgrades of an existing database, each guarded by its own `ext:access:*` flag and run inside a transaction:
  *  - `sessions-hashed`: every stored session token is replaced by its SHA-256 hash (lib/sessionKey.ts), so the cookie
@@ -66,6 +70,7 @@ export const extension: DbExtension = {
     for (const col of [
       addColumnIfMissing(db, 'users', 'setup_code_required', 'INTEGER NOT NULL DEFAULT 0'),
       addColumnIfMissing(db, 'setup_codes', 'held_by', 'TEXT'),
+      addColumnIfMissing(db, 'sessions', 'via_setup_code', 'INTEGER NOT NULL DEFAULT 0'),
     ]) {
       if (col) changed.push(col);
     }

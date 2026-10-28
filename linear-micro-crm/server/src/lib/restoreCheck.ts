@@ -1,6 +1,7 @@
 /**
- * What a restore would make Linear Hub forget about money: the live database's payments approved or sent, bank files
- * made, bank details changed and pay runs marked paid that the backup does not have. After such a restore, the same
+ * What a restore would make Linear Hub forget about money: the live database's payments approved, sent or paid, bank
+ * files made or downloaded, bank details changed and pay runs marked paid (on time or late) that the backup does not
+ * have. After such a restore, the same
  * week could be paid again (a new payment gets new idempotency keys, so the bank or provider does not stop it), or
  * paid to someone's old bank details. Restore lists them and asks for a typed confirmation; the restored database
  * then carries a warning (meta `restore_payment_warning`) that the Needs-attention bell shows the office.
@@ -15,13 +16,19 @@ import { formatPence } from '@lm/shared';
 export interface PaymentLosses {
   /** Live payments approved that the backup has not approved (or does not have). */
   approved: Array<{ id: number; approvedAt: string; pence: number; count: number }>;
-  /** Payments to people that went to the bank or were paid, which the backup still has as not sent. */
+  /** Payments to people that went to the bank or were paid, which the backup still has as not sent (or as sent, not paid). */
   sent: { count: number; pence: number; names: string[] };
   /** Bank files made that the backup has not made. */
   bankFiles: Array<{ id: number; fileName: string }>;
+  /**
+   * Live bank files downloaded that the backup has as not downloaded (MON-2: a downloaded file counts as sent, as it may
+   * be at the bank). Approval names the file, so a backup made between approval and download has the file but not the
+   * download: restored, the file could be cancelled without the NOT UPLOADED words and the week paid again.
+   */
+  downloaded: Array<{ id: number; fileName: string }>;
   /** People whose bank details changed after the backup: the backup has their OLD details. */
   bankDetails: string[];
-  /** Pay runs marked paid that the backup still has as unpaid. */
+  /** Pay runs marked paid (status 'paid', or 'late' when paid after the due date) that the backup still has as unpaid. */
   paidRuns: { count: number; gross: number; names: string[] };
   /** Everything above added up (0: nothing found to lose). */
   total: number;
@@ -32,13 +39,33 @@ export interface PaymentLosses {
 export const RESTORE_WARNING_META = 'restore_payment_warning';
 
 /** Nothing lost (no live database to compare with). */
-export const noLosses = (): PaymentLosses => ({ approved: [], sent: { count: 0, pence: 0, names: [] }, bankFiles: [], bankDetails: [], paidRuns: { count: 0, gross: 0, names: [] }, total: 0, unknown: null });
+export const noLosses = (): PaymentLosses => ({
+  approved: [],
+  sent: { count: 0, pence: 0, names: [] },
+  bankFiles: [],
+  downloaded: [],
+  bankDetails: [],
+  paidRuns: { count: 0, gross: 0, names: [] },
+  total: 0,
+  unknown: null,
+});
+
+const totalOf = (l: PaymentLosses) => l.approved.length + l.sent.count + l.bankFiles.length + l.downloaded.length + l.bankDetails.length + l.paidRuns.count;
 
 const reason = (err: unknown) => (err instanceof Error ? err.message : String(err)).split('\n')[0]!.slice(0, 200);
 
 function tables(db: DatabaseSync, schema: 'main' | 'bk'): Set<string> {
   return new Set((db.prepare(`SELECT name FROM ${schema}.sqlite_master WHERE type = 'table'`).all() as Array<{ name: string }>).map((r) => r.name));
 }
+
+function columns(db: DatabaseSync, schema: 'main' | 'bk', table: string): Set<string> {
+  return new Set((db.prepare(`SELECT name FROM pragma_table_info(?, ?)`).all(table, schema) as Array<{ name: string }>).map((r) => r.name));
+}
+
+/** A run counts as paid when marked paid on time ('paid') or after its due date ('late'), as everywhere else. */
+const PAID_RUN = `('paid', 'late')`;
+/** The audit action 1.4.0 wrote for a bank file's download (1.5's upgrade turns the first into downloaded_at). */
+const DOWNLOAD_ACTION = 'GET /payments/batches/:id/file';
 
 /** Compares the live database with a backup (both closed files). The live file is opened read-only. */
 export function paymentLosses(liveFile: string, backupFile: string): PaymentLosses {
@@ -76,13 +103,39 @@ export function paymentLosses(liveFile: string, backupFile: string): PaymentLoss
            ORDER BY b.id`,
         )
         .all() as Array<{ id: number; fileName: string }>;
+      if (columns(db, 'main', 'payment_batches').has('downloaded_at')) {
+        // Downloaded in the backup: its own downloaded_at; a 1.4 backup has no such column, but its audit trail has the
+        // download (the upgrade after the restore turns that into downloaded_at). No payments table: never downloaded.
+        const downloadedInBackup = !inBackup('payment_batches')
+          ? null
+          : columns(db, 'bk', 'payment_batches').has('downloaded_at')
+            ? `x.downloaded_at IS NOT NULL`
+            : inBackup('audit_log')
+              ? `EXISTS (SELECT 1 FROM bk.audit_log a WHERE a.action = '${DOWNLOAD_ACTION}' AND a.entity = 'payment_batch' AND a.entity_id = x.id)`
+              : null;
+        out.downloaded = db
+          .prepare(
+            `SELECT b.id, COALESCE(b.file_name, 'payment #' || b.id) AS fileName FROM main.payment_batches b
+             WHERE b.mode = 'live' AND b.downloaded_at IS NOT NULL
+               ${downloadedInBackup ? `AND NOT EXISTS (SELECT 1 FROM bk.payment_batches x WHERE x.id = b.id AND ${downloadedInBackup})` : ''}
+             ORDER BY b.id`,
+          )
+          .all() as Array<{ id: number; fileName: string }>;
+      }
     }
     if (has('payment_items')) {
+      // Lost when the backup has it as not sent, or as sent but not paid while it is paid now (restored, it would be
+      // on its way again and could be cancelled and paid a second time).
       const rows = db
         .prepare(
           `SELECT ${name} AS name, i.amount_pence AS pence FROM main.payment_items i JOIN main.users u ON u.id = i.user_id
            WHERE i.live = 1 AND i.status IN ('submitted', 'processing', 'paid')
-             ${inBackup('payment_items') ? `AND NOT EXISTS (SELECT 1 FROM bk.payment_items x WHERE x.id = i.id AND x.status IN ('submitted', 'processing', 'paid'))` : ''}
+             ${
+               inBackup('payment_items')
+                 ? `AND NOT EXISTS (SELECT 1 FROM bk.payment_items x WHERE x.id = i.id AND x.status IN ('submitted', 'processing', 'paid')
+                      AND (i.status <> 'paid' OR x.status = 'paid'))`
+                 : ''
+             }
            ORDER BY i.id`,
         )
         .all() as Array<{ name: string; pence: number }>;
@@ -103,18 +156,18 @@ export function paymentLosses(liveFile: string, backupFile: string): PaymentLoss
       const rows = db
         .prepare(
           `SELECT ${name} AS name, r.gross FROM main.payroll_runs r JOIN main.users u ON u.id = r.user_id
-           WHERE r.status = 'paid'
-             ${inBackup('payroll_runs') ? `AND NOT EXISTS (SELECT 1 FROM bk.payroll_runs x WHERE x.user_id = r.user_id AND x.week_start = r.week_start AND x.status = 'paid')` : ''}
+           WHERE r.status IN ${PAID_RUN}
+             ${inBackup('payroll_runs') ? `AND NOT EXISTS (SELECT 1 FROM bk.payroll_runs x WHERE x.user_id = r.user_id AND x.week_start = r.week_start AND x.status IN ${PAID_RUN})` : ''}
            ORDER BY r.week_start`,
         )
         .all() as Array<{ name: string; gross: number }>;
       out.paidRuns = { count: rows.length, gross: rows.reduce((n, r) => n + Number(r.gross), 0), names: [...new Set(rows.map((r) => r.name))] };
     }
-    out.total = out.approved.length + out.sent.count + out.bankFiles.length + out.bankDetails.length + out.paidRuns.count;
+    out.total = totalOf(out);
     return out;
   } catch (err) {
     // fail closed: an error must never read as "nothing to lose"
-    out.total = out.approved.length + out.sent.count + out.bankFiles.length + out.bankDetails.length + out.paidRuns.count;
+    out.total = totalOf(out);
     return { ...out, unknown: reason(err) };
   } finally {
     db.close();
@@ -131,7 +184,7 @@ export function describeLosses(l: PaymentLosses): string[] {
   if (!l.total) {
     return [
       `Linear Hub could not compare the money records in the current database with this backup (${l.unknown}).`,
-      'So it cannot tell whether restoring makes it forget payments approved or sent, bank files, bank details changes or pay runs marked paid after the backup.',
+      'So it cannot tell whether restoring makes it forget payments approved, sent or paid, bank files made or downloaded, bank details changes or pay runs marked paid after the backup.',
       'If you restore, check each payment against the bank statement before paying anyone, so nobody is paid twice or to old bank details.',
     ];
   }
@@ -142,6 +195,13 @@ export function describeLosses(l: PaymentLosses): string[] {
   }
   if (l.sent.count) lines.push(`  - ${plural(l.sent.count, 'payment')} to people sent to the bank or paid (${formatPence(l.sent.pence)}): ${some(l.sent.names)}`);
   if (l.bankFiles.length) lines.push(`  - ${plural(l.bankFiles.length, 'bank file')} made: ${some(l.bankFiles.map((f) => f.fileName))}`);
+  if (l.downloaded.length) {
+    const one = l.downloaded.length === 1;
+    lines.push(
+      `  - ${plural(l.downloaded.length, 'bank file')} downloaded after the backup, so ${one ? 'it' : 'they'} may be at the bank: ${some(l.downloaded.map((f) => f.fileName))}. ` +
+        `The backup has ${one ? 'it' : 'them'} as not downloaded, so ${one ? 'it' : 'they'} could be cancelled and paid again.`,
+    );
+  }
   if (l.bankDetails.length) lines.push(`  - ${plural(l.bankDetails.length, 'bank details change', 'bank details changes')}: ${some(l.bankDetails)}. The backup has their OLD bank details.`);
   if (l.paidRuns.count) lines.push(`  - ${plural(l.paidRuns.count, 'pay run')} marked paid (${pounds(l.paidRuns.gross)}): ${some(l.paidRuns.names)}`);
   if (l.unknown) lines.push(`  - and maybe more: Linear Hub could not compare everything (${l.unknown})`);
@@ -160,6 +220,7 @@ export function restoreWarningRecord(l: PaymentLosses, backupName: string, at: D
     approved: l.approved.length,
     sent: l.sent.count,
     bankFiles: l.bankFiles.length,
+    downloaded: l.downloaded.length,
     bankDetails: l.bankDetails.length,
     paidRuns: l.paidRuns.count,
     unknown: Boolean(l.unknown),

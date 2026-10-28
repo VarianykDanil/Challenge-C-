@@ -40,7 +40,8 @@ export const ACCESS_MESSAGES = {
     'Two-step verification is on. Your recovery codes are not shown over an insecure connection: make new ones in Settings → Security on a secure connection.',
   trialTitle: 'Trial mode: demo sign-ins are on',
   trialTitleNoDemo: 'Trial mode: the demo company is still here',
-  trialBody: 'Go live before real pay or bank details go in. Run npm run golive on the computer that runs Linear Hub.',
+  // every office administrator reads this in the bell: no commands (the steps are in Settings → Trial mode)
+  trialBody: 'Go live before real pay or bank details go in. Ask Noryn to go live with you: it is done on the computer that runs Linear Hub.',
 } as const;
 
 /** The trial sentence for the banner and the Needs-attention item. */
