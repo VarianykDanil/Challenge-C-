@@ -11,13 +11,15 @@
  * --owner-last-name. DB_PATH, PORT, LM_BACKUP_DIR and LM_APP_SECRET_FILE are read as npm start reads them.
  * Exit codes: 0 live (now or already); 1 refused or cancelled, nothing changed.
  */
+import './serviceEnv.ts'; // first: the installed service's settings, before anything reads them (as doctor and backup)
 import { existsSync } from 'node:fs';
 import path from 'node:path';
 import { setupCodeExpiryText } from '@lm/shared';
 import { get, openDb, type Db } from './db/connection.ts';
 import { createSchema } from './db/schema.ts';
 import { DEFAULT_DB_PATH } from './db/seed.ts';
-import { backupDirFor, backupNow, inspectDatabase } from './lib/backup.ts';
+import { backupDirFor, backupNow, foldersOutsideBackup, inspectDatabase } from './lib/backup.ts';
+import { backupVideos } from './lib/backupFiles.ts';
 import { findPortHolder } from './lib/boot.ts';
 import { ask, flagValue, runningRefusal, stopHint, typedConfirmation } from './lib/commandLine.ts';
 import { goLive, ownerProblem, planGoLive, recordCountText, recordName, type GoLiveOwnerInput } from './lib/goLive.ts';
@@ -146,7 +148,9 @@ const people = Number(get<{ n: number }>(db, `SELECT COUNT(*) AS n FROM users`)!
 const secretFile = process.env.LM_APP_SECRET ? null : process.env.LM_APP_SECRET_FILE ? path.resolve(process.env.LM_APP_SECRET_FILE) : path.join(path.dirname(dbPath), 'app-secret');
 let backupPath: string;
 try {
-  const backup = await backupNow(db, { dir: backupDirFor(dbPath), secretFile, rotate: false });
+  // a whole backup, like the nightly one: the database and the uploaded files (statement PDFs, the signature image)
+  const files = { folders: foldersOutsideBackup(dbPath), includeVideos: backupVideos() };
+  const backup = await backupNow(db, { dir: backupDirFor(dbPath), secretFile, files, rotate: false });
   const check = inspectDatabase(backup.path);
   if (!check.ok || check.summary?.users !== people) throw new Error(check.problems.join(' ') || 'it does not hold the same people');
   backupPath = backup.path;

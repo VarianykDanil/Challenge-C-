@@ -12,6 +12,7 @@
  * DB_PATH is honoured, like npm start (default server/data/linear.sqlite). Exit codes: 0 done, or nothing to reset;
  * 1 no email given, no database (or a file that is not a Linear Hub database), or no one with that email.
  */
+import './serviceEnv.ts'; // first: the installed service's settings, before anything reads them (as doctor and backup)
 import { existsSync } from 'node:fs';
 import path from 'node:path';
 import { get, openDb, type Db } from './db/connection.ts';

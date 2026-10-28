@@ -9,6 +9,7 @@
  * Works while Linear Hub is running (it waits up to five seconds for the server). DB_PATH is honoured, like npm start.
  * Exit codes: 0 done, or no code needed; 1 no email given, no database, no one with that email, or they have left.
  */
+import './serviceEnv.ts'; // first: the installed service's settings, before anything reads them (as doctor and backup)
 import { existsSync } from 'node:fs';
 import path from 'node:path';
 import { setupCodeExpiryText } from '@lm/shared';

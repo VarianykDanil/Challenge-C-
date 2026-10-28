@@ -1,6 +1,7 @@
 /**
- * Imported first by the commands run by hand (doctor, backup, restore, key:restore, recovery-sheet), so that from a
- * plain terminal they use the database, folders and key of the installed background service (useServiceSettings).
+ * Imported first by the commands run by hand (doctor, backup, restore, key:restore, recovery-sheet, golive, setup-code,
+ * pin:reset, 2fa:reset), so that from a plain terminal they use the database, folders and key of the installed
+ * background service (useServiceSettings).
  */
 import { useServiceSettings } from './service.ts';
 

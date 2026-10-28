@@ -13,7 +13,8 @@ import { existsSync } from 'node:fs';
 import path from 'node:path';
 import { all, get, openDb, type Db } from '../db/connection.ts';
 import { resetAndSeed, type SeedStats } from '../db/seed.ts';
-import { backupDirFor, backupNow, inspectDatabase, listBackups } from './backup.ts';
+import { backupDirFor, backupNow, foldersOutsideBackup, inspectDatabase, listBackups } from './backup.ts';
+import { backupVideos } from './backupFiles.ts';
 import { runningRefusal, typedConfirmation } from './commandLine.ts';
 import { demoTeamMarkers } from './demoTeams.ts';
 import { demoPeopleIds, isTrialMode } from './trialMode.ts';
@@ -84,7 +85,9 @@ export async function runSeedCommand(file: string, args: readonly string[], port
         return 1;
       }
       const secretFile = process.env.LM_APP_SECRET ? null : process.env.LM_APP_SECRET_FILE ? path.resolve(process.env.LM_APP_SECRET_FILE) : path.join(path.dirname(file), 'app-secret');
-      const backup = await backupNow(db, { dir: backupDirFor(file), secretFile, rotate: false });
+      // a whole backup, like the nightly one: the database and the uploaded files
+      const files = { folders: foldersOutsideBackup(file), includeVideos: backupVideos() };
+      const backup = await backupNow(db, { dir: backupDirFor(file), secretFile, files, rotate: false });
       const check = inspectDatabase(backup.path);
       if (!check.ok || check.summary?.users !== people) {
         warn(`Nothing was changed: the backup failed its check (${check.problems.join(' ') || 'it does not hold the same people'}).`);

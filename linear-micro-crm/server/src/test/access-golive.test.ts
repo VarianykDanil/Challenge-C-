@@ -9,7 +9,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { spawn, spawnSync } from 'node:child_process';
 import { once } from 'node:events';
-import { existsSync, mkdtempSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import net from 'node:net';
 import os from 'node:os';
 import path from 'node:path';
@@ -201,6 +201,9 @@ test('npm run golive: refuses while the database is open or without GO LIVE; bac
     seed(db, todayISO());
     const usersBefore = count(db, `SELECT COUNT(*) AS n FROM users`);
     db.close();
+    // an uploaded statement PDF: the backup golive makes first holds the files too, like every other backup (1.5 keys)
+    mkdirSync(path.join(dir, 'statements'), { recursive: true });
+    writeFileSync(path.join(dir, 'statements', 'trial-week.pdf'), '%PDF-1.4 a statement from the trial week\n');
     const port = await freePort();
     const ownerArgs = ['--owner-email', OWNER.email, '--owner-first-name', OWNER.firstName, '--owner-last-name', OWNER.lastName];
 
@@ -252,6 +255,8 @@ test('npm run golive: refuses while the database is open or without GO LIVE; bac
     const saved = openDb(path.join(dir, 'backups', backups[0]!));
     assert.equal(count(saved, `SELECT COUNT(*) AS n FROM users`), usersBefore, 'the backup holds the trial as it was');
     saved.close();
+    const filesDir = path.join(dir, 'backups', backups[0]!.replace(/\.sqlite$/, '.files'));
+    assert.ok(existsSync(path.join(filesDir, 'statements', 'trial-week.pdf')), `the uploaded files are in the backup too (${filesDir})`);
     const after = openDb(dbPath);
     assert.equal(isTrialMode(after), false);
     const owner = get<{ id: number }>(after, `SELECT id FROM users WHERE email = 'robin.ash@office.example'`)!;
